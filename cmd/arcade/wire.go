@@ -18,8 +18,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/arcentrix/arcade/internal/engine/bootstrap"
 	"github.com/arcentrix/arcade/internal/engine/config"
 	"github.com/arcentrix/arcade/internal/engine/repo"
@@ -36,19 +34,8 @@ import (
 	"github.com/google/wire"
 )
 
-// ProvidePluginConfig 提供插件配置，直接从 conf.d/plugins.toml 读取
-func ProvidePluginConfig() map[string]any {
-	configs, err := plugin.LoadPluginConfig("conf.d/plugins.toml")
-	if err != nil {
-		panic(fmt.Sprintf("failed to load plugin config: %v", err))
-	}
-	return configs
-}
-
-func initApp(configPath string) (*bootstrap.App, func(), error) {
+func initApp(configPath string, pluginConfigs map[string]any) (*bootstrap.App, func(), error) {
 	panic(wire.Build(
-		// 提供插件配置
-		ProvidePluginConfig,
 		// 配置层
 		config.ProviderSet,
 		// 日志层（依赖 config）

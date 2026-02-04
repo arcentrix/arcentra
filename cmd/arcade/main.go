@@ -23,18 +23,20 @@ import (
 )
 
 var (
-	configFile string
+	configFile       string
+	pluginConfigFile string
 )
 
 func init() {
 	flag.StringVar(&configFile, "conf", "conf.d/config.toml", "config file path, e.g. -conf ./conf.d")
+	flag.StringVar(&pluginConfigFile, "plugin-conf", "conf.d/plugins.toml", "plugin config file path, e.g. -plugin-conf ./conf.d/plugins.toml")
 }
 
 func main() {
 	flag.Parse()
 
 	// Bootstrap 初始化应用
-	app, cleanup, _, err := bootstrap.Bootstrap(configFile, initApp)
+	app, cleanup, _, err := bootstrap.Bootstrap(configFile, pluginConfigFile, initApp)
 	if err != nil {
 		panic(err)
 	}

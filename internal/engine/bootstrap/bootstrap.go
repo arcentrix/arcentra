@@ -55,7 +55,7 @@ type App struct {
 }
 
 // InitAppFunc init app function type
-type InitAppFunc func(configPath string) (*App, func(), error)
+type InitAppFunc func(configPath string, pluginConfigs map[string]any) (*App, func(), error)
 
 func NewApp(
 	rt *router.Router,
@@ -133,9 +133,14 @@ func NewApp(
 }
 
 // Bootstrap init app, return App instance and cleanup function
-func Bootstrap(configFile string, initApp InitAppFunc) (*App, func(), *config.AppConfig, error) {
+func Bootstrap(configFile string, pluginConfigFile string, initApp InitAppFunc) (*App, func(), *config.AppConfig, error) {
+	pluginConfigs, err := plugin.LoadPluginConfig(pluginConfigFile)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	// Wire build App (所有依赖都由 wire 自动注入)
-	app, cleanup, err := initApp(configFile)
+	app, cleanup, err := initApp(configFile, pluginConfigs)
 	if err != nil {
 		return nil, nil, nil, err
 	}

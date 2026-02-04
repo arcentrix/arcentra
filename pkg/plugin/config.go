@@ -15,9 +15,8 @@
 package plugin
 
 import (
+	"maps"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/arcentrix/arcade/pkg/log"
@@ -48,23 +47,9 @@ func LoadPluginConfig(configPath string) (map[string]any, error) {
 
 // loadPluginConfigFile 从文件加载插件配置
 func loadPluginConfigFile(configPath string) (map[string]any, error) {
-	// 如果路径为空，尝试使用默认路径
+
 	if configPath == "" {
-		// 尝试从当前目录或常见配置目录查找
-		possiblePaths := []string{
-			"conf.d/plugins.toml",
-			"./conf.d/plugins.toml",
-			"plugins.toml",
-		}
-		for _, path := range possiblePaths {
-			if _, err := os.Stat(path); err == nil {
-				configPath = path
-				break
-			}
-		}
-		if configPath == "" {
-			return make(map[string]any), nil // 文件不存在，返回空配置
-		}
+		return make(map[string]any), nil // 文件不存在，返回空配置
 	}
 
 	config := viper.New()
@@ -120,20 +105,6 @@ func GetPluginConfig() map[string]any {
 
 	// 返回副本，避免外部修改
 	result := make(map[string]any, len(pluginConfigs))
-	for k, v := range pluginConfigs {
-		result[k] = v
-	}
+	maps.Copy(result, pluginConfigs)
 	return result
-}
-
-// LoadPluginConfigFromDir 从配置目录加载插件配置
-// 会在目录中查找 plugins.toml 文件
-func LoadPluginConfigFromDir(confDir string) (map[string]any, error) {
-	// 如果 confDir 是文件路径，则使用其目录
-	if filepath.Ext(confDir) != "" {
-		confDir = filepath.Dir(confDir)
-	}
-
-	pluginConfigPath := filepath.Join(confDir, "plugins.toml")
-	return LoadPluginConfig(pluginConfigPath)
 }
