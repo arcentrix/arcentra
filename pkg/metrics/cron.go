@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/cron"
+	"github.com/arcentrix/arcade/pkg/cron"
 	"github.com/hashicorp/go-metrics"
 )
 

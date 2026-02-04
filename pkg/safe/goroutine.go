@@ -17,7 +17,7 @@ package safe
 import (
 	"runtime/debug"
 
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 // Go starts a new goroutine to run the given function f safely.

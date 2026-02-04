@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/id"
-	"github.com/go-arcade/arcade/pkg/safe"
+	"github.com/arcentrix/arcade/pkg/id"
+	"github.com/arcentrix/arcade/pkg/safe"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
 )

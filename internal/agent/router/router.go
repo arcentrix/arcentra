@@ -17,11 +17,11 @@ package router
 import (
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/http"
-	"github.com/go-arcade/arcade/pkg/http/middleware"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/shutdown"
-	"github.com/go-arcade/arcade/pkg/version"
+	"github.com/arcentrix/arcade/pkg/http"
+	"github.com/arcentrix/arcade/pkg/http/middleware"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/shutdown"
+	"github.com/arcentrix/arcade/pkg/version"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/pprof"

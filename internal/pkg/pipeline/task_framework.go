@@ -19,10 +19,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/plugin"
-	"github.com/go-arcade/arcade/pkg/retry"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/plugin"
+	"github.com/arcentrix/arcade/pkg/retry"
 )
 
 // TaskFramework handles task execution lifecycle

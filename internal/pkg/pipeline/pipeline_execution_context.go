@@ -24,11 +24,11 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/builtin"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/plugin"
 	"github.com/expr-lang/expr"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/builtin"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/plugin"
 )
 
 // ExecutionContext provides execution context for pipeline

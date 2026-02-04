@@ -19,9 +19,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/go-arcade/arcade/pkg/dag"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/safe"
+	"github.com/arcentrix/arcade/pkg/dag"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/safe"
 )
 
 // Reconciler reconciles pipeline execution state based on DAG

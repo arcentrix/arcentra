@@ -18,8 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/go-arcade/arcade/internal/engine/model"
-	storagerepo "github.com/go-arcade/arcade/internal/engine/repo"
+	"github.com/arcentrix/arcade/internal/engine/model"
+	storagerepo "github.com/arcentrix/arcade/internal/engine/repo"
 )
 
 type StorageService struct {

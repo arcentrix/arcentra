@@ -20,10 +20,10 @@ import (
 	"strings"
 	"time"
 
+	agentv1 "github.com/arcentrix/arcade/api/agent/v1"
+	agentmodel "github.com/arcentrix/arcade/internal/engine/model"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/bytedance/sonic"
-	agentv1 "github.com/go-arcade/arcade/api/agent/v1"
-	agentmodel "github.com/go-arcade/arcade/internal/engine/model"
-	"github.com/go-arcade/arcade/pkg/log"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"gorm.io/gorm"

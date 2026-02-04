@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	tracecontext "github.com/go-arcade/arcade/pkg/trace/context"
+	tracecontext "github.com/arcentrix/arcade/pkg/trace/context"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	redisTracerName = "github.com/go-arcade/arcade/pkg/trace/inject/redis"
+	redisTracerName = "github.com/arcentrix/arcade/pkg/trace/inject/redis"
 )
 
 var (

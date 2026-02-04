@@ -20,8 +20,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/arcentrix/arcade/pkg/plugin"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/pkg/plugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

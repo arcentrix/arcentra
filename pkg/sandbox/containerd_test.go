@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 func TestContainerdSandbox_Create(t *testing.T) {

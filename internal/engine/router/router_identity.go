@@ -21,12 +21,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/arcentrix/arcade/internal/engine/model"
+	"github.com/arcentrix/arcade/internal/engine/service"
+	httpx "github.com/arcentrix/arcade/pkg/http"
+	"github.com/arcentrix/arcade/pkg/http/middleware"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/internal/engine/model"
-	"github.com/go-arcade/arcade/internal/engine/service"
-	httpx "github.com/go-arcade/arcade/pkg/http"
-	"github.com/go-arcade/arcade/pkg/http/middleware"
-	"github.com/go-arcade/arcade/pkg/log"
 	"github.com/gofiber/fiber/v2"
 )
 

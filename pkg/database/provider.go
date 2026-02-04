@@ -15,7 +15,7 @@
 package database
 
 import (
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/google/wire"
 	"gorm.io/gorm"
 )

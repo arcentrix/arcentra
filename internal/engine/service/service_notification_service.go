@@ -18,9 +18,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-arcade/arcade/internal/pkg/notify"
-	"github.com/go-arcade/arcade/internal/pkg/notify/channel"
-	"github.com/go-arcade/arcade/internal/pkg/notify/template"
+	"github.com/arcentrix/arcade/internal/pkg/notify"
+	"github.com/arcentrix/arcade/internal/pkg/notify/channel"
+	"github.com/arcentrix/arcade/internal/pkg/notify/template"
 )
 
 // NotificationService provides high-level notification functionality with template support

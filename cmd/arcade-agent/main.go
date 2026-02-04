@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/go-arcade/arcade/internal/agent/bootstrap"
+	"github.com/arcentrix/arcade/internal/agent/bootstrap"
 )
 
 func main() {

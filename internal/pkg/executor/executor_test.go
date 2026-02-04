@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/plugin"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/plugin"
 )
 
 func TestExecutorManager(t *testing.T) {

@@ -21,8 +21,8 @@ import (
 	"net/http"
 	"net/http/pprof"
 
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/safe"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/safe"
 )
 
 // PprofConfig holds pprof server configuration

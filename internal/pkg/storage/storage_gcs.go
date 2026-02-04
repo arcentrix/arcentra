@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 	"google.golang.org/api/option"
 )
 

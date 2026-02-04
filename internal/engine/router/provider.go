@@ -15,10 +15,10 @@
 package router
 
 import (
-	"github.com/go-arcade/arcade/internal/engine/service"
-	"github.com/go-arcade/arcade/pkg/cache"
-	"github.com/go-arcade/arcade/pkg/http"
-	"github.com/go-arcade/arcade/pkg/shutdown"
+	"github.com/arcentrix/arcade/internal/engine/service"
+	"github.com/arcentrix/arcade/pkg/cache"
+	"github.com/arcentrix/arcade/pkg/http"
+	"github.com/arcentrix/arcade/pkg/shutdown"
 	"github.com/google/wire"
 )
 

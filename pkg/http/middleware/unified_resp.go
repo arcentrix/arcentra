@@ -15,7 +15,7 @@
 package middleware
 
 import (
-	httpx "github.com/go-arcade/arcade/pkg/http"
+	httpx "github.com/arcentrix/arcade/pkg/http"
 	"github.com/gofiber/fiber/v2"
 )
 

@@ -15,8 +15,8 @@
 package dsl
 
 import (
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/validation"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/validation"
 )
 
 // PipelineBasicValidatorAdapter adapts DSLParser to implement PipelineBasicValidator interface

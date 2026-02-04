@@ -17,7 +17,7 @@ package channel
 import (
 	"context"
 
-	"github.com/go-arcade/arcade/internal/pkg/notify/auth"
+	"github.com/arcentrix/arcade/internal/pkg/notify/auth"
 )
 
 // LarkAppChannel implements Lark (Feishu international) app notification channel

@@ -15,7 +15,7 @@
 package inject
 
 import (
-	tracecontext "github.com/go-arcade/arcade/pkg/trace/context"
+	tracecontext "github.com/arcentrix/arcade/pkg/trace/context"
 	"google.golang.org/grpc"
 )
 

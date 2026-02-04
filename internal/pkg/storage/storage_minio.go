@@ -24,7 +24,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )

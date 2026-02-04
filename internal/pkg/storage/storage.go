@@ -21,9 +21,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	storagemodel "github.com/go-arcade/arcade/internal/engine/model"
-	storagerepo "github.com/go-arcade/arcade/internal/engine/repo"
-	"github.com/go-arcade/arcade/pkg/log"
+	storagemodel "github.com/arcentrix/arcade/internal/engine/model"
+	storagerepo "github.com/arcentrix/arcade/internal/engine/repo"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 // 存储类型常量

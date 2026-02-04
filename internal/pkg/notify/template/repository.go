@@ -18,9 +18,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/arcentrix/arcade/internal/engine/model"
+	"github.com/arcentrix/arcade/internal/engine/repo"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/internal/engine/model"
-	"github.com/go-arcade/arcade/internal/engine/repo"
 )
 
 // ITemplateRepository defines the interface for template storage

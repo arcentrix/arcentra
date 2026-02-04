@@ -17,8 +17,8 @@ package sandbox
 import (
 	"fmt"
 
-	"github.com/go-arcade/arcade/internal/agent/config"
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/internal/agent/config"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 // NewSandboxFromConfig creates a sandbox instance from agent configuration

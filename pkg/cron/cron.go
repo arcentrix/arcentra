@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron"
 )

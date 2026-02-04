@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/safe"
+	"github.com/arcentrix/arcade/pkg/safe"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 

@@ -18,9 +18,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
-	"github.com/go-arcade/arcade/pkg/log"
 )
 
 // DSLParser parses Pipeline DSL from JSON format

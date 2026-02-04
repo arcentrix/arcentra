@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/id"
+	"github.com/arcentrix/arcade/pkg/id"
 )
 
 // AgentIDInfo Agent ID信息

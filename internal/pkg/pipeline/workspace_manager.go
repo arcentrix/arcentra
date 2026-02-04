@@ -20,7 +20,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 // WorkspaceManager manages workspace directory structure for pipeline execution

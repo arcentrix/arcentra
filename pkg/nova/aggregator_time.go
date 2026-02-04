@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/safe"
+	"github.com/arcentrix/arcade/pkg/safe"
 )
 
 // TimeAggregator aggregates tasks based on time window

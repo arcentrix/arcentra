@@ -17,8 +17,8 @@ package executor
 import (
 	"context"
 
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/plugin"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/plugin"
 )
 
 // PipelineAdapter 将 pipeline 的 step 和 job 适配为执行器格式

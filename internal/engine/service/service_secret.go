@@ -24,10 +24,10 @@ import (
 	"io"
 	"slices"
 
-	"github.com/go-arcade/arcade/internal/engine/model"
-	secretrepo "github.com/go-arcade/arcade/internal/engine/repo"
-	"github.com/go-arcade/arcade/pkg/id"
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/internal/engine/model"
+	secretrepo "github.com/arcentrix/arcade/internal/engine/repo"
+	"github.com/arcentrix/arcade/pkg/id"
+	"github.com/arcentrix/arcade/pkg/log"
 	"gorm.io/gorm"
 )
 

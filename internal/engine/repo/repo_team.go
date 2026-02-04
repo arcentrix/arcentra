@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/go-arcade/arcade/internal/engine/model"
-	"github.com/go-arcade/arcade/pkg/database"
+	"github.com/arcentrix/arcade/internal/engine/model"
+	"github.com/arcentrix/arcade/pkg/database"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )

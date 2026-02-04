@@ -15,10 +15,10 @@
 package grpc
 
 import (
-	"github.com/go-arcade/arcade/internal/engine/repo"
-	"github.com/go-arcade/arcade/internal/engine/service"
-	"github.com/go-arcade/arcade/internal/pkg/grpc/interceptor"
-	"github.com/go-arcade/arcade/pkg/cache"
+	"github.com/arcentrix/arcade/internal/engine/repo"
+	"github.com/arcentrix/arcade/internal/engine/service"
+	"github.com/arcentrix/arcade/internal/pkg/grpc/interceptor"
+	"github.com/arcentrix/arcade/pkg/cache"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"

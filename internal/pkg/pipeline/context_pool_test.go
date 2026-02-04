@@ -21,9 +21,9 @@ import (
 	"testing"
 	"time"
 
-	pipelinev1 "github.com/go-arcade/arcade/api/pipeline/v1"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
-	"github.com/go-arcade/arcade/pkg/log"
+	pipelinev1 "github.com/arcentrix/arcade/api/pipeline/v1"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 func TestLRUCache(t *testing.T) {

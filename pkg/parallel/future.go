@@ -17,7 +17,7 @@ package parallel
 import (
 	"context"
 
-	"github.com/go-arcade/arcade/pkg/trace"
+	"github.com/arcentrix/arcade/pkg/trace"
 )
 
 type IFuture interface {

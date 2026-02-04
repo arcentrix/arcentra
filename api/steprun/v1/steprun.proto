@@ -4,7 +4,7 @@ package steprun.v1;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "github.com/go-arcade/arcade/api/steprun/v1;steprunv1";
+option go_package = "github.com/arcentrix/arcade/api/steprun/v1;steprunv1";
 
 // StepRunService - StepRun management interface
 // StepRun represents the execution of a Step within a Job

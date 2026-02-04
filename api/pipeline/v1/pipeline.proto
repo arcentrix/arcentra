@@ -4,7 +4,7 @@ package pipeline.v1;
 
 import "google/protobuf/struct.proto";
 
-option go_package = "github.com/go-arcade/arcade/api/pipeline/v1;pipelinev1";
+option go_package = "github.com/arcentrix/arcade/api/pipeline/v1;pipelinev1";
 
 // PipelineService - Pipeline management interface
 service PipelineService {

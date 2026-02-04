@@ -5,7 +5,7 @@ package agent.v1;
 import "steprun/v1/steprun.proto";
 import "google/protobuf/struct.proto";
 
-option go_package = "github.com/go-arcade/arcade/api/agent/v1;agentv1";
+option go_package = "github.com/arcentrix/arcade/api/agent/v1;agentv1";
 
 // AgentService - Main interface for communication between Agent and Server
 service AgentService {

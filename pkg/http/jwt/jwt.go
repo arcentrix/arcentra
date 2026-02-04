@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/http"
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/http"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/golang-jwt/jwt/v5"
 )
 

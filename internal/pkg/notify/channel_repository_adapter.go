@@ -18,9 +18,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/arcentrix/arcade/internal/engine/model"
+	"github.com/arcentrix/arcade/internal/engine/repo"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/internal/engine/model"
-	"github.com/go-arcade/arcade/internal/engine/repo"
 )
 
 // ChannelRepositoryAdapter 适配器，将 repo.INotificationChannelRepository 适配到 notify.ChannelRepository

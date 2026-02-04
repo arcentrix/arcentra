@@ -17,8 +17,8 @@ package queue
 import (
 	"fmt"
 
-	agentconfig "github.com/go-arcade/arcade/internal/agent/config"
-	"github.com/go-arcade/arcade/internal/engine/config"
+	agentconfig "github.com/arcentrix/arcade/internal/agent/config"
+	"github.com/arcentrix/arcade/internal/engine/config"
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"

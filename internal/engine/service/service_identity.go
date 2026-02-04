@@ -20,15 +20,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arcentrix/arcade/internal/engine/model"
+	"github.com/arcentrix/arcade/internal/engine/repo"
+	"github.com/arcentrix/arcade/pkg/id"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/sso"
+	"github.com/arcentrix/arcade/pkg/sso/ldap"
+	"github.com/arcentrix/arcade/pkg/sso/oidc"
+	"github.com/arcentrix/arcade/pkg/sso/util"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/internal/engine/model"
-	"github.com/go-arcade/arcade/internal/engine/repo"
-	"github.com/go-arcade/arcade/pkg/id"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/sso"
-	"github.com/go-arcade/arcade/pkg/sso/ldap"
-	"github.com/go-arcade/arcade/pkg/sso/oidc"
-	"github.com/go-arcade/arcade/pkg/sso/util"
 	"golang.org/x/oauth2"
 )
 

@@ -15,10 +15,9 @@
 package main
 
 import (
-	"github.com/go-arcade/arcade/pkg/version"
+	"github.com/arcentrix/arcade/pkg/version"
 	"github.com/spf13/cobra"
 )
-
 
 var rootCmd = &cobra.Command{
 	Use:   "arcade-cli",

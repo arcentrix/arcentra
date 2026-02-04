@@ -19,9 +19,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/go-arcade/arcade/internal/engine/model"
-	userrepo "github.com/go-arcade/arcade/internal/engine/repo"
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/internal/engine/model"
+	userrepo "github.com/arcentrix/arcade/internal/engine/repo"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 type UserExt struct {

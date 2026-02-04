@@ -17,8 +17,8 @@ package middleware
 import (
 	"runtime/debug"
 
-	"github.com/go-arcade/arcade/pkg/http"
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/http"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/gofiber/fiber/v2"
 )
 

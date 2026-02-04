@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/go-arcade/arcade/pkg/sso/oauth"
-	"github.com/go-arcade/arcade/pkg/sso/oidc"
+	"github.com/arcentrix/arcade/pkg/sso/oauth"
+	"github.com/arcentrix/arcade/pkg/sso/oidc"
 	"golang.org/x/oauth2"
 )
 

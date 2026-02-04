@@ -20,9 +20,9 @@ import (
 	"io"
 	"sync"
 
-	streamv1 "github.com/go-arcade/arcade/api/stream/v1"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/safe"
+	streamv1 "github.com/arcentrix/arcade/api/stream/v1"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/safe"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"gorm.io/gorm"

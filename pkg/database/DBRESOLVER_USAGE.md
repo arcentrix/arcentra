@@ -113,7 +113,7 @@ db.Exec("UPDATE users SET name = ?", "jinzhu") // 原生 SQL 写操作
 ### 使用辅助函数
 
 ```go
-import "github.com/go-arcade/arcade/pkg/database"
+import "github.com/arcentrix/arcade/pkg/database"
 
 // 强制使用主库（primary）
 db.Clauses(database.Write()).First(&user)

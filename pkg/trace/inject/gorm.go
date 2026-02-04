@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"time"
 
-	tracecontext "github.com/go-arcade/arcade/pkg/trace/context"
+	tracecontext "github.com/arcentrix/arcade/pkg/trace/context"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	gormTracerName = "github.com/go-arcade/arcade/pkg/trace/inject/gorm"
+	gormTracerName = "github.com/arcentrix/arcade/pkg/trace/inject/gorm"
 )
 
 var (

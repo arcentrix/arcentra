@@ -20,7 +20,7 @@ import (
 	"net/smtp"
 	"strings"
 
-	"github.com/go-arcade/arcade/internal/pkg/notify/auth"
+	"github.com/arcentrix/arcade/internal/pkg/notify/auth"
 )
 
 // EmailChannel implements email notification channel

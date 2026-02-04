@@ -17,9 +17,9 @@ package dsl
 import (
 	"testing"
 
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/validation"
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/validation"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 func TestDSLParser_Parse(t *testing.T) {

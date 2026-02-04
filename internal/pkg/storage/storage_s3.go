@@ -26,12 +26,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/go-arcade/arcade/pkg/log"
 )
 
 type S3Storage struct {

@@ -17,8 +17,8 @@ package repo
 import (
 	"context"
 
-	"github.com/go-arcade/arcade/internal/engine/model"
-	"github.com/go-arcade/arcade/pkg/database"
+	"github.com/arcentrix/arcade/internal/engine/model"
+	"github.com/arcentrix/arcade/pkg/database"
 )
 
 // NotificationTemplateFilter 通知模板查询过滤器

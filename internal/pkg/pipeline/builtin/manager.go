@@ -21,7 +21,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 // Manager manages all builtin functions

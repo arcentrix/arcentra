@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/pkg/log"
 	"github.com/hibiken/asynq"
 )
 

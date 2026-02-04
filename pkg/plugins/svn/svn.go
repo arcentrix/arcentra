@@ -26,9 +26,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/plugin"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/plugin"
 )
 
 // SVNConfig is the plugin's configuration structure
@@ -216,7 +216,7 @@ func (p *SVN) Author() string {
 
 // Repository returns the plugin repository
 func (p *SVN) Repository() string {
-	return "https://github.com/go-arcade/arcade"
+	return "https://github.com/arcentrix/arcade"
 }
 
 // Init initializes the plugin

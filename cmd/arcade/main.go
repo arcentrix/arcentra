@@ -17,9 +17,9 @@ package main
 import (
 	"flag"
 
-	"github.com/go-arcade/arcade/internal/engine/bootstrap"
-	_ "github.com/go-arcade/arcade/pkg/plugins/git"
-	_ "github.com/go-arcade/arcade/pkg/plugins/svn"
+	"github.com/arcentrix/arcade/internal/engine/bootstrap"
+	_ "github.com/arcentrix/arcade/pkg/plugins/git"
+	_ "github.com/arcentrix/arcade/pkg/plugins/svn"
 )
 
 var (

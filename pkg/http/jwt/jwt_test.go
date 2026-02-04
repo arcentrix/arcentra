@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/http"
+	"github.com/arcentrix/arcade/pkg/http"
 )
 
 func TestJwt(t *testing.T) {

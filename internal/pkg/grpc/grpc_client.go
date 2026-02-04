@@ -25,13 +25,13 @@ import (
 
 	"strings"
 
-	agentv1 "github.com/go-arcade/arcade/api/agent/v1"
-	pipelinev1 "github.com/go-arcade/arcade/api/pipeline/v1"
-	steprunv1 "github.com/go-arcade/arcade/api/steprun/v1"
-	streamv1 "github.com/go-arcade/arcade/api/stream/v1"
-	"github.com/go-arcade/arcade/internal/pkg/grpc/interceptor"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/trace/inject"
+	agentv1 "github.com/arcentrix/arcade/api/agent/v1"
+	pipelinev1 "github.com/arcentrix/arcade/api/pipeline/v1"
+	steprunv1 "github.com/arcentrix/arcade/api/steprun/v1"
+	streamv1 "github.com/arcentrix/arcade/api/stream/v1"
+	"github.com/arcentrix/arcade/internal/pkg/grpc/interceptor"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/trace/inject"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"

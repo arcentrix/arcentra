@@ -18,7 +18,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
 )
 
 // ExecutionContext is the interface for execution context to avoid circular imports

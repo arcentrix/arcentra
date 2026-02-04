@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/pkg/log"
 )
 
 // Manager 是插件管理器

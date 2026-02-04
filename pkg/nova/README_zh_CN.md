@@ -22,7 +22,7 @@ Nova 是一个灵活且高性能的 Go 任务队列库，支持多种消息代�
 ## 安装
 
 ```bash
-go get github.com/go-arcade/arcade/pkg/nova
+go get github.com/arcentrix/arcade/pkg/nova
 ```
 
 ## 快速开始
@@ -37,7 +37,7 @@ import (
     "fmt"
     "time"
     
-    "github.com/go-arcade/arcade/pkg/taskqueue"
+    "github.com/arcentrix/arcade/pkg/taskqueue"
 )
 
 func main() {

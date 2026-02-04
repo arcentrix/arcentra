@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
 )
 
 // JobRunner runs a single job

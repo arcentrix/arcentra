@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/safe"
+	"github.com/arcentrix/arcade/pkg/safe"
 )
 
 // 定义测试用状态

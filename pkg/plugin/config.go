@@ -20,8 +20,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/fsnotify/fsnotify"
-	"github.com/go-arcade/arcade/pkg/log"
 	"github.com/spf13/viper"
 )
 

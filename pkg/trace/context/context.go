@@ -18,7 +18,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/go-arcade/arcade/pkg/num"
+	"github.com/arcentrix/arcade/pkg/num"
 	"github.com/timandy/routine"
 	"go.opentelemetry.io/otel/trace"
 )

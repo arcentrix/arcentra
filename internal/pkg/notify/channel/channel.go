@@ -17,7 +17,7 @@ package channel
 import (
 	"context"
 
-	"github.com/go-arcade/arcade/internal/pkg/notify/auth"
+	"github.com/arcentrix/arcade/internal/pkg/notify/auth"
 )
 
 // INotifyChannel defines the interface for notification channels

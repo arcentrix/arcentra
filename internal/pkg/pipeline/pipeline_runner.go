@@ -18,7 +18,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
 	"golang.org/x/sync/errgroup"
 )
 

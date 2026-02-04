@@ -20,11 +20,11 @@ import (
 	"sync"
 	"time"
 
-	pipelinev1 "github.com/go-arcade/arcade/api/pipeline/v1"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/safe"
-	"github.com/go-arcade/arcade/pkg/statemachine"
+	pipelinev1 "github.com/arcentrix/arcade/api/pipeline/v1"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/safe"
+	"github.com/arcentrix/arcade/pkg/statemachine"
 )
 
 var (

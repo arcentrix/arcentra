@@ -15,8 +15,8 @@
 package service
 
 import (
-	pluginmodel "github.com/go-arcade/arcade/internal/engine/model"
-	pluginrepo "github.com/go-arcade/arcade/internal/engine/repo"
+	pluginmodel "github.com/arcentrix/arcade/internal/engine/model"
+	pluginrepo "github.com/arcentrix/arcade/internal/engine/repo"
 )
 
 type PluginService struct {

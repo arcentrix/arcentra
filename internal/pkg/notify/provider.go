@@ -17,8 +17,8 @@ package notify
 import (
 	"context"
 
-	"github.com/go-arcade/arcade/internal/engine/repo"
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/internal/engine/repo"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/google/wire"
 )
 

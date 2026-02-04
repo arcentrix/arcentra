@@ -15,8 +15,8 @@
 package router
 
 import (
-	"github.com/go-arcade/arcade/pkg/http"
-	"github.com/go-arcade/arcade/pkg/shutdown"
+	"github.com/arcentrix/arcade/pkg/http"
+	"github.com/arcentrix/arcade/pkg/shutdown"
 	"github.com/google/wire"
 )
 

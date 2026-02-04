@@ -18,8 +18,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/http"
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/http"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 )
@@ -52,7 +52,7 @@ func AccessLogMiddleware(httpConfig *http.Http) fiber.Handler {
 		Next: func(c *fiber.Ctx) bool {
 			path := c.Path()
 			for _, rule := range excludedPaths {
-				if before, ok :=strings.CutSuffix(rule, "/*"); ok  {
+				if before, ok := strings.CutSuffix(rule, "/*"); ok {
 					prefix := before
 					if strings.HasPrefix(path, prefix) {
 						return true

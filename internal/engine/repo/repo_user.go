@@ -20,12 +20,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/arcentrix/arcade/internal/engine/consts"
+	"github.com/arcentrix/arcade/internal/engine/model"
+	"github.com/arcentrix/arcade/pkg/cache"
+	"github.com/arcentrix/arcade/pkg/database"
+	"github.com/arcentrix/arcade/pkg/http"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/internal/engine/consts"
-	"github.com/go-arcade/arcade/internal/engine/model"
-	"github.com/go-arcade/arcade/pkg/cache"
-	"github.com/go-arcade/arcade/pkg/database"
-	"github.com/go-arcade/arcade/pkg/http"
 	"gorm.io/gorm"
 )
 

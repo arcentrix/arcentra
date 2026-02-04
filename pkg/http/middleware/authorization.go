@@ -19,12 +19,12 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/arcentrix/arcade/internal/engine/consts"
+	"github.com/arcentrix/arcade/pkg/cache"
+	"github.com/arcentrix/arcade/pkg/http"
+	"github.com/arcentrix/arcade/pkg/http/jwt"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/internal/engine/consts"
-	"github.com/go-arcade/arcade/pkg/cache"
-	"github.com/go-arcade/arcade/pkg/http"
-	"github.com/go-arcade/arcade/pkg/http/jwt"
-	"github.com/go-arcade/arcade/pkg/log"
 	"github.com/gofiber/fiber/v2"
 	goJwt "github.com/golang-jwt/jwt/v5"
 )

@@ -15,7 +15,7 @@
 package service
 
 import (
-	steprunv1 "github.com/go-arcade/arcade/api/steprun/v1"
+	steprunv1 "github.com/arcentrix/arcade/api/steprun/v1"
 )
 
 type StepRunServiceImpl struct {

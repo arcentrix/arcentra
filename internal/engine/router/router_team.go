@@ -17,11 +17,11 @@ package router
 import (
 	"strconv"
 
-	"github.com/go-arcade/arcade/internal/engine/model"
-	"github.com/go-arcade/arcade/pkg/auth"
-	"github.com/go-arcade/arcade/pkg/http"
-	"github.com/go-arcade/arcade/pkg/http/middleware"
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/internal/engine/model"
+	"github.com/arcentrix/arcade/pkg/auth"
+	"github.com/arcentrix/arcade/pkg/http"
+	"github.com/arcentrix/arcade/pkg/http/middleware"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/gofiber/fiber/v2"
 )
 

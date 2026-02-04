@@ -18,7 +18,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 var (

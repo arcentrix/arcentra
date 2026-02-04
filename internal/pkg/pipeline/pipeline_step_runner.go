@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/builtin"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/builtin"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
 )
 
 // StepRunner runs a single step

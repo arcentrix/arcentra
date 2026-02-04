@@ -15,11 +15,11 @@
 package service
 
 import (
-	"github.com/go-arcade/arcade/internal/engine/repo"
-	storagepkg "github.com/go-arcade/arcade/internal/pkg/storage"
-	"github.com/go-arcade/arcade/pkg/cache"
-	"github.com/go-arcade/arcade/pkg/database"
-	pluginpkg "github.com/go-arcade/arcade/pkg/plugin"
+	"github.com/arcentrix/arcade/internal/engine/repo"
+	storagepkg "github.com/arcentrix/arcade/internal/pkg/storage"
+	"github.com/arcentrix/arcade/pkg/cache"
+	"github.com/arcentrix/arcade/pkg/database"
+	pluginpkg "github.com/arcentrix/arcade/pkg/plugin"
 	"golang.org/x/crypto/bcrypt"
 )
 

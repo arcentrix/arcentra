@@ -15,8 +15,8 @@
 package repo
 
 import (
-	"github.com/go-arcade/arcade/pkg/cache"
-	"github.com/go-arcade/arcade/pkg/database"
+	"github.com/arcentrix/arcade/pkg/cache"
+	"github.com/arcentrix/arcade/pkg/database"
 	"gorm.io/gorm"
 )
 

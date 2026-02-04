@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/trace"
+	"github.com/arcentrix/arcade/pkg/trace"
 )
 
 type Group struct {

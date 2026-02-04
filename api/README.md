@@ -249,7 +249,7 @@ Main configuration file, defines:
 ### buf.gen.yaml
 
 Code generation configuration, defines:
-- Go Package prefix: `github.com/go-arcade/arcade/api`
+- Go Package prefix: `github.com/arcentrix/arcade/api`
 - Plugin configuration:
   - `protocolbuffers/go` - Generate Go message code
   - `grpc/go` - Generate gRPC service code
@@ -267,7 +267,7 @@ import (
     "log"
     
     "google.golang.org/grpc"
-    agentv1 "github.com/go-arcade/arcade/api/agent/v1"
+    agentv1 "github.com/arcentrix/arcade/api/agent/v1"
 )
 
 func main() {
@@ -314,7 +314,7 @@ import (
     "net"
     
     "google.golang.org/grpc"
-    agentv1 "github.com/go-arcade/arcade/api/agent/v1"
+    agentv1 "github.com/arcentrix/arcade/api/agent/v1"
 )
 
 type agentService struct {

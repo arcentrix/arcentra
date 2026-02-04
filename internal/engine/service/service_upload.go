@@ -24,11 +24,11 @@ import (
 	"strings"
 	"time"
 
-	storagemodel "github.com/go-arcade/arcade/internal/engine/model"
-	storagerepo "github.com/go-arcade/arcade/internal/engine/repo"
-	storagepkg "github.com/go-arcade/arcade/internal/pkg/storage"
-	"github.com/go-arcade/arcade/pkg/id"
-	"github.com/go-arcade/arcade/pkg/log"
+	storagemodel "github.com/arcentrix/arcade/internal/engine/model"
+	storagerepo "github.com/arcentrix/arcade/internal/engine/repo"
+	storagepkg "github.com/arcentrix/arcade/internal/pkg/storage"
+	"github.com/arcentrix/arcade/pkg/id"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 type UploadService struct {

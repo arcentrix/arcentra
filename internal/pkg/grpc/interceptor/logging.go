@@ -18,7 +18,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 	"google.golang.org/grpc"
 )
 

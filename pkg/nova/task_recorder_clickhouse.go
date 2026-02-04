@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )

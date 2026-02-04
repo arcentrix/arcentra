@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/go-arcade/arcade/internal/pkg/notify/auth"
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/internal/pkg/notify/auth"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/go-resty/resty/v2"
 )
 

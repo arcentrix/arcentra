@@ -15,8 +15,8 @@
 package repo
 
 import (
-	"github.com/go-arcade/arcade/internal/engine/model"
-	"github.com/go-arcade/arcade/pkg/database"
+	"github.com/arcentrix/arcade/internal/engine/model"
+	"github.com/arcentrix/arcade/pkg/database"
 )
 
 type IUserRoleBindingRepository interface {

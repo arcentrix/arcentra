@@ -21,8 +21,8 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/arcentrix/arcade/pkg/plugin"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/pkg/plugin"
 )
 
 // StdoutConfig is the plugin's configuration structure (can be passed from host via Init)
@@ -161,7 +161,7 @@ func (p *Stdout) Author() string {
 
 // Repository returns the plugin repository
 func (p *Stdout) Repository() string {
-	return "https://github.com/go-arcade/arcade"
+	return "https://github.com/arcentrix/arcade"
 }
 
 // Init initializes the plugin

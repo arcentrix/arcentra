@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/safe"
+	"github.com/arcentrix/arcade/pkg/safe"
 )
 
 // TimerWheel is a timer wheel for managing delayed tasks

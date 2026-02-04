@@ -22,12 +22,12 @@ import (
 	"sync"
 	"time"
 
-	pipelinev1 "github.com/go-arcade/arcade/api/pipeline/v1"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/builtin"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/plugin"
-	"github.com/go-arcade/arcade/pkg/statemachine"
+	pipelinev1 "github.com/arcentrix/arcade/api/pipeline/v1"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/builtin"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/plugin"
+	"github.com/arcentrix/arcade/pkg/statemachine"
 )
 
 // Context represents the context for pipeline execution throughout its lifecycle.

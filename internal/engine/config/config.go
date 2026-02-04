@@ -18,17 +18,17 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/arcentrix/arcade/internal/pkg/grpc"
+	"github.com/arcentrix/arcade/pkg/http"
 	"github.com/fsnotify/fsnotify"
-	"github.com/go-arcade/arcade/internal/pkg/grpc"
-	"github.com/go-arcade/arcade/pkg/http"
 	"github.com/spf13/viper"
 
-	"github.com/go-arcade/arcade/pkg/cache"
-	"github.com/go-arcade/arcade/pkg/database"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/metrics"
-	"github.com/go-arcade/arcade/pkg/pprof"
-	"github.com/go-arcade/arcade/pkg/trace"
+	"github.com/arcentrix/arcade/pkg/cache"
+	"github.com/arcentrix/arcade/pkg/database"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/metrics"
+	"github.com/arcentrix/arcade/pkg/pprof"
+	"github.com/arcentrix/arcade/pkg/trace"
 )
 
 type TaskQueueConfig struct {

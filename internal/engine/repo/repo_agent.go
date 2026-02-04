@@ -18,11 +18,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/go-arcade/arcade/internal/engine/consts"
-	"github.com/go-arcade/arcade/internal/engine/model"
-	"github.com/go-arcade/arcade/pkg/cache"
-	"github.com/go-arcade/arcade/pkg/database"
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/internal/engine/consts"
+	"github.com/arcentrix/arcade/internal/engine/model"
+	"github.com/arcentrix/arcade/pkg/cache"
+	"github.com/arcentrix/arcade/pkg/database"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 type IAgentRepository interface {

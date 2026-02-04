@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"time"
 
+	agentmodel "github.com/arcentrix/arcade/internal/engine/model"
+	agentrepo "github.com/arcentrix/arcade/internal/engine/repo"
+	"github.com/arcentrix/arcade/pkg/id"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/util"
 	"github.com/bytedance/sonic"
-	agentmodel "github.com/go-arcade/arcade/internal/engine/model"
-	agentrepo "github.com/go-arcade/arcade/internal/engine/repo"
-	"github.com/go-arcade/arcade/pkg/id"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/util"
 )
 
 type AgentService struct {

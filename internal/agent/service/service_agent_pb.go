@@ -19,10 +19,10 @@ import (
 	"maps"
 	"time"
 
-	agentv1 "github.com/go-arcade/arcade/api/agent/v1"
-	"github.com/go-arcade/arcade/internal/agent/config"
-	grpcclient "github.com/go-arcade/arcade/internal/pkg/grpc"
-	"github.com/go-arcade/arcade/pkg/log"
+	agentv1 "github.com/arcentrix/arcade/api/agent/v1"
+	"github.com/arcentrix/arcade/internal/agent/config"
+	grpcclient "github.com/arcentrix/arcade/internal/pkg/grpc"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 // AgentService implements agent.v1.AgentServiceServer

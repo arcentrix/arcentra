@@ -263,7 +263,7 @@ vim conf.d/plugins.yaml
 ### 使用示例
 
 ```go
-import "github.com/go-arcade/arcade/pkg/plugin"
+import "github.com/arcentrix/arcade/pkg/plugin"
 
 // 创建插件管理器
 manager := plugin.NewManager()

@@ -17,8 +17,8 @@ package pipeline
 import (
 	"time"
 
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
-	"github.com/go-arcade/arcade/pkg/dag"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/pkg/dag"
 )
 
 // TaskState represents the state of a task

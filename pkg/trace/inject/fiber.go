@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"time"
 
-	tracecontext "github.com/go-arcade/arcade/pkg/trace/context"
+	tracecontext "github.com/arcentrix/arcade/pkg/trace/context"
 	"github.com/gofiber/fiber/v2"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -27,7 +27,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const fiberTracerName = "github.com/go-arcade/arcade/pkg/trace/inject/fiber"
+const fiberTracerName = "github.com/arcentrix/arcade/pkg/trace/inject/fiber"
 
 var (
 	fiberTracer     = otel.Tracer(fiberTracerName)

@@ -15,12 +15,12 @@
 package config
 
 import (
-	grpcclient "github.com/go-arcade/arcade/internal/pkg/grpc"
-	"github.com/go-arcade/arcade/pkg/cache"
-	"github.com/go-arcade/arcade/pkg/http"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/metrics"
-	"github.com/go-arcade/arcade/pkg/pprof"
+	grpcclient "github.com/arcentrix/arcade/internal/pkg/grpc"
+	"github.com/arcentrix/arcade/pkg/cache"
+	"github.com/arcentrix/arcade/pkg/http"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/metrics"
+	"github.com/arcentrix/arcade/pkg/pprof"
 	"github.com/google/wire"
 )
 

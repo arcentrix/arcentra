@@ -65,7 +65,7 @@ go get github.com/VictoriaMetrics/fastcache
 ### 2. 基础使用
 
 ```go
-import "github.com/go-arcade/arcade/pkg/cache"
+import "github.com/arcentrix/arcade/pkg/cache"
 
 // 创建本地缓存
 fc := cache.NewFastCache(cache.FastCacheConfig{
@@ -389,7 +389,7 @@ package main
 
 import (
     "github.com/google/wire"
-    "github.com/go-arcade/arcade/pkg/cache"
+    "github.com/arcentrix/arcade/pkg/cache"
 )
 
 func initApp() (*App, error) {

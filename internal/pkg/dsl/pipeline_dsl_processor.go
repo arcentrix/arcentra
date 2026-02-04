@@ -18,11 +18,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-arcade/arcade/internal/pkg/pipeline"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/validation"
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/plugin"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/validation"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/plugin"
 )
 
 // DSLProcessor processes Pipeline DSL with variable resolution and validation

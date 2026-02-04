@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/hashicorp/go-metrics"
 	"github.com/hibiken/asynq"
 )

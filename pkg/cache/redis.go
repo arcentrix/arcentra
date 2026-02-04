@@ -21,8 +21,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/trace/inject"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/trace/inject"
 	"github.com/redis/go-redis/v9"
 )
 

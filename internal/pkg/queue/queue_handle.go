@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 // PipelineTaskHandler 流水线任务处理器

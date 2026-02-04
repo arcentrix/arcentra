@@ -1,6 +1,6 @@
 [Unit]
 Description=Arcade CI/CD Platform Agent
-Documentation=https://github.com/go-arcade/arcade
+Documentation=https://github.com/arcentrix/arcade
 After=network.target
 Wants=network.target
 

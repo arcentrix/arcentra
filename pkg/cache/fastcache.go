@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
+	"github.com/arcentrix/arcade/pkg/safe"
 	"github.com/bytedance/sonic"
-	"github.com/go-arcade/arcade/pkg/safe"
 	"github.com/redis/go-redis/v9"
 )
 

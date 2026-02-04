@@ -34,9 +34,9 @@ type Sandbox interface {
 
 ```go
 import (
-    "github.com/go-arcade/arcade/internal/agent/config"
-    "github.com/go-arcade/arcade/pkg/sandbox"
-    "github.com/go-arcade/arcade/pkg/log"
+    "github.com/arcentrix/arcade/internal/agent/config"
+    "github.com/arcentrix/arcade/pkg/sandbox"
+    "github.com/arcentrix/arcade/pkg/log"
 )
 
 cfg := config.NewConf("conf.d/agent.toml")
@@ -53,8 +53,8 @@ defer sb.Close()
 
 ```go
 import (
-    "github.com/go-arcade/arcade/pkg/sandbox"
-    "github.com/go-arcade/arcade/pkg/log"
+    "github.com/arcentrix/arcade/pkg/sandbox"
+    "github.com/arcentrix/arcade/pkg/log"
 )
 
 config := &sandbox.ContainerdConfig{

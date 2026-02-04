@@ -17,7 +17,7 @@ package trace
 import (
 	"context"
 
-	tracectx "github.com/go-arcade/arcade/pkg/trace/context"
+	tracectx "github.com/arcentrix/arcade/pkg/trace/context"
 	"go.opentelemetry.io/otel/trace"
 )
 

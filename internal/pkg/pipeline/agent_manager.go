@@ -23,10 +23,10 @@ import (
 	"sync"
 	"time"
 
-	agentv1 "github.com/go-arcade/arcade/api/agent/v1"
-	steprunv1 "github.com/go-arcade/arcade/api/steprun/v1"
-	"github.com/go-arcade/arcade/internal/pkg/pipeline/spec"
-	"github.com/go-arcade/arcade/pkg/log"
+	agentv1 "github.com/arcentrix/arcade/api/agent/v1"
+	steprunv1 "github.com/arcentrix/arcade/api/steprun/v1"
+	"github.com/arcentrix/arcade/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcade/pkg/log"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 

@@ -26,7 +26,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 	"github.com/tencentyun/cos-go-sdk-v5"
 )
 

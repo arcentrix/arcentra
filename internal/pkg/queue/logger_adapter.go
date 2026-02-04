@@ -15,7 +15,7 @@
 package queue
 
 import (
-	"github.com/go-arcade/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/log"
 )
 
 // asynqLoggerAdapter 适配器，将 asynq.Logger 接口适配到 pkg/log

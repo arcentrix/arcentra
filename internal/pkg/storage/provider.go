@@ -15,7 +15,7 @@
 package storage
 
 import (
-	"github.com/go-arcade/arcade/internal/engine/repo"
+	"github.com/arcentrix/arcade/internal/engine/repo"
 	"github.com/google/wire"
 )
 

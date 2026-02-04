@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-arcade/arcade/pkg/log"
-	"github.com/go-arcade/arcade/pkg/safe"
+	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcade/pkg/safe"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
