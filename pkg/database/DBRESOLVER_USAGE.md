@@ -1,6 +1,6 @@
 # GORM DBResolver 使用指南
 
-本文档说明如何在 Arcade 项目中使用 GORM DBResolver 实现多数据源和读写分离。
+本文档说明如何在 Arcentra 项目中使用 GORM DBResolver 实现多数据源和读写分离。
 
 ## 功能特性
 
@@ -31,7 +31,7 @@ host = "127.0.0.1"
 port = "3306"
 user = "root"
 password = "password"
-dbname = "arcade"
+dbname = "Arcentra"
 ```
 
 ### 读写分离配置
@@ -51,7 +51,7 @@ host = "127.0.0.1"  # 默认主库（如果 primary 为空则使用此配置）
 port = "3306"
 user = "root"
 password = "password"
-dbname = "arcade"
+dbname = "Arcentra"
 
 # 配置多个主库（primary）
 [[database.mysql.primary]]
@@ -59,14 +59,14 @@ host = "127.0.0.1"
 port = "3306"
 user = "root"
 password = "password"
-dbname = "arcade"
+dbname = "Arcentra"
 
 [[database.mysql.primary]]
 host = "127.0.0.2"
 port = "3306"
 user = "root"
 password = "password"
-dbname = "arcade"
+dbname = "Arcentra"
 
 # 配置多个从库（replicas）
 [[database.mysql.replicas]]
@@ -74,14 +74,14 @@ host = "127.0.0.3"
 port = "3306"
 user = "readonly"
 password = "password"
-dbname = "arcade"
+dbname = "Arcentra"
 
 [[database.mysql.replicas]]
 host = "127.0.0.4"
 port = "3306"
 user = "readonly"
 password = "password"
-dbname = "arcade"
+dbname = "Arcentra"
 ```
 
 ## 自动读写分离
@@ -113,7 +113,7 @@ db.Exec("UPDATE users SET name = ?", "jinzhu") // 原生 SQL 写操作
 ### 使用辅助函数
 
 ```go
-import "github.com/arcentrix/arcade/pkg/database"
+import "github.com/arcentrix/arcentra/pkg/database"
 
 // 强制使用主库（primary）
 db.Clauses(database.Write()).First(&user)

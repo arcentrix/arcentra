@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arcentrix/arcade/pkg/safe"
+	"github.com/arcentrix/arcentra/pkg/safe"
 )
 
 // 定义测试用状态

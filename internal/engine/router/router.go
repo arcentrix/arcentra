@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,14 +19,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/arcentrix/arcade/internal/engine/service"
-	"github.com/arcentrix/arcade/pkg/cache"
-	"github.com/arcentrix/arcade/pkg/http"
-	"github.com/arcentrix/arcade/pkg/http/middleware"
-	"github.com/arcentrix/arcade/pkg/log"
-	"github.com/arcentrix/arcade/pkg/shutdown"
-	"github.com/arcentrix/arcade/pkg/trace/inject"
-	"github.com/arcentrix/arcade/pkg/version"
+	"github.com/arcentrix/arcentra/internal/engine/service"
+	"github.com/arcentrix/arcentra/pkg/cache"
+	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/http/middleware"
+	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/shutdown"
+	"github.com/arcentrix/arcentra/pkg/trace/inject"
+	"github.com/arcentrix/arcentra/pkg/version"
 	fiberi18n "github.com/gofiber/contrib/fiberi18n/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -72,7 +72,7 @@ func (rt *Router) Router() *fiber.App {
 	}
 
 	app := fiber.New(fiber.Config{
-		AppName: "Arcade",
+		AppName: "Arcentra",
 		// DisableStartupMessage: true,
 		ReadTimeout:  time.Duration(rt.Http.ReadTimeout) * time.Second,
 		WriteTimeout: time.Duration(rt.Http.WriteTimeout) * time.Second,

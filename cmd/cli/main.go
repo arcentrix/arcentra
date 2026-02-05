@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,14 @@
 package main
 
 import (
-	"github.com/arcentrix/arcade/pkg/version"
+	"github.com/arcentrix/arcentra/pkg/version"
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "arcade-cli",
-	Short: "arcade cli is a command line tool",
-	Long:  "arcade cli is a command line tool",
+	Use:   "arcentra-cli",
+	Short: "arcentra cli is a command line tool",
+	Long:  "arcentra cli is a command line tool",
 	Run: func(cmd *cobra.Command, args []string) {
 		err := cmd.Help()
 		if err != nil {

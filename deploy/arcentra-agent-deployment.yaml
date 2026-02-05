@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: arcade-agent
+  name: Arcentra-agent
   labels:
-    app: arcade-agent
+    app: Arcentra-agent
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: arcade-agent
+      app: Arcentra-agent
   template:
     metadata:
       labels:
-        app: arcade-agent
+        app: Arcentra-agent
     spec:
       containers:
-      - name: arcade-agent
-        image: go-arcade/arcade-agent:latest
+      - name: arcentra-agent
+        image: go-Arcentra/Arcentra-agent:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8081
@@ -53,16 +53,16 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: arcade-agent-config
+          name: arcentra-agent-config
       restartPolicy: Always
 
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: arcade-agent
+  name: Arcentra-agent
   labels:
-    app: arcade-agent
+    app: Arcentra-agent
 spec:
   type: ClusterIP
   ports:
@@ -79,5 +79,5 @@ spec:
     protocol: TCP
     name: grpc
   selector:
-    app: arcade-agent
+    app: Arcentra-agent
 

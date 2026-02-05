@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"

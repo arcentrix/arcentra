@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ package sandbox
 import (
 	"fmt"
 
-	"github.com/arcentrix/arcade/internal/agent/config"
-	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcentra/internal/agent/config"
+	"github.com/arcentrix/arcentra/pkg/log"
 )
 
 // NewSandboxFromConfig creates a sandbox instance from agent configuration
@@ -50,7 +50,7 @@ func NewSandboxFromConfig(cfg *config.AgentConfig, logger log.Logger) (Sandbox, 
 func NewContainerdSandboxFromConfig(cfg *config.ContainerdConfig, logger log.Logger) (Sandbox, error) {
 	sandboxConfig := &ContainerdConfig{
 		UnixSocket:   cfg.UnixSocket,
-		Namespace:    "arcade",
+		Namespace:    "arcentra",
 		DefaultImage: cfg.Image,
 		NetworkMode:  cfg.Network,
 	}

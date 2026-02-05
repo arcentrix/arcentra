@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,12 +36,12 @@ func (User) TableName() string {
 }
 
 type Register struct {
-	UserId   string    `json:"userId"`
-	Username string    `json:"username"`
-	FullName string    `gorm:"column:full_name" json:"fullName"`
-	Email    string    `json:"email"`
-	Avatar   string    `gorm:"column:avatar" json:"avatar"`
-	Password string    `json:"password"`
+	UserId    string    `json:"userId"`
+	Username  string    `json:"username"`
+	FullName  string    `gorm:"column:full_name" json:"fullName"`
+	Email     string    `json:"email"`
+	Avatar    string    `gorm:"column:avatar" json:"avatar"`
+	Password  string    `json:"password"`
 	CreatedAt time.Time `gorm:"column:created_at" json:"createdAt"`
 }
 
@@ -94,15 +94,15 @@ type UserInfo struct {
 }
 
 type AddUserReq struct {
-	UserId     string    `json:"userId"`
-	Username   string    `json:"username"`
-	FullName   string    `gorm:"column:full_name" json:"fullName"`
-	Password   string    `json:"password"`
-	Avatar     string    `json:"avatar"`
-	Email      string    `json:"email"`
-	Phone      string    `json:"phone"`
-	IsEnabled  int       `gorm:"column:is_enabled" json:"isEnabled"`
-	CreatedAt  time.Time `gorm:"column:created_at" json:"createdAt"`
+	UserId    string    `json:"userId"`
+	Username  string    `json:"username"`
+	FullName  string    `gorm:"column:full_name" json:"fullName"`
+	Password  string    `json:"password"`
+	Avatar    string    `json:"avatar"`
+	Email     string    `json:"email"`
+	Phone     string    `json:"phone"`
+	IsEnabled int       `gorm:"column:is_enabled" json:"isEnabled"`
+	CreatedAt time.Time `gorm:"column:created_at" json:"createdAt"`
 }
 
 // ResetPasswordReq reset password request (for forgot password scenario)

@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/arcentrix/arcade/pkg/id"
+	"github.com/arcentrix/arcentra/pkg/id"
 )
 
 // AgentIDInfo Agent ID信息
@@ -167,9 +167,9 @@ func GetDefaultIDFilePath() string {
 	// 根据操作系统返回不同的路径
 	switch {
 	case fileExists("/var/lib"):
-		return "/var/lib/arcade/agent/agent.id"
+		return "/var/lib/arcentra/agent/agent.id"
 	case fileExists("/Library"):
-		return "/Library/Application Support/arcade/agent.id"
+		return "/Library/Application Support/arcentra/agent.id"
 	default:
 		// Windows 或其他系统，使用当前目录
 		return "./data/agent.id"

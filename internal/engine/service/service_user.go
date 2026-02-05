@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,16 +21,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/arcentrix/arcade/internal/engine/consts"
-	usermodel "github.com/arcentrix/arcade/internal/engine/model"
-	userrepo "github.com/arcentrix/arcade/internal/engine/repo"
-	"github.com/arcentrix/arcade/pkg/cache"
-	"github.com/arcentrix/arcade/pkg/http"
-	"github.com/arcentrix/arcade/pkg/http/jwt"
-	"github.com/arcentrix/arcade/pkg/id"
-	"github.com/arcentrix/arcade/pkg/log"
-	"github.com/arcentrix/arcade/pkg/safe"
-	"github.com/arcentrix/arcade/pkg/util"
+	"github.com/arcentrix/arcentra/internal/engine/consts"
+	usermodel "github.com/arcentrix/arcentra/internal/engine/model"
+	userrepo "github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/pkg/cache"
+	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/http/jwt"
+	"github.com/arcentrix/arcentra/pkg/id"
+	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/safe"
+	"github.com/arcentrix/arcentra/pkg/util"
 	"golang.org/x/crypto/bcrypt"
 )
 

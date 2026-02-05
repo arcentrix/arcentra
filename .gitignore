@@ -8,6 +8,6 @@
 docs/*.md
 *.so
 /api/*/*/*.pb.go
-/cmd/arcade/wire_gen.go
-/cmd/arcade-agent/wire_gen.go
+/cmd/arcentra/wire_gen.go
+/cmd/arcentra-agent/wire_gen.go
 .DS_Store

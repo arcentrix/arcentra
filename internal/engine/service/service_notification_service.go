@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,9 +18,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/arcentrix/arcade/internal/pkg/notify"
-	"github.com/arcentrix/arcade/internal/pkg/notify/channel"
-	"github.com/arcentrix/arcade/internal/pkg/notify/template"
+	"github.com/arcentrix/arcentra/internal/pkg/notify"
+	"github.com/arcentrix/arcentra/internal/pkg/notify/channel"
+	"github.com/arcentrix/arcentra/internal/pkg/notify/template"
 )
 
 // NotificationService provides high-level notification functionality with template support

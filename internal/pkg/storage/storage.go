@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	storagemodel "github.com/arcentrix/arcade/internal/engine/model"
-	storagerepo "github.com/arcentrix/arcade/internal/engine/repo"
-	"github.com/arcentrix/arcade/pkg/log"
+	storagemodel "github.com/arcentrix/arcentra/internal/engine/model"
+	storagerepo "github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/pkg/log"
 )
 
 // 存储类型常量

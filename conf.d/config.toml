@@ -14,7 +14,7 @@ enabled = true
 # trace exporter type: "jaeger", "otlp-grpc", "otlp-http", or "none"
 exporterType = "otlp-grpc"
 # trace endpoint
-endpoint = "openobserv.go-arcade.io:4317"
+endpoint = "openobserv.arcentra.io:4317"
 # trace insecure
 insecure = true
 # trace headers
@@ -39,7 +39,7 @@ level = "DEBUG"
 # log write directory
 path = "logs"
 # log file name
-filename = "arcade.LOG"
+filename = "arcentra.LOG"
 # rotate by time
 keepHours = 4
 # rotate by size
@@ -111,13 +111,13 @@ host = "127.0.0.1"
 port = "3306"
 user = "root"
 password = "muP4woo9Aidiph2jeX8u"
-dbname = "arcade"
+dbname = "arcentra"
 
 # ClickHouse data source configuration
 [database.clickhouse]
 host = "localhost"
 port = 9000
-dbname = "arcade"
+dbname = "arcentra"
 username = "default"
 password = "Doh4Pur5lix6ru0OoK0t"
 # unit: second

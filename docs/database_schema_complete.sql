@@ -1,6 +1,6 @@
 -- ================================================================
--- Arcade CI/CD 平台完整数据库表结构设计
--- 数据库: arcade_ci_meta
+-- Arcentra CI/CD 平台完整数据库表结构设计
+-- 数据库: arcentra_ci_meta
 -- 字符集: utf8mb4
 -- 排序规则: utf8mb4_unicode_ci
 -- ================================================================
@@ -795,7 +795,7 @@ CREATE TABLE IF NOT EXISTS `t_audit_log` (
 
 -- 插入默认管理员用户（密码: admin123，需要在应用层加密）
 INSERT INTO `t_user` (`user_id`, `username`, `nick_name`, `password`, `email`, `is_enabled`)
-VALUES ('user_admin', 'admin', '系统管理员', 'TO_BE_ENCRYPTED', 'admin@arcade.local', 0)
+VALUES ('user_admin', 'admin', '系统管理员', 'TO_BE_ENCRYPTED', 'admin@arcentra.local', 0)
 ON DUPLICATE KEY UPDATE `username` = `username`;
 
 -- 插入默认角色
@@ -829,7 +829,7 @@ INSERT INTO `t_organization` (
   'default-org',
   '默认组织',
   '这是系统默认组织',
-  'https://arcade.example.com',
+  'https://arcentra.example.com',
   'admin@example.com',
   JSON_OBJECT(
     'allow_public_projects', true,
@@ -938,7 +938,7 @@ INSERT INTO `t_project` (
   'demo-project',
   '演示项目',
   'default-org/demo-project',
-  '这是一个示例项目，用于演示 Arcade CI/CD 平台的功能',
+  '这是一个示例项目，用于演示 Arcentra CI/CD 平台的功能',
   'https://github.com/example/demo-project.git',
   'github',
   'main',
@@ -1015,15 +1015,15 @@ VALUES (
     'heartbeat_interval', 30,
     'max_concurrent_jobs', 5,
     'job_timeout', 3600,
-    'workspace_dir', '/var/lib/arcade/workspace',
-    'temp_dir', '/var/lib/arcade/temp',
+    'workspace_dir', '/var/lib/arcentra/workspace',
+    'temp_dir', '/var/lib/arcentra/temp',
     'log_level', 'INFO',
     'enable_docker', true,
     'docker_network', 'bridge',
     'resource_limits', JSON_OBJECT('cpu', '2', 'memory', '4G'),
     'allowed_commands', JSON_ARRAY('docker', 'kubectl', 'npm', 'yarn', 'go', 'python'),
     'env_vars', JSON_OBJECT('PATH', '/usr/local/bin:/usr/bin:/bin'),
-    'cache_dir', '/var/lib/arcade/cache',
+    'cache_dir', '/var/lib/arcentra/cache',
     'cleanup_policy', JSON_OBJECT('max_age_days', 7, 'max_size_gb', 50)
   ),
   'Agent 001 默认配置'
@@ -1032,7 +1032,7 @@ VALUES (
 -- 插入官方插件来源
 INSERT INTO `t_plugin_source` (`source_id`, `name`, `source_type`, `repository`, `is_trusted`)
 VALUES 
-  ('source_arcade_official', 'Arcade Official', 'official', 'https://github.com/arcentrix/arcade/plugins', 1),
-  ('source_community', 'Community', 'community', 'https://plugins.arcade.io', 0)
+  ('source_Arcentra_official', 'Arcentra Official', 'official', 'https://github.com/arcentrix/arcentra/plugins', 1),
+  ('source_community', 'Community', 'community', 'https://plugins.arcentra.io', 0)
 ON DUPLICATE KEY UPDATE `name` = `name`;
 

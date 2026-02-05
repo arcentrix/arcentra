@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/arcentrix/arcade/pkg/id"
+	"github.com/arcentrix/arcentra/pkg/id"
 )
 
 func TestGetXid(t *testing.T) {

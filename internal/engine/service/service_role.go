@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,10 @@ package service
 import (
 	"time"
 
-	"github.com/arcentrix/arcade/internal/engine/model"
-	"github.com/arcentrix/arcade/internal/engine/repo"
-	"github.com/arcentrix/arcade/pkg/log"
-	"github.com/arcentrix/arcade/pkg/util"
+	"github.com/arcentrix/arcentra/internal/engine/model"
+	"github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/util"
 )
 
 type RoleService struct {

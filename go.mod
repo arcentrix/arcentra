@@ -1,4 +1,4 @@
-module github.com/arcentrix/arcade
+module github.com/arcentrix/arcentra
 
 go 1.25.6
 

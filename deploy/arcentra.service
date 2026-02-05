@@ -1,28 +1,28 @@
 [Unit]
-Description=Arcade CI/CD Platform Agent
-Documentation=https://github.com/arcentrix/arcade
-After=network.target
+Description=Arcentra CI/CD Platform Server
+Documentation=https://github.com/arcentrix/arcentra
+After=network.target mysql.service clickhouse.service
 Wants=network.target
 
 [Service]
 Type=simple
-User=arcade-agent
-Group=arcade-agent
-WorkingDirectory=/opt/arcade-agent
-ExecStart=/opt/arcade-agent/arcade-agent -conf /opt/arcade-agent/conf.d/agent.toml
+User=arcentra
+Group=arcentra
+WorkingDirectory=/opt/arcentra
+ExecStart=/opt/arcentra/arcentra -conf /opt/arcentra/conf.d/config.toml -plugin /opt/arcentra/plugins
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5s
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=arcade-agent
+SyslogIdentifier=arcentra
 
 # 安全设置
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/arcade-agent
+ReadWritePaths=/opt/arcentra
 
 # 资源限制
 LimitNOFILE=65536

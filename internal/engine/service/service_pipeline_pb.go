@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 package service
 
 import (
-	pipelinev1 "github.com/arcentrix/arcade/api/pipeline/v1"
+	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 )
 
 type PipelineServiceImpl struct {

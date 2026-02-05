@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ package channel
 import (
 	"context"
 
-	"github.com/arcentrix/arcade/internal/pkg/notify/auth"
+	"github.com/arcentrix/arcentra/internal/pkg/notify/auth"
 )
 
 // LarkCardChannel implements Lark card notification channel

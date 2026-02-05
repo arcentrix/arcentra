@@ -1,13 +1,13 @@
 -- ================================================================
--- Arcade CI/CD 平台 ClickHouse 初始化脚本（最终版）
--- 数据库: arcade
+-- Arcentra CI/CD 平台 ClickHouse 初始化脚本（最终版）
+-- 数据库: arcentra
 -- 说明:
 --   - 面向日志 / 事件 / 队列类高写入场景
 --   - 设计目标：长期稳定、低维护、可扩展
 -- ================================================================
 
-CREATE DATABASE IF NOT EXISTS arcade;
-USE arcade;
+CREATE DATABASE IF NOT EXISTS Arcentra;
+USE Arcentra;
 
 -- ================================================================
 -- Table 1: l_task_queue_records

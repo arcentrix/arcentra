@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/arcentrix/arcade/pkg/log"
-	"github.com/arcentrix/arcade/pkg/version"
+	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/version"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -70,7 +70,7 @@ type BatchConfig struct {
 // SetDefaults sets default values for the configuration
 func (c *TraceConfig) SetDefaults() {
 	if c.ServiceName == "" {
-		c.ServiceName = "arcade"
+		c.ServiceName = "arcentra"
 	}
 	c.ServiceVersion = version.GetVersion().Version
 

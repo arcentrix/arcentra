@@ -34,9 +34,9 @@ type Sandbox interface {
 
 ```go
 import (
-    "github.com/arcentrix/arcade/internal/agent/config"
-    "github.com/arcentrix/arcade/pkg/sandbox"
-    "github.com/arcentrix/arcade/pkg/log"
+    "github.com/arcentrix/arcentra/internal/agent/config"
+    "github.com/arcentrix/arcentra/pkg/sandbox"
+    "github.com/arcentrix/arcentra/pkg/log"
 )
 
 cfg := config.NewConf("conf.d/agent.toml")
@@ -53,13 +53,13 @@ defer sb.Close()
 
 ```go
 import (
-    "github.com/arcentrix/arcade/pkg/sandbox"
-    "github.com/arcentrix/arcade/pkg/log"
+    "github.com/arcentrix/arcentra/pkg/sandbox"
+    "github.com/arcentrix/arcentra/pkg/log"
 )
 
 config := &sandbox.ContainerdConfig{
     UnixSocket:  "/run/containerd/containerd.sock",
-    Namespace:   "arcade",
+    Namespace:   "arcentra",
     DefaultImage: "alpine:latest",
     NetworkMode: "bridge",
     Resources: &sandbox.Resources{
@@ -170,7 +170,7 @@ io.Copy(os.Stdout, logs)
 ### ContainerdConfig
 
 - `UnixSocket`: containerd unix socket 路径（默认：`/run/containerd/containerd.sock`）
-- `Namespace`: containerd 命名空间（默认：`arcade`）
+- `Namespace`: containerd 命名空间（默认：`Arcentra`）
 - `DefaultImage`: 默认容器镜像
 - `NetworkMode`: 默认网络模式（bridge, host, none）
 - `Resources`: 默认资源限制

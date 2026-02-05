@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,11 +21,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/arcentrix/arcade/internal/engine/model"
-	"github.com/arcentrix/arcade/internal/engine/service"
-	httpx "github.com/arcentrix/arcade/pkg/http"
-	"github.com/arcentrix/arcade/pkg/http/middleware"
-	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcentra/internal/engine/model"
+	"github.com/arcentrix/arcentra/internal/engine/service"
+	httpx "github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/http/middleware"
+	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/bytedance/sonic"
 	"github.com/gofiber/fiber/v2"
 )
@@ -262,14 +262,14 @@ func (rt *Router) ldapLogin(c *fiber.Ctx) error {
 		return httpx.WithRepErrMsg(c, httpx.UsernameArePasswordIsRequired.Code, httpx.UsernameArePasswordIsRequired.Msg, c.Path())
 	}
 
-	// Step 1: Verify LDAP identity and map/create Arcade user
+	// Step 1: Verify LDAP identity and map/create Arcentra user
 	userInfo, err := identityService.LDAPLogin(providerName, req.Username, req.Password)
 	if err != nil {
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
 	}
 
-	// Step 2 & 3: Generate Arcade token using Login method (password empty for LDAP)
-	// This follows the unified flow: verify identity → map/create user → generate Arcade token
+	// Step 2 & 3: Generate Arcentra token using Login method (password empty for LDAP)
+	// This follows the unified flow: verify identity → map/create user → generate Arcentra token
 	userService := rt.Services.User
 	loginReq := &model.Login{
 		Username: userInfo.Username,
@@ -282,7 +282,7 @@ func (rt *Router) ldapLogin(c *fiber.Ctx) error {
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, fmt.Sprintf("failed to generate token: %v", err), c.Path())
 	}
 
-	// Step 4: Return LoginResp with Arcade token (subsequent requests only use Arcade token)
+	// Step 4: Return LoginResp with Arcentra token (subsequent requests only use Arcentra token)
 	c.Locals(middleware.DETAIL, loginResp)
 	return nil
 }

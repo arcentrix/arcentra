@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	tracecontext "github.com/arcentrix/arcade/pkg/trace/context"
+	tracecontext "github.com/arcentrix/arcentra/pkg/trace/context"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	redisTracerName = "github.com/arcentrix/arcade/pkg/trace/inject/redis"
+	redisTracerName = "github.com/arcentrix/arcentra/pkg/trace/inject/redis"
 )
 
 var (

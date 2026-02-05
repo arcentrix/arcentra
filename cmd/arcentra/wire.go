@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,19 +18,19 @@
 package main
 
 import (
-	"github.com/arcentrix/arcade/internal/engine/bootstrap"
-	"github.com/arcentrix/arcade/internal/engine/config"
-	"github.com/arcentrix/arcade/internal/engine/repo"
-	"github.com/arcentrix/arcade/internal/engine/router"
-	"github.com/arcentrix/arcade/internal/engine/service"
-	"github.com/arcentrix/arcade/internal/pkg/grpc"
-	"github.com/arcentrix/arcade/internal/pkg/queue"
-	"github.com/arcentrix/arcade/internal/pkg/storage"
-	"github.com/arcentrix/arcade/pkg/cache"
-	"github.com/arcentrix/arcade/pkg/database"
-	"github.com/arcentrix/arcade/pkg/log"
-	"github.com/arcentrix/arcade/pkg/metrics"
-	"github.com/arcentrix/arcade/pkg/plugin"
+	"github.com/arcentrix/arcentra/internal/engine/bootstrap"
+	"github.com/arcentrix/arcentra/internal/engine/config"
+	"github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/internal/engine/router"
+	"github.com/arcentrix/arcentra/internal/engine/service"
+	"github.com/arcentrix/arcentra/internal/pkg/grpc"
+	"github.com/arcentrix/arcentra/internal/pkg/queue"
+	"github.com/arcentrix/arcentra/internal/pkg/storage"
+	"github.com/arcentrix/arcentra/pkg/cache"
+	"github.com/arcentrix/arcentra/pkg/database"
+	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/metrics"
+	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/google/wire"
 )
 

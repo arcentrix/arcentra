@@ -36,10 +36,10 @@ PROTOC_GEN_GO := $(shell go env GOPATH)/bin/protoc-gen-go
 PROTOC_GEN_GO_GRPC := $(shell go env GOPATH)/bin/protoc-gen-go-grpc
 
 LDFLAGS := \
- -X 'github.com/arcentrix/arcade/pkg/version.Version=$(VERSION)' \
- -X 'github.com/arcentrix/arcade/pkg/version.GitBranch=$(GIT_BRANCH)' \
- -X 'github.com/arcentrix/arcade/pkg/version.GitCommit=$(GIT_COMMIT)' \
- -X 'github.com/arcentrix/arcade/pkg/version.BuildTime=$(BUILD_TIME)'
+ -X 'github.com/arcentrix/arcentra/pkg/version.Version=$(VERSION)' \
+ -X 'github.com/arcentrix/arcentra/pkg/version.GitBranch=$(GIT_BRANCH)' \
+ -X 'github.com/arcentrix/arcentra/pkg/version.GitCommit=$(GIT_COMMIT)' \
+ -X 'github.com/arcentrix/arcentra/pkg/version.BuildTime=$(BUILD_TIME)'
 
 .DEFAULT_GOAL := help
 
@@ -48,7 +48,7 @@ deps-sync:
 	go mod verify
 
 help: ## show help information
-	@echo "Arcade CI/CD platform Makefile commands"
+	@echo "arcentra CI/CD platform Makefile commands"
 	@echo ""
 	@echo "Usage: make [command]"
 	@echo ""
@@ -70,19 +70,19 @@ prebuild: ## download and embed the front-end file
 	echo "web file download and embedding completed."
 
 build: wire buf ## build main program
-	go build -ldflags "${LDFLAGS}" -o arcade ./cmd/arcade/
+	go build -ldflags "${LDFLAGS}" -o arcentra ./cmd/arcentra/
 
 build-agent: wire buf ## build agent program
-	go build -ldflags "${LDFLAGS}" -o arcade-agent ./cmd/arcade-agent/
+	go build -ldflags "${LDFLAGS}" -o arcentra-agent ./cmd/arcentra-agent/
 
 build-cli: ## build CLI tool
-	go build -ldflags "${LDFLAGS}" -o arcade-cli ./cmd/cli/
+	go build -ldflags "${LDFLAGS}" -o arcentra-cli ./cmd/cli/
 
 run: deps-sync wire buf
-	go run -ldflags "${LDFLAGS}" ./cmd/arcade/
+	go run -ldflags "${LDFLAGS}" ./cmd/arcentra/
 
 run-agent: deps-sync wire buf
-	go run ./cmd/arcade-agent/
+	go run ./cmd/arcentra-agent/
 
 release: ## create release version
 	goreleaser --skip-validate --skip-publish --snapshot
@@ -132,8 +132,8 @@ wire-install: ## install wire tool
 
 wire: ## generate wire dependency injection code
 	@echo ">> generating wire code..."
-	@cd cmd/arcade && wire
-	@cd cmd/arcade-agent && wire
+	@cd cmd/arcentra && wire
+	@cd cmd/arcentra-agent && wire
 	@echo ">> wire code generation done."
 
 wire-clean: ## clean wire generated code
@@ -173,7 +173,7 @@ addlicense-check: ## check if addlicense tool is installed
 
 addlicense: addlicense-check ## run addlicense code analysis
 	@echo ">> running addlicense..."
-	@addlicense -v -l apache -c "Arcade Team" $(find . -name "*.go" -not -name "wire_gen.go" -not -name "*.pb.go" -not -name "*_grpc.pb.go")
+	@addlicense -v -l apache -c "arcentra Team" $(find . -name "*.go" -not -name "wire_gen.go" -not -name "*.pb.go" -not -name "*_grpc.pb.go")
 	@echo ">> addlicense analysis done."
 
 # version management

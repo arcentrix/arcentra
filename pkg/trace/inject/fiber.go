@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"time"
 
-	tracecontext "github.com/arcentrix/arcade/pkg/trace/context"
+	tracecontext "github.com/arcentrix/arcentra/pkg/trace/context"
 	"github.com/gofiber/fiber/v2"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -27,7 +27,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const fiberTracerName = "github.com/arcentrix/arcade/pkg/trace/inject/fiber"
+const fiberTracerName = "github.com/arcentrix/arcentra/pkg/trace/inject/fiber"
 
 var (
 	fiberTracer     = otel.Tracer(fiberTracerName)

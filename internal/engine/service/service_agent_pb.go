@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,9 @@ import (
 	"strings"
 	"time"
 
-	agentv1 "github.com/arcentrix/arcade/api/agent/v1"
-	agentmodel "github.com/arcentrix/arcade/internal/engine/model"
-	"github.com/arcentrix/arcade/pkg/log"
+	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
+	agentmodel "github.com/arcentrix/arcentra/internal/engine/model"
+	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/bytedance/sonic"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

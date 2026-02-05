@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ package repo
 import (
 	"context"
 
-	"github.com/arcentrix/arcade/internal/engine/model"
-	"github.com/arcentrix/arcade/pkg/database"
+	"github.com/arcentrix/arcentra/internal/engine/model"
+	"github.com/arcentrix/arcentra/pkg/database"
 )
 
 // INotificationChannelRepository 通知配置仓库接口

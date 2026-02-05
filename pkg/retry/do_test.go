@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arcentrix/arcade/pkg/safe"
+	"github.com/arcentrix/arcentra/pkg/safe"
 )
 
 func TestDo_Success(t *testing.T) {

@@ -39,9 +39,9 @@ services:
         soft: 262144
         hard: 262144
       
-  arcade:
-    image: go-arcade/arcade:latest
-    container_name: arcade
+  arcentra:
+    image: go-arcentra/arcentra:latest
+    container_name: arcentra
     restart: always
     ports:
       - 8080:8080
@@ -51,9 +51,9 @@ services:
     volumes:
       - ./conf.d:/conf.d
   
-  arcade-agent:
-    image: go-arcade/arcade-agent:latest
-    container_name: arcade-agent
+  arcentra-agent:
+    image: go-arcentra/arcentra-agent:latest
+    container_name: arcentra-agent
     restart: always
     ports:
       - 8081:8081

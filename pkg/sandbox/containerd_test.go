@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arcentrix/arcade/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/log"
 )
 
 func TestContainerdSandbox_Create(t *testing.T) {
@@ -30,7 +30,7 @@ func TestContainerdSandbox_Create(t *testing.T) {
 	logger := log.Logger{Log: log.GetLogger()}
 	config := &ContainerdConfig{
 		UnixSocket:   "/run/containerd/containerd.sock",
-		Namespace:    "arcade-test",
+		Namespace:    "arcentra-test",
 		DefaultImage: "alpine:latest",
 		NetworkMode:  "bridge",
 		Resources: &Resources{
@@ -82,7 +82,7 @@ func TestContainerdSandbox_Execute(t *testing.T) {
 	logger := log.Logger{Log: log.GetLogger()}
 	config := &ContainerdConfig{
 		UnixSocket:   "/run/containerd/containerd.sock",
-		Namespace:    "arcade-test",
+		Namespace:    "arcentra-test",
 		DefaultImage: "alpine:latest",
 		NetworkMode:  "bridge",
 	}

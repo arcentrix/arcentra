@@ -22,7 +22,7 @@ Nova is a flexible and high-performance task queue library for Go that supports 
 ## Installation
 
 ```bash
-go get github.com/arcentrix/arcade/pkg/nova
+go get github.com/arcentrix/arcentra/pkg/nova
 ```
 
 ## Quick Start
@@ -36,7 +36,7 @@ import (
     "context"
     "time"
     
-    "github.com/arcentrix/arcade/pkg/taskqueue"
+    "github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 
 func main() {

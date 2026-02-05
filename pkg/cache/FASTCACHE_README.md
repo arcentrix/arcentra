@@ -39,7 +39,7 @@ FastCache 是基于 VictoriaMetrics 的 `fastcache` 库实现的高性能本地�
 ## 文件结构
 
 ```
-arcade/pkg/cache/
+Arcentra/pkg/cache/
 ├── fastcache.go                 # FastCache 实现
 ├── hybrid_cache.go              # HybridCache 混合缓存实现
 ├── wire_providers.go            # Wire 依赖注入提供者
@@ -65,7 +65,7 @@ go get github.com/VictoriaMetrics/fastcache
 ### 2. 基础使用
 
 ```go
-import "github.com/arcentrix/arcade/pkg/cache"
+import "github.com/arcentrix/arcentra/pkg/cache"
 
 // 创建本地缓存
 fc := cache.NewFastCache(cache.FastCacheConfig{
@@ -389,7 +389,7 @@ package main
 
 import (
     "github.com/google/wire"
-    "github.com/arcentrix/arcade/pkg/cache"
+    "github.com/arcentrix/arcentra/pkg/cache"
 )
 
 func initApp() (*App, error) {

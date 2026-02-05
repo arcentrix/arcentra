@@ -13,8 +13,8 @@ WORKDIR /
 
 RUN mkdir -p /conf.d
 
-COPY --from=builder /app/arcade /arcade
+COPY --from=builder /app/arcentra /arcentra
 
 EXPOSE 8080
 
-ENTRYPOINT [ "/arcade -conf /conf.d/config.toml" ]
+ENTRYPOINT [ "/arcentra -conf /conf.d/config.toml" ]

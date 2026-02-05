@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,17 +22,17 @@ import (
 	"syscall"
 	"time"
 
-	agentv1 "github.com/arcentrix/arcade/api/agent/v1"
-	"github.com/arcentrix/arcade/internal/agent/config"
-	"github.com/arcentrix/arcade/internal/agent/router"
-	"github.com/arcentrix/arcade/internal/agent/service"
-	grpcclient "github.com/arcentrix/arcade/internal/pkg/grpc"
-	"github.com/arcentrix/arcade/internal/pkg/queue"
-	"github.com/arcentrix/arcade/pkg/cron"
-	"github.com/arcentrix/arcade/pkg/log"
-	"github.com/arcentrix/arcade/pkg/metrics"
-	"github.com/arcentrix/arcade/pkg/safe"
-	"github.com/arcentrix/arcade/pkg/shutdown"
+	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
+	"github.com/arcentrix/arcentra/internal/agent/config"
+	"github.com/arcentrix/arcentra/internal/agent/router"
+	"github.com/arcentrix/arcentra/internal/agent/service"
+	grpcclient "github.com/arcentrix/arcentra/internal/pkg/grpc"
+	"github.com/arcentrix/arcentra/internal/pkg/queue"
+	"github.com/arcentrix/arcentra/pkg/cron"
+	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/metrics"
+	"github.com/arcentrix/arcentra/pkg/safe"
+	"github.com/arcentrix/arcentra/pkg/shutdown"
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/connectivity"

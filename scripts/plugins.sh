@@ -179,7 +179,7 @@ generate_checksum() {
 # Test plugin auto-loading function
 test_autoload() {
     echo "========================================"
-    echo -e "${BLUE}[INFO]${NC} Arcade Plugin Auto-loading Test Script"
+    echo -e "${BLUE}[INFO]${NC} Arcentra Plugin Auto-loading Test Script"
     echo "========================================"
     echo ""
 

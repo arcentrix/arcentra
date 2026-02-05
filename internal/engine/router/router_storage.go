@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 package router
 
 import (
-	"github.com/arcentrix/arcade/internal/engine/service"
-	"github.com/arcentrix/arcade/pkg/http"
-	"github.com/arcentrix/arcade/pkg/http/middleware"
+	"github.com/arcentrix/arcentra/internal/engine/service"
+	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 

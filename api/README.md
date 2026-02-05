@@ -1,12 +1,12 @@
-# Arcade Agent API
+# Arcentra Agent API
 
 English | [简体中文](./README_zh_CN.md)
 
-gRPC API definitions for the Arcade and Agent interaction, defined using Protocol Buffers and managed through Buf.
+gRPC API definitions for the Arcentra and Agent interaction, defined using Protocol Buffers and managed through Buf.
 
 ## Overview
 
-This directory contains all gRPC API definitions for the Arcade and Agent interaction, divided into five main service modules:
+This directory contains all gRPC API definitions for the Arcentra and Agent interaction, divided into five main service modules:
 
 - **Agent Service** - Core interface for communication between Agent and Server
 - **Pipeline Service** - Pipeline management interface
@@ -242,14 +242,14 @@ buf format -w
 ### buf.yaml
 
 Main configuration file, defines:
-- Module name: `buf.build/observabil/arcade`
+- Module name: `buf.build/observabil/Arcentra`
 - Lint rules: Use STANDARD rule set, but allow streaming RPC
 - Breaking change check: Use FILE level check
 
 ### buf.gen.yaml
 
 Code generation configuration, defines:
-- Go Package prefix: `github.com/arcentrix/arcade/api`
+- Go Package prefix: `github.com/arcentrix/arcentra/api`
 - Plugin configuration:
   - `protocolbuffers/go` - Generate Go message code
   - `grpc/go` - Generate gRPC service code
@@ -267,7 +267,7 @@ import (
     "log"
     
     "google.golang.org/grpc"
-    agentv1 "github.com/arcentrix/arcade/api/agent/v1"
+    agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 )
 
 func main() {
@@ -314,7 +314,7 @@ import (
     "net"
     
     "google.golang.org/grpc"
-    agentv1 "github.com/arcentrix/arcade/api/agent/v1"
+    agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 )
 
 type agentService struct {

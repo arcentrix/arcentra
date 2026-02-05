@@ -1,4 +1,4 @@
-# Arcade CI/CD 平台 API 文档
+# Arcentra CI/CD 平台 API 文档
 
 ## 架构说明
 
@@ -216,7 +216,7 @@ label_selector {
 
 ## 插件系统
 
-Arcade 提供了强大的插件系统，支持动态扩展功能。插件系统具有以下特性：
+Arcentra 提供了强大的插件系统，支持动态扩展功能。插件系统具有以下特性：
 
 ### 插件类型
 
@@ -263,7 +263,7 @@ vim conf.d/plugins.yaml
 ### 使用示例
 
 ```go
-import "github.com/arcentrix/arcade/pkg/plugin"
+import "github.com/arcentrix/arcentra/pkg/plugin"
 
 // 创建插件管理器
 manager := plugin.NewManager()

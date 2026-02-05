@@ -26,9 +26,9 @@ maxConcurrentJobs = 5
 # job timeout in seconds
 jobTimeout = 3600
 # workspace directory
-workspaceDir = "/var/lib/arcade/workspace"
+workspaceDir = "/var/lib/arcentra/workspace"
 # temporary directory
-tempDir = "/var/lib/arcade/temp"
+tempDir = "/var/lib/arcentra/temp"
 # log level: DEBUG INFO WARNING ERROR FATAL
 logLevel = "INFO"
 # denied commands
@@ -75,7 +75,7 @@ network = "bridge"
 # containerd unix socket
 unixSocket = "/run/containerd/containerd.sock"
 # containerd image
-image = "arcade-agent:latest"
+image = "arcentra-agent:latest"
 # containerd resources
 [agent.sandbox.containerd.resources]
 cpu = "1"
@@ -86,9 +86,9 @@ memory = "1G"
 # kubernetes namespace
 namespace = "default"
 # kubernetes pod name
-podName = "arcade-agent"
+podName = "arcentra-agent"
 # kubernetes pod image
-image = "arcade-agent:latest"
+image = "arcentra-agent:latest"
 # kubernetes pod resources
 [agent.sandbox.kubernetes.resources]
 cpu = "1"

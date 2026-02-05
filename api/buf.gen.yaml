@@ -3,7 +3,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/arcentrix/arcade/api
+      value: github.com/arcentrix/arcentra/api
 plugins:
   - remote: buf.build/protocolbuffers/go
     out: .

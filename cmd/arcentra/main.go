@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@ package main
 import (
 	"flag"
 
-	"github.com/arcentrix/arcade/internal/engine/bootstrap"
-	_ "github.com/arcentrix/arcade/pkg/plugins/git"
-	_ "github.com/arcentrix/arcade/pkg/plugins/svn"
+	"github.com/arcentrix/arcentra/internal/engine/bootstrap"
+	_ "github.com/arcentrix/arcentra/pkg/plugins/git"
+	_ "github.com/arcentrix/arcentra/pkg/plugins/svn"
 )
 
 var (

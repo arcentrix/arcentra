@@ -1,12 +1,12 @@
-# Arcade Agent API 中文文档
+# Arcentra Agent API 中文文档
 
 简体中文 | [English](./README.md)
 
-Arcade 与 Agent 交互的 gRPC API 定义，使用 Protocol Buffers 定义，通过 Buf 进行管理。
+Arcentra 与 Agent 交互的 gRPC API 定义，使用 Protocol Buffers 定义，通过 Buf 进行管理。
 
 ## 概述
 
-本目录包含了 Arcade 与 Agent 交互的所有的 gRPC API 定义，分为五个主要服务模块：
+本目录包含了 Arcentra 与 Agent 交互的所有的 gRPC API 定义，分为五个主要服务模块：
 
 - **Agent Service** - Agent 端与 Server 端通信的核心接口
 - **Pipeline Service** - 流水线管理接口

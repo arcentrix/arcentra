@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"time"
 
-	tracecontext "github.com/arcentrix/arcade/pkg/trace/context"
+	tracecontext "github.com/arcentrix/arcentra/pkg/trace/context"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	gormTracerName = "github.com/arcentrix/arcade/pkg/trace/inject/gorm"
+	gormTracerName = "github.com/arcentrix/arcentra/pkg/trace/inject/gorm"
 )
 
 var (

@@ -18,8 +18,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/arcentrix/arcade/pkg/http"
-	"github.com/arcentrix/arcade/pkg/http/jwt"
+	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/http/jwt"
 	"github.com/gofiber/fiber/v2"
 )
 

@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ import (
 	"maps"
 	"time"
 
-	agentv1 "github.com/arcentrix/arcade/api/agent/v1"
-	"github.com/arcentrix/arcade/internal/agent/config"
-	grpcclient "github.com/arcentrix/arcade/internal/pkg/grpc"
-	"github.com/arcentrix/arcade/pkg/log"
+	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
+	"github.com/arcentrix/arcentra/internal/agent/config"
+	grpcclient "github.com/arcentrix/arcentra/internal/pkg/grpc"
+	"github.com/arcentrix/arcentra/pkg/log"
 )
 
 // AgentService implements agent.v1.AgentServiceServer

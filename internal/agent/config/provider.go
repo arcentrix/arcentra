@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
 package config
 
 import (
-	grpcclient "github.com/arcentrix/arcade/internal/pkg/grpc"
-	"github.com/arcentrix/arcade/pkg/cache"
-	"github.com/arcentrix/arcade/pkg/http"
-	"github.com/arcentrix/arcade/pkg/log"
-	"github.com/arcentrix/arcade/pkg/metrics"
-	"github.com/arcentrix/arcade/pkg/pprof"
+	grpcclient "github.com/arcentrix/arcentra/internal/pkg/grpc"
+	"github.com/arcentrix/arcentra/pkg/cache"
+	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/metrics"
+	"github.com/arcentrix/arcentra/pkg/pprof"
 	"github.com/google/wire"
 )
 

@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arcentrix/arcade/pkg/log"
-	"github.com/arcentrix/arcade/pkg/safe"
+	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/safe"
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/containers"
@@ -71,7 +71,7 @@ func NewContainerdSandbox(config *ContainerdConfig, logger log.Logger) (*Contain
 	}
 
 	if config.Namespace == "" {
-		config.Namespace = "arcade"
+		config.Namespace = "arcentra"
 	}
 
 	client, err := containerd.New(config.UnixSocket)
@@ -611,5 +611,5 @@ func parseMemory(memory string) int64 {
 
 // generateContainerID generates a unique container ID
 func generateContainerID() string {
-	return fmt.Sprintf("arcade-%d", time.Now().UnixNano())
+	return fmt.Sprintf("arcentra-%d", time.Now().UnixNano())
 }

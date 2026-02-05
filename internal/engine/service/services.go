@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +15,11 @@
 package service
 
 import (
-	"github.com/arcentrix/arcade/internal/engine/repo"
-	storagepkg "github.com/arcentrix/arcade/internal/pkg/storage"
-	"github.com/arcentrix/arcade/pkg/cache"
-	"github.com/arcentrix/arcade/pkg/database"
-	pluginpkg "github.com/arcentrix/arcade/pkg/plugin"
+	"github.com/arcentrix/arcentra/internal/engine/repo"
+	storagepkg "github.com/arcentrix/arcentra/internal/pkg/storage"
+	"github.com/arcentrix/arcentra/pkg/cache"
+	"github.com/arcentrix/arcentra/pkg/database"
+	pluginpkg "github.com/arcentrix/arcentra/pkg/plugin"
 	"golang.org/x/crypto/bcrypt"
 )
 

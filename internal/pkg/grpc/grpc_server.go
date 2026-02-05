@@ -1,4 +1,4 @@
-// Copyright 2025 Arcade Team
+// Copyright 2025 Arcentra Team
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,20 +21,20 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/arcentrix/arcade/internal/engine/service"
-	"github.com/arcentrix/arcade/pkg/log"
-	"github.com/arcentrix/arcade/pkg/safe"
+	"github.com/arcentrix/arcentra/internal/engine/service"
+	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/safe"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 	"gorm.io/gorm"
 
-	agentv1 "github.com/arcentrix/arcade/api/agent/v1"
-	pipelinev1 "github.com/arcentrix/arcade/api/pipeline/v1"
-	steprunv1 "github.com/arcentrix/arcade/api/steprun/v1"
-	streamv1 "github.com/arcentrix/arcade/api/stream/v1"
-	"github.com/arcentrix/arcade/internal/pkg/grpc/interceptor"
-	"github.com/arcentrix/arcade/pkg/trace/inject"
+	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
+	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
+	steprunv1 "github.com/arcentrix/arcentra/api/steprun/v1"
+	streamv1 "github.com/arcentrix/arcentra/api/stream/v1"
+	"github.com/arcentrix/arcentra/internal/pkg/grpc/interceptor"
+	"github.com/arcentrix/arcentra/pkg/trace/inject"
 	grpcmiddleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpcrecovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	grpcctxtags "github.com/grpc-ecosystem/go-grpc-middleware/tags"
