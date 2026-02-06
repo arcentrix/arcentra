@@ -1,7 +1,7 @@
 # Arcentra
 
 English | [简体中文](./README_zh_CN.md)
-> **A Cloud-Native CI/CD Control Plane and Automation Hub**
+> **A Cloud-native CI/CD architecture hub and automation platform**
 
 Arcentra is an open-source, cloud-native **CI/CD control plane** designed to orchestrate pipelines, schedule agents, and unify automation workflows at scale.
 
