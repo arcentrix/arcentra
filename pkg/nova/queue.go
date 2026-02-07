@@ -112,7 +112,7 @@ func NewTaskQueue(opts ...QueueOption) (TaskQueue, error) {
 
 	// Validate required configuration
 	if config.Type == "" {
-		return nil, fmt.Errorf("broker type is required, use WithKafka, WithRocketMQ or WithRabbitMQ")
+		return nil, fmt.Errorf("broker type is required, use WithKafka or WithRocketMQ")
 	}
 
 	// Use default GroupID if not set
@@ -135,8 +135,6 @@ func NewTaskQueue(opts ...QueueOption) (TaskQueue, error) {
 		broker, delayManager, err = newKafkaBroker(config)
 	case QueueTypeRocketMQ:
 		broker, delayManager, err = newRocketMQBroker(config)
-	case QueueTypeRabbitMQ:
-		broker, delayManager, err = newRabbitMQBroker(config)
 	default:
 		return nil, fmt.Errorf("unsupported queue type: %s", config.Type)
 	}
@@ -153,8 +151,6 @@ func NewTaskQueue(opts ...QueueOption) (TaskQueue, error) {
 		topicPrefix = config.kafkaConfig.TopicPrefix
 	} else if config.rocketmqConfig != nil && config.rocketmqConfig.TopicPrefix != "" {
 		topicPrefix = config.rocketmqConfig.TopicPrefix
-	} else if config.rabbitmqConfig != nil && config.rabbitmqConfig.TopicPrefix != "" {
-		topicPrefix = config.rabbitmqConfig.TopicPrefix
 	}
 
 	// Initialize priority queue mapping
@@ -294,8 +290,6 @@ func (q *TaskQueueImpl) Start(handler IHandler) error {
 		topicPrefix = q.config.kafkaConfig.TopicPrefix
 	} else if q.config.rocketmqConfig != nil && q.config.rocketmqConfig.TopicPrefix != "" {
 		topicPrefix = q.config.rocketmqConfig.TopicPrefix
-	} else if q.config.rabbitmqConfig != nil && q.config.rabbitmqConfig.TopicPrefix != "" {
-		topicPrefix = q.config.rabbitmqConfig.TopicPrefix
 	}
 	topics = append(topics, fmt.Sprintf("%s%s", topicPrefix, TasksSuffix))
 
@@ -346,8 +340,6 @@ func (q *TaskQueueImpl) StartBatch(handler IBatchHandler, agg IAggregator) error
 		topicPrefix = q.config.kafkaConfig.TopicPrefix
 	} else if q.config.rocketmqConfig != nil && q.config.rocketmqConfig.TopicPrefix != "" {
 		topicPrefix = q.config.rocketmqConfig.TopicPrefix
-	} else if q.config.rabbitmqConfig != nil && q.config.rabbitmqConfig.TopicPrefix != "" {
-		topicPrefix = q.config.rabbitmqConfig.TopicPrefix
 	}
 	topics = append(topics, fmt.Sprintf("%s%s", topicPrefix, TasksSuffix))
 
@@ -518,8 +510,6 @@ func (q *TaskQueueImpl) getQueueName(customQueue string, priority Priority) stri
 			topicPrefix = q.config.kafkaConfig.TopicPrefix
 		} else if q.config.rocketmqConfig != nil && q.config.rocketmqConfig.TopicPrefix != "" {
 			topicPrefix = q.config.rocketmqConfig.TopicPrefix
-		} else if q.config.rabbitmqConfig != nil && q.config.rabbitmqConfig.TopicPrefix != "" {
-			topicPrefix = q.config.rabbitmqConfig.TopicPrefix
 		}
 		return fmt.Sprintf("%s-%s", topicPrefix, customQueue)
 	}

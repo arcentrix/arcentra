@@ -16,12 +16,14 @@ package nova
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	mqkafka "github.com/arcentrix/arcentra/pkg/mq/kafka"
+	ckafka "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
 const (
@@ -31,8 +33,8 @@ const (
 
 // DelayTopicManager manages delay topics using multiple delay topics (time-sharded) to manage delayed tasks
 type DelayTopicManager struct {
-	producer     *kafka.Producer
-	consumer     *kafka.Consumer
+	producer     *mqkafka.Producer
+	consumer     *mqkafka.Consumer
 	delayTopics  []string      // List of delay topics
 	targetTopic  string        // Target topic (where messages are sent after delay expires)
 	slotDuration time.Duration // Time interval for each delay topic
@@ -57,8 +59,8 @@ type DelayMessage struct {
 
 // NewDelayTopicManager creates a new delay topic manager
 func NewDelayTopicManager(
-	producer *kafka.Producer,
-	consumer *kafka.Consumer,
+	producer *mqkafka.Producer,
+	consumer *mqkafka.Consumer,
 	targetTopic string,
 	slotCount int,
 	slotDuration time.Duration,
@@ -95,7 +97,7 @@ func (dm *DelayTopicManager) Start() error {
 	topics := make([]string, len(dm.delayTopics))
 	copy(topics, dm.delayTopics)
 
-	if err := dm.consumer.SubscribeTopics(topics, nil); err != nil {
+	if err := dm.consumer.Subscribe(topics); err != nil {
 		return fmt.Errorf("failed to subscribe delay topics: %w", err)
 	}
 
@@ -161,22 +163,13 @@ func (dm *DelayTopicManager) EnqueueDelay(
 
 	// Send to delay topic, using execution time as key (for partitioning)
 	key := fmt.Sprintf("%d", executeAt.Unix())
-	message := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{
-			Topic:     &delayTopic,
-			Partition: kafka.PartitionAny,
-		},
-		Key:   []byte(key),
-		Value: msgData,
-		Headers: []kafka.Header{
-			{Key: "execute_at", Value: []byte(executeAt.Format(time.RFC3339))},
-			{Key: "target_topic", Value: []byte(dm.targetTopic)},
-			{Key: "target_queue", Value: []byte(targetQueue)},
-			{Key: "priority", Value: []byte(strconv.Itoa(int(priority)))},
-		},
+	headers := map[string]string{
+		"execute_at":   executeAt.Format(time.RFC3339),
+		"target_topic": dm.targetTopic,
+		"target_queue": targetQueue,
+		"priority":     strconv.Itoa(int(priority)),
 	}
-
-	if err := dm.producer.Produce(message, nil); err != nil {
+	if err := dm.producer.Send(dm.ctx, delayTopic, key, msgData, headers); err != nil {
 		return fmt.Errorf("failed to produce delay message: %w", err)
 	}
 
@@ -208,7 +201,8 @@ func (dm *DelayTopicManager) consumeDelayMessages() {
 		default:
 			msg, err := dm.consumer.ReadMessage(100 * time.Millisecond)
 			if err != nil {
-				if err.(kafka.Error).Code() == kafka.ErrTimedOut {
+				var kafkaErr ckafka.Error
+				if errors.As(err, &kafkaErr) && kafkaErr.Code() == ckafka.ErrTimedOut {
 					continue
 				}
 				// Log error but continue running
@@ -259,21 +253,12 @@ func (dm *DelayTopicManager) sendToTargetTopic(task *Task, queue string, priorit
 		return fmt.Errorf("failed to encode task message: %w", err)
 	}
 
-	message := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{
-			Topic:     &dm.targetTopic,
-			Partition: kafka.PartitionAny,
-		},
-		Key:   []byte(taskMsg.TaskID),
-		Value: msgData,
-		Headers: []kafka.Header{
-			{Key: "queue", Value: []byte(queue)},
-			{Key: "priority", Value: []byte(strconv.Itoa(int(priority)))},
-			{Key: "task_type", Value: []byte(task.Type)},
-		},
+	headers := map[string]string{
+		"queue":     queue,
+		"priority":  strconv.Itoa(int(priority)),
+		"task_type": task.Type,
 	}
-
-	if err := dm.producer.Produce(message, nil); err != nil {
+	if err := dm.producer.Send(dm.ctx, dm.targetTopic, taskMsg.TaskID, msgData, headers); err != nil {
 		return fmt.Errorf("failed to produce task message: %w", err)
 	}
 

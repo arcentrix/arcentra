@@ -24,7 +24,6 @@ type QueueType string
 const (
 	QueueTypeKafka    QueueType = "kafka"
 	QueueTypeRocketMQ QueueType = "rocketmq"
-	QueueTypeRabbitMQ QueueType = "rabbitmq"
 )
 
 // MessageQueueBroker is the interface for message queue brokers

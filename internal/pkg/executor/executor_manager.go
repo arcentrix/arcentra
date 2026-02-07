@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"github.com/arcentrix/arcentra/pkg/plugin"
 )
 
 // ExecutorManager 执行器管理器
@@ -25,6 +27,7 @@ import (
 type ExecutorManager struct {
 	executors []Executor
 	mu        sync.RWMutex
+	emitter   *EventEmitter
 }
 
 // NewExecutorManager 创建执行器管理器
@@ -61,10 +64,20 @@ func (m *ExecutorManager) SelectExecutor(req *ExecutionRequest) (Executor, error
 func (m *ExecutorManager) Execute(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
 	executor, err := m.SelectExecutor(req)
 	if err != nil {
+		m.emitFailure(ctx, req, nil, err, "")
 		return nil, err
 	}
 
-	return executor.Execute(ctx, req)
+	m.emitStarted(ctx, req, executor.Name())
+
+	result, execErr := executor.Execute(ctx, req)
+	if execErr != nil {
+		m.emitFailure(ctx, req, result, execErr, executor.Name())
+		return result, execErr
+	}
+
+	m.emitSuccess(ctx, req, result, executor.Name())
+	return result, nil
 }
 
 // ListExecutors 列出所有注册的执行器
@@ -89,4 +102,153 @@ func (m *ExecutorManager) GetExecutor(name string) Executor {
 	}
 
 	return nil
+}
+
+// SetEventEmitter sets the EventEmitter for the manager.
+func (m *ExecutorManager) SetEventEmitter(emitter *EventEmitter) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.emitter = emitter
+}
+
+// SetEventPublisher creates an EventEmitter with the given publisher.
+func (m *ExecutorManager) SetEventPublisher(publisher EventPublisher, config EventEmitterConfig) {
+	if publisher == nil {
+		return
+	}
+	m.SetEventEmitter(NewEventEmitter(publisher, config))
+}
+
+func (m *ExecutorManager) getEmitter() *EventEmitter {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.emitter
+}
+
+func (m *ExecutorManager) emitStarted(ctx context.Context, req *ExecutionRequest, executorName string) {
+	emitter := m.getEmitter()
+	if emitter == nil {
+		return
+	}
+	if req == nil {
+		return
+	}
+	eventCtx := buildEventContext(req)
+	data := map[string]any{
+		"status":    "running",
+		"workspace": req.Workspace,
+		"message":   "execution started",
+	}
+	emitter.Emit(ctx, plugin.EventTypeTaskStarted, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
+}
+
+func (m *ExecutorManager) emitSuccess(ctx context.Context, req *ExecutionRequest, result *ExecutionResult, executorName string) {
+	emitter := m.getEmitter()
+	if emitter == nil {
+		return
+	}
+	eventCtx := buildEventContext(req)
+	durationMs := int64(0)
+	if result != nil {
+		durationMs = result.Duration.Milliseconds()
+	}
+	data := map[string]any{
+		"status":     "succeeded",
+		"durationMs": durationMs,
+	}
+	emitter.Emit(ctx, plugin.EventTypeTaskSucceeded, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
+	m.emitLogs(ctx, emitter, eventCtx, executorName, result)
+	m.emitProgress(ctx, emitter, eventCtx, executorName, result)
+	m.emitArtifact(ctx, emitter, eventCtx, executorName, result)
+	m.emitFinished(ctx, emitter, eventCtx, executorName, "succeeded", durationMs)
+}
+
+func (m *ExecutorManager) emitFailure(ctx context.Context, req *ExecutionRequest, result *ExecutionResult, execErr error, executorName string) {
+	emitter := m.getEmitter()
+	if emitter == nil {
+		return
+	}
+	eventCtx := buildEventContext(req)
+	durationMs := int64(0)
+	exitCode := int32(-1)
+	if result != nil {
+		durationMs = result.Duration.Milliseconds()
+		exitCode = result.ExitCode
+	}
+	data := map[string]any{
+		"status":       "failed",
+		"errorMessage": execErr.Error(),
+		"exitCode":     exitCode,
+	}
+	emitter.Emit(ctx, plugin.EventTypeTaskFailed, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
+	m.emitLogs(ctx, emitter, eventCtx, executorName, result)
+	m.emitProgress(ctx, emitter, eventCtx, executorName, result)
+	m.emitArtifact(ctx, emitter, eventCtx, executorName, result)
+	m.emitFinished(ctx, emitter, eventCtx, executorName, "failed", durationMs)
+}
+
+func (m *ExecutorManager) emitFinished(ctx context.Context, emitter *EventEmitter, eventCtx EventContext, executorName, status string, durationMs int64) {
+	data := map[string]any{
+		"status":     status,
+		"durationMs": durationMs,
+	}
+	emitter.Emit(ctx, plugin.EventTypeTaskFinished, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
+}
+
+func (m *ExecutorManager) emitLogs(ctx context.Context, emitter *EventEmitter, eventCtx EventContext, executorName string, result *ExecutionResult) {
+	if result == nil {
+		return
+	}
+	if result.Output != "" {
+		data := map[string]any{
+			"stream":  "stdout",
+			"content": result.Output,
+		}
+		emitter.Emit(ctx, plugin.EventTypeTaskLog, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
+	}
+	if result.ErrorOutput != "" {
+		data := map[string]any{
+			"stream":  "stderr",
+			"content": result.ErrorOutput,
+		}
+		emitter.Emit(ctx, plugin.EventTypeTaskLog, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
+	}
+}
+
+func (m *ExecutorManager) emitProgress(ctx context.Context, emitter *EventEmitter, eventCtx EventContext, executorName string, result *ExecutionResult) {
+	if result == nil || len(result.Metadata) == 0 {
+		return
+	}
+	value, ok := result.Metadata["progress"]
+	if !ok {
+		return
+	}
+	parsed, ok := normalizeAnyMap(value)
+	if !ok {
+		return
+	}
+	data := normalizeMapKeys(parsed)
+	if len(data) == 0 {
+		return
+	}
+	emitter.Emit(ctx, plugin.EventTypeTaskProgress, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
+}
+
+func (m *ExecutorManager) emitArtifact(ctx context.Context, emitter *EventEmitter, eventCtx EventContext, executorName string, result *ExecutionResult) {
+	if result == nil || len(result.Metadata) == 0 {
+		return
+	}
+	value, ok := result.Metadata["artifact"]
+	if !ok {
+		return
+	}
+	parsed, ok := normalizeAnyMap(value)
+	if !ok {
+		return
+	}
+	data := normalizeMapKeys(parsed)
+	if len(data) == 0 {
+		return
+	}
+	emitter.Emit(ctx, plugin.EventTypeTaskArtifact, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
 }

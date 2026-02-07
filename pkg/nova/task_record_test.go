@@ -116,11 +116,12 @@ func TestTaskRecord_Fields(t *testing.T) {
 }
 
 func TestTaskRecord_OptionalFields(t *testing.T) {
+	now := time.Now()
 	record := &TaskRecord{
 		TaskID:    "task-123",
 		Task:      &Task{Type: "test", Payload: []byte("data")},
 		Status:    TaskStatusPending,
-		CreatedAt: time.Now(),
+		CreatedAt: now,
 	}
 
 	// Optional fields should be nil
@@ -154,8 +155,8 @@ func TestTaskRecord_OptionalFields(t *testing.T) {
 	if record.TaskID != "task-123" {
 		t.Errorf("expected TaskID to be 'task-123', got %s", record.TaskID)
 	}
-	if record.Task != nil {
-		t.Error("expected Task to be nil")
+	if record.Task == nil {
+		t.Error("expected Task to be set")
 	}
 	if record.Status != TaskStatusPending {
 		t.Errorf("expected Status to be TaskStatusPending, got %v", record.Status)
@@ -163,8 +164,8 @@ func TestTaskRecord_OptionalFields(t *testing.T) {
 	if record.Queue != "" {
 		t.Errorf("expected Queue to be empty, got %s", record.Queue)
 	}
-	if !record.CreatedAt.Equal(time.Now()) {
-		t.Errorf("expected CreatedAt to be %v, got %v", time.Now(), record.CreatedAt)
+	if record.CreatedAt.Sub(now) > time.Millisecond || now.Sub(record.CreatedAt) > time.Millisecond {
+		t.Errorf("expected CreatedAt close to %v, got %v", now, record.CreatedAt)
 	}
 }
 

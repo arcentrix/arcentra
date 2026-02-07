@@ -42,6 +42,37 @@ type TaskQueueConfig struct {
 	GroupMaxSize     int            `mapstructure:"groupMaxSize"`     // 组最大大小
 }
 
+type EventsKafkaConfig struct {
+	Enabled          bool       `mapstructure:"enabled"`
+	BootstrapServers string     `mapstructure:"bootstrapServers"`
+	Acks             string     `mapstructure:"acks"`
+	Retries          int        `mapstructure:"retries"`
+	Compression      string     `mapstructure:"compression"`
+	SecurityProtocol string     `mapstructure:"securityProtocol"`
+	Sasl             SaslConfig `mapstructure:"sasl"`
+	Ssl              SslConfig  `mapstructure:"ssl"`
+}
+
+type SaslConfig struct {
+	Mechanism string `mapstructure:"mechanism"`
+	Username  string `mapstructure:"username"`
+	Password  string `mapstructure:"password"`
+}
+
+type SslConfig struct {
+	CaFile   string `mapstructure:"caFile"`
+	CertFile string `mapstructure:"certFile"`
+	KeyFile  string `mapstructure:"keyFile"`
+	Password string `mapstructure:"password"`
+}
+
+type EventsConfig struct {
+	Enabled      bool              `mapstructure:"enabled"`
+	SourcePrefix string            `mapstructure:"sourcePrefix"`
+	Timeout      int               `mapstructure:"timeout"`
+	Kafka        EventsKafkaConfig `mapstructure:"kafka"`
+}
+
 type AppConfig struct {
 	Log       log.Conf
 	Grpc      grpc.Conf
@@ -49,6 +80,7 @@ type AppConfig struct {
 	Database  database.Database
 	Redis     cache.Redis
 	TaskQueue TaskQueueConfig
+	Events    EventsConfig
 	Metrics   metrics.MetricsConfig
 	Pprof     pprof.PprofConfig
 	Trace     trace.TraceConfig

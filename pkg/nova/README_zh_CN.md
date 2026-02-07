@@ -1,10 +1,10 @@
 # Nova 任务队列
 
-Nova 是一个灵活且高性能的 Go 任务队列库，支持多种消息代理（Kafka、RocketMQ、RabbitMQ），提供统一的 API。
+Nova 是一个灵活且高性能的 Go 任务队列库，支持多种消息代理（Kafka、RocketMQ），提供统一的 API。
 
 ## 特性
 
-- **多代理支持**：可在 Kafka、RocketMQ 和 RabbitMQ 之间无缝切换
+- **多代理支持**：可在 Kafka、RocketMQ 之间无缝切换
 - **延迟任务**：内置支持定时和延迟任务执行
 - **优先级队列**：支持高、中、低优先级任务队列
 - **批量处理**：高效的批量处理，支持可配置的聚合器
@@ -17,7 +17,6 @@ Nova 是一个灵活且高性能的 Go 任务队列库，支持多种消息代�
 
 - **Kafka**：完整支持，包含 SASL/SSL 认证
 - **RocketMQ**：支持 ACL 认证
-- **RabbitMQ**：支持 TLS 认证
 
 ## 安装
 
@@ -156,30 +155,7 @@ if err != nil {
 defer queue.Stop()
 ```
 
-### 4. 使用 RabbitMQ
-
-```go
-queue, err := taskqueue.NewTaskQueue(
-    taskqueue.WithRabbitMQ(
-        "amqp://guest:guest@localhost:5672/",
-        taskqueue.WithRabbitMQExchange("myapp-exchange"),
-        taskqueue.WithRabbitMQTopicPrefix("myapp"),
-        taskqueue.WithRabbitMQPrefetch(10, 0),
-        // 认证（如果 URL 中未包含）
-        taskqueue.WithRabbitMQAuth("username", "password"),
-        // TLS
-        taskqueue.WithRabbitMQTLS(tlsConfig),
-    ),
-    taskqueue.WithGroupID("my-group"),
-    taskqueue.WithTopicPrefix("myapp"),
-)
-if err != nil {
-    panic(err)
-}
-defer queue.Stop()
-```
-
-### 5. 批量处理与聚合器
+### 4. 批量处理与聚合器
 
 库提供了三种类型的聚合器用于批量处理：
 
@@ -360,15 +336,6 @@ queue.Enqueue(task,
 - `WithRocketMQAuth(accessKey, secretKey string)`: 设置 ACL 认证
 - `WithRocketMQCredentials(credentials *primitive.Credentials)`: 设置凭证
 - `WithRocketMQDelaySlots(count int, duration time.Duration)`: 配置延迟槽
-
-### RabbitMQ 选项
-
-- `WithRabbitMQExchange(exchange string)`: 设置交换机名称
-- `WithRabbitMQTopicPrefix(prefix string)`: 设置主题前缀
-- `WithRabbitMQPrefetch(count, size int)`: 设置预取配置
-- `WithRabbitMQAuth(username, password string)`: 设置认证
-- `WithRabbitMQTLS(tlsConfig *tls.Config)`: 设置 TLS 配置
-- `WithRabbitMQDelaySlots(count int, duration time.Duration)`: 配置延迟槽
 
 ## API 参考
 

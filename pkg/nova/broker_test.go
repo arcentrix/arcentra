@@ -26,9 +26,6 @@ func TestQueueTypeConstants(t *testing.T) {
 	if QueueTypeRocketMQ != "rocketmq" {
 		t.Errorf("expected QueueTypeRocketMQ to be 'rocketmq', got %s", QueueTypeRocketMQ)
 	}
-	if QueueTypeRabbitMQ != "rabbitmq" {
-		t.Errorf("expected QueueTypeRabbitMQ to be 'rabbitmq', got %s", QueueTypeRabbitMQ)
-	}
 }
 
 func TestMessage_Fields(t *testing.T) {

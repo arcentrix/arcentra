@@ -17,6 +17,7 @@ package executor
 import (
 	"context"
 
+	"github.com/arcentrix/arcentra/internal/engine/config"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/plugin"
 )
@@ -139,5 +140,20 @@ func NewExecutorManagerWithDefaults(
 		manager.Register(pluginExec)
 	}
 
+	return manager
+}
+
+// NewExecutorManagerWithDefaultsAndEvents creates a default executor manager with event publishing enabled.
+func NewExecutorManagerWithDefaultsAndEvents(
+	pluginManager *plugin.Manager,
+	remoteExecutor RemoteExecutor,
+	logger log.Logger,
+	appConf *config.AppConfig,
+) *ExecutorManager {
+	manager := NewExecutorManagerWithDefaults(pluginManager, remoteExecutor, logger)
+	publisher := NewEventPublisherFromConfig(appConf)
+	if publisher != nil {
+		manager.SetEventPublisher(publisher, BuildEventEmitterConfig(appConf))
+	}
 	return manager
 }

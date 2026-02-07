@@ -39,7 +39,6 @@ type queueConfig struct {
 	// Broker-specific configuration
 	kafkaConfig    *KafkaConfig
 	rocketmqConfig *RocketMQConfig
-	rabbitmqConfig *RabbitMQConfig
 	// Task recorder (optional)
 	taskRecorder TaskRecorder
 }
@@ -67,15 +66,6 @@ func WithRocketMQ(nameServers []string, opts ...RocketMQOption) QueueOption {
 			c.BootstrapServers = nameServers[0]
 		}
 		c.rocketmqConfig = NewRocketMQConfig(nameServers, opts...)
-	})
-}
-
-// WithRabbitMQ configures a RabbitMQ broker
-func WithRabbitMQ(url string, opts ...RabbitMQOption) QueueOption {
-	return queueOptionFunc(func(c *queueConfig) {
-		c.Type = QueueTypeRabbitMQ
-		c.BootstrapServers = url
-		c.rabbitmqConfig = NewRabbitMQConfig(url, opts...)
 	})
 }
 
@@ -129,4 +119,4 @@ func WithMessageCodec(codec MessageCodec) QueueOption {
 	})
 }
 
-// Broker-specific option functions are defined in options_kafka.go, options_rabbitmq.go, and options_rocketmq.go
+// Broker-specific option functions are defined in options_kafka.go and options_rocketmq.go

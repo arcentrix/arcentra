@@ -157,6 +157,12 @@ func (e *PluginExecutor) executePlugin(ctx context.Context, req *ExecutionReques
 			if success, ok := resultData["success"].(bool); ok {
 				result.Success = success
 			}
+			if progress, ok := resultData["progress"]; ok {
+				result.WithMetadata("progress", progress)
+			}
+			if artifact, ok := resultData["artifact"]; ok {
+				result.WithMetadata("artifact", artifact)
+			}
 		}
 	}
 

@@ -16,11 +16,13 @@ package nova
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	mqkafka "github.com/arcentrix/arcentra/pkg/mq/kafka"
+	ckafka "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
 // KafkaConfig represents Kafka configuration
@@ -64,8 +66,8 @@ func NewKafkaConfig(bootstrapServers string, opts ...KafkaOption) *KafkaConfig {
 
 // kafkaBroker is the Kafka broker implementation
 type kafkaBroker struct {
-	producer *kafka.Producer
-	consumer *kafka.Consumer
+	producer *mqkafka.Producer
+	consumer *mqkafka.Consumer
 	config   *KafkaConfig
 	mu       sync.RWMutex
 }
@@ -87,37 +89,33 @@ func newKafkaBroker(config *queueConfig) (MessageQueueBroker, DelayManager, erro
 		kafkaConfig.DelaySlotDuration = config.DelaySlotDuration
 	}
 
-	// Create producer configuration
-	producerConfig := &kafka.ConfigMap{
-		"bootstrap.servers":                     kafkaConfig.BootstrapServers,
-		"acks":                                  "all",
-		"retries":                               3,
-		"max.in.flight.requests.per.connection": 5,
-		"compression.type":                      "snappy",
+	clientOptions := []mqkafka.ClientOption{
+		mqkafka.WithSecurityProtocol(kafkaConfig.SecurityProtocol),
+		mqkafka.WithSaslMechanism(kafkaConfig.SASLMechanism),
+		mqkafka.WithSaslUsername(kafkaConfig.SASLUsername),
+		mqkafka.WithSaslPassword(kafkaConfig.SASLPassword),
+		mqkafka.WithSslCaFile(kafkaConfig.SSLCAFile),
+		mqkafka.WithSslCertFile(kafkaConfig.SSLCertFile),
+		mqkafka.WithSslKeyFile(kafkaConfig.SSLKeyFile),
+		mqkafka.WithSslPassword(kafkaConfig.SSLPassword),
 	}
 
-	// Apply authentication configuration
-	applyKafkaAuthConfig(producerConfig, kafkaConfig)
-
-	producer, err := kafka.NewProducer(producerConfig)
+	producer, err := mqkafka.NewProducer(
+		kafkaConfig.BootstrapServers,
+		mqkafka.WithProducerClientOptions(clientOptions...),
+	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create producer: %w", err)
 	}
 
-	// Create consumer configuration
-	consumerConfig := &kafka.ConfigMap{
-		"bootstrap.servers":    kafkaConfig.BootstrapServers,
-		"group.id":             kafkaConfig.GroupID,
-		"auto.offset.reset":    "earliest",
-		"enable.auto.commit":   kafkaConfig.AutoCommit,
-		"session.timeout.ms":   kafkaConfig.SessionTimeout,
-		"max.poll.interval.ms": kafkaConfig.MaxPollInterval,
-	}
-
-	// Apply authentication configuration
-	applyKafkaAuthConfig(consumerConfig, kafkaConfig)
-
-	consumer, err := kafka.NewConsumer(consumerConfig)
+	consumer, err := mqkafka.NewConsumer(
+		kafkaConfig.BootstrapServers,
+		kafkaConfig.GroupID,
+		mqkafka.WithConsumerClientOptions(clientOptions...),
+		mqkafka.WithConsumerEnableAutoCommit(kafkaConfig.AutoCommit),
+		mqkafka.WithConsumerSessionTimeoutMs(kafkaConfig.SessionTimeout),
+		mqkafka.WithConsumerMaxPollIntervalMs(kafkaConfig.MaxPollInterval),
+	)
 	if err != nil {
 		producer.Close()
 		return nil, nil, fmt.Errorf("failed to create consumer: %w", err)
@@ -144,40 +142,10 @@ func newKafkaBroker(config *queueConfig) (MessageQueueBroker, DelayManager, erro
 
 // SendMessage sends a single message
 func (b *kafkaBroker) SendMessage(ctx context.Context, topic string, key string, value []byte, headers map[string]string) error {
-	kafkaHeaders := make([]kafka.Header, 0, len(headers))
-	for k, v := range headers {
-		kafkaHeaders = append(kafkaHeaders, kafka.Header{
-			Key:   k,
-			Value: []byte(v),
-		})
+	if err := b.producer.Send(ctx, topic, key, value, headers); err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
 	}
-
-	message := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{
-			Topic:     &topic,
-			Partition: kafka.PartitionAny,
-		},
-		Key:     []byte(key),
-		Value:   value,
-		Headers: kafkaHeaders,
-	}
-
-	deliveryChan := make(chan kafka.Event, 1)
-	if err := b.producer.Produce(message, deliveryChan); err != nil {
-		return fmt.Errorf("failed to produce message: %w", err)
-	}
-
-	// Wait for send result
-	select {
-	case e := <-deliveryChan:
-		m := e.(*kafka.Message)
-		if m.TopicPartition.Error != nil {
-			return fmt.Errorf("failed to deliver message: %w", m.TopicPartition.Error)
-		}
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return nil
 }
 
 // SendBatchMessages sends multiple messages in batch
@@ -186,53 +154,18 @@ func (b *kafkaBroker) SendBatchMessages(ctx context.Context, topic string, messa
 		return nil
 	}
 
-	deliveryChan := make(chan kafka.Event, len(messages))
 	var firstErr error
 
 	for _, msg := range messages {
-		kafkaHeaders := make([]kafka.Header, 0, len(msg.Headers))
-		for k, v := range msg.Headers {
-			kafkaHeaders = append(kafkaHeaders, kafka.Header{
-				Key:   k,
-				Value: []byte(v),
-			})
-		}
-
-		message := &kafka.Message{
-			TopicPartition: kafka.TopicPartition{
-				Topic:     &topic,
-				Partition: kafka.PartitionAny,
-			},
-			Key:     []byte(msg.Key),
-			Value:   msg.Value,
-			Headers: kafkaHeaders,
-		}
-
-		if err := b.producer.Produce(message, deliveryChan); err != nil {
+		if err := b.producer.Send(ctx, topic, msg.Key, msg.Value, msg.Headers); err != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("failed to produce message: %w", err)
+				firstErr = err
 			}
-		}
-	}
-
-	// Wait for all messages to be sent
-	successCount := 0
-	for i := 0; i < len(messages); i++ {
-		select {
-		case e := <-deliveryChan:
-			m := e.(*kafka.Message)
-			if m.TopicPartition.Error == nil {
-				successCount++
-			} else if firstErr == nil {
-				firstErr = m.TopicPartition.Error
-			}
-		case <-ctx.Done():
-			return ctx.Err()
 		}
 	}
 
 	if firstErr != nil {
-		return fmt.Errorf("failed to send batch: %w (success: %d/%d)", firstErr, successCount, len(messages))
+		return fmt.Errorf("failed to send batch: %w", firstErr)
 	}
 
 	return nil
@@ -240,7 +173,7 @@ func (b *kafkaBroker) SendBatchMessages(ctx context.Context, topic string, messa
 
 // Subscribe subscribes to topics and consumes messages
 func (b *kafkaBroker) Subscribe(ctx context.Context, topics []string, handler MessageHandler) error {
-	if err := b.consumer.SubscribeTopics(topics, nil); err != nil {
+	if err := b.consumer.Subscribe(topics); err != nil {
 		return fmt.Errorf("failed to subscribe topics: %w", err)
 	}
 
@@ -251,7 +184,8 @@ func (b *kafkaBroker) Subscribe(ctx context.Context, topics []string, handler Me
 		default:
 			msg, err := b.consumer.ReadMessage(100 * time.Millisecond)
 			if err != nil {
-				if err.(kafka.Error).Code() == kafka.ErrTimedOut {
+				var kafkaErr ckafka.Error
+				if errors.As(err, &kafkaErr) && kafkaErr.Code() == ckafka.ErrTimedOut {
 					continue
 				}
 				// Log error but continue running
@@ -278,7 +212,7 @@ func (b *kafkaBroker) Subscribe(ctx context.Context, topics []string, handler Me
 
 			// Manually commit offset
 			if !b.config.AutoCommit {
-				if _, err := b.consumer.CommitMessage(msg); err != nil {
+				if err := b.consumer.CommitMessage(msg); err != nil {
 					// Log error but continue processing
 				}
 			}
@@ -300,7 +234,6 @@ func (b *kafkaBroker) Close() error {
 	}
 
 	if b.producer != nil {
-		b.producer.Flush(15 * 1000) // Wait 15 seconds
 		b.producer.Close()
 	}
 
@@ -309,37 +242,4 @@ func (b *kafkaBroker) Close() error {
 	}
 
 	return nil
-}
-
-// applyKafkaAuthConfig applies Kafka authentication configuration
-func applyKafkaAuthConfig(config *kafka.ConfigMap, kafkaConfig *KafkaConfig) {
-	// Set security protocol
-	if kafkaConfig.SecurityProtocol != "" {
-		_ = config.SetKey("security.protocol", kafkaConfig.SecurityProtocol)
-	}
-
-	// Set SASL configuration
-	if kafkaConfig.SASLMechanism != "" {
-		_ = config.SetKey("sasl.mechanism", kafkaConfig.SASLMechanism)
-		if kafkaConfig.SASLUsername != "" {
-			_ = config.SetKey("sasl.username", kafkaConfig.SASLUsername)
-		}
-		if kafkaConfig.SASLPassword != "" {
-			_ = config.SetKey("sasl.password", kafkaConfig.SASLPassword)
-		}
-	}
-
-	// Set SSL configuration
-	if kafkaConfig.SSLCAFile != "" {
-		_ = config.SetKey("ssl.ca.location", kafkaConfig.SSLCAFile)
-	}
-	if kafkaConfig.SSLCertFile != "" {
-		_ = config.SetKey("ssl.certificate.location", kafkaConfig.SSLCertFile)
-	}
-	if kafkaConfig.SSLKeyFile != "" {
-		_ = config.SetKey("ssl.key.location", kafkaConfig.SSLKeyFile)
-	}
-	if kafkaConfig.SSLPassword != "" {
-		_ = config.SetKey("ssl.key.password", kafkaConfig.SSLPassword)
-	}
 }

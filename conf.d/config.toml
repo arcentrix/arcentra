@@ -31,6 +31,40 @@ exportTimeout = "60s"
 # trace batch export size
 maxExportBatchSize = 512
 
+[events]
+# enable event publishing, false or true
+enabled = false
+# event source prefix, e.g. urn:arcentra:executor
+sourcePrefix = "urn:arcentra:executor"
+# publish timeout (seconds)
+timeout = 3
+
+[events.kafka]
+# enable kafka events, false or true
+enabled = false
+# kafka bootstrap servers
+bootstrapServers = "127.0.0.1:9092"
+# acks: all, 1, 0
+acks = "all"
+# retries
+retries = 3
+# compression: snappy, gzip, lz4, zstd
+compression = "snappy"
+# security protocol: PLAINTEXT, SSL, SASL_PLAINTEXT, SASL_SSL
+securityProtocol = ""
+
+[events.kafka.sasl]
+# mechanism: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+mechanism = ""
+username = ""
+password = ""
+
+[events.kafka.ssl]
+caFile = ""
+certFile = ""
+keyFile = ""
+password = ""
+
 [log]
 # support stdout, file, kafka
 output = "stdout"

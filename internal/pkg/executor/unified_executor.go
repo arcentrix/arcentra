@@ -283,6 +283,12 @@ func (e *UnifiedExecutor) executeLocally(ctx context.Context, req *ExecutionRequ
 			if success, ok := resultData["success"].(bool); ok {
 				result.Success = success
 			}
+			if progress, ok := resultData["progress"]; ok {
+				result.WithMetadata("progress", progress)
+			}
+			if artifact, ok := resultData["artifact"]; ok {
+				result.WithMetadata("artifact", artifact)
+			}
 		}
 	}
 

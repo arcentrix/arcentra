@@ -17,14 +17,12 @@ package nova
 import (
 	"context"
 	"fmt"
-	"maps"
 	"sync"
 	"time"
 
-	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
-	"github.com/apache/rocketmq-client-go/v2/producer"
+	mqrocket "github.com/arcentrix/arcentra/pkg/mq/rocketmq"
 )
 
 // RocketMQConfig represents RocketMQ configuration
@@ -63,8 +61,8 @@ func NewRocketMQConfig(nameServers []string, opts ...RocketMQOption) *RocketMQCo
 
 // rocketmqBroker is the RocketMQ broker implementation
 type rocketmqBroker struct {
-	producer rocketmq.Producer
-	consumer rocketmq.PushConsumer
+	producer *mqrocket.Producer
+	consumer *mqrocket.Consumer
 	config   *RocketMQConfig
 	mu       sync.RWMutex
 }
@@ -82,56 +80,33 @@ func newRocketMQBroker(config *queueConfig) (MessageQueueBroker, DelayManager, e
 		rocketmqConfig.DelaySlotDuration = config.DelaySlotDuration
 	}
 
-	// Prepare authentication credentials
-	var credentials *primitive.Credentials
-	var err error
-	if rocketmqConfig.Credentials != nil {
-		credentials = rocketmqConfig.Credentials
-	} else if rocketmqConfig.AccessKey != "" && rocketmqConfig.SecretKey != "" {
-		cred := primitive.Credentials{
-			AccessKey: rocketmqConfig.AccessKey,
-			SecretKey: rocketmqConfig.SecretKey,
-		}
-		credentials = &cred
+	clientOpts := []mqrocket.ClientOption{
+		mqrocket.WithAccessKey(rocketmqConfig.AccessKey),
+		mqrocket.WithSecretKey(rocketmqConfig.SecretKey),
+		mqrocket.WithCredentials(rocketmqConfig.Credentials),
 	}
 
-	// Create producer options
-	producerOpts := []producer.Option{
-		producer.WithNsResolver(primitive.NewPassthroughResolver(rocketmqConfig.NameServer)),
-		producer.WithGroupName(fmt.Sprintf("%s-producer", rocketmqConfig.GroupID)),
-		producer.WithRetry(3),
-	}
-	if credentials != nil {
-		producerOpts = append(producerOpts, producer.WithCredentials(*credentials))
+	producerOpts := []mqrocket.ProducerOption{
+		mqrocket.WithProducerClientOptions(clientOpts...),
+		mqrocket.WithProducerGroupName(fmt.Sprintf("%s-producer", rocketmqConfig.GroupID)),
+		mqrocket.WithProducerRetry(3),
 	}
 
-	p, err := rocketmq.NewProducer(producerOpts...)
+	p, err := mqrocket.NewProducer(rocketmqConfig.NameServer, producerOpts...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create producer: %w", err)
 	}
 
-	if err = p.Start(); err != nil {
-		return nil, nil, fmt.Errorf("failed to start producer: %w", err)
+	consumerOpts := []mqrocket.ConsumerOption{
+		mqrocket.WithConsumerClientOptions(clientOpts...),
+		mqrocket.WithConsumerModel(rocketmqConfig.ConsumerModel),
+		mqrocket.WithConsumerConsumeTimeout(rocketmqConfig.ConsumeTimeout),
+		mqrocket.WithConsumerMaxReconsumeTimes(rocketmqConfig.MaxReconsumeTimes),
 	}
 
-	// Create consumer options
-	consumerOpts := []consumer.Option{
-		consumer.WithGroupName(rocketmqConfig.GroupID),
-		consumer.WithNsResolver(primitive.NewPassthroughResolver(rocketmqConfig.NameServer)),
-		consumer.WithConsumerModel(rocketmqConfig.ConsumerModel),
-		consumer.WithConsumeTimeout(rocketmqConfig.ConsumeTimeout),
-		consumer.WithMaxReconsumeTimes(rocketmqConfig.MaxReconsumeTimes),
-	}
-	if credentials != nil {
-		consumerOpts = append(consumerOpts, consumer.WithCredentials(*credentials))
-	}
-
-	c, err := rocketmq.NewPushConsumer(consumerOpts...)
+	c, err := mqrocket.NewConsumer(rocketmqConfig.NameServer, rocketmqConfig.GroupID, consumerOpts...)
 	if err != nil {
-		err = p.Shutdown()
-		if err != nil {
-			return nil, nil, err
-		}
+		_ = p.Close()
 		return nil, nil, fmt.Errorf("failed to create consumer: %w", err)
 	}
 
@@ -155,23 +130,9 @@ func newRocketMQBroker(config *queueConfig) (MessageQueueBroker, DelayManager, e
 
 // SendMessage sends a single message
 func (b *rocketmqBroker) SendMessage(ctx context.Context, topic string, key string, value []byte, headers map[string]string) error {
-	msg := primitive.NewMessage(topic, value)
-	msg.WithKeys([]string{key})
-
-	// Set message properties
-	for k, v := range headers {
-		msg.WithProperty(k, v)
-	}
-
-	result, err := b.producer.SendSync(ctx, msg)
-	if err != nil {
+	if err := b.producer.Send(ctx, topic, key, value, headers); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
-
-	if result.Status != primitive.SendOK {
-		return fmt.Errorf("failed to send message: status=%v", result.Status)
-	}
-
 	return nil
 }
 
@@ -181,26 +142,10 @@ func (b *rocketmqBroker) SendBatchMessages(ctx context.Context, topic string, me
 		return nil
 	}
 
-	msgs := make([]*primitive.Message, 0, len(messages))
 	for _, msg := range messages {
-		rmqMsg := primitive.NewMessage(topic, msg.Value)
-		rmqMsg.WithKeys([]string{msg.Key})
-
-		// Set message properties
-		for k, v := range msg.Headers {
-			rmqMsg.WithProperty(k, v)
+		if err := b.producer.Send(ctx, topic, msg.Key, msg.Value, msg.Headers); err != nil {
+			return fmt.Errorf("failed to send batch messages: %w", err)
 		}
-
-		msgs = append(msgs, rmqMsg)
-	}
-
-	result, err := b.producer.SendSync(ctx, msgs...)
-	if err != nil {
-		return fmt.Errorf("failed to send batch messages: %w", err)
-	}
-
-	if result.Status != primitive.SendOK {
-		return fmt.Errorf("failed to send batch messages: status=%v", result.Status)
 	}
 
 	return nil
@@ -208,39 +153,17 @@ func (b *rocketmqBroker) SendBatchMessages(ctx context.Context, topic string, me
 
 // Subscribe subscribes to topics and consumes messages
 func (b *rocketmqBroker) Subscribe(ctx context.Context, topics []string, handler MessageHandler) error {
-	// Register consumer for each topic
-	for _, topic := range topics {
-		if err := b.consumer.Subscribe(topic, consumer.MessageSelector{}, func(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
-			for _, msg := range msgs {
-				// Convert message format
-				headers := make(map[string]string)
-				maps.Copy(headers, msg.GetProperties())
-
-				message := &Message{
-					Key:     msg.GetKeys(),
-					Value:   msg.Body,
-					Headers: headers,
-				}
-
-				// Process message
-				if err := handler(ctx, message); err != nil {
-					return consumer.ConsumeRetryLater, err
-				}
-			}
-			return consumer.ConsumeSuccess, nil
-		}); err != nil {
-			return fmt.Errorf("failed to subscribe topic %s: %w", topic, err)
+	return b.consumer.Subscribe(ctx, topics, func(ctx context.Context, msg *mqrocket.Message) error {
+		if msg == nil {
+			return nil
 		}
-	}
-
-	// Start consumer
-	if err := b.consumer.Start(); err != nil {
-		return fmt.Errorf("failed to start consumer: %w", err)
-	}
-
-	// Wait for context cancellation
-	<-ctx.Done()
-	return nil
+		message := &Message{
+			Key:     msg.Key,
+			Value:   msg.Value,
+			Headers: msg.Headers,
+		}
+		return handler(ctx, message)
+	})
 }
 
 // Close closes the connection
@@ -251,14 +174,14 @@ func (b *rocketmqBroker) Close() error {
 	var errs []error
 
 	if b.consumer != nil {
-		if err := b.consumer.Shutdown(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to shutdown consumer: %w", err))
+		if err := b.consumer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("failed to close consumer: %w", err))
 		}
 	}
 
 	if b.producer != nil {
-		if err := b.producer.Shutdown(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to shutdown producer: %w", err))
+		if err := b.producer.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("failed to close producer: %w", err))
 		}
 	}
 

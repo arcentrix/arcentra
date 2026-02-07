@@ -23,6 +23,7 @@ import (
 	"github.com/apache/rocketmq-client-go/v2"
 	"github.com/apache/rocketmq-client-go/v2/consumer"
 	"github.com/apache/rocketmq-client-go/v2/primitive"
+	mqrocket "github.com/arcentrix/arcentra/pkg/mq/rocketmq"
 )
 
 const (
@@ -66,17 +67,26 @@ type RocketMQDelayManager struct {
 
 // NewRocketMQDelayManager creates a new RocketMQ delay manager
 func NewRocketMQDelayManager(
-	p rocketmq.Producer,
-	c rocketmq.PushConsumer,
+	p *mqrocket.Producer,
+	c *mqrocket.Consumer,
 	targetTopic string,
 	slotCount int,
 	slotDuration time.Duration,
 ) *RocketMQDelayManager {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	var rawProducer rocketmq.Producer
+	var rawConsumer rocketmq.PushConsumer
+	if p != nil {
+		rawProducer = p.Raw()
+	}
+	if c != nil {
+		rawConsumer = c.Raw()
+	}
+
 	dm := &RocketMQDelayManager{
-		producer:     p,
-		consumer:     c,
+		producer:     rawProducer,
+		consumer:     rawConsumer,
 		targetTopic:  targetTopic,
 		slotCount:    slotCount,
 		slotDuration: slotDuration,

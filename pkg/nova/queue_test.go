@@ -65,7 +65,7 @@ func TestNewTaskQueue_NoBrokerType(t *testing.T) {
 	if err == nil {
 		t.Error("expected error when no broker type is specified")
 	}
-	if err.Error() != "broker type is required, use WithKafka, WithRocketMQ or WithRabbitMQ" {
+	if err.Error() != "broker type is required, use WithKafka or WithRocketMQ" {
 		t.Errorf("unexpected error message: %v", err)
 	}
 }
@@ -76,10 +76,10 @@ func TestNewTaskQueue_WithKafka(t *testing.T) {
 	_, err := NewTaskQueue(WithKafka("localhost:9092"))
 	if err != nil {
 		// Check if error is about connection failure (expected) vs config error (unexpected)
-		if err.Error() == "broker type is required, use WithKafka, WithRocketMQ or WithRabbitMQ" {
+		if err.Error() == "broker type is required, use WithKafka or WithRocketMQ" {
 			t.Error("unexpected config error")
 		}
-		// Connection errors are expected in test environment without actual Kafka/RocketMQ/RabbitMQ running
+		// Connection errors are expected in test environment without actual Kafka/RocketMQ running
 		// So we just verify that config was accepted (error is not about missing broker type)
 	} else {
 		// If no error, that's also fine (Kafka might be running)
@@ -108,6 +108,18 @@ func TestNewTaskQueue_DefaultValues(t *testing.T) {
 	if config.TopicPrefix == "" {
 		config.TopicPrefix = DefaultTopicPrefix
 	}
+	if config.DelaySlotCount == 0 {
+		config.DelaySlotCount = DefaultDelaySlotCount
+	}
+	if config.DelaySlotDuration == 0 {
+		config.DelaySlotDuration = DefaultDelaySlotDuration
+	}
+	if config.SessionTimeout == 0 {
+		config.SessionTimeout = DefaultSessionTimeout
+	}
+	if config.MaxPollInterval == 0 {
+		config.MaxPollInterval = DefaultMaxPollInterval
+	}
 
 	if config.GroupID == "" {
 		t.Error("expected default GroupID to be set")
@@ -115,20 +127,20 @@ func TestNewTaskQueue_DefaultValues(t *testing.T) {
 	if config.TopicPrefix != DefaultTopicPrefix {
 		t.Errorf("expected default TopicPrefix to be %s, got %s", DefaultTopicPrefix, config.TopicPrefix)
 	}
-	if config.DelaySlotCount != 24 {
-		t.Errorf("expected DelaySlotCount to be 24, got %d", config.DelaySlotCount)
+	if config.DelaySlotCount != DefaultDelaySlotCount {
+		t.Errorf("expected DelaySlotCount to be %d, got %d", DefaultDelaySlotCount, config.DelaySlotCount)
 	}
-	if config.DelaySlotDuration != time.Hour {
-		t.Errorf("expected DelaySlotDuration to be %v, got %v", time.Hour, config.DelaySlotDuration)
+	if config.DelaySlotDuration != DefaultDelaySlotDuration {
+		t.Errorf("expected DelaySlotDuration to be %v, got %v", DefaultDelaySlotDuration, config.DelaySlotDuration)
 	}
 	if config.AutoCommit != false {
 		t.Errorf("expected AutoCommit to be false, got %v", config.AutoCommit)
 	}
-	if config.SessionTimeout != 30000 {
-		t.Errorf("expected SessionTimeout to be 30000, got %d", config.SessionTimeout)
+	if config.SessionTimeout != DefaultSessionTimeout {
+		t.Errorf("expected SessionTimeout to be %d, got %d", DefaultSessionTimeout, config.SessionTimeout)
 	}
-	if config.MaxPollInterval != 300000 {
-		t.Errorf("expected MaxPollInterval to be 300000, got %d", config.MaxPollInterval)
+	if config.MaxPollInterval != DefaultMaxPollInterval {
+		t.Errorf("expected MaxPollInterval to be %d, got %d", DefaultMaxPollInterval, config.MaxPollInterval)
 	}
 	if config.messageFormat != MessageFormatJSON {
 		t.Errorf("expected messageFormat to be MessageFormatJSON, got %v", config.messageFormat)

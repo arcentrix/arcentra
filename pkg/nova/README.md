@@ -1,10 +1,10 @@
 # Nova Task Queue
 
-Nova is a flexible and high-performance task queue library for Go that supports multiple message brokers (Kafka, RocketMQ, RabbitMQ) with unified API.
+Nova is a flexible and high-performance task queue library for Go that supports multiple message brokers (Kafka, RocketMQ) with unified API.
 
 ## Features
 
-- **Multiple Broker Support**: Seamlessly switch between Kafka, RocketMQ, and RabbitMQ
+- **Multiple Broker Support**: Seamlessly switch between Kafka and RocketMQ
 - **Delayed Tasks**: Built-in support for scheduled and delayed task execution
 - **Priority Queues**: Support for high, normal, and low priority task queues
 - **Batch Processing**: Efficient batch processing with configurable aggregators
@@ -17,7 +17,6 @@ Nova is a flexible and high-performance task queue library for Go that supports 
 
 - **Kafka**: Full support with SASL/SSL authentication
 - **RocketMQ**: Support with ACL authentication
-- **RabbitMQ**: Support with TLS authentication
 
 ## Installation
 
@@ -155,30 +154,7 @@ if err != nil {
 defer queue.Stop()
 ```
 
-### 4. Using RabbitMQ
-
-```go
-queue, err := taskqueue.NewTaskQueue(
-    taskqueue.WithRabbitMQ(
-        "amqp://guest:guest@localhost:5672/",
-        taskqueue.WithRabbitMQExchange("myapp-exchange"),
-        taskqueue.WithRabbitMQTopicPrefix("myapp"),
-        taskqueue.WithRabbitMQPrefetch(10, 0),
-        // Authentication (if not in URL)
-        taskqueue.WithRabbitMQAuth("username", "password"),
-        // TLS
-        taskqueue.WithRabbitMQTLS(tlsConfig),
-    ),
-    taskqueue.WithGroupID("my-group"),
-    taskqueue.WithTopicPrefix("myapp"),
-)
-if err != nil {
-    panic(err)
-}
-defer queue.Stop()
-```
-
-### 5. Batch Processing with Aggregators
+### 4. Batch Processing with Aggregators
 
 The library provides three types of aggregators for batch processing:
 
@@ -359,15 +335,6 @@ queue.Enqueue(task,
 - `WithRocketMQAuth(accessKey, secretKey string)`: Set ACL authentication
 - `WithRocketMQCredentials(credentials *primitive.Credentials)`: Set credentials
 - `WithRocketMQDelaySlots(count int, duration time.Duration)`: Configure delay slots
-
-### RabbitMQ Options
-
-- `WithRabbitMQExchange(exchange string)`: Set exchange name
-- `WithRabbitMQTopicPrefix(prefix string)`: Set topic prefix
-- `WithRabbitMQPrefetch(count, size int)`: Set prefetch configuration
-- `WithRabbitMQAuth(username, password string)`: Set authentication
-- `WithRabbitMQTLS(tlsConfig *tls.Config)`: Set TLS configuration
-- `WithRabbitMQDelaySlots(count int, duration time.Duration)`: Configure delay slots
 
 ## API Reference
 

@@ -66,23 +66,6 @@ func TestWithRocketMQ_EmptyNameServers(t *testing.T) {
 	}
 }
 
-func TestWithRabbitMQ(t *testing.T) {
-	url := "amqp://guest:guest@localhost:5672/"
-	opt := WithRabbitMQ(url)
-	config := &queueConfig{}
-	opt.apply(config)
-
-	if config.Type != QueueTypeRabbitMQ {
-		t.Errorf("expected Type to be QueueTypeRabbitMQ, got %v", config.Type)
-	}
-	if config.BootstrapServers != url {
-		t.Errorf("expected BootstrapServers to be '%s', got %s", url, config.BootstrapServers)
-	}
-	if config.rabbitmqConfig == nil {
-		t.Error("expected rabbitmqConfig to be set")
-	}
-}
-
 func TestWithGroupID(t *testing.T) {
 	groupID := "test-group"
 	opt := WithGroupID(groupID)
