@@ -25,8 +25,8 @@ func TestWithKafka(t *testing.T) {
 	config := &queueConfig{}
 	opt.apply(config)
 
-	if config.Type != QueueTypeKafka {
-		t.Errorf("expected Type to be QueueTypeKafka, got %v", config.Type)
+	if config.Provider != QueueProviderKafka {
+		t.Errorf("expected Provider to be QueueProviderKafka, got %v", config.Provider)
 	}
 	if config.BootstrapServers != "localhost:9092" {
 		t.Errorf("expected BootstrapServers to be 'localhost:9092', got %s", config.BootstrapServers)

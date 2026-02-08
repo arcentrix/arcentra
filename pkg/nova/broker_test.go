@@ -20,11 +20,11 @@ import (
 )
 
 func TestQueueTypeConstants(t *testing.T) {
-	if QueueTypeKafka != "kafka" {
-		t.Errorf("expected QueueTypeKafka to be 'kafka', got %s", QueueTypeKafka)
+	if QueueProviderKafka != "kafka" {
+		t.Errorf("expected QueueProviderKafka to be 'kafka', got %s", QueueProviderKafka)
 	}
-	if QueueTypeRocketMQ != "rocketmq" {
-		t.Errorf("expected QueueTypeRocketMQ to be 'rocketmq', got %s", QueueTypeRocketMQ)
+	if QueueProviderRocketMQ != "rocketmq" {
+		t.Errorf("expected QueueProviderRocketMQ to be 'rocketmq', got %s", QueueProviderRocketMQ)
 	}
 }
 
