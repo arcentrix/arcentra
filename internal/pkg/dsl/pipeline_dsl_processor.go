@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline"
+	"github.com/arcentrix/arcentra/internal/pkg/pipeline/interceptor"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/validation"
 	"github.com/arcentrix/arcentra/pkg/log"
@@ -87,7 +88,7 @@ func (p *DSLProcessor) ProcessConfig(
 // resolvePipelineVariables resolves all variables in pipeline structure
 func (p *DSLProcessor) resolvePipelineVariables(pl *spec.Pipeline, ctx *pipeline.ExecutionContext) error {
 	// Create variable interpreter
-	interpreter := pipeline.NewVariableInterpreter(ctx.Env)
+	interpreter := interceptor.NewVariableInterpreter(ctx.Env)
 
 	// Resolve pipeline-level variables
 	if pl.Variables != nil {
@@ -207,7 +208,7 @@ func (p *DSLProcessor) resolvePipelineVariables(pl *spec.Pipeline, ctx *pipeline
 }
 
 // resolveSource resolves variables in source configuration
-func (p *DSLProcessor) resolveSource(source *spec.Source, interpreter *pipeline.VariableInterpreter) error {
+func (p *DSLProcessor) resolveSource(source *spec.Source, interpreter *interceptor.VariableInterpreter) error {
 	if source.Repo != "" {
 		resolved, err := interpreter.Resolve(source.Repo)
 		if err != nil {
@@ -254,7 +255,7 @@ func (p *DSLProcessor) resolveSource(source *spec.Source, interpreter *pipeline.
 }
 
 // resolveNotify resolves variables in notify configuration
-func (p *DSLProcessor) resolveNotify(notify *spec.Notify, interpreter *pipeline.VariableInterpreter) error {
+func (p *DSLProcessor) resolveNotify(notify *spec.Notify, interpreter *interceptor.VariableInterpreter) error {
 	if notify.OnSuccess != nil && notify.OnSuccess.Params != nil {
 		resolvedParams, err := interpreter.ResolveMap(notify.OnSuccess.Params)
 		if err != nil {
