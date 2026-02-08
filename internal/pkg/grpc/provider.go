@@ -31,7 +31,7 @@ var ProviderSet = wire.NewSet(
 )
 
 // ProvideGrpcServer 提供 gRPC 服务器实例
-func ProvideGrpcServer(cfg *Conf, services *service.Services, repos *repo.Repositories, cache cache.ICache, mysqlDB *gorm.DB) *ServerWrapper {
+func ProvideGrpcServer(cfg *Conf, services *service.Services, repos *repo.Repositories, cache cache.ICache, mysqlDB *gorm.DB, kafkaSettings service.KafkaSettings) *ServerWrapper {
 	server := NewGrpcServer(*cfg)
 
 	// Set up token verifier for agent authentication
@@ -45,7 +45,7 @@ func ProvideGrpcServer(cfg *Conf, services *service.Services, repos *repo.Reposi
 		redisClient = rc.GetClient()
 	}
 
-	server.Register(services, redisClient, mysqlDB)
+	server.Register(services, redisClient, mysqlDB, kafkaSettings)
 	return server
 }
 

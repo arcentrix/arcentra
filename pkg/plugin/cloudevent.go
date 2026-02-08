@@ -62,6 +62,42 @@ const (
 	EventTypeTaskRetryRequested = "arcentra.task.retry.requested"
 	// EventTypeTaskRetryStarted indicates a retry start.
 	EventTypeTaskRetryStarted = "arcentra.task.retry.started"
+	// EventTypePipelineStarted indicates a pipeline started.
+	EventTypePipelineStarted = "arcentra.pipeline.started"
+	// EventTypePipelineCompleted indicates a pipeline completed.
+	EventTypePipelineCompleted = "arcentra.pipeline.completed"
+	// EventTypePipelineFailed indicates a pipeline failed.
+	EventTypePipelineFailed = "arcentra.pipeline.failed"
+	// EventTypePipelineCancelled indicates a pipeline cancelled.
+	EventTypePipelineCancelled = "arcentra.pipeline.cancelled"
+	// EventTypePipelineApprovalRequested indicates a pipeline approval requested.
+	EventTypePipelineApprovalRequested = "arcentra.pipeline.approval.requested"
+	// EventTypePipelineApprovalApproved indicates a pipeline approval approved.
+	EventTypePipelineApprovalApproved = "arcentra.pipeline.approval.approved"
+	// EventTypePipelineApprovalRejected indicates a pipeline approval rejected.
+	EventTypePipelineApprovalRejected = "arcentra.pipeline.approval.rejected"
+	// EventTypePipelineRollbackRequested indicates a pipeline rollback requested.
+	EventTypePipelineRollbackRequested = "arcentra.pipeline.rollback.requested"
+	// EventTypePipelineRollbackStarted indicates a pipeline rollback started.
+	EventTypePipelineRollbackStarted = "arcentra.pipeline.rollback.started"
+	// EventTypePipelineRollbackFinished indicates a pipeline rollback finished.
+	EventTypePipelineRollbackFinished = "arcentra.pipeline.rollback.finished"
+	// EventTypeJobStarted indicates a job started.
+	EventTypeJobStarted = "arcentra.job.started"
+	// EventTypeJobCompleted indicates a job completed.
+	EventTypeJobCompleted = "arcentra.job.completed"
+	// EventTypeJobFailed indicates a job failed.
+	EventTypeJobFailed = "arcentra.job.failed"
+	// EventTypeJobCancelled indicates a job cancelled.
+	EventTypeJobCancelled = "arcentra.job.cancelled"
+	// EventTypeStepStarted indicates a step started.
+	EventTypeStepStarted = "arcentra.step.started"
+	// EventTypeStepCompleted indicates a step completed.
+	EventTypeStepCompleted = "arcentra.step.completed"
+	// EventTypeStepFailed indicates a step failed.
+	EventTypeStepFailed = "arcentra.step.failed"
+	// EventTypeStepCancelled indicates a step cancelled.
+	EventTypeStepCancelled = "arcentra.step.cancelled"
 )
 
 // CloudEvent represents a CloudEvents 1.0 envelope.

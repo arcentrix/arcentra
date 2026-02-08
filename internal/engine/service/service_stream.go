@@ -15,14 +15,16 @@
 package service
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"sync"
+	"time"
 
 	streamv1 "github.com/arcentrix/arcentra/api/stream/v1"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/logstream"
+	"github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/safe"
+	"github.com/bytedance/sonic"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"gorm.io/gorm"
@@ -35,24 +37,101 @@ type StreamServiceImpl struct {
 	redis         *redis.Client
 	mysql         *gorm.DB
 	mu            sync.RWMutex
-	subscribers   map[string][]*LogSubscriber // stepRunID -> subscribers
+	logConsumer   *kafka.Consumer
 }
 
-// LogSubscriber 日志订阅者
-type LogSubscriber struct {
-	StepRunID string
-	Stream    grpc.ServerStreamingServer[streamv1.StreamStepRunLogResponse]
-	Cancel    context.CancelFunc
+type KafkaSettings struct {
+	BootstrapServers string
+	SecurityProtocol string
+	Sasl             SaslSettings
+	Ssl              SslSettings
+}
+
+type SaslSettings struct {
+	Mechanism string
+	Username  string
+	Password  string
+}
+
+type SslSettings struct {
+	CaFile   string
+	CertFile string
+	KeyFile  string
+	Password string
 }
 
 // NewStreamService 创建Stream服务实例
-func NewStreamService(redis *redis.Client, mysql *gorm.DB) *StreamServiceImpl {
-	return &StreamServiceImpl{
+func NewStreamService(redis *redis.Client, mysql *gorm.DB, kafkaSettings KafkaSettings) *StreamServiceImpl {
+	service := &StreamServiceImpl{
 		logAggregator: NewLogAggregator(redis, mysql),
 		redis:         redis,
 		mysql:         mysql,
-		subscribers:   make(map[string][]*LogSubscriber),
 	}
+	service.startKafkaLogConsumer(kafkaSettings)
+	return service
+}
+
+func (s *StreamServiceImpl) startKafkaLogConsumer(cfg KafkaSettings) {
+	if cfg.BootstrapServers == "" {
+		return
+	}
+
+	clientOptions := []kafka.ClientOption{
+		kafka.WithSecurityProtocol(cfg.SecurityProtocol),
+		kafka.WithSaslMechanism(cfg.Sasl.Mechanism),
+		kafka.WithSaslUsername(cfg.Sasl.Username),
+		kafka.WithSaslPassword(cfg.Sasl.Password),
+		kafka.WithSslCaFile(cfg.Ssl.CaFile),
+		kafka.WithSslCertFile(cfg.Ssl.CertFile),
+		kafka.WithSslKeyFile(cfg.Ssl.KeyFile),
+		kafka.WithSslPassword(cfg.Ssl.Password),
+	}
+
+	consumer, err := kafka.NewConsumer(
+		cfg.BootstrapServers,
+		"BUILD_LOGS",
+		"arcentra",
+		kafka.WithConsumerClientOptions(clientOptions...),
+		kafka.WithConsumerAutoOffsetReset("earliest"),
+	)
+	if err != nil {
+		log.Warnw("failed to create kafka log consumer", "error", err)
+		return
+	}
+
+	s.logConsumer = consumer
+
+	safe.Go(func() {
+		if err := consumer.Subscribe([]string{"BUILD_LOGS"}); err != nil {
+			log.Warnw("failed to subscribe build logs topic", "error", err)
+			return
+		}
+
+		for {
+			msg, err := consumer.ReadMessage(200 * time.Millisecond)
+			if err != nil {
+				continue
+			}
+			var payload logstream.BuildLogMessage
+			if err := sonic.Unmarshal(msg.Value, &payload); err != nil {
+				log.Warnw("failed to unmarshal build log message", "error", err)
+				continue
+			}
+			entry := &LogEntry{
+				StepRunID:  payload.StepRunId,
+				Timestamp:  payload.Timestamp,
+				LineNumber: payload.LineNumber,
+				Level:      payload.Level,
+				Content:    payload.Content,
+				Stream:     payload.Stream,
+				PluginName: payload.PluginName,
+				AgentID:    payload.AgentId,
+			}
+			if err := s.logAggregator.PushLog(entry); err != nil {
+				log.Warnw("failed to push log entry", "error", err)
+			}
+		}
+	})
 }
 
 // GetLogAggregator 获取日志聚合器
@@ -61,167 +140,6 @@ func (s *StreamServiceImpl) GetLogAggregator() *LogAggregator {
 }
 
 // UploadStepRunLog Agent端流式上报日志给Server
-func (s *StreamServiceImpl) UploadStepRunLog(stream grpc.ClientStreamingServer[streamv1.UploadStepRunLogRequest, streamv1.UploadStepRunLogResponse]) error {
-	var stepRunID, agentID string
-	receivedLines := int32(0)
-
-	for {
-		req, err := stream.Recv()
-		if err == io.EOF {
-			// 客户端关闭流，返回响应
-			log.Infow("log upload stream closed", "stepRunId", stepRunID, "agentId", agentID, "receivedLines", receivedLines)
-			return stream.SendAndClose(&streamv1.UploadStepRunLogResponse{
-				Success:       true,
-				Message:       "logs uploaded successfully",
-				ReceivedLines: receivedLines,
-			})
-		}
-		if err != nil {
-			log.Errorw("failed to receive log upload", "error", err)
-			return err
-		}
-
-		// 记录步骤执行ID和AgentID
-		if stepRunID == "" {
-			stepRunID = req.StepRunId
-			agentID = req.AgentId
-			log.Infow("start receiving logs for step run", "stepRunId", stepRunID, "agentId", agentID)
-		}
-
-		// 转换日志条目并推送到聚合器
-		for _, logChunk := range req.Logs {
-			entry := &LogEntry{
-				StepRunID:  req.StepRunId,
-				Timestamp:  logChunk.Timestamp,
-				LineNumber: logChunk.LineNumber,
-				Level:      logChunk.Level,
-				Content:    logChunk.Content,
-				Stream:     logChunk.Stream,
-				AgentID:    req.AgentId,
-			}
-
-			if err := s.logAggregator.PushLog(entry); err != nil {
-				log.Errorw("failed to push log to aggregator", "stepRunId", req.StepRunId, "error", err)
-			}
-			receivedLines++
-
-			// 通知订阅者
-			s.notifySubscribers(req.StepRunId, logChunk)
-		}
-	}
-}
-
-// StreamStepRunLog 实时获取步骤执行日志流
-func (s *StreamServiceImpl) StreamStepRunLog(req *streamv1.StreamStepRunLogRequest, stream grpc.ServerStreamingServer[streamv1.StreamStepRunLogResponse]) error {
-	ctx := stream.Context()
-	stepRunID := req.StepRunId
-
-	log.Infow("client requesting log stream", "stepRunId", stepRunID, "fromLine", req.FromLine, "follow", req.Follow)
-
-	// 先从 MySQL 获取历史日志
-	historicalLogs, err := s.logAggregator.GetLogsByStepRunID(stepRunID, req.FromLine, 1000)
-	if err != nil {
-		log.Errorw("failed to get historical logs", "stepRunId", stepRunID, "error", err)
-		return err
-	}
-
-	// 发送历史日志
-	for _, entry := range historicalLogs {
-		logChunk := &streamv1.LogChunk{
-			Timestamp:  entry.Timestamp,
-			LineNumber: entry.LineNumber,
-			Level:      entry.Level,
-			Content:    entry.Content,
-			Stream:     entry.Stream,
-		}
-
-		if err := stream.Send(&streamv1.StreamStepRunLogResponse{
-			StepRunId:  stepRunID,
-			LogChunk:   logChunk,
-			IsComplete: false,
-		}); err != nil {
-			log.Errorw("failed to send log", "stepRunId", stepRunID, "error", err)
-			return err
-		}
-	}
-
-	// 如果不需要持续跟踪，发送完成标记并返回
-	if !req.Follow {
-		return stream.Send(&streamv1.StreamStepRunLogResponse{
-			StepRunId:  stepRunID,
-			IsComplete: true,
-		})
-	}
-
-	// 订阅实时日志
-	subscriber := &LogSubscriber{
-		StepRunID: stepRunID,
-		Stream:    stream,
-	}
-	ctx2, cancel := context.WithCancel(ctx)
-	subscriber.Cancel = cancel
-	defer cancel()
-
-	// 注册订阅者
-	s.mu.Lock()
-	s.subscribers[stepRunID] = append(s.subscribers[stepRunID], subscriber)
-	s.mu.Unlock()
-
-	// 清理订阅者
-	defer func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		subs := s.subscribers[stepRunID]
-		for i, sub := range subs {
-			if sub == subscriber {
-				s.subscribers[stepRunID] = append(subs[:i], subs[i+1:]...)
-				break
-			}
-		}
-		if len(s.subscribers[stepRunID]) == 0 {
-			delete(s.subscribers, stepRunID)
-		}
-	}()
-
-	// 订阅实时日志channel
-	logChan := s.logAggregator.Subscribe(ctx2, stepRunID)
-	log.Infow("subscribed to real-time logs for step run", "stepRunId", stepRunID)
-
-	// 持续发送日志直到上下文取消
-	for {
-		select {
-		case <-ctx.Done():
-			log.Infow("log stream cancelled for step run", "stepRunId", stepRunID)
-			return ctx.Err()
-		case entry, ok := <-logChan:
-			if !ok {
-				// 频道关闭
-				return stream.Send(&streamv1.StreamStepRunLogResponse{
-					StepRunId:  stepRunID,
-					IsComplete: true,
-				})
-			}
-
-			logChunk := &streamv1.LogChunk{
-				Timestamp:  entry.Timestamp,
-				LineNumber: entry.LineNumber,
-				Level:      entry.Level,
-				Content:    entry.Content,
-				Stream:     entry.Stream,
-			}
-
-			if err := stream.Send(&streamv1.StreamStepRunLogResponse{
-				StepRunId:  stepRunID,
-				LogChunk:   logChunk,
-				IsComplete: false,
-			}); err != nil {
-				log.Errorw("failed to send real-time log", "stepRunId", stepRunID, "error", err)
-				return err
-			}
-		}
-	}
-}
-
 // StreamStepRunStatus 实时获取步骤执行状态流
 func (s *StreamServiceImpl) StreamStepRunStatus(req *streamv1.StreamStepRunStatusRequest, stream grpc.ServerStreamingServer[streamv1.StreamStepRunStatusResponse]) error {
 	// TODO: 实现步骤执行状态流
@@ -256,30 +174,4 @@ func (s *StreamServiceImpl) StreamAgentStatus(req *streamv1.StreamAgentStatusReq
 func (s *StreamServiceImpl) StreamEvents(req *streamv1.StreamEventsRequest, stream grpc.ServerStreamingServer[streamv1.StreamEventsResponse]) error {
 	// TODO: 实现事件流
 	return fmt.Errorf("not implemented")
-}
-
-// notifySubscribers 通知订阅者
-func (s *StreamServiceImpl) notifySubscribers(stepRunID string, logChunk *streamv1.LogChunk) {
-	s.mu.RLock()
-	subs := s.subscribers[stepRunID]
-	s.mu.RUnlock()
-
-	if len(subs) == 0 {
-		return
-	}
-
-	// 异步通知所有订阅者
-	for _, sub := range subs {
-		subscriber := sub
-		safe.Go(func() {
-			err := subscriber.Stream.Send(&streamv1.StreamStepRunLogResponse{
-				StepRunId:  stepRunID,
-				LogChunk:   logChunk,
-				IsComplete: false,
-			})
-			if err != nil {
-				log.Errorw("failed to send log to subscriber", "stepRunId", stepRunID, "error", err)
-			}
-		})
-	}
 }

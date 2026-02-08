@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package gateway.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/arcentrix/arcentra/api/gateway/v1;gatewayv1";
+
+// GatewayService - Data plane ingestion interface
+service GatewayService {
+  // Push logs - Agent pushes logs to Gateway
+  rpc PushLogs(stream PushLogsRequest) returns (PushLogsResponse) {}
+
+  // Push events - Agent pushes events to Gateway
+  rpc PushEvents(stream PushEventsRequest) returns (PushEventsResponse) {}
+}
+
+// Meta information for log and event data
+message Meta {
+  string agent_id = 1;                      // Agent unique identifier
+  string pipeline_id = 2;                   // Pipeline ID
+  string step_id = 3;                       // Step ID
+  google.protobuf.Timestamp timestamp = 4;  // Event timestamp
+}
+
+// Log batch payload
+message LogBatch {
+  string batch_id = 1;                      // Client batch ID
+  Meta meta = 2;
+
+  // Compression algorithm
+  enum Compression {
+    COMPRESSION_UNSPECIFIED = 0;
+    COMPRESSION_NONE = 1;
+    COMPRESSION_GZIP = 2;
+    COMPRESSION_ZSTD = 3;
+  }
+
+  Compression compression = 3;
+  bytes data = 4;                           // Raw log bytes
+  uint32 raw_size = 5;                      // Decompressed byte size
+}
+
+// Push logs request
+message PushLogsRequest {
+  LogBatch batch = 1;
+}
+
+// Event record
+message Event {
+  string event_id = 1;                      // Idempotent event ID
+  Meta meta = 2;
+  string event_type = 3;                    // Event type identifier
+  google.protobuf.Struct payload = 4;       // Event payload
+}
+
+// Event batch payload
+message EventBatch {
+  string batch_id = 1;                      // Client batch ID
+  repeated Event events = 2;
+}
+
+// Push events request
+message PushEventsRequest {
+  EventBatch batch = 1;
+}
+
+// Ingestion acknowledgment
+message IngestAck {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_ACCEPTED = 1;
+    STATUS_PARTIAL_ACCEPTED = 2;
+    STATUS_REJECTED = 3;
+  }
+
+  Status status = 1;
+  string message = 2;
+  repeated string rejected_event_ids = 3;   // Rejected event IDs
+  string last_event_id = 4;                 // Last accepted event ID
+}
+
+// Push logs response
+message PushLogsResponse {
+  IngestAck ack = 1;
+}
+
+// Push events response
+message PushEventsResponse {
+  IngestAck ack = 1;
+}

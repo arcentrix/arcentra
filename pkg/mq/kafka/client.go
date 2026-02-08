@@ -1,98 +1,105 @@
 package kafka
 
 import (
+	"fmt"
+	"os"
+	"strings"
+
 	"github.com/arcentrix/arcentra/pkg/mq"
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
-// ClientConfig represents Kafka shared client configuration.
-type ClientConfig struct {
-	BootstrapServers string `json:"bootstrapServers" mapstructure:"bootstrapServers"`
-	ClientId         string `json:"clientId" mapstructure:"clientId"`
+// KafkaConfig represents Kafka shared client configuration.
+type KafkaConfig struct {
+	BootstrapServers string     `mapstructure:"bootstrapServers"`
+	Acks             string     `mapstructure:"acks"`
+	Retries          int        `mapstructure:"retries"`
+	Compression      string     `mapstructure:"compression"`
+	SecurityProtocol string     `mapstructure:"securityProtocol"`
+	Sasl             SaslConfig `mapstructure:"sasl"`
+	Ssl              SslConfig  `mapstructure:"ssl"`
+}
 
-	SecurityProtocol string `json:"securityProtocol" mapstructure:"securityProtocol"`
-	SaslMechanism    string `json:"saslMechanism" mapstructure:"saslMechanism"`
-	SaslUsername     string `json:"saslUsername" mapstructure:"saslUsername"`
-	SaslPassword     string `json:"saslPassword" mapstructure:"saslPassword"`
-	SslCaFile        string `json:"sslCaFile" mapstructure:"sslCaFile"`
-	SslCertFile      string `json:"sslCertFile" mapstructure:"sslCertFile"`
-	SslKeyFile       string `json:"sslKeyFile" mapstructure:"sslKeyFile"`
-	SslPassword      string `json:"sslPassword" mapstructure:"sslPassword"`
+type SaslConfig struct {
+	Mechanism string `mapstructure:"mechanism"`
+	Username  string `mapstructure:"username"`
+	Password  string `mapstructure:"password"`
+}
+
+type SslConfig struct {
+	CaFile   string `mapstructure:"caFile"`
+	CertFile string `mapstructure:"certFile"`
+	KeyFile  string `mapstructure:"keyFile"`
+	Password string `mapstructure:"password"`
 }
 
 // ClientOption defines optional configuration for ClientConfig.
 type ClientOption interface {
-	apply(*ClientConfig)
+	apply(*KafkaConfig)
 }
 
-type clientOptionFunc func(*ClientConfig)
+type clientOptionFunc func(*KafkaConfig)
 
-func (fn clientOptionFunc) apply(cfg *ClientConfig) {
+func (fn clientOptionFunc) apply(cfg *KafkaConfig) {
 	fn(cfg)
 }
 
-func WithClientId(clientId string) ClientOption {
-	return clientOptionFunc(func(cfg *ClientConfig) {
-		cfg.ClientId = clientId
-	})
-}
-
 func WithSecurityProtocol(securityProtocol string) ClientOption {
-	return clientOptionFunc(func(cfg *ClientConfig) {
+	return clientOptionFunc(func(cfg *KafkaConfig) {
 		cfg.SecurityProtocol = securityProtocol
 	})
 }
 
 func WithSaslMechanism(mechanism string) ClientOption {
-	return clientOptionFunc(func(cfg *ClientConfig) {
-		cfg.SaslMechanism = mechanism
+	return clientOptionFunc(func(cfg *KafkaConfig) {
+		cfg.Sasl.Mechanism = mechanism
 	})
 }
 
 func WithSaslUsername(username string) ClientOption {
-	return clientOptionFunc(func(cfg *ClientConfig) {
-		cfg.SaslUsername = username
+	return clientOptionFunc(func(cfg *KafkaConfig) {
+		cfg.Sasl.Username = username
 	})
 }
 
 func WithSaslPassword(password string) ClientOption {
-	return clientOptionFunc(func(cfg *ClientConfig) {
-		cfg.SaslPassword = password
+	return clientOptionFunc(func(cfg *KafkaConfig) {
+		cfg.Sasl.Password = password
 	})
 }
 
 func WithSslCaFile(path string) ClientOption {
-	return clientOptionFunc(func(cfg *ClientConfig) {
-		cfg.SslCaFile = path
+	return clientOptionFunc(func(cfg *KafkaConfig) {
+		cfg.Ssl.CaFile = path
 	})
 }
 
 func WithSslCertFile(path string) ClientOption {
-	return clientOptionFunc(func(cfg *ClientConfig) {
-		cfg.SslCertFile = path
+	return clientOptionFunc(func(cfg *KafkaConfig) {
+		cfg.Ssl.CertFile = path
 	})
 }
 
 func WithSslKeyFile(path string) ClientOption {
-	return clientOptionFunc(func(cfg *ClientConfig) {
-		cfg.SslKeyFile = path
+	return clientOptionFunc(func(cfg *KafkaConfig) {
+		cfg.Ssl.KeyFile = path
 	})
 }
 
 func WithSslPassword(password string) ClientOption {
-	return clientOptionFunc(func(cfg *ClientConfig) {
-		cfg.SslPassword = password
+	return clientOptionFunc(func(cfg *KafkaConfig) {
+		cfg.Ssl.Password = password
 	})
 }
 
 // KafkaClient holds a base client configuration.
 type KafkaClient struct {
-	Config ClientConfig
+	Config KafkaConfig
 }
 
 // NewKafkaClient creates a new KafkaClient using options.
 func NewKafkaClient(bootstrapServers string, opts ...ClientOption) (*KafkaClient, error) {
-	cfg := ClientConfig{
+	cfg := KafkaConfig{
 		BootstrapServers: bootstrapServers,
 	}
 	for _, opt := range opts {
@@ -104,7 +111,7 @@ func NewKafkaClient(bootstrapServers string, opts ...ClientOption) (*KafkaClient
 	return &KafkaClient{Config: cfg}, nil
 }
 
-func buildBaseConfig(cfg ClientConfig) (*kafka.ConfigMap, error) {
+func buildBaseConfig(cfg KafkaConfig) (*kafka.ConfigMap, error) {
 	if err := mq.RequireNonEmpty("bootstrapServers", cfg.BootstrapServers); err != nil {
 		return nil, err
 	}
@@ -113,38 +120,45 @@ func buildBaseConfig(cfg ClientConfig) (*kafka.ConfigMap, error) {
 		"bootstrap.servers": cfg.BootstrapServers,
 	}
 
-	if cfg.ClientId != "" {
-		_ = config.SetKey("client.id", cfg.ClientId)
-	}
-
 	applyAuthConfig(config, cfg)
 
 	return config, nil
 }
 
-func applyAuthConfig(config *kafka.ConfigMap, cfg ClientConfig) {
+func applyAuthConfig(config *kafka.ConfigMap, cfg KafkaConfig) {
 	if cfg.SecurityProtocol != "" {
 		_ = config.SetKey("security.protocol", cfg.SecurityProtocol)
 	}
-	if cfg.SaslMechanism != "" {
-		_ = config.SetKey("sasl.mechanism", cfg.SaslMechanism)
+	if cfg.Sasl.Mechanism != "" {
+		_ = config.SetKey("sasl.mechanism", cfg.Sasl.Mechanism)
 	}
-	if cfg.SaslUsername != "" {
-		_ = config.SetKey("sasl.username", cfg.SaslUsername)
+	if cfg.Sasl.Username != "" {
+		_ = config.SetKey("sasl.username", cfg.Sasl.Username)
 	}
-	if cfg.SaslPassword != "" {
-		_ = config.SetKey("sasl.password", cfg.SaslPassword)
+	if cfg.Sasl.Password != "" {
+		_ = config.SetKey("sasl.password", cfg.Sasl.Password)
 	}
-	if cfg.SslCaFile != "" {
-		_ = config.SetKey("ssl.ca.location", cfg.SslCaFile)
+	if cfg.Ssl.CaFile != "" {
+		_ = config.SetKey("ssl.ca.location", cfg.Ssl.CaFile)
 	}
-	if cfg.SslCertFile != "" {
-		_ = config.SetKey("ssl.certificate.location", cfg.SslCertFile)
+	if cfg.Ssl.CertFile != "" {
+		_ = config.SetKey("ssl.certificate.location", cfg.Ssl.CertFile)
 	}
-	if cfg.SslKeyFile != "" {
-		_ = config.SetKey("ssl.key.location", cfg.SslKeyFile)
+	if cfg.Ssl.KeyFile != "" {
+		_ = config.SetKey("ssl.key.location", cfg.Ssl.KeyFile)
 	}
-	if cfg.SslPassword != "" {
-		_ = config.SetKey("ssl.key.password", cfg.SslPassword)
+	if cfg.Ssl.Password != "" {
+		_ = config.SetKey("ssl.key.password", cfg.Ssl.Password)
 	}
+}
+
+func buildClientID(programName string) (string, error) {
+	if err := mq.RequireNonEmpty("programName", programName); err != nil {
+		return "", err
+	}
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		hostname = "UNKNOWN"
+	}
+	return strings.ToUpper(fmt.Sprintf("%s_CLIENT_%s", programName, hostname)), nil
 }

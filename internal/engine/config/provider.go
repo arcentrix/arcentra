@@ -15,6 +15,7 @@
 package config
 
 import (
+	"github.com/arcentrix/arcentra/internal/engine/service"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
@@ -35,6 +36,7 @@ var ProviderSet = wire.NewSet(
 	ProvideRedisConfig,
 	ProvideMetricsConfig,
 	ProvidePprofConfig,
+	ProvideKafkaSettings,
 )
 
 // ProvideConf 提供应用配置
@@ -81,4 +83,26 @@ func ProvidePprofConfig(appConf *AppConfig) pprof.PprofConfig {
 	pprofConfig := appConf.Pprof
 	pprofConfig.SetDefaults()
 	return pprofConfig
+}
+
+// ProvideKafkaSettings provides Kafka settings for log consumption.
+func ProvideKafkaSettings(appConf *AppConfig) service.KafkaSettings {
+	if appConf == nil {
+		return service.KafkaSettings{}
+	}
+	return service.KafkaSettings{
+		BootstrapServers: appConf.MessageQueue.Kafka.BootstrapServers,
+		SecurityProtocol: appConf.MessageQueue.Kafka.SecurityProtocol,
+		Sasl: service.SaslSettings{
+			Mechanism: appConf.MessageQueue.Kafka.Sasl.Mechanism,
+			Username:  appConf.MessageQueue.Kafka.Sasl.Username,
+			Password:  appConf.MessageQueue.Kafka.Sasl.Password,
+		},
+		Ssl: service.SslSettings{
+			CaFile:   appConf.MessageQueue.Kafka.Ssl.CaFile,
+			CertFile: appConf.MessageQueue.Kafka.Ssl.CertFile,
+			KeyFile:  appConf.MessageQueue.Kafka.Ssl.KeyFile,
+			Password: appConf.MessageQueue.Kafka.Ssl.Password,
+		},
+	}
 }

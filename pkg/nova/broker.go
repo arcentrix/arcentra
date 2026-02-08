@@ -18,12 +18,12 @@ import (
 	"context"
 )
 
-// QueueType represents the message queue type
-type QueueType string
+// QueueProvider represents the message queue provider
+type QueueProvider string
 
 const (
-	QueueTypeKafka    QueueType = "kafka"
-	QueueTypeRocketMQ QueueType = "rocketmq"
+	QueueProviderKafka    QueueProvider = "kafka"
+	QueueProviderRocketMQ QueueProvider = "rocketmq"
 )
 
 // MessageQueueBroker is the interface for message queue brokers
@@ -54,7 +54,7 @@ type MessageHandler func(ctx context.Context, msg *Message) error
 
 // BrokerConfig is the interface for broker configuration
 type BrokerConfig interface {
-	GetType() QueueType
+	GetProvider() QueueProvider
 	GetBootstrapServers() string
 	GetGroupID() string
 	GetTopicPrefix() string

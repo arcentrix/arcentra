@@ -31,9 +31,6 @@ service StepRunService {
   // Retry step run
   rpc RetryStepRun(RetryStepRunRequest) returns (RetryStepRunResponse) {}
 
-  // Get step run log
-  rpc GetStepRunLog(GetStepRunLogRequest) returns (GetStepRunLogResponse) {}
-
   // List step run artifacts
   rpc ListStepRunArtifacts(ListStepRunArtifactsRequest) returns (ListStepRunArtifactsResponse) {}
 }
@@ -262,32 +259,6 @@ message RetryStepRunResponse {
   string message = 2;
   string new_step_run_id = 3;           // Newly created step run ID
   Error error = 4;                       // Error details (if success == false)
-}
-
-// Get step run log request
-message GetStepRunLogRequest {
-  string step_run_id = 1;                // Step run ID
-  int32 offset = 2;                      // Log offset (line number, default 0)
-  int32 limit = 3;                       // Number of lines to fetch (default 1000)
-}
-
-// Get step run log response
-message GetStepRunLogResponse {
-  bool success = 1;
-  string message = 2;
-  repeated LogLine logs = 3;             // Log lines
-  int32 total_lines = 4;                 // Total lines
-  bool has_more = 5;                     // Whether there are more logs
-  Error error = 6;                       // Error details (if success == false)
-}
-
-// Log line
-message LogLine {
-  int32 line_number = 1;                  // Line number
-  int64 timestamp = 2;                   // Timestamp (Unix timestamp in seconds)
-  string level = 3;                      // Log level (info, warn, error, debug)
-  string content = 4;                    // Log content
-  string stream = 5;                     // Stream type (stdout, stderr)
 }
 
 // List step run artifacts request

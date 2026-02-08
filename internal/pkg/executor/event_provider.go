@@ -15,6 +15,7 @@
 package executor
 
 import (
+	"strings"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/engine/config"
@@ -23,8 +24,10 @@ import (
 )
 
 const (
-	eventTopic           = "ARCENTRA_EVENTS"
-	defaultKafkaClientId = "arcentra-events"
+	eventTopicPipeline   = "EVENT_PIPELINE"
+	eventTopicAgent      = "EVENT_AGENT"
+	eventTopicPlatform   = "EVENT_PLATFORM"
+	eventTopicArtifact   = "EVENT_ARTIFACT"
 )
 
 // BuildEventEmitterConfig builds emitter config from app config.
@@ -41,30 +44,31 @@ func BuildEventEmitterConfig(appConf *config.AppConfig) EventEmitterConfig {
 
 // NewEventPublisherFromConfig builds a publisher based on app config.
 func NewEventPublisherFromConfig(appConf *config.AppConfig) EventPublisher {
-	if appConf == nil || !appConf.Events.Enabled {
+	if appConf == nil {
 		return nil
 	}
 
 	var publishers []EventPublisher
 
-	if appConf.Events.Kafka.Enabled {
-		kafkaPublisher, err := NewKafkaPublisher(
-			appConf.Events.Kafka.BootstrapServers,
-			eventTopic,
+	mqKafka := appConf.MessageQueue.Kafka
+	if mqKafka.BootstrapServers != "" {
+		kafkaPublisher, err := NewKafkaTopicPublisher(
+			mqKafka.BootstrapServers,
+			"arcentra",
+			resolveEventTopic,
 			kafka.WithProducerClientOptions(
-				kafka.WithClientId(defaultKafkaClientId),
-				kafka.WithSecurityProtocol(appConf.Events.Kafka.SecurityProtocol),
-				kafka.WithSaslMechanism(appConf.Events.Kafka.Sasl.Mechanism),
-				kafka.WithSaslUsername(appConf.Events.Kafka.Sasl.Username),
-				kafka.WithSaslPassword(appConf.Events.Kafka.Sasl.Password),
-				kafka.WithSslCaFile(appConf.Events.Kafka.Ssl.CaFile),
-				kafka.WithSslCertFile(appConf.Events.Kafka.Ssl.CertFile),
-				kafka.WithSslKeyFile(appConf.Events.Kafka.Ssl.KeyFile),
-				kafka.WithSslPassword(appConf.Events.Kafka.Ssl.Password),
+				kafka.WithSecurityProtocol(mqKafka.SecurityProtocol),
+				kafka.WithSaslMechanism(mqKafka.Sasl.Mechanism),
+				kafka.WithSaslUsername(mqKafka.Sasl.Username),
+				kafka.WithSaslPassword(mqKafka.Sasl.Password),
+				kafka.WithSslCaFile(mqKafka.Ssl.CaFile),
+				kafka.WithSslCertFile(mqKafka.Ssl.CertFile),
+				kafka.WithSslKeyFile(mqKafka.Ssl.KeyFile),
+				kafka.WithSslPassword(mqKafka.Ssl.Password),
 			),
-			kafka.WithProducerAcks(appConf.Events.Kafka.Acks),
-			kafka.WithProducerRetries(appConf.Events.Kafka.Retries),
-			kafka.WithProducerCompression(appConf.Events.Kafka.Compression),
+			kafka.WithProducerAcks(mqKafka.Acks),
+			kafka.WithProducerRetries(mqKafka.Retries),
+			kafka.WithProducerCompression(mqKafka.Compression),
 		)
 		if err != nil {
 			log.Warnw("failed to create kafka event publisher", "error", err)
@@ -77,4 +81,24 @@ func NewEventPublisherFromConfig(appConf *config.AppConfig) EventPublisher {
 		return nil
 	}
 	return NewMultiPublisher(publishers...)
+}
+
+func resolveEventTopic(event map[string]any) string {
+	eventType, _ := event["type"].(string)
+	if eventType == "" {
+		return eventTopicPlatform
+	}
+	switch {
+	case strings.HasPrefix(eventType, "arcentra.pipeline."),
+		strings.HasPrefix(eventType, "arcentra.job."),
+		strings.HasPrefix(eventType, "arcentra.step."),
+		strings.HasPrefix(eventType, "arcentra.task."):
+		return eventTopicPipeline
+	case strings.HasPrefix(eventType, "arcentra.agent."):
+		return eventTopicAgent
+	case strings.HasPrefix(eventType, "arcentra.artifact."):
+		return eventTopicArtifact
+	default:
+		return eventTopicPlatform
+	}
 }

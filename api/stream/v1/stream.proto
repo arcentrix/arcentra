@@ -10,12 +10,6 @@ option go_package = "github.com/arcentrix/arcentra/api/stream/v1;streamv1";
 
 // StreamService - Real-time data streaming interface
 service StreamService {
-  // Stream step run logs in real-time - Server-side streaming pushes logs to client
-  rpc StreamStepRunLog(StreamStepRunLogRequest) returns (stream StreamStepRunLogResponse) {}
-
-  // Upload step run log stream - Agent-side streaming uploads logs to Server
-  rpc UploadStepRunLog(stream UploadStepRunLogRequest) returns (UploadStepRunLogResponse) {}
-
   // Stream step run status in real-time - Server-side streaming pushes step run (StepRun) status changes
   rpc StreamStepRunStatus(StreamStepRunStatusRequest) returns (stream StreamStepRunStatusResponse) {}
 
@@ -63,45 +57,6 @@ enum EventType {
   EVENT_TYPE_AGENT_REGISTERED = 14;      // Agent registered
   EVENT_TYPE_AGENT_UNREGISTERED = 15;     // Agent unregistered
   EVENT_TYPE_AGENT_OFFLINE = 16;          // Agent offline
-}
-
-// ============ Step Run Log Stream Related ============
-
-// Request to stream step run logs in real-time
-message StreamStepRunLogRequest {
-  string step_run_id = 1;                // Step run ID (required)
-  int32 from_line = 2;                   // Starting line number (0 means from beginning)
-  bool follow = 3;                       // Whether to continuously track (similar to tail -f)
-}
-
-// Response for streaming step run logs in real-time
-message StreamStepRunLogResponse {
-  string step_run_id = 1;                // Step run ID
-  LogChunk log_chunk = 2;                // Log chunk
-  bool is_complete = 3;                  // Whether log transmission is complete
-}
-
-// Log chunk
-message LogChunk {
-  int64 timestamp = 1;                   // Timestamp (Unix timestamp in seconds)
-  int32 line_number = 2;                 // Line number
-  string level = 3;                      // Log level (info, warn, error, debug)
-  string content = 4;                    // Log content
-  string stream = 5;                     // Stream type (stdout, stderr)
-}
-
-// Request to upload step run log stream
-message UploadStepRunLogRequest {
-  string step_run_id = 1;                // Step run ID (required)
-  string agent_id = 2;                  // Agent ID (required)
-  repeated LogChunk logs = 3;           // List of log chunks
-}
-
-// Response for uploading step run log stream
-message UploadStepRunLogResponse {
-  bool success = 1;
-  string message = 2;
-  int32 received_lines = 3;              // Number of log lines received
 }
 
 // ============ Step Run Status Stream Related ============
@@ -191,7 +146,6 @@ message AgentChannelRequest {
   oneof payload {
     HeartbeatData heartbeat = 3;         // Heartbeat data
     StepRunStatusUpdate step_run_status = 4; // Step run status update
-    LogData log_data = 5;                // Log data
     StepRunFetchRequest step_run_fetch = 6; // Step run fetch request
     AgentMetrics metrics = 7;            // Agent metrics
   }
@@ -212,12 +166,6 @@ message StepRunStatusUpdate {
   int32 exit_code = 3;                  // Exit code
   string error_message = 4;              // Error message
   int64 timestamp = 5;                   // Timestamp (Unix timestamp in seconds)
-}
-
-// Log data
-message LogData {
-  string step_run_id = 1;                // Step run ID (required)
-  repeated LogChunk logs = 2;            // List of log chunks
 }
 
 // Step run fetch request

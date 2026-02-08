@@ -24,9 +24,11 @@ import (
 	"regexp"
 	"strings"
 
+	executor "github.com/arcentrix/arcentra/internal/pkg/executor"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/builtin"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/expr-lang/expr"
 )
@@ -38,6 +40,8 @@ type ExecutionContext struct {
 	PluginManager  *plugin.Manager
 	BuiltinManager *builtin.Manager
 	AgentManager   *AgentManager
+	EventEmitter   *executor.EventEmitter
+	TaskQueue      nova.TaskQueue
 	Logger         log.Logger
 	Env            map[string]string
 }
@@ -59,9 +63,20 @@ func NewExecutionContext(
 		PluginManager:  pluginMgr,
 		BuiltinManager: builtin.NewManager(logger),
 		WorkspaceRoot:  workspace,
+		EventEmitter:   nil,
 		Logger:         logger,
 		Env:            env,
 	}
+}
+
+// SetEventEmitter sets the event emitter for pipeline events.
+func (c *ExecutionContext) SetEventEmitter(emitter *executor.EventEmitter) {
+	c.EventEmitter = emitter
+}
+
+// SetTaskQueue sets the task queue for pipeline execution.
+func (c *ExecutionContext) SetTaskQueue(queue nova.TaskQueue) {
+	c.TaskQueue = queue
 }
 
 // GetPipeline returns the pipeline (implements builtin.ExecutionContext interface)

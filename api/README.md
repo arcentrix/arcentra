@@ -1,6 +1,6 @@
 # Arcentra Agent API
 
-English | [简体中文](./README_zh_CN.md)
+English | [简体中文](https://github.com/arcentrix/arcentra/blob/main/api/README_zh_CN.md)
 
 gRPC API definitions for the Arcentra and Agent interaction, defined using Protocol Buffers and managed through Buf.
 
@@ -9,10 +9,10 @@ gRPC API definitions for the Arcentra and Agent interaction, defined using Proto
 This directory contains all gRPC API definitions for the Arcentra and Agent interaction, divided into five main service modules:
 
 - **Agent Service** - Core interface for communication between Agent and Server
+- **Gateway Service** - Data-plane ingestion for logs and events
 - **Pipeline Service** - Pipeline management interface
 - **StepRun Service** - StepRun (Step execution) management interface
 - **Stream Service** - Real-time data streaming interface
-- **Plugin Service** - Plugin communication interface
 
 ## Directory Structure
 
@@ -26,6 +26,10 @@ api/
 │   ├── agent.proto             # Proto definition file
 │   ├── agent.pb.go             # Generated Go message code
 │   └── agent_grpc.pb.go        # Generated gRPC service code
+├── gateway/v1/                 # Gateway Service API
+│   ├── gateway.proto           # Proto definition file
+│   ├── gateway.pb.go           # Generated Go message code
+│   └── gateway_grpc.pb.go      # Generated gRPC service code
 ├── pipeline/v1/               # Pipeline Service API
 │   ├── pipeline.proto
 │   ├── pipeline.pb.go
@@ -38,12 +42,6 @@ api/
 │   ├── stream.proto
 │   ├── stream.pb.go
 │   └── stream_grpc.pb.go
-└── plugin/v1/                  # Plugin Service API
-    ├── plugin.proto
-    ├── plugin_type.proto
-    ├── plugin.pb.go
-    ├── plugin_type.pb.go
-    └── plugin_grpc.pb.go
 ```
 
 ## API Service Description
@@ -57,17 +55,28 @@ The main interface for communication between Agent and Server, responsible for A
 - **Agent Registration/Unregistration** (`Register`/`Unregister`) - Agent lifecycle management
 - **StepRun Fetching** (`FetchStepRun`) - Agent actively pulls step runs to execute
 - **Status Reporting** (`ReportStepRunStatus`) - Report step run execution status
-- **Log Reporting** (`ReportStepRunLog`) - Batch report step run execution logs
 - **StepRun Cancellation** (`CancelStepRun`) - Server notifies Agent to cancel step run
 - **Label Updates** (`UpdateLabels`) - Dynamically update Agent's labels
-- **Plugin Management** (`DownloadPlugin`, `ListAvailablePlugins`) - Plugin distribution and query
+- **Control Plane** (`Connect`) - Bidirectional control channel between Agent and Gateway
 
 **Core Features:**
 - Support label selector for intelligent step run routing
-- Support dynamic plugin distribution
-- Comprehensive metrics reporting mechanism
+- Control-plane task dispatch, cancel and status feedback
+- Metrics reported with task status updates
 
-### 2. Pipeline Service (`pipeline/v1`)
+### 2. Gateway Service (`gateway/v1`)
+
+Data-plane ingestion interface for logs and events.
+
+**Main Features:**
+- **Push Logs** (`PushLogs`) - High-throughput, batched, lossy log stream
+- **Push Events** (`PushEvents`) - Reliable, idempotent event stream with retry
+
+**Core Features:**
+- Supports batching and compression
+- Event idempotency with partial acceptance and retry
+
+### 3. Pipeline Service (`pipeline/v1`)
 
 Pipeline management interface, responsible for creating, executing and managing CI/CD pipelines.
 
@@ -81,7 +90,6 @@ Pipeline management interface, responsible for creating, executing and managing 
 - **Stop Pipeline** (`StopPipeline`) - Stop running pipeline
 - **Get Pipeline Run** (`GetPipelineRun`) - Get pipeline run details
 - **List Pipeline Runs** (`ListPipelineRuns`) - Paginated pipeline run list query
-- **Get Pipeline Run Log** (`GetPipelineRunLog`) - Get pipeline run log
 
 **Supported Trigger Methods:**
 - Manual trigger (Manual)
@@ -102,7 +110,7 @@ Pipeline management interface, responsible for creating, executing and managing 
 - CANCELLED (Cancelled)
 - PARTIAL (Partial success)
 
-### 3. StepRun Service (`steprun/v1`)
+### 4. StepRun Service (`steprun/v1`)
 
 StepRun (Step execution) management interface, responsible for CRUD operations and execution management of step runs.
 
@@ -116,7 +124,6 @@ According to DSL: Step → StepRun (execution of a Step)
 - **Delete StepRun** (`DeleteStepRun`) - Delete step run
 - **Cancel StepRun** (`CancelStepRun`) - Cancel running step run
 - **Retry StepRun** (`RetryStepRun`) - Re-execute failed step run
-- **Get Log** (`GetStepRunLog`) - Get step run execution log
 - **Artifact Management** (`ListStepRunArtifacts`) - Manage step run artifacts
 
 **StepRun Status:**
@@ -136,12 +143,11 @@ According to DSL: Step → StepRun (execution of a Step)
 - Support label selector routing
 - Support conditional expressions (when)
 
-### 4. Stream Service (`stream/v1`)
+### 5. Stream Service (`stream/v1`)
 
 Real-time data streaming interface, providing bidirectional streaming communication capability.
 
 **Main Features:**
-- **StepRun Log Stream** (`StreamStepRunLog`, `UploadStepRunLog`) - Real-time get and report step run logs
 - **StepRun Status Stream** (`StreamStepRunStatus`) - Real-time push step run status changes
 - **Job Status Stream** (`StreamJobStatus`) - Real-time push job (JobRun) status changes
 - **Pipeline Status Stream** (`StreamPipelineStatus`) - Real-time push pipeline (PipelineRun) status changes
@@ -154,38 +160,6 @@ Real-time data streaming interface, providing bidirectional streaming communicat
 - JobRun events (started, completed, failed, cancelled)
 - PipelineRun events (started, completed, failed, cancelled)
 - Agent events (registered, unregistered, offline)
-
-### 5. Plugin Service (`plugin/v1`)
-
-Plugin communication interface, providing unified plugin execution and management capabilities.
-
-**Main Features:**
-- **Plugin Information** (`GetInfo`) - Get plugin metadata (name, version, type, description)
-- **Plugin Metrics** (`GetMetrics`) - Get plugin runtime metrics (call count, error count, uptime)
-- **Plugin Initialization** (`Init`) - Initialize plugin with configuration
-- **Plugin Cleanup** (`Cleanup`) - Cleanup plugin resources
-- **Action Execution** (`Execute`) - Unified entry point for all plugin operations
-- **Config Management** (`ConfigQuery`, `ConfigQueryByKey`, `ConfigList`) - Query plugin configurations
-
-**Supported Plugin Types:**
-- `SOURCE` - Source code management plugin (clone, pull, checkout, etc.)
-- `BUILD` - Build plugin (compile, package, generate artifacts, etc.)
-- `TEST` - Test plugin (unit tests, integration tests, coverage, etc.)
-- `DEPLOY` - Deployment plugin (deploy, rollback, scaling, etc.)
-- `SECURITY` - Security plugin (vulnerability scanning, compliance checks, etc.)
-- `NOTIFY` - Notification plugin (email, webhook, instant messaging, etc.)
-- `APPROVAL` - Approval plugin (create approval, approve, reject, etc.)
-- `STORAGE` - Storage plugin (save, load, delete, list, etc.)
-- `ANALYTICS` - Analytics plugin (event tracking, queries, metrics, reports, etc.)
-- `INTEGRATION` - Integration plugin (connect, call, subscribe, etc.)
-- `CUSTOM` - Custom plugin for special-purpose functionality
-
-**Core Features:**
-- Unified action-based execution model
-- Support for action registry and dynamic routing
-- Host-provided capabilities (database access, storage access)
-- Comprehensive error handling with structured error codes
-- Runtime metrics and monitoring support
 
 ## Quick Start
 
@@ -351,14 +325,13 @@ func main() {
 ### Streaming RPC Example
 
 ```go
-// Client: Receive step run logs in real-time
-func streamStepRunLog(client streamv1.StreamServiceClient, stepRunID string) {
-    req := &streamv1.StreamStepRunLogRequest{
-        StepRunId: stepRunID,
-        Follow:    true, // Continuously track, similar to tail -f
+// Client: Receive step run status in real-time
+func streamStepRunStatus(client streamv1.StreamServiceClient, stepRunID string) {
+    req := &streamv1.StreamStepRunStatusRequest{
+        StepRunIds: []string{stepRunID},
     }
     
-    stream, err := client.StreamStepRunLog(context.Background(), req)
+    stream, err := client.StreamStepRunStatus(context.Background(), req)
     if err != nil {
         log.Fatalf("Failed to create stream: %v", err)
     }
@@ -371,8 +344,7 @@ func streamStepRunLog(client streamv1.StreamServiceClient, stepRunID string) {
         if err != nil {
             log.Fatalf("Receive failed: %v", err)
         }
-        
-        log.Printf("[%s] %s", resp.LogChunk.Level, resp.LogChunk.Content)
+        log.Printf("[%s] status=%v", resp.StepRunId, resp.Status)
     }
 }
 ```
@@ -426,131 +398,6 @@ labelSelector := &agentv1.AgentSelector{
 - `NotExists` - Label key does not exist
 - `Gt` - Label value greater than specified value (for numeric comparison)
 - `Lt` - Label value less than specified value (for numeric comparison)
-
-## Plugin Service Usage
-
-### Execute Plugin Action Example
-
-```go
-// Execute a plugin action
-req := &pluginv1.ExecuteRequest{
-    Action: "send",  // Action name
-    Params: []byte(`{"message": "Hello World"}`),  // Action parameters (JSON)
-    Opts:   []byte(`{"timeout": 30}`),  // Optional overrides (JSON)
-}
-
-resp, err := client.Execute(context.Background(), req)
-if err != nil {
-    log.Fatalf("Failed to execute plugin action: %v", err)
-}
-
-if resp.Error != nil {
-    log.Fatalf("Plugin execution error: %s (code: %d)", resp.Error.Message, resp.Error.Code)
-}
-
-// Parse result
-var result map[string]interface{}
-json.Unmarshal(resp.Result, &result)
-log.Printf("Plugin execution result: %+v", result)
-```
-
-### Get Plugin Information Example
-
-```go
-// Get plugin information
-infoResp, err := client.GetInfo(context.Background(), &pluginv1.GetInfoRequest{})
-if err != nil {
-    log.Fatalf("Failed to get plugin info: %v", err)
-}
-
-info := infoResp.Info
-log.Printf("Plugin: %s v%s (%s)", info.Name, info.Version, info.Type)
-log.Printf("Description: %s", info.Description)
-```
-
-### Query Plugin Configuration Example
-
-```go
-// Query plugin configuration
-configResp, err := client.ConfigQuery(context.Background(), &pluginv1.ConfigQueryRequest{
-    PluginId: "notify",
-})
-if err != nil {
-    log.Fatalf("Failed to query config: %v", err)
-}
-
-if configResp.Error != nil {
-    log.Fatalf("Config query error: %s", configResp.Error.Message)
-}
-
-var config map[string]interface{}
-json.Unmarshal(configResp.Config, &config)
-log.Printf("Plugin config: %+v", config)
-```
-
-### Standard Action Names
-
-Plugins use a unified action-based execution model. Common action names include:
-
-**Source Plugin Actions:**
-- `clone` - Clone repository
-- `pull` - Pull latest changes
-- `checkout` - Checkout specific branch/commit
-- `commit.get` - Get commit information
-- `commit.diff` - Get commit diff
-
-**Build Plugin Actions:**
-- `build` - Build project
-- `artifacts.get` - Get build artifacts
-- `clean` - Clean build artifacts
-
-**Notify Plugin Actions:**
-- `send` - Send notification
-- `send.template` - Send notification using template
-- `send.batch` - Send batch notifications
-
-**Storage Plugin Actions:**
-- `save` - Save data
-- `load` - Load data
-- `delete` - Delete data
-- `list` - List items
-- `exists` - Check if item exists
-
-**Host-Provided Actions:**
-- `config.query` - Query plugin configuration
-- `config.query.key` - Query configuration by key
-- `config.list` - List all configurations
-
-## Plugin Distribution Mechanism
-
-Agent Service supports dynamic plugin distribution, supporting three plugin locations:
-
-1. **SERVER** - Server filesystem
-2. **STORAGE** - Object storage (S3/OSS/COS/GCS)
-3. **REGISTRY** - Plugin registry
-
-### Download Plugin Example
-
-```go
-req := &agentv1.DownloadPluginRequest{
-    AgentId:  "agent-123",
-    PluginId: "notify",
-    Version:  "1.0.0", // Optional, download latest if not specified
-}
-
-resp, err := client.DownloadPlugin(context.Background(), req)
-if err != nil {
-    log.Fatalf("Failed to download plugin: %v", err)
-}
-
-// Verify checksum
-if calculateSHA256(resp.PluginData) != resp.Checksum {
-    log.Fatal("Plugin checksum mismatch")
-}
-
-// Save plugin
-os.WriteFile("plugins/notify.so", resp.PluginData, 0755)
-```
 
 ## Concept Mapping
 
@@ -606,18 +453,17 @@ When introducing breaking changes, create a new version directory (e.g. `agent/v
 
 ## FAQ
 
-### 1. How to handle large file transfers?
+### 1. How to handle large log/event payloads?
 
-For large files (such as plugin binaries), recommend:
-- Use streaming RPC for chunked transfer
-- Or return pre-signed URL, let client download directly from object storage
+Use Gateway Service ingestion:
+- Batch data in `PushLogs`/`PushEvents`
+- Enable compression and set `raw_size` for verification
 
 ### 2. How to handle long-running step runs?
 
 Use Stream Service's streaming interface:
 - Real-time push step run status updates
-- Real-time push log output
-- Use bidirectional stream to maintain connection
+- Use `AgentChannel` or `Connect` to maintain control-plane communication
 
 ### 3. How to implement step run priority?
 
@@ -641,8 +487,6 @@ Agent should:
 
 - [Pipeline DSL Documentation](../docs/Pipeline%20DSL.md)
 - [Pipeline Schema Documentation](../docs/pipeline_schema.md)
-- [Plugin Development Guide](../docs/PLUGIN_DEVELOPMENT.md)
-- [Plugin Distribution Guide](../docs/PLUGIN_DISTRIBUTION.md)
 - [Implementation Guide](../docs/IMPLEMENTATION_GUIDE.md)
 - [Buf Documentation](https://docs.buf.build/)
 - [gRPC Documentation](https://grpc.io/docs/)

@@ -100,17 +100,6 @@ func (s *AgentService) ReportStepRunStatus(ctx context.Context, req *agentv1.Rep
 	}, nil
 }
 
-// ReportStepRunLog handles step run log reporting requests
-func (s *AgentService) ReportStepRunLog(ctx context.Context, req *agentv1.ReportStepRunLogRequest) (*agentv1.ReportStepRunLogResponse, error) {
-	log.Debugw("ReportStepRunLog request received", "agent_id", req.AgentId, "step_run_id", req.StepRunId, "log_count", len(req.Logs))
-
-	// TODO: Implement step run log reporting logic
-	return &agentv1.ReportStepRunLogResponse{
-		Success: true,
-		Message: "step run logs reported successfully",
-	}, nil
-}
-
 // CancelStepRun handles step run cancellation requests from server
 func (s *AgentService) CancelStepRun(ctx context.Context, req *agentv1.CancelStepRunRequest) (*agentv1.CancelStepRunResponse, error) {
 	log.Infow("CancelStepRun request received", "agent_id", req.AgentId, "step_run_id", req.StepRunId, "reason", req.Reason)
@@ -143,26 +132,3 @@ func (s *AgentService) UpdateLabels(ctx context.Context, req *agentv1.UpdateLabe
 	}, nil
 }
 
-// DownloadPlugin handles plugin download requests
-func (s *AgentService) DownloadPlugin(ctx context.Context, req *agentv1.DownloadPluginRequest) (*agentv1.DownloadPluginResponse, error) {
-	log.Infow("DownloadPlugin request received", "agent_id", req.AgentId, "plugin_id", req.PluginId, "version", req.Version)
-
-	// TODO: Implement plugin download logic
-	return &agentv1.DownloadPluginResponse{
-		Success: true,
-		Message: "plugin download initiated",
-	}, nil
-}
-
-// ListAvailablePlugins handles available plugins listing requests
-func (s *AgentService) ListAvailablePlugins(ctx context.Context, req *agentv1.ListAvailablePluginsRequest) (*agentv1.ListAvailablePluginsResponse, error) {
-	log.Debugw("ListAvailablePlugins request received", "agent_id", req.AgentId, "plugin_type", req.PluginType)
-
-	// TODO: Implement plugin listing logic
-	// For now, return empty plugin list
-	return &agentv1.ListAvailablePluginsResponse{
-		Success: true,
-		Message: "no plugins available",
-		Plugins: []*agentv1.PluginInfo{},
-	}, nil
-}

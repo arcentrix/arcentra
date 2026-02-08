@@ -16,6 +16,7 @@ package kafka
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/arcentrix/arcentra/pkg/mq"
@@ -24,8 +25,7 @@ import (
 
 // ConsumerConfig represents Kafka consumer configuration.
 type ConsumerConfig struct {
-	ClientConfig `json:",inline" mapstructure:",squash"`
-	GroupId      string `json:"groupId" mapstructure:"groupId"`
+	KafkaConfig `json:",inline" mapstructure:",squash"`
 
 	AutoOffsetReset   string `json:"autoOffsetReset" mapstructure:"autoOffsetReset"`
 	EnableAutoCommit  *bool  `json:"enableAutoCommit" mapstructure:"enableAutoCommit"`
@@ -47,7 +47,7 @@ func (fn consumerOptionFunc) apply(cfg *ConsumerConfig) {
 func WithConsumerClientOptions(opts ...ClientOption) ConsumerOption {
 	return consumerOptionFunc(func(cfg *ConsumerConfig) {
 		for _, opt := range opts {
-			opt.apply(&cfg.ClientConfig)
+			opt.apply(&cfg.KafkaConfig)
 		}
 	})
 }
@@ -82,15 +82,17 @@ type Consumer struct {
 }
 
 // NewConsumer creates a new Kafka consumer.
-func NewConsumer(bootstrapServers string, groupId string, opts ...ConsumerOption) (*Consumer, error) {
-	if err := mq.RequireNonEmpty("groupId", groupId); err != nil {
+func NewConsumer(bootstrapServers string, topicName string, programName string, opts ...ConsumerOption) (*Consumer, error) {
+	if err := mq.RequireNonEmpty("topicName", topicName); err != nil {
+		return nil, err
+	}
+	if err := mq.RequireNonEmpty("programName", programName); err != nil {
 		return nil, err
 	}
 	cfg := ConsumerConfig{
-		ClientConfig: ClientConfig{
+		KafkaConfig: KafkaConfig{
 			BootstrapServers: bootstrapServers,
 		},
-		GroupId:           groupId,
 		AutoOffsetReset:   "earliest",
 		SessionTimeoutMs:  10000,
 		MaxPollIntervalMs: 300000,
@@ -105,11 +107,17 @@ func NewConsumer(bootstrapServers string, groupId string, opts ...ConsumerOption
 		enableAutoCommit = *cfg.EnableAutoCommit
 	}
 
-	config, err := buildBaseConfig(cfg.ClientConfig)
+	config, err := buildBaseConfig(cfg.KafkaConfig)
 	if err != nil {
 		return nil, err
 	}
-	_ = config.SetKey("group.id", cfg.GroupId)
+	clientID, err := buildClientID(programName)
+	if err != nil {
+		return nil, err
+	}
+	groupID := strings.ToUpper(fmt.Sprintf("%s_CONSUMER", strings.TrimSpace(topicName)))
+	_ = config.SetKey("client.id", clientID)
+	_ = config.SetKey("group.id", groupID)
 	_ = config.SetKey("auto.offset.reset", cfg.AutoOffsetReset)
 	_ = config.SetKey("enable.auto.commit", enableAutoCommit)
 	_ = config.SetKey("session.timeout.ms", cfg.SessionTimeoutMs)

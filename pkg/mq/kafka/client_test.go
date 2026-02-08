@@ -3,23 +3,26 @@ package kafka
 import "testing"
 
 func TestBuildBaseConfig_Required(t *testing.T) {
-	if _, err := buildBaseConfig(ClientConfig{}); err == nil {
+	if _, err := buildBaseConfig(KafkaConfig{}); err == nil {
 		t.Fatal("expected error when bootstrapServers is empty")
 	}
 }
 
 func TestBuildBaseConfig_WithAuth(t *testing.T) {
-	cfg := ClientConfig{
+	cfg := KafkaConfig{
 		BootstrapServers: "localhost:9092",
-		ClientId:         "client-1",
 		SecurityProtocol: "SASL_SSL",
-		SaslMechanism:    "PLAIN",
-		SaslUsername:     "user",
-		SaslPassword:     "pass",
-		SslCaFile:        "ca.pem",
-		SslCertFile:      "cert.pem",
-		SslKeyFile:       "key.pem",
-		SslPassword:      "secret",
+		Sasl: SaslConfig{
+			Mechanism: "PLAIN",
+			Username:  "user",
+			Password:  "pass",
+		},
+		Ssl: SslConfig{
+			CaFile:   "ca.pem",
+			CertFile: "cert.pem",
+			KeyFile:  "key.pem",
+			Password: "secret",
+		},
 	}
 
 	config, err := buildBaseConfig(cfg)
@@ -29,9 +32,6 @@ func TestBuildBaseConfig_WithAuth(t *testing.T) {
 
 	if got, err := config.Get("bootstrap.servers", nil); err != nil || got != "localhost:9092" {
 		t.Fatalf("expected bootstrap.servers to be set, got %v (err=%v)", got, err)
-	}
-	if got, err := config.Get("client.id", nil); err != nil || got != "client-1" {
-		t.Fatalf("expected client.id to be set, got %v (err=%v)", got, err)
 	}
 	if got, err := config.Get("security.protocol", nil); err != nil || got != "SASL_SSL" {
 		t.Fatalf("expected security.protocol to be set, got %v (err=%v)", got, err)

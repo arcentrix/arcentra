@@ -20,6 +20,7 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
 	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
@@ -30,17 +31,6 @@ import (
 	"github.com/arcentrix/arcentra/pkg/pprof"
 	"github.com/arcentrix/arcentra/pkg/trace"
 )
-
-type EventsKafkaConfig struct {
-	Enabled          bool       `mapstructure:"enabled"`
-	BootstrapServers string     `mapstructure:"bootstrapServers"`
-	Acks             string     `mapstructure:"acks"`
-	Retries          int        `mapstructure:"retries"`
-	Compression      string     `mapstructure:"compression"`
-	SecurityProtocol string     `mapstructure:"securityProtocol"`
-	Sasl             SaslConfig `mapstructure:"sasl"`
-	Ssl              SslConfig  `mapstructure:"ssl"`
-}
 
 type SaslConfig struct {
 	Mechanism string `mapstructure:"mechanism"`
@@ -56,22 +46,47 @@ type SslConfig struct {
 }
 
 type EventsConfig struct {
-	Enabled      bool              `mapstructure:"enabled"`
-	SourcePrefix string            `mapstructure:"sourcePrefix"`
-	Timeout      int               `mapstructure:"timeout"`
-	Kafka        EventsKafkaConfig `mapstructure:"kafka"`
+	SourcePrefix string `mapstructure:"sourcePrefix"`
+	Timeout      int    `mapstructure:"timeout"`
+}
+
+type KafkaConfig struct {
+	BootstrapServers string     `mapstructure:"bootstrapServers"`
+	Acks             string     `mapstructure:"acks"`
+	Retries          int        `mapstructure:"retries"`
+	Compression      string     `mapstructure:"compression"`
+	SecurityProtocol string     `mapstructure:"securityProtocol"`
+	Sasl             SaslConfig `mapstructure:"sasl"`
+	Ssl              SslConfig  `mapstructure:"ssl"`
+}
+
+type MessageQueueConfig struct {
+	Kafka KafkaConfig `mapstructure:"kafka"`
+}
+
+type TaskQueueConfig struct {
+	Type              string `mapstructure:"type"`
+	DelaySlotCount    int    `mapstructure:"delaySlotCount"`
+	DelaySlotDuration int    `mapstructure:"delaySlotDuration"`
+	AutoCommit        bool   `mapstructure:"autoCommit"`
+	SessionTimeout    int    `mapstructure:"sessionTimeout"`
+	MaxPollInterval   int    `mapstructure:"maxPollInterval"`
+	MessageFormat     string `mapstructure:"messageFormat"`
+	MessageCodec      string `mapstructure:"messageCodec"`
 }
 
 type AppConfig struct {
-	Log      log.Conf
-	Grpc     grpc.Conf
-	Http     http.Http
-	Database database.Database
-	Redis    cache.Redis
-	Events   EventsConfig
-	Metrics  metrics.MetricsConfig
-	Pprof    pprof.PprofConfig
-	Trace    trace.TraceConfig
+	Log          log.Conf              `mapstructure:"log"`
+	Grpc         grpc.Conf             `mapstructure:"grpc"`
+	Http         http.Http             `mapstructure:"http"`
+	Database     database.Database     `mapstructure:"database"`
+	Redis        cache.Redis           `mapstructure:"redis"`
+	Events       EventsConfig          `mapstructure:"events"`
+	MessageQueue MessageQueueConfig    `mapstructure:"messageQueue"`
+	Metrics      metrics.MetricsConfig `mapstructure:"metrics"`
+	Pprof        pprof.PprofConfig     `mapstructure:"pprof"`
+	Trace        trace.TraceConfig     `mapstructure:"trace"`
+	TaskQueue    nova.TaskQueueConfig  `mapstructure:"taskQueue"`
 }
 
 var (

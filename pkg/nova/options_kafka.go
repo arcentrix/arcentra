@@ -27,6 +27,13 @@ func (f kafkaOptionFunc) apply(c *KafkaConfig) {
 	f(c)
 }
 
+// WithKafkaClientProgramName sets the Kafka client program name
+func WithKafkaClientProgramName(programName string) KafkaOption {
+	return kafkaOptionFunc(func(c *KafkaConfig) {
+		c.ClientProgram = programName
+	})
+}
+
 // WithKafkaGroupID sets the Kafka consumer group ID
 func WithKafkaGroupID(groupID string) KafkaOption {
 	return kafkaOptionFunc(func(c *KafkaConfig) {

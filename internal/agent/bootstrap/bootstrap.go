@@ -26,6 +26,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	"github.com/arcentrix/arcentra/internal/agent/router"
 	"github.com/arcentrix/arcentra/internal/agent/service"
+	agentqueue "github.com/arcentrix/arcentra/internal/agent/taskqueue"
 	grpcclient "github.com/arcentrix/arcentra/internal/pkg/grpc"
 	"github.com/arcentrix/arcentra/pkg/cron"
 	"github.com/arcentrix/arcentra/pkg/log"
@@ -46,6 +47,7 @@ type Agent struct {
 	AgentService  *service.AgentService
 	ConfigFile    string // Configuration file path
 	ShutdownMgr   *shutdown.Manager
+	TaskQueue     interface{ Stop() error }
 }
 
 type InitAppFunc func(configPath string) (*Agent, func(), error)
@@ -62,6 +64,10 @@ func NewAgent(
 
 	// Create agent service
 	agentService := service.NewAgentService(agentConf, grpcClient)
+	taskQueue, err := agentqueue.StartWorker(context.Background(), agentConf)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// 注册步骤执行处理器（Agent 作为 worker 执行步骤执行）
 	cleanup := func() {
@@ -84,6 +90,11 @@ func NewAgent(
 				log.Errorw("failed to close gRPC client", "error", err)
 			}
 		}
+		if taskQueue != nil {
+			if err := taskQueue.Stop(); err != nil {
+				log.Errorw("failed to stop task queue", "error", err)
+			}
+		}
 	}
 
 	app := &Agent{
@@ -94,6 +105,7 @@ func NewAgent(
 		AgentConf:     agentConf,
 		AgentService:  agentService,
 		ShutdownMgr:   shutdownMgr,
+		TaskQueue:     taskQueue,
 	}
 	return app, cleanup, nil
 }

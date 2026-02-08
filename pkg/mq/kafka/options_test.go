@@ -5,16 +5,12 @@ import "testing"
 func TestProducerOptionsApply(t *testing.T) {
 	cfg := ProducerConfig{}
 	WithProducerClientOptions(
-		WithClientId("client-1"),
 		WithSecurityProtocol("SASL_SSL"),
 	).apply(&cfg)
 	WithProducerAcks("1").apply(&cfg)
 	WithProducerRetries(5).apply(&cfg)
 	WithProducerCompression("gzip").apply(&cfg)
 
-	if cfg.ClientId != "client-1" {
-		t.Fatalf("expected ClientId to be set, got %s", cfg.ClientId)
-	}
 	if cfg.SecurityProtocol != "SASL_SSL" {
 		t.Fatalf("expected SecurityProtocol to be set, got %s", cfg.SecurityProtocol)
 	}
@@ -47,7 +43,6 @@ func TestNormalizeProducerConfig_Defaults(t *testing.T) {
 func TestConsumerOptionsApply(t *testing.T) {
 	cfg := ConsumerConfig{}
 	WithConsumerClientOptions(
-		WithClientId("client-2"),
 		WithSecurityProtocol("PLAINTEXT"),
 	).apply(&cfg)
 	WithConsumerAutoOffsetReset("latest").apply(&cfg)
@@ -55,9 +50,6 @@ func TestConsumerOptionsApply(t *testing.T) {
 	WithConsumerSessionTimeoutMs(15000).apply(&cfg)
 	WithConsumerMaxPollIntervalMs(600000).apply(&cfg)
 
-	if cfg.ClientId != "client-2" {
-		t.Fatalf("expected ClientId to be set, got %s", cfg.ClientId)
-	}
 	if cfg.SecurityProtocol != "PLAINTEXT" {
 		t.Fatalf("expected SecurityProtocol to be set, got %s", cfg.SecurityProtocol)
 	}

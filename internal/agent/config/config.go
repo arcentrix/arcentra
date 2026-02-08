@@ -24,6 +24,8 @@ import (
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/metrics"
+	"github.com/arcentrix/arcentra/pkg/mq/kafka"
+	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/pprof"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
@@ -31,26 +33,19 @@ import (
 
 // AgentConfig holds all configuration settings
 type AgentConfig struct {
-	Grpc      GrpcConfig            `mapstructure:"grpc"`
-	Agent     AgentInfo             `mapstructure:"agent"`
-	Log       log.Conf              `mapstructure:"log"`
-	Http      http.Http             `mapstructure:"http"`
-	Redis     cache.Redis           `mapstructure:"redis"`
-	TaskQueue TaskQueueConfig       `mapstructure:"taskQueue"`
-	Metrics   metrics.MetricsConfig `mapstructure:"metrics"`
-	Pprof     pprof.PprofConfig     `mapstructure:"pprof"`
+	Grpc         GrpcConfig            `mapstructure:"grpc"`
+	Agent        AgentInfo             `mapstructure:"agent"`
+	Log          log.Conf              `mapstructure:"log"`
+	Http         http.Http             `mapstructure:"http"`
+	Redis        cache.Redis           `mapstructure:"redis"`
+	TaskQueue    nova.TaskQueueConfig  `mapstructure:"taskQueue"`
+	MessageQueue MqConfig              `mapstructure:"messageQueue"`
+	Metrics      metrics.MetricsConfig `mapstructure:"metrics"`
+	Pprof        pprof.PprofConfig     `mapstructure:"pprof"`
 }
 
-// TaskQueueConfig queue 任务队列配置
-type TaskQueueConfig struct {
-	Concurrency      int            `mapstructure:"concurrency"`
-	StrictPriority   bool           `mapstructure:"strictPriority"`
-	Priority         map[string]int `mapstructure:"priority"`         // 优先级配置：队列名 -> 优先级权重
-	LogLevel         string         `mapstructure:"logLevel"`         // 日志级别: debug, info, warn, error
-	ShutdownTimeout  int            `mapstructure:"shutdownTimeout"`  // 关闭超时时间（秒）
-	GroupGracePeriod int            `mapstructure:"groupGracePeriod"` // 组优雅关闭周期（秒）
-	GroupMaxDelay    int            `mapstructure:"groupMaxDelay"`    // 组最大延迟（秒）
-	GroupMaxSize     int            `mapstructure:"groupMaxSize"`     // 组最大大小
+type MqConfig struct {
+	Kafka kafka.KafkaConfig `mapstructure:"kafka"`
 }
 
 // GrpcConfig gRPC client configuration

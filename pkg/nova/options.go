@@ -24,7 +24,7 @@ type QueueOption interface {
 }
 
 type queueConfig struct {
-	Type              QueueType
+	Provider          QueueProvider
 	BootstrapServers  string
 	GroupID           string
 	TopicPrefix       string
@@ -37,8 +37,7 @@ type queueConfig struct {
 	messageFormat MessageFormat
 	messageCodec  MessageCodec
 	// Broker-specific configuration
-	kafkaConfig    *KafkaConfig
-	rocketmqConfig *RocketMQConfig
+	kafkaConfig *KafkaConfig
 	// Task recorder (optional)
 	taskRecorder TaskRecorder
 }
@@ -52,20 +51,9 @@ func (f queueOptionFunc) apply(c *queueConfig) {
 // WithKafka configures a Kafka broker
 func WithKafka(bootstrapServers string, opts ...KafkaOption) QueueOption {
 	return queueOptionFunc(func(c *queueConfig) {
-		c.Type = QueueTypeKafka
+		c.Provider = QueueProviderKafka
 		c.BootstrapServers = bootstrapServers
 		c.kafkaConfig = NewKafkaConfig(bootstrapServers, opts...)
-	})
-}
-
-// WithRocketMQ configures a RocketMQ broker
-func WithRocketMQ(nameServers []string, opts ...RocketMQOption) QueueOption {
-	return queueOptionFunc(func(c *queueConfig) {
-		c.Type = QueueTypeRocketMQ
-		if len(nameServers) > 0 {
-			c.BootstrapServers = nameServers[0]
-		}
-		c.rocketmqConfig = NewRocketMQConfig(nameServers, opts...)
 	})
 }
 

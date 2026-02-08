@@ -155,5 +155,11 @@ func NewExecutorManagerWithDefaultsAndEvents(
 	if publisher != nil {
 		manager.SetEventPublisher(publisher, BuildEventEmitterConfig(appConf))
 	}
+	logPublisher, err := NewKafkaLogPublisherFromConfig(appConf)
+	if err != nil {
+		log.Warnw("failed to create kafka log publisher", "error", err)
+	} else if logPublisher != nil {
+		manager.SetLogPublisher(logPublisher)
+	}
 	return manager
 }

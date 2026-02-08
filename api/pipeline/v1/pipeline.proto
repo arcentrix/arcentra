@@ -35,8 +35,6 @@ service PipelineService {
   // List pipeline runs
   rpc ListPipelineRuns(ListPipelineRunsRequest) returns (ListPipelineRunsResponse) {}
 
-  // Get pipeline run log
-  rpc GetPipelineRunLog(GetPipelineRunLogRequest) returns (GetPipelineRunLogResponse) {}
 }
 
 // Pipeline status enum
@@ -378,33 +376,6 @@ message ListPipelineRunsResponse {
   int32 total = 4;                       // Total count
   int32 page = 5;                        // Current page
   int32 page_size = 6;                   // Items per page
-}
-
-// Get pipeline run log request
-message GetPipelineRunLogRequest {
-  string run_id = 1;                     // Pipeline run ID
-  int32 offset = 2;                      // Log offset (line number, default 0)
-  int32 limit = 3;                       // Number of lines to fetch (default 1000)
-}
-
-// Get pipeline run log response
-message GetPipelineRunLogResponse {
-  bool success = 1;
-  string message = 2;
-  repeated LogLine logs = 3;             // Log lines
-  int32 total_lines = 4;                 // Total lines
-  bool has_more = 5;                     // Whether there are more logs
-  Error error = 6;                       // Error details (if success == false)
-}
-
-// Log line
-message LogLine {
-  int32 line_number = 1;                 // Line number
-  int64 timestamp = 2;                   // Timestamp (Unix timestamp in seconds)
-  string level = 3;                      // Log level (info, warn, error, debug)
-  string content = 4;                    // Log content
-  string job_name = 5;                   // Job name (optional)
-  string step_name = 6;                  // Step name (optional)
 }
 
 // ============ Error Definition ============

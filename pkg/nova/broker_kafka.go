@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ type KafkaConfig struct {
 	BootstrapServers  string        // Kafka broker address
 	GroupID           string        // Consumer group ID
 	TopicPrefix       string        // Topic prefix
+	ClientProgram     string        // Client program name
 	DelaySlotCount    int           // Number of delay topic slots
 	DelaySlotDuration time.Duration // Time interval for each delay slot
 	AutoCommit        bool          // Whether to auto-commit
@@ -100,8 +102,14 @@ func newKafkaBroker(config *queueConfig) (MessageQueueBroker, DelayManager, erro
 		mqkafka.WithSslPassword(kafkaConfig.SSLPassword),
 	}
 
+	programName := strings.TrimSpace(kafkaConfig.ClientProgram)
+	if programName == "" {
+		programName = "arcentra"
+	}
+
 	producer, err := mqkafka.NewProducer(
 		kafkaConfig.BootstrapServers,
+		programName,
 		mqkafka.WithProducerClientOptions(clientOptions...),
 	)
 	if err != nil {
@@ -110,7 +118,8 @@ func newKafkaBroker(config *queueConfig) (MessageQueueBroker, DelayManager, erro
 
 	consumer, err := mqkafka.NewConsumer(
 		kafkaConfig.BootstrapServers,
-		kafkaConfig.GroupID,
+		fmt.Sprintf("%s%s", kafkaConfig.TopicPrefix, PriorityNormalSuffix),
+		programName,
 		mqkafka.WithConsumerClientOptions(clientOptions...),
 		mqkafka.WithConsumerEnableAutoCommit(kafkaConfig.AutoCommit),
 		mqkafka.WithConsumerSessionTimeoutMs(kafkaConfig.SessionTimeout),

@@ -21,8 +21,11 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/arcentrix/arcentra/pkg/retry"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
+	"github.com/bytedance/sonic"
 )
 
 // TaskFramework handles task execution lifecycle
@@ -62,6 +65,10 @@ func (tf *TaskFramework) Execute(ctx context.Context, task *Task) error {
 	// Start: start task execution
 	if err := tf.start(ctx, task); err != nil {
 		task.MarkCompleted(TaskStateFailed, err)
+		tf.emitJobEvent(plugin.EventTypeJobFailed, task, map[string]any{
+			"status": "failed",
+			"error":  err.Error(),
+		})
 		return fmt.Errorf("start task %s: %w", task.Name, err)
 	}
 
@@ -87,10 +94,17 @@ func (tf *TaskFramework) Execute(ctx context.Context, task *Task) error {
 	// Wait: wait for task completion
 	if err := tf.wait(waitCtx, task); err != nil {
 		task.MarkCompleted(TaskStateFailed, err)
+		tf.emitJobEvent(plugin.EventTypeJobFailed, task, map[string]any{
+			"status": "failed",
+			"error":  err.Error(),
+		})
 		return fmt.Errorf("wait task %s: %w", task.Name, err)
 	}
 
 	task.MarkCompleted(TaskStateSucceeded, nil)
+	tf.emitJobEvent(plugin.EventTypeJobCompleted, task, map[string]any{
+		"status": "succeeded",
+	})
 	return nil
 }
 
@@ -155,6 +169,9 @@ func (tf *TaskFramework) start(_ context.Context, task *Task) error {
 	if tf.logger.Log != nil {
 		tf.logger.Log.Infow("task started", "task", task.Name)
 	}
+	tf.emitJobEvent(plugin.EventTypeJobStarted, task, map[string]any{
+		"status": "started",
+	})
 	return nil
 }
 
@@ -164,6 +181,40 @@ func (tf *TaskFramework) queue(_ context.Context, task *Task) error {
 
 	if tf.logger.Log != nil {
 		tf.logger.Log.Infow("task queued", "task", task.Name)
+	}
+	if tf.execCtx.TaskQueue != nil {
+		for i := range task.Job.Steps {
+			step := &task.Job.Steps[i]
+			if !step.RunOnAgent {
+				continue
+			}
+			stepRunId := fmt.Sprintf("%s-%s-%s", tf.execCtx.Pipeline.Namespace, task.Job.Name, step.Name)
+			payload := &taskqueue.StepRunTaskPayload{
+				PipelineId: tf.execCtx.Pipeline.Namespace,
+				JobId:      fmt.Sprintf("%s-%s", tf.execCtx.Pipeline.Namespace, task.Job.Name),
+				JobName:    task.Job.Name,
+				StepName:   step.Name,
+				StepIndex:  int32(i),
+				StepRunId:  stepRunId,
+				Uses:       step.Uses,
+				Action:     step.Action,
+				Args:       step.Args,
+				Env:        tf.execCtx.ResolveStepEnv(task.Job, step),
+				Workspace:  tf.execCtx.StepWorkspace(task.Job.Name, step.Name),
+				Timeout:    step.Timeout,
+			}
+			payloadBytes, err := sonic.Marshal(payload)
+			if err != nil {
+				return fmt.Errorf("marshal step run payload: %w", err)
+			}
+			_, err = tf.execCtx.TaskQueue.Enqueue(&nova.Task{
+				Type:    taskqueue.TaskTypeStepRun,
+				Payload: payloadBytes,
+			}, nova.Queue("DEFAULT"))
+			if err != nil {
+				return fmt.Errorf("enqueue step run task: %w", err)
+			}
+		}
 	}
 	return nil
 }
@@ -249,6 +300,10 @@ func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *
 		}
 	}
 
+	tf.emitStepEvent(plugin.EventTypeStepStarted, task, step.Name, map[string]any{
+		"status": "started",
+	})
+
 	// Create step runner and execute
 	stepRunner := NewStepRunner(tf.execCtx, task.Job, step)
 	if err := stepRunner.Run(ctx); err != nil {
@@ -256,10 +311,22 @@ func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *
 			if tf.logger.Log != nil {
 				tf.logger.Log.Warnw("step failed but continuing", "task", task.Name, "step", step.Name, "error", err)
 			}
+			tf.emitStepEvent(plugin.EventTypeStepFailed, task, step.Name, map[string]any{
+				"status": "failed",
+				"error":  err.Error(),
+			})
 			return nil
 		}
+		tf.emitStepEvent(plugin.EventTypeStepFailed, task, step.Name, map[string]any{
+			"status": "failed",
+			"error":  err.Error(),
+		})
 		return err
 	}
+
+	tf.emitStepEvent(plugin.EventTypeStepCompleted, task, step.Name, map[string]any{
+		"status": "completed",
+	})
 
 	return nil
 }

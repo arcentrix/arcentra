@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	executor "github.com/arcentrix/arcentra/internal/pkg/executor"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/bytedance/sonic"
@@ -59,6 +60,7 @@ type ApprovalManager struct {
 	logger       log.Logger
 	timeout      time.Duration
 	pollInterval time.Duration
+	emitter      *executor.EventEmitter
 }
 
 // NewApprovalManager creates a new approval manager
@@ -70,6 +72,13 @@ func NewApprovalManager(pluginMgr *plugin.Manager, logger log.Logger) *ApprovalM
 		timeout:      24 * time.Hour,  // Default timeout: 24 hours
 		pollInterval: 5 * time.Second, // Default poll interval: 5 seconds
 	}
+}
+
+// SetEventEmitter sets the event emitter for approval events.
+func (am *ApprovalManager) SetEventEmitter(emitter *executor.EventEmitter) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	am.emitter = emitter
 }
 
 // SetTimeout sets the default timeout for approval requests
@@ -117,6 +126,7 @@ func (am *ApprovalManager) CreateApproval(ctx context.Context, jobName, stepName
 	if am.logger.Log != nil {
 		am.logger.Log.Infow("created approval request", "request", requestID, "job", jobName, "step", stepName)
 	}
+	am.emitApprovalEvent(plugin.EventTypePipelineApprovalRequested, request, "")
 
 	return request, nil
 }
@@ -193,6 +203,7 @@ func (am *ApprovalManager) Approve(requestID, approvedBy, reason string) error {
 	if am.logger.Log != nil {
 		am.logger.Log.Infow("approval request approved", "request", requestID, "approved_by", approvedBy)
 	}
+	am.emitApprovalEvent(plugin.EventTypePipelineApprovalApproved, request, reason)
 
 	return nil
 }
@@ -218,8 +229,28 @@ func (am *ApprovalManager) Reject(requestID, rejectedBy, reason string) error {
 	if am.logger.Log != nil {
 		am.logger.Log.Infow("approval request rejected", "request", requestID, "rejected_by", rejectedBy, "reason", reason)
 	}
+	am.emitApprovalEvent(plugin.EventTypePipelineApprovalRejected, request, reason)
 
 	return nil
+}
+
+func (am *ApprovalManager) emitApprovalEvent(eventType string, request *ApprovalRequest, reason string) {
+	am.mu.RLock()
+	emitter := am.emitter
+	am.mu.RUnlock()
+	if emitter == nil || request == nil {
+		return
+	}
+	data := map[string]any{
+		"requestId": request.ID,
+		"jobName":   request.JobName,
+		"stepName":  request.StepName,
+		"status":    string(request.Status),
+	}
+	if reason != "" {
+		data["reason"] = reason
+	}
+	emitter.Emit(context.Background(), eventType, emitter.BuildSource("pipeline"), fmt.Sprintf("approval:%s", request.ID), data, nil)
 }
 
 // ListApprovals lists all approval requests

@@ -122,6 +122,36 @@ rotateNum = 3
 # unit: MB
 rotateSize = 256
 
+[messageQueue.kafka]
+# kafka bootstrap servers
+bootstrapServers = "127.0.0.1:9092"
+# acks: all, 1, 0
+acks = "all"
+# retries
+retries = 3
+# compression: snappy, gzip, lz4, zstd
+compression = "zstd"
+# security protocol: PLAINTEXT, SSL, SASL_PLAINTEXT, SASL_SSL
+securityProtocol = "SASL_PLAINTEXT"
+
+[messageQueue.kafka.sasl]
+# mechanism: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+mechanism = "PLAIN"
+# sasl username
+username = "admin"
+# sasl password
+password = "teThLWZqm6RVYYQt8D66"
+
+[messageQueue.kafka.ssl]
+# ssl ca file
+caFile = ""
+# ssl cert file
+certFile = ""
+# ssl key file
+keyFile = ""
+# ssl password
+password = ""
+
 # http configuration
 [http]
 # http server host
@@ -175,27 +205,18 @@ writeTimeout = 10
 
 [taskQueue]
 # Task queue configuration
-# Concurrency: number of workers processing tasks concurrently
-concurrency = 10
-# StrictPriority: if true, process tasks in strict priority order
-strictPriority = true
-# LogLevel: log level (debug, info, warn, error)
-logLevel = "info"
-# ShutdownTimeout: shutdown timeout in seconds
-shutdownTimeout = 10
-# GroupGracePeriod: group grace period in seconds
-groupGracePeriod = 5
-# GroupMaxDelay: group max delay in seconds
-groupMaxDelay = 20
-# GroupMaxSize: group max size
-groupMaxSize = 100
-
-# Priority weight: queue name -> priority weight (higher weight = higher priority)
-# Critical queue has highest priority, low queue has lowest priority
-[taskQueue.priority]
-# Critical queue has highest priority, default queue has medium priority, low queue has lowest priority
-critical = 6
-# Default queue has medium priority
-default = 3
-# Low queue has lowest priority
-low = 1
+provider = "kafka"
+# DelaySlotCount: delay slot count
+delaySlotCount = 24
+# DelaySlotDuration: delay slot duration in seconds
+delaySlotDuration = 3600
+# AutoCommit: kafka enable auto commit
+autoCommit = false
+# SessionTimeout: kafka session timeout in milliseconds
+sessionTimeout = 30000
+# MaxPollInterval: kafka max poll interval in milliseconds
+maxPollInterval = 300000
+# MessageFormat: json, sonic, blob, protobuf
+messageFormat = "protobuf"
+# MessageCodec: optional custom codec name (defaults to MessageFormat)
+messageCodec = "protobuf"

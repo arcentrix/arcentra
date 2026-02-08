@@ -36,36 +36,6 @@ func TestWithKafka(t *testing.T) {
 	}
 }
 
-func TestWithRocketMQ(t *testing.T) {
-	nameServers := []string{"localhost:9876"}
-	opt := WithRocketMQ(nameServers)
-	config := &queueConfig{}
-	opt.apply(config)
-
-	if config.Type != QueueTypeRocketMQ {
-		t.Errorf("expected Type to be QueueTypeRocketMQ, got %v", config.Type)
-	}
-	if config.BootstrapServers != "localhost:9876" {
-		t.Errorf("expected BootstrapServers to be 'localhost:9876', got %s", config.BootstrapServers)
-	}
-	if config.rocketmqConfig == nil {
-		t.Error("expected rocketmqConfig to be set")
-	}
-}
-
-func TestWithRocketMQ_EmptyNameServers(t *testing.T) {
-	opt := WithRocketMQ([]string{})
-	config := &queueConfig{}
-	opt.apply(config)
-
-	if config.Type != QueueTypeRocketMQ {
-		t.Errorf("expected Type to be QueueTypeRocketMQ, got %v", config.Type)
-	}
-	if config.rocketmqConfig == nil {
-		t.Error("expected rocketmqConfig to be set")
-	}
-}
-
 func TestWithGroupID(t *testing.T) {
 	groupID := "test-group"
 	opt := WithGroupID(groupID)

@@ -23,10 +23,10 @@ import (
 
 // ProducerConfig represents Kafka producer configuration.
 type ProducerConfig struct {
-	ClientConfig `json:",inline" mapstructure:",squash"`
-	Acks         string `json:"acks" mapstructure:"acks"`
-	Retries      int    `json:"retries" mapstructure:"retries"`
-	Compression  string `json:"compression" mapstructure:"compression"`
+	KafkaConfig `json:",inline" mapstructure:",squash"`
+	Acks        string `json:"acks" mapstructure:"acks"`
+	Retries     int    `json:"retries" mapstructure:"retries"`
+	Compression string `json:"compression" mapstructure:"compression"`
 }
 
 // ProducerOption defines optional configuration for ProducerConfig.
@@ -43,7 +43,7 @@ func (fn producerOptionFunc) apply(cfg *ProducerConfig) {
 func WithProducerClientOptions(opts ...ClientOption) ProducerOption {
 	return producerOptionFunc(func(cfg *ProducerConfig) {
 		for _, opt := range opts {
-			opt.apply(&cfg.ClientConfig)
+			opt.apply(&cfg.KafkaConfig)
 		}
 	})
 }
@@ -72,9 +72,9 @@ type Producer struct {
 }
 
 // NewProducer creates a new Kafka producer.
-func NewProducer(bootstrapServers string, opts ...ProducerOption) (*Producer, error) {
+func NewProducer(bootstrapServers string, programName string, opts ...ProducerOption) (*Producer, error) {
 	cfg := ProducerConfig{
-		ClientConfig: ClientConfig{
+		KafkaConfig: KafkaConfig{
 			BootstrapServers: bootstrapServers,
 		},
 		Acks:        "all",
@@ -86,10 +86,15 @@ func NewProducer(bootstrapServers string, opts ...ProducerOption) (*Producer, er
 	}
 	normalizeProducerConfig(&cfg)
 
-	config, err := buildBaseConfig(cfg.ClientConfig)
+	config, err := buildBaseConfig(cfg.KafkaConfig)
 	if err != nil {
 		return nil, err
 	}
+	clientID, err := buildClientID(programName)
+	if err != nil {
+		return nil, err
+	}
+	_ = config.SetKey("client.id", clientID)
 	_ = config.SetKey("acks", cfg.Acks)
 	_ = config.SetKey("retries", cfg.Retries)
 	_ = config.SetKey("compression.type", cfg.Compression)

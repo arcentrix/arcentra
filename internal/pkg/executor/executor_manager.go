@@ -28,6 +28,7 @@ type ExecutorManager struct {
 	executors []Executor
 	mu        sync.RWMutex
 	emitter   *EventEmitter
+	logPub    LogPublisher
 }
 
 // NewExecutorManager 创建执行器管理器
@@ -119,10 +120,23 @@ func (m *ExecutorManager) SetEventPublisher(publisher EventPublisher, config Eve
 	m.SetEventEmitter(NewEventEmitter(publisher, config))
 }
 
+// SetLogPublisher sets the log publisher for build logs.
+func (m *ExecutorManager) SetLogPublisher(publisher LogPublisher) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.logPub = publisher
+}
+
 func (m *ExecutorManager) getEmitter() *EventEmitter {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.emitter
+}
+
+func (m *ExecutorManager) getLogPublisher() LogPublisher {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.logPub
 }
 
 func (m *ExecutorManager) emitStarted(ctx context.Context, req *ExecutionRequest, executorName string) {
@@ -199,12 +213,14 @@ func (m *ExecutorManager) emitLogs(ctx context.Context, emitter *EventEmitter, e
 	if result == nil {
 		return
 	}
+	logPublisher := m.getLogPublisher()
 	if result.Output != "" {
 		data := map[string]any{
 			"stream":  "stdout",
 			"content": result.Output,
 		}
 		emitter.Emit(ctx, plugin.EventTypeTaskLog, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
+		m.publishBuildLog(ctx, logPublisher, eventCtx, result.Output, "stdout")
 	}
 	if result.ErrorOutput != "" {
 		data := map[string]any{
@@ -212,7 +228,16 @@ func (m *ExecutorManager) emitLogs(ctx context.Context, emitter *EventEmitter, e
 			"content": result.ErrorOutput,
 		}
 		emitter.Emit(ctx, plugin.EventTypeTaskLog, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
+		m.publishBuildLog(ctx, logPublisher, eventCtx, result.ErrorOutput, "stderr")
 	}
+}
+
+func (m *ExecutorManager) publishBuildLog(ctx context.Context, publisher LogPublisher, eventCtx EventContext, content, stream string) {
+	if publisher == nil || content == "" {
+		return
+	}
+	entry := BuildLogMessageFromEvent(eventCtx, content, stream)
+	_ = publisher.Publish(ctx, entry)
 }
 
 func (m *ExecutorManager) emitProgress(ctx context.Context, emitter *EventEmitter, eventCtx EventContext, executorName string, result *ExecutionResult) {

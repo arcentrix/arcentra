@@ -21,6 +21,7 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/arcentrix/arcentra/pkg/safe"
 )
@@ -45,11 +46,29 @@ func NewPipelineExecutor(
 	}
 }
 
+// NewPipelineExecutorWithQueue creates a new pipeline executor with task queue.
+func NewPipelineExecutorWithQueue(
+	p *spec.Pipeline,
+	pluginMgr *plugin.Manager,
+	workspace string,
+	logger log.Logger,
+	taskQueue nova.TaskQueue,
+) *PipelineExecutor {
+	execCtx := NewExecutionContext(p, pluginMgr, workspace, logger)
+	execCtx.SetTaskQueue(taskQueue)
+	return &PipelineExecutor{
+		execCtx: execCtx,
+		logger:  logger,
+	}
+}
+
 // Execute executes the pipeline using DAG-based reconciliation
 func (pe *PipelineExecutor) Execute(ctx context.Context) error {
+	pe.emitPipelineEvent(plugin.EventTypePipelineStarted, "started")
 	// Build DAG from pipeline jobs
 	graph, tasks, err := BuildDAG(pe.execCtx.Pipeline.Jobs)
 	if err != nil {
+		pe.emitPipelineEvent(plugin.EventTypePipelineFailed, "failed")
 		return fmt.Errorf("build DAG: %w", err)
 	}
 
@@ -80,17 +99,20 @@ func (pe *PipelineExecutor) Execute(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			pe.emitPipelineEvent(plugin.EventTypePipelineFailed, "failed")
 			return ctx.Err()
 		case <-reconcileCh:
 			// Triggered by task completion
 			hasMore, err := reconciler.Reconcile(ctx)
 			if err != nil {
+				pe.emitPipelineEvent(plugin.EventTypePipelineFailed, "failed")
 				return fmt.Errorf("reconcile: %w", err)
 			}
 			if !hasMore && reconciler.IsCompleted() {
 				if pe.logger.Log != nil {
 					pe.logger.Log.Infow("pipeline execution completed", "namespace", pe.execCtx.Pipeline.Namespace)
 				}
+				pe.emitPipelineEvent(plugin.EventTypePipelineCompleted, "completed")
 				return nil
 			}
 		case <-ticker.C:
@@ -99,6 +121,7 @@ func (pe *PipelineExecutor) Execute(ctx context.Context) error {
 				if pe.logger.Log != nil {
 					pe.logger.Log.Infow("pipeline execution completed", "namespace", pe.execCtx.Pipeline.Namespace)
 				}
+				pe.emitPipelineEvent(plugin.EventTypePipelineCompleted, "completed")
 				return nil
 			}
 		}

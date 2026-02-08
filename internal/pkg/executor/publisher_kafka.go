@@ -29,11 +29,11 @@ type KafkaPublisher struct {
 }
 
 // NewKafkaPublisher creates a new KafkaPublisher.
-func NewKafkaPublisher(bootstrapServers string, topic string, opts ...kafka.ProducerOption) (*KafkaPublisher, error) {
+func NewKafkaPublisher(bootstrapServers string, programName string, topic string, opts ...kafka.ProducerOption) (*KafkaPublisher, error) {
 	if topic == "" {
 		return nil, fmt.Errorf("kafka topic is required")
 	}
-	producer, err := kafka.NewProducer(bootstrapServers, opts...)
+	producer, err := kafka.NewProducer(bootstrapServers, programName, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -66,4 +66,60 @@ func (p *KafkaPublisher) Close() error {
 	}
 	p.producer.Close()
 	return nil
+}
+
+// KafkaTopicPublisher publishes CloudEvents to Kafka with dynamic topics.
+type KafkaTopicPublisher struct {
+	producer      *kafka.Producer
+	topicResolver func(event map[string]any) string
+}
+
+// NewKafkaTopicPublisher creates a new KafkaTopicPublisher.
+func NewKafkaTopicPublisher(bootstrapServers string, programName string, resolver func(event map[string]any) string, opts ...kafka.ProducerOption) (*KafkaTopicPublisher, error) {
+	if resolver == nil {
+		return nil, fmt.Errorf("topic resolver is required")
+	}
+	producer, err := kafka.NewProducer(bootstrapServers, programName, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &KafkaTopicPublisher{
+		producer:      producer,
+		topicResolver: resolver,
+	}, nil
+}
+
+// Publish sends event to Kafka.
+func (p *KafkaTopicPublisher) Publish(ctx context.Context, event map[string]any) error {
+	if p == nil || p.producer == nil {
+		return fmt.Errorf("kafka publisher is not initialized")
+	}
+	topic := p.topicResolver(event)
+	if topic == "" {
+		return fmt.Errorf("kafka topic is required")
+	}
+	payload, err := sonic.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal event: %w", err)
+	}
+	return p.producer.Send(ctx, topic, buildEventKey(event), payload, nil)
+}
+
+// Close closes the publisher.
+func (p *KafkaTopicPublisher) Close() error {
+	if p == nil || p.producer == nil {
+		return nil
+	}
+	p.producer.Close()
+	return nil
+}
+
+func buildEventKey(event map[string]any) string {
+	if value, ok := event["subject"].(string); ok && value != "" {
+		return value
+	}
+	if value, ok := event["id"].(string); ok {
+		return value
+	}
+	return ""
 }

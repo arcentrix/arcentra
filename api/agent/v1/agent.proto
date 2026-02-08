@@ -24,20 +24,80 @@ service AgentService {
   // Report step run status - Agent reports status changes during step run execution
   rpc ReportStepRunStatus(ReportStepRunStatusRequest) returns (ReportStepRunStatusResponse) {}
 
-  // Report step run log - Agent batch reports step run execution logs
-  rpc ReportStepRunLog(ReportStepRunLogRequest) returns (ReportStepRunLogResponse) {}
-
   // Cancel step run - Server notifies Agent to cancel a running step run
   rpc CancelStepRun(CancelStepRunRequest) returns (CancelStepRunResponse) {}
 
   // Update labels - Dynamically update Agent's labels
   rpc UpdateLabels(UpdateLabelsRequest) returns (UpdateLabelsResponse) {}
 
-  // Download plugin - Agent downloads plugin from Server
-  rpc DownloadPlugin(DownloadPluginRequest) returns (DownloadPluginResponse) {}
+  // Connect - Bidirectional control plane channel
+  rpc Connect(stream ConnectRequest) returns (stream ConnectResponse) {}
+}
 
-  // List available plugins - Agent queries available plugin list
-  rpc ListAvailablePlugins(ListAvailablePluginsRequest) returns (ListAvailablePluginsResponse) {}
+// ============ Control Plane ============
+
+// Connect request from Agent to Gateway
+message ConnectRequest {
+  string agent_id = 1;                      // Agent unique identifier
+  string request_id = 2;                    // Client request ID for tracing
+  oneof payload {
+    ConnectHeartbeat heartbeat = 3;         // Heartbeat
+    TaskAck task_ack = 4;                   // Command ack
+    TaskStatus task_status = 5;             // Task execution status
+  }
+}
+
+// Connect response from Gateway to Agent
+message ConnectResponse {
+  string agent_id = 1;                      // Agent unique identifier
+  string command_id = 2;                    // Command ID for ack and idempotency
+  oneof payload {
+    TaskDispatch task_dispatch = 3;         // Task dispatch
+    TaskCancel task_cancel = 4;             // Task cancel
+  }
+}
+
+// Heartbeat data over Connect
+message ConnectHeartbeat {
+  int64 timestamp = 1;                      // Timestamp in seconds
+  AgentStatus status = 2;                   // Agent status
+  int32 running_step_runs_count = 3;        // Running step runs count
+  int32 max_concurrent_step_runs = 4;       // Maximum concurrent step runs
+}
+
+// Task dispatch command
+message TaskDispatch {
+  repeated StepRun step_runs = 1;           // Step runs to execute
+}
+
+// Task cancel command
+message TaskCancel {
+  string step_run_id = 1;                   // Step run ID
+  string reason = 2;                        // Cancellation reason
+}
+
+// Command acknowledgment
+message TaskAck {
+  string command_id = 1;                    // Command ID from ConnectResponse
+  AckStatus status = 2;                     // Ack status
+  string message = 3;                       // Ack message
+}
+
+// Ack status enum
+enum AckStatus {
+  ACK_STATUS_UNSPECIFIED = 0;
+  ACK_STATUS_OK = 1;
+  ACK_STATUS_FAILED = 2;
+}
+
+// Task status update
+message TaskStatus {
+  string step_run_id = 1;                   // Step run ID
+  steprun.v1.StepRunStatus status = 2;      // Step run status
+  int32 exit_code = 3;                      // Exit code
+  string error_message = 4;                 // Error message
+  int64 timestamp = 5;                      // Timestamp in seconds
+  map<string, string> metrics = 6;          // Execution metrics
 }
 
 // Agent status enum
@@ -178,28 +238,6 @@ message ReportStepRunStatusResponse {
   string message = 2;
 }
 
-// Report step run log request
-message ReportStepRunLogRequest {
-  string agent_id = 1;                    // Agent ID (required)
-  string step_run_id = 2;                 // Step run ID (required)
-  repeated LogEntry logs = 3;             // Log entries
-}
-
-// Log entry
-message LogEntry {
-  int64 timestamp = 1;                    // Timestamp (Unix timestamp in seconds)
-  string level = 2;                       // Log level (info, warn, error, debug)
-  string content = 3;                    // Log content
-  int32 line_number = 4;                 // Line number
-  string stream = 5;                     // Stream type (stdout, stderr)
-}
-
-// Report step run log response
-message ReportStepRunLogResponse {
-  bool success = 1;
-  string message = 2;
-}
-
 // Cancel step run request
 message CancelStepRunRequest {
   string agent_id = 1;                    // Agent ID (required)
@@ -263,32 +301,3 @@ enum PluginLocation {
   PLUGIN_LOCATION_REGISTRY = 3;          // Plugin registry
 }
 
-// Download plugin request
-message DownloadPluginRequest {
-  string agent_id = 1;                    // Agent ID (required)
-  string plugin_id = 2;                   // Plugin ID (required)
-  string version = 3;                     // Version number (optional, download latest if not specified)
-}
-
-// Download plugin response
-message DownloadPluginResponse {
-  bool success = 1;                       // Success status
-  string message = 2;                     // Message
-  bytes plugin_data = 3;                  // Plugin binary data
-  string checksum = 4;                    // SHA256 checksum
-  int64 size = 5;                         // File size
-  string version = 6;                     // Actual version number
-}
-
-// List available plugins request
-message ListAvailablePluginsRequest {
-  string agent_id = 1;                    // Agent ID (required)
-  string plugin_type = 2;                 // Optional: filter by type (notify/ci/cd/security, etc.)
-}
-
-// List available plugins response
-message ListAvailablePluginsResponse {
-  bool success = 1;
-  string message = 2;
-  repeated PluginInfo plugins = 3;        // List of available plugins
-}

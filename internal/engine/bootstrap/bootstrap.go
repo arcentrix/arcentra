@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/engine/config"
-	"github.com/arcentrix/arcentra/internal/engine/model"
 	"github.com/arcentrix/arcentra/internal/engine/repo"
 	"github.com/arcentrix/arcentra/internal/engine/router"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
@@ -153,13 +152,6 @@ func Bootstrap(configFile string, pluginConfigFile string, initApp InitAppFunc) 
 func Run(app *App, cleanup func()) {
 	appConf := app.AppConf
 
-	// 同步插件信息到数据库
-	if err := syncPluginsToDatabase(app.PluginMgr, app.Repos); err != nil {
-		log.Warnw("failed to sync plugins to database", zap.Error(err))
-	} else {
-		log.Info("plugins synced to database successfully")
-	}
-
 	// start metrics server
 	if app.MetricsServer != nil {
 		if err := app.MetricsServer.Start(); err != nil {
@@ -220,65 +212,4 @@ func Run(app *App, cleanup func()) {
 	cleanup()
 
 	log.Info("Server shutdown complete")
-}
-
-// syncPluginsToDatabase 同步插件信息到数据库
-func syncPluginsToDatabase(pluginMgr *plugin.Manager, repos *repo.Repositories) error {
-	if pluginMgr == nil || repos == nil || repos.Plugin == nil {
-		return fmt.Errorf("plugin manager or repositories not initialized")
-	}
-
-	// 获取所有已注册的插件信息
-	plugins := pluginMgr.ListPlugins()
-	if len(plugins) == 0 {
-		log.Info("no plugins to sync")
-		return nil
-	}
-
-	var errors []error
-	for name, info := range plugins {
-		// 获取插件实例以获取 Repository 和 Author
-		pluginInstance, err := pluginMgr.GetPlugin(name)
-		var repository string
-		var author string
-		if err == nil && pluginInstance != nil {
-			repository = pluginInstance.Repository()
-			author = pluginInstance.Author()
-		} else {
-			repository = info.Homepage
-			author = info.Author
-		}
-
-		// 将 PluginInfo 转换为 model.Plugin
-		pluginModel := &model.Plugin{
-			PluginId:    name, // 使用插件名称作为 plugin_id
-			Name:        info.Name,
-			Version:     info.Version,
-			Description: info.Description,
-			Author:      author,
-			PluginType:  plugin.PluginTypeToString(info.Type),
-			Repository:  repository,
-		}
-
-		// 创建或更新插件信息
-		if err := repos.Plugin.CreateOrUpdatePlugin(pluginModel); err != nil {
-			log.Errorw("failed to sync plugin to database",
-				"plugin", name,
-				"version", info.Version,
-				zap.Error(err),
-			)
-			errors = append(errors, fmt.Errorf("plugin %s@%s: %w", name, info.Version, err))
-		} else {
-			log.Infow("plugin synced to database",
-				"plugin", name,
-				"version", info.Version,
-			)
-		}
-	}
-
-	if len(errors) > 0 {
-		return fmt.Errorf("failed to sync %d plugin(s): %v", len(errors), errors)
-	}
-
-	return nil
 }

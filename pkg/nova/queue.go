@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,7 +28,7 @@ import (
 
 const (
 	// DefaultGroupID is the default consumer group ID format
-	DefaultGroupID = "TASK_QUEUE_GROUP_%d"
+	DefaultGroupID = "TASK_QUEUE_GROUP_%s"
 	// DefaultTopicPrefix is the default topic prefix
 	DefaultTopicPrefix = "TASK_QUEUE"
 	// DefaultDelaySlotCount is the default number of delay slots
@@ -50,6 +51,17 @@ const (
 	// TasksSuffix is the suffix for task topics
 	TasksSuffix = "%s_TASKS"
 )
+
+type TaskQueueConfig struct {
+	Provider          string `mapstructure:"provider"`
+	DelaySlotCount    int    `mapstructure:"delaySlotCount"`
+	DelaySlotDuration int    `mapstructure:"delaySlotDuration"`
+	AutoCommit        bool   `mapstructure:"autoCommit"`
+	SessionTimeout    int    `mapstructure:"sessionTimeout"`
+	MaxPollInterval   int    `mapstructure:"maxPollInterval"`
+	MessageFormat     string `mapstructure:"messageFormat"`
+	MessageCodec      string `mapstructure:"messageCodec"`
+}
 
 // TaskMessage represents a task message structure
 type TaskMessage struct {
@@ -94,7 +106,7 @@ type DelayManager interface {
 func NewTaskQueue(opts ...QueueOption) (TaskQueue, error) {
 	// Default configuration
 	config := &queueConfig{
-		GroupID:           fmt.Sprintf(DefaultGroupID, os.Getpid()),
+		GroupID:           DefaultGroupID,
 		TopicPrefix:       DefaultTopicPrefix,
 		DelaySlotCount:    DefaultDelaySlotCount,
 		DelaySlotDuration: DefaultDelaySlotDuration,
@@ -111,18 +123,16 @@ func NewTaskQueue(opts ...QueueOption) (TaskQueue, error) {
 	}
 
 	// Validate required configuration
-	if config.Type == "" {
+	if config.Provider == "" {
 		return nil, fmt.Errorf("broker type is required, use WithKafka or WithRocketMQ")
 	}
 
-	// Use default GroupID if not set
 	if config.GroupID == "" {
-		config.GroupID = fmt.Sprintf(DefaultGroupID, os.Getpid())
-	}
-
-	// Use default TopicPrefix if not set
-	if config.TopicPrefix == "" {
-		config.TopicPrefix = DefaultTopicPrefix
+		hostname, err := os.Hostname()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get hostname: %w", err)
+		}
+		config.GroupID = fmt.Sprintf(DefaultGroupID, hostname)
 	}
 
 	// Create broker based on type
@@ -130,13 +140,11 @@ func NewTaskQueue(opts ...QueueOption) (TaskQueue, error) {
 	var delayManager DelayManager
 	var err error
 
-	switch config.Type {
-	case QueueTypeKafka:
+	switch config.Provider {
+	case QueueProviderKafka:
 		broker, delayManager, err = newKafkaBroker(config)
-	case QueueTypeRocketMQ:
-		broker, delayManager, err = newRocketMQBroker(config)
 	default:
-		return nil, fmt.Errorf("unsupported queue type: %s", config.Type)
+		return nil, fmt.Errorf("unsupported queue type: %s", config.Provider)
 	}
 
 	if err != nil {
@@ -149,15 +157,14 @@ func NewTaskQueue(opts ...QueueOption) (TaskQueue, error) {
 	topicPrefix := config.TopicPrefix
 	if config.kafkaConfig != nil && config.kafkaConfig.TopicPrefix != "" {
 		topicPrefix = config.kafkaConfig.TopicPrefix
-	} else if config.rocketmqConfig != nil && config.rocketmqConfig.TopicPrefix != "" {
-		topicPrefix = config.rocketmqConfig.TopicPrefix
 	}
+	topicPrefix = normalizeQueuePrefix(topicPrefix)
 
 	// Initialize priority queue mapping
 	priorityQueues := map[Priority]string{
-		PriorityHigh:   fmt.Sprintf("%s%s", topicPrefix, PriorityHighSuffix),
-		PriorityNormal: fmt.Sprintf("%s%s", topicPrefix, PriorityNormalSuffix),
-		PriorityLow:    fmt.Sprintf("%s%s", topicPrefix, PriorityLowSuffix),
+		PriorityHigh:   formatQueueTopic(topicPrefix, PriorityHighSuffix),
+		PriorityNormal: formatQueueTopic(topicPrefix, PriorityNormalSuffix),
+		PriorityLow:    formatQueueTopic(topicPrefix, PriorityLowSuffix),
 	}
 
 	// Determine message codec
@@ -285,13 +292,6 @@ func (q *TaskQueueImpl) Start(handler IHandler) error {
 	for _, topic := range q.priorityQueues {
 		topics = append(topics, topic)
 	}
-	topicPrefix := q.config.TopicPrefix
-	if q.config.kafkaConfig != nil && q.config.kafkaConfig.TopicPrefix != "" {
-		topicPrefix = q.config.kafkaConfig.TopicPrefix
-	} else if q.config.rocketmqConfig != nil && q.config.rocketmqConfig.TopicPrefix != "" {
-		topicPrefix = q.config.rocketmqConfig.TopicPrefix
-	}
-	topics = append(topics, fmt.Sprintf("%s%s", topicPrefix, TasksSuffix))
 
 	// Start consumption goroutine
 	q.wg.Add(1)
@@ -335,13 +335,6 @@ func (q *TaskQueueImpl) StartBatch(handler IBatchHandler, agg IAggregator) error
 	for _, topic := range q.priorityQueues {
 		topics = append(topics, topic)
 	}
-	topicPrefix := q.config.TopicPrefix
-	if q.config.kafkaConfig != nil && q.config.kafkaConfig.TopicPrefix != "" {
-		topicPrefix = q.config.kafkaConfig.TopicPrefix
-	} else if q.config.rocketmqConfig != nil && q.config.rocketmqConfig.TopicPrefix != "" {
-		topicPrefix = q.config.rocketmqConfig.TopicPrefix
-	}
-	topics = append(topics, fmt.Sprintf("%s%s", topicPrefix, TasksSuffix))
 
 	// Start batch consumption goroutine
 	q.wg.Add(1)
@@ -504,14 +497,20 @@ func (q *TaskQueueImpl) sendBatchTasks(tasks []*Task, queueName string, priority
 
 // getQueueName gets the queue name based on custom queue and priority
 func (q *TaskQueueImpl) getQueueName(customQueue string, priority Priority) string {
-	if customQueue != "" {
-		topicPrefix := q.config.TopicPrefix
-		if q.config.kafkaConfig != nil && q.config.kafkaConfig.TopicPrefix != "" {
-			topicPrefix = q.config.kafkaConfig.TopicPrefix
-		} else if q.config.rocketmqConfig != nil && q.config.rocketmqConfig.TopicPrefix != "" {
-			topicPrefix = q.config.rocketmqConfig.TopicPrefix
-		}
-		return fmt.Sprintf("%s-%s", topicPrefix, customQueue)
-	}
 	return q.priorityQueues[priority]
+}
+
+func normalizeQueuePrefix(prefix string) string {
+	return strings.ToUpper(strings.TrimSpace(prefix))
+}
+
+func normalizeQueueName(name string) string {
+	return strings.ToUpper(strings.TrimSpace(name))
+}
+
+func formatQueueTopic(prefix, suffix string) string {
+	if prefix == "" {
+		return normalizeQueueName(strings.TrimPrefix(suffix, "_"))
+	}
+	return fmt.Sprintf("%s%s", prefix, strings.ToUpper(suffix))
 }
