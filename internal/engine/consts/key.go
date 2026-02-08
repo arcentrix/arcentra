@@ -16,5 +16,6 @@ package consts
 
 const UserInfoKey = "user:info:"
 const UserTokenKey = "user:token:"
+const UserRolesRoutesKey = "user:roles_routes:"
 const AgentDetailKey = "agent:detail:"
 const GeneralSettingsKeyByName = "general:settings:"
