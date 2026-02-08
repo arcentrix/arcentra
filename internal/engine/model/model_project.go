@@ -109,11 +109,13 @@ const (
 
 // ProjectRepoType 仓库类型枚举
 const (
-	RepoTypeGit    = "git"    // 通用Git
-	RepoTypeGitHub = "github" // GitHub
-	RepoTypeGitLab = "gitlab" // GitLab
-	RepoTypeGitee  = "gitee"  // Gitee
-	RepoTypeSVN    = "svn"    // SVN
+	RepoTypeGit       = "git"       // 通用Git
+	RepoTypeGitHub    = "github"    // GitHub
+	RepoTypeGitLab    = "gitlab"    // GitLab
+	RepoTypeGitee     = "gitee"     // Gitee
+	RepoTypeBitbucket = "bitbucket" // Bitbucket
+	RepoTypeGitea     = "gitea"     // Gitea
+	RepoTypeSVN       = "svn"       // SVN
 )
 
 // ProjectStatus 项目状态枚举

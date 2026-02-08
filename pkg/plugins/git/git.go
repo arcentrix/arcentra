@@ -68,6 +68,7 @@ type CheckoutArgs struct {
 	Path   string            `json:"path"`   // Repository path (required)
 	Force  bool              `json:"force"`  // Force checkout
 	Create bool              `json:"create"` // Create branch if not exists
+	Auth   map[string]string `json:"auth"`   // Authentication (optional, only needed for remote ops)
 	Env    map[string]string `json:"env"`    // Additional environment variables
 }
 
@@ -77,6 +78,7 @@ type PullArgs struct {
 	Branch string            `json:"branch"` // Branch to pull (optional, defaults to current)
 	Remote string            `json:"remote"` // Remote name (optional, defaults to origin)
 	Rebase bool              `json:"rebase"` // Use rebase instead of merge
+	Auth   map[string]string `json:"auth"`   // Authentication (username, password, token, ssh_key)
 	Env    map[string]string `json:"env"`    // Additional environment variables
 }
 
@@ -113,6 +115,30 @@ type TagArgs struct {
 	Env  map[string]string `json:"env"`  // Additional environment variables
 }
 
+// Branch represents a structured branch info.
+type Branch struct {
+	Name     string `json:"name"`
+	CommitId string `json:"commitId"`
+	IsRemote bool   `json:"isRemote"`
+	IsHead   bool   `json:"isHead"`
+	Upstream string `json:"upstream,omitempty"`
+}
+
+// Tag represents a structured tag info.
+type Tag struct {
+	Name     string `json:"name"`
+	CommitId string `json:"commitId"`
+}
+
+// Commit represents a structured commit info.
+type Commit struct {
+	CommitId    string    `json:"commitId"`
+	AuthorName  string    `json:"authorName"`
+	AuthorEmail string    `json:"authorEmail"`
+	CommittedAt time.Time `json:"committedAt"`
+	Message     string    `json:"message"`
+}
+
 // Git implements the git plugin
 type Git struct {
 	*plugin.PluginBase
@@ -125,13 +151,17 @@ type Git struct {
 // Action definitions
 var (
 	actions = map[string]string{
-		"clone":    "Clone a git repository",
-		"checkout": "Checkout a branch, tag, or commit",
-		"pull":     "Pull latest changes from remote",
-		"status":   "Check repository status",
-		"log":      "View commit history",
-		"branch":   "List branches",
-		"tag":      "List tags",
+		"clone":         "Clone a git repository",
+		"checkout":      "Checkout a branch, tag, or commit",
+		"pull":          "Pull latest changes from remote",
+		"status":        "Check repository status",
+		"log":           "View commit history",
+		"branch":        "List branches",
+		"tag":           "List tags",
+		"branches.list": "List branches (structured)",
+		"tags.list":     "List tags (structured)",
+		"commits.list":  "List commits (structured)",
+		"commit.get":    "Get a commit (structured)",
 	}
 )
 
@@ -202,6 +232,28 @@ func (p *Git) registerActions() {
 	// Register "tag" action
 	if err := p.Registry().RegisterFunc("tag", actions["tag"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
 		return p.tag(params, opts)
+	}); err != nil {
+		return
+	}
+
+	// Register structured actions
+	if err := p.Registry().RegisterFunc("branches.list", actions["branches.list"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+		return p.branchesList(params, opts)
+	}); err != nil {
+		return
+	}
+	if err := p.Registry().RegisterFunc("tags.list", actions["tags.list"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+		return p.tagsList(params, opts)
+	}); err != nil {
+		return
+	}
+	if err := p.Registry().RegisterFunc("commits.list", actions["commits.list"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+		return p.commitsList(params, opts)
+	}); err != nil {
+		return
+	}
+	if err := p.Registry().RegisterFunc("commit.get", actions["commit.get"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+		return p.commitGet(params, opts)
 	}); err != nil {
 		return
 	}
@@ -330,15 +382,15 @@ func (p *Git) clone(params json.RawMessage, opts json.RawMessage) (json.RawMessa
 	args = append(args, cloneParams.Repo, destPath)
 
 	// Execute clone
-	result, err := p.runGitCommand(args, nil, cloneParams.Env, "")
+	result, err := p.runGitCommand(args, cloneParams.Auth, cloneParams.Env, "")
 	if err != nil {
 		return nil, fmt.Errorf("clone failed: %w", err)
 	}
 	if !result["success"].(bool) {
-		errorMsg := result["stderr"].(string)
+		errorMsg := p.redactSensitive(result["stderr"].(string), cloneParams.Auth)
 		if errorMsg == "" {
 			if errStr, ok := result["error"].(string); ok {
-				errorMsg = errStr
+				errorMsg = p.redactSensitive(errStr, cloneParams.Auth)
 			} else {
 				errorMsg = "clone command failed"
 			}
@@ -396,7 +448,7 @@ func (p *Git) checkout(params json.RawMessage, opts json.RawMessage) (json.RawMe
 		args = append(args, checkoutParams.Ref)
 	}
 
-	result, err := p.runGitCommand(args, nil, checkoutParams.Env, checkoutParams.Path)
+	result, err := p.runGitCommand(args, checkoutParams.Auth, checkoutParams.Env, checkoutParams.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -437,7 +489,7 @@ func (p *Git) pull(params json.RawMessage, opts json.RawMessage) (json.RawMessag
 		args = append(args, pullParams.Branch)
 	}
 
-	result, err := p.runGitCommand(args, nil, pullParams.Env, pullParams.Path)
+	result, err := p.runGitCommand(args, pullParams.Auth, pullParams.Env, pullParams.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -598,6 +650,203 @@ func (p *Git) tag(params json.RawMessage, opts json.RawMessage) (json.RawMessage
 	return sonic.Marshal(result)
 }
 
+type commitGetArgs struct {
+	Path     string            `json:"path"`
+	CommitId string            `json:"commitId"`
+	Env      map[string]string `json:"env"`
+}
+
+// branchesList lists branches in structured format.
+func (p *Git) branchesList(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+	var branchParams BranchArgs
+	if err := sonic.Unmarshal(params, &branchParams); err != nil {
+		return nil, fmt.Errorf("failed to parse branches.list params: %w", err)
+	}
+	var optsMap map[string]any
+	if len(opts) > 0 {
+		if err := sonic.Unmarshal(opts, &optsMap); err == nil {
+			if workspace, ok := optsMap["workspace"].(string); ok && workspace != "" {
+				if branchParams.Path == "" {
+					branchParams.Path = workspace
+				}
+			}
+		}
+	}
+	if branchParams.Path == "" {
+		return nil, fmt.Errorf("repository path is required")
+	}
+
+	refs := []string{"refs/heads"}
+	if branchParams.All || branchParams.Remote {
+		refs = append(refs, "refs/remotes")
+	}
+
+	branches := make([]Branch, 0)
+	for _, ref := range refs {
+		result, err := p.runGitCommand([]string{"for-each-ref", "--format=%(refname:short)%x1f%(objectname)%x1f%(HEAD)%x1f%(upstream:short)", ref}, nil, branchParams.Env, branchParams.Path)
+		if err != nil {
+			return nil, err
+		}
+		stdout, _ := result["stdout"].(string)
+		lines := strings.Split(strings.TrimSpace(stdout), "\n")
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			parts := strings.Split(line, "\x1f")
+			if len(parts) < 2 {
+				continue
+			}
+			b := Branch{
+				Name:     strings.TrimSpace(parts[0]),
+				CommitId: strings.TrimSpace(parts[1]),
+				IsRemote: ref == "refs/remotes",
+			}
+			if len(parts) >= 3 && strings.TrimSpace(parts[2]) == "*" {
+				b.IsHead = true
+			}
+			if len(parts) >= 4 {
+				b.Upstream = strings.TrimSpace(parts[3])
+			}
+			branches = append(branches, b)
+		}
+	}
+
+	return sonic.Marshal(map[string]any{"branches": branches})
+}
+
+// tagsList lists tags in structured format.
+func (p *Git) tagsList(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+	var tagParams TagArgs
+	if err := sonic.Unmarshal(params, &tagParams); err != nil {
+		return nil, fmt.Errorf("failed to parse tags.list params: %w", err)
+	}
+	var optsMap map[string]any
+	if len(opts) > 0 {
+		if err := sonic.Unmarshal(opts, &optsMap); err == nil {
+			if workspace, ok := optsMap["workspace"].(string); ok && workspace != "" {
+				if tagParams.Path == "" {
+					tagParams.Path = workspace
+				}
+			}
+		}
+	}
+	if tagParams.Path == "" {
+		return nil, fmt.Errorf("repository path is required")
+	}
+
+	args := []string{"for-each-ref", "refs/tags", "--format=%(refname:short)%x1f%(objectname)%x1f%(peeled)"}
+	if tagParams.Sort != "" {
+		args = append(args, "--sort", tagParams.Sort)
+	}
+	result, err := p.runGitCommand(args, nil, tagParams.Env, tagParams.Path)
+	if err != nil {
+		return nil, err
+	}
+	stdout, _ := result["stdout"].(string)
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	tags := make([]Tag, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.Split(line, "\x1f")
+		if len(parts) < 2 {
+			continue
+		}
+		commitId := strings.TrimSpace(parts[1])
+		if len(parts) >= 3 && strings.TrimSpace(parts[2]) != "" {
+			commitId = strings.TrimSpace(parts[2])
+		}
+		tags = append(tags, Tag{
+			Name:     strings.TrimSpace(parts[0]),
+			CommitId: commitId,
+		})
+	}
+	return sonic.Marshal(map[string]any{"tags": tags})
+}
+
+// commitsList lists commits in structured format.
+func (p *Git) commitsList(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+	var logParams LogArgs
+	if err := sonic.Unmarshal(params, &logParams); err != nil {
+		return nil, fmt.Errorf("failed to parse commits.list params: %w", err)
+	}
+	var optsMap map[string]any
+	if len(opts) > 0 {
+		if err := sonic.Unmarshal(opts, &optsMap); err == nil {
+			if workspace, ok := optsMap["workspace"].(string); ok && workspace != "" {
+				if logParams.Path == "" {
+					logParams.Path = workspace
+				}
+			}
+		}
+	}
+	if logParams.Path == "" {
+		return nil, fmt.Errorf("repository path is required")
+	}
+
+	args := []string{"log", "--date=iso-strict", "--pretty=format:%H%x1f%an%x1f%ae%x1f%ad%x1f%s%x1e"}
+	if logParams.Limit > 0 {
+		args = append(args, fmt.Sprintf("-%d", logParams.Limit))
+	}
+	if logParams.Since != "" {
+		args = append(args, "--since", logParams.Since)
+	}
+	if logParams.Until != "" {
+		args = append(args, "--until", logParams.Until)
+	}
+	if logParams.Author != "" {
+		args = append(args, "--author", logParams.Author)
+	}
+	if logParams.Ref != "" {
+		args = append(args, logParams.Ref)
+	}
+
+	result, err := p.runGitCommand(args, nil, logParams.Env, logParams.Path)
+	if err != nil {
+		return nil, err
+	}
+	stdout, _ := result["stdout"].(string)
+	commits := parseCommitRecords(stdout)
+	return sonic.Marshal(map[string]any{"commits": commits})
+}
+
+// commitGet gets a single commit in structured format.
+func (p *Git) commitGet(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+	var args commitGetArgs
+	if err := sonic.Unmarshal(params, &args); err != nil {
+		return nil, fmt.Errorf("failed to parse commit.get params: %w", err)
+	}
+	var optsMap map[string]any
+	if len(opts) > 0 {
+		if err := sonic.Unmarshal(opts, &optsMap); err == nil {
+			if workspace, ok := optsMap["workspace"].(string); ok && workspace != "" {
+				if args.Path == "" {
+					args.Path = workspace
+				}
+			}
+		}
+	}
+	if args.Path == "" {
+		return nil, fmt.Errorf("repository path is required")
+	}
+	if args.CommitId == "" {
+		return nil, fmt.Errorf("commitId is required")
+	}
+
+	result, err := p.runGitCommand([]string{"show", "-s", "--date=iso-strict", "--pretty=format:%H%x1f%an%x1f%ae%x1f%ad%x1f%s", args.CommitId}, nil, args.Env, args.Path)
+	if err != nil {
+		return nil, err
+	}
+	stdout, _ := result["stdout"].(string)
+	commit, err := parseCommitLine(stdout)
+	if err != nil {
+		return nil, err
+	}
+	return sonic.Marshal(map[string]any{"commit": commit})
+}
+
 // runGitCommand executes a git command
 func (p *Git) runGitCommand(args []string, auth map[string]string, env map[string]string, workDir string) (map[string]any, error) {
 	ctx := context.Background()
@@ -619,6 +868,9 @@ func (p *Git) runGitCommand(args []string, auth map[string]string, env map[strin
 	// Set environment variables
 	cmd.Env = os.Environ()
 
+	// Avoid interactive prompts in CI/daemon mode.
+	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
+
 	// Configure git user if provided
 	if p.cfg.UserName != "" {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("GIT_AUTHOR_NAME=%s", p.cfg.UserName))
@@ -629,16 +881,54 @@ func (p *Git) runGitCommand(args []string, auth map[string]string, env map[strin
 		cmd.Env = append(cmd.Env, fmt.Sprintf("GIT_COMMITTER_EMAIL=%s", p.cfg.UserEmail))
 	}
 
-	// Add authentication environment variables
+	// Add authentication (HTTPS via GIT_ASKPASS, SSH via key file + GIT_SSH_COMMAND).
 	if auth != nil {
-		if username, ok := auth["username"]; ok {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("GIT_USERNAME=%s", username))
-		}
-		if password, ok := auth["password"]; ok {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("GIT_PASSWORD=%s", password))
-		}
-		if token, ok := auth["token"]; ok {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("GIT_TOKEN=%s", token))
+		if sshKey, ok := auth["ssh_key"]; ok && strings.TrimSpace(sshKey) != "" {
+			keyFile, err := os.CreateTemp("", "arcentra_git_sshkey_*")
+			if err != nil {
+				return nil, fmt.Errorf("create ssh key temp file: %w", err)
+			}
+			keyPath := keyFile.Name()
+			_ = keyFile.Close()
+			if err := os.WriteFile(keyPath, []byte(sshKey), 0o600); err != nil {
+				_ = os.Remove(keyPath)
+				return nil, fmt.Errorf("write ssh key temp file: %w", err)
+			}
+			defer func() { _ = os.Remove(keyPath) }()
+			cmd.Env = append(cmd.Env, fmt.Sprintf(`GIT_SSH_COMMAND=ssh -i %s -o IdentitiesOnly=yes -o StrictHostKeyChecking=no`, keyPath))
+		} else {
+			username := strings.TrimSpace(auth["username"])
+			password := strings.TrimSpace(auth["password"])
+			token := strings.TrimSpace(auth["token"])
+			if password == "" && token != "" {
+				password = token
+				if username == "" {
+					username = "oauth2"
+				}
+			}
+			if username != "" && password != "" {
+				askpass, err := os.CreateTemp("", "arcentra_git_askpass_*")
+				if err != nil {
+					return nil, fmt.Errorf("create askpass temp file: %w", err)
+				}
+				askpassPath := askpass.Name()
+				_ = askpass.Close()
+				script := `#!/bin/sh
+case "$1" in
+  *Username*) echo "$GIT_USERNAME" ;;
+  *Password*) echo "$GIT_PASSWORD" ;;
+  *) echo "" ;;
+esac
+`
+				if err := os.WriteFile(askpassPath, []byte(script), 0o700); err != nil {
+					_ = os.Remove(askpassPath)
+					return nil, fmt.Errorf("write askpass script: %w", err)
+				}
+				defer func() { _ = os.Remove(askpassPath) }()
+				cmd.Env = append(cmd.Env, fmt.Sprintf("GIT_ASKPASS=%s", askpassPath))
+				cmd.Env = append(cmd.Env, fmt.Sprintf("GIT_USERNAME=%s", username))
+				cmd.Env = append(cmd.Env, fmt.Sprintf("GIT_PASSWORD=%s", password))
+			}
 		}
 	}
 
@@ -677,6 +967,64 @@ func (p *Git) runGitCommand(args []string, auth map[string]string, env map[strin
 	}
 
 	return result, nil
+}
+
+func (p *Git) redactSensitive(s string, auth map[string]string) string {
+	if s == "" || auth == nil {
+		return s
+	}
+	out := s
+	for _, k := range []string{"password", "token", "ssh_key"} {
+		if v := strings.TrimSpace(auth[k]); v != "" {
+			out = strings.ReplaceAll(out, v, "***")
+		}
+	}
+	return out
+}
+
+func parseCommitRecords(stdout string) []Commit {
+	records := strings.Split(stdout, "\x1e")
+	commits := make([]Commit, 0, len(records))
+	for _, rec := range records {
+		rec = strings.TrimSpace(rec)
+		if rec == "" {
+			continue
+		}
+		parts := strings.Split(rec, "\x1f")
+		if len(parts) < 5 {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, strings.TrimSpace(parts[3]))
+		if err != nil {
+			continue
+		}
+		commits = append(commits, Commit{
+			CommitId:    strings.TrimSpace(parts[0]),
+			AuthorName:  strings.TrimSpace(parts[1]),
+			AuthorEmail: strings.TrimSpace(parts[2]),
+			CommittedAt: t,
+			Message:     strings.TrimSpace(parts[4]),
+		})
+	}
+	return commits
+}
+
+func parseCommitLine(stdout string) (Commit, error) {
+	parts := strings.Split(strings.TrimSpace(stdout), "\x1f")
+	if len(parts) < 5 {
+		return Commit{}, fmt.Errorf("unexpected git output")
+	}
+	t, err := time.Parse(time.RFC3339, strings.TrimSpace(parts[3]))
+	if err != nil {
+		return Commit{}, fmt.Errorf("parse commit time: %w", err)
+	}
+	return Commit{
+		CommitId:    strings.TrimSpace(parts[0]),
+		AuthorName:  strings.TrimSpace(parts[1]),
+		AuthorEmail: strings.TrimSpace(parts[2]),
+		CommittedAt: t,
+		Message:     strings.TrimSpace(parts[4]),
+	}, nil
 }
 
 // init registers the plugin

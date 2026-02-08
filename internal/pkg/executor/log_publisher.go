@@ -1,4 +1,3 @@
-c
 package executor
 
 import (

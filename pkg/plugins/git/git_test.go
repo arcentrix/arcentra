@@ -27,6 +27,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func workspaceTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp(".", "tmp_git_*")
+	require.NoError(t, err)
+	abs, err := filepath.Abs(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(abs) })
+	return abs
+}
+
+func skipIfDotGitNotWritable(t *testing.T) {
+	t.Helper()
+	tmpDir := workspaceTempDir(t)
+	dotGit := filepath.Join(tmpDir, "repo", ".git")
+	if err := os.MkdirAll(dotGit, 0o755); err != nil {
+		t.Skipf("skip git integration tests: cannot create .git dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dotGit, "config"), []byte("[core]\n"), 0o644); err != nil {
+		t.Skipf("skip git integration tests: .git is not writable in this environment: %v", err)
+	}
+}
+
 func TestNewGitPlugin(t *testing.T) {
 	plugin := NewGit()
 
@@ -146,13 +168,14 @@ func TestGitPlugin_Clone(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git command not found, skipping test")
 	}
+	skipIfDotGitNotWritable(t)
 
 	plugin := NewGit()
 	err := plugin.Init(json.RawMessage{})
 	require.NoError(t, err)
 
 	// 创建一个临时目录作为测试仓库
-	tmpDir := t.TempDir()
+	tmpDir := workspaceTempDir(t)
 	repoPath := filepath.Join(tmpDir, "test-repo")
 
 	// 初始化一个测试 git 仓库
@@ -175,7 +198,7 @@ func TestGitPlugin_Clone(t *testing.T) {
 	require.NoError(t, err)
 
 	// 测试克隆
-	cloneDir := t.TempDir()
+	cloneDir := workspaceTempDir(t)
 	params := map[string]any{
 		"repo": repoPath,
 		"path": filepath.Join(cloneDir, "cloned"),
@@ -232,13 +255,14 @@ func TestGitPlugin_Checkout(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git command not found, skipping test")
 	}
+	skipIfDotGitNotWritable(t)
 
 	plugin := NewGit()
 	err := plugin.Init(json.RawMessage{})
 	require.NoError(t, err)
 
 	// 创建测试仓库
-	tmpDir := t.TempDir()
+	tmpDir := workspaceTempDir(t)
 	repoPath := filepath.Join(tmpDir, "test-repo")
 
 	err = exec.Command("git", "init", repoPath).Run()
@@ -295,13 +319,14 @@ func TestGitPlugin_Status(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git command not found, skipping test")
 	}
+	skipIfDotGitNotWritable(t)
 
 	plugin := NewGit()
 	err := plugin.Init(json.RawMessage{})
 	require.NoError(t, err)
 
 	// 创建测试仓库
-	tmpDir := t.TempDir()
+	tmpDir := workspaceTempDir(t)
 	repoPath := filepath.Join(tmpDir, "test-repo")
 
 	err = exec.Command("git", "init", repoPath).Run()
@@ -330,12 +355,13 @@ func TestGitPlugin_StatusWithShortFormat(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git command not found, skipping test")
 	}
+	skipIfDotGitNotWritable(t)
 
 	plugin := NewGit()
 	err := plugin.Init(json.RawMessage{})
 	require.NoError(t, err)
 
-	tmpDir := t.TempDir()
+	tmpDir := workspaceTempDir(t)
 	repoPath := filepath.Join(tmpDir, "test-repo")
 
 	err = exec.Command("git", "init", repoPath).Run()
@@ -377,13 +403,14 @@ func TestGitPlugin_Log(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git command not found, skipping test")
 	}
+	skipIfDotGitNotWritable(t)
 
 	plugin := NewGit()
 	err := plugin.Init(json.RawMessage{})
 	require.NoError(t, err)
 
 	// 创建测试仓库
-	tmpDir := t.TempDir()
+	tmpDir := workspaceTempDir(t)
 	repoPath := filepath.Join(tmpDir, "test-repo")
 
 	err = exec.Command("git", "init", repoPath).Run()
@@ -419,13 +446,14 @@ func TestGitPlugin_Branch(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git command not found, skipping test")
 	}
+	skipIfDotGitNotWritable(t)
 
 	plugin := NewGit()
 	err := plugin.Init(json.RawMessage{})
 	require.NoError(t, err)
 
 	// 创建测试仓库
-	tmpDir := t.TempDir()
+	tmpDir := workspaceTempDir(t)
 	repoPath := filepath.Join(tmpDir, "test-repo")
 
 	err = exec.Command("git", "init", repoPath).Run()
@@ -459,13 +487,14 @@ func TestGitPlugin_Tag(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git command not found, skipping test")
 	}
+	skipIfDotGitNotWritable(t)
 
 	plugin := NewGit()
 	err := plugin.Init(json.RawMessage{})
 	require.NoError(t, err)
 
 	// 创建测试仓库
-	tmpDir := t.TempDir()
+	tmpDir := workspaceTempDir(t)
 	repoPath := filepath.Join(tmpDir, "test-repo")
 
 	err = exec.Command("git", "init", repoPath).Run()
@@ -505,13 +534,14 @@ func TestGitPlugin_Pull(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git command not found, skipping test")
 	}
+	skipIfDotGitNotWritable(t)
 
 	plugin := NewGit()
 	err := plugin.Init(json.RawMessage{})
 	require.NoError(t, err)
 
 	// 创建测试仓库
-	tmpDir := t.TempDir()
+	tmpDir := workspaceTempDir(t)
 	repoPath := filepath.Join(tmpDir, "test-repo")
 
 	err = exec.Command("git", "init", repoPath).Run()
@@ -562,12 +592,13 @@ func TestGitPlugin_ResultStructure(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git command not found, skipping test")
 	}
+	skipIfDotGitNotWritable(t)
 
 	plugin := NewGit()
 	err := plugin.Init(json.RawMessage{})
 	require.NoError(t, err)
 
-	tmpDir := t.TempDir()
+	tmpDir := workspaceTempDir(t)
 	repoPath := filepath.Join(tmpDir, "test-repo")
 
 	err = exec.Command("git", "init", repoPath).Run()

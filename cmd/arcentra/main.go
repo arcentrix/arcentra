@@ -19,6 +19,7 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/engine/bootstrap"
 	_ "github.com/arcentrix/arcentra/pkg/plugins/git"
+	_ "github.com/arcentrix/arcentra/pkg/plugins/scm"
 	_ "github.com/arcentrix/arcentra/pkg/plugins/svn"
 )
 

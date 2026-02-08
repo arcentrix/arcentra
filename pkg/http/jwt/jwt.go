@@ -45,7 +45,7 @@ func GenToken(userId string, secretKey []byte, accessExpired, refreshExpired tim
 		UserId: userId,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    issUser, // 签发人
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(accessExpired * time.Minute)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(accessExpired)),
 			NotBefore: jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -58,7 +58,7 @@ func GenToken(userId string, secretKey []byte, accessExpired, refreshExpired tim
 	// rToken
 	rClaims := jwt.RegisteredClaims{
 		Issuer:    issUser,
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(refreshExpired * time.Minute)),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(refreshExpired)),
 	}
 	rToken, rErr := jwt.NewWithClaims(jwt.SigningMethodHS256, rClaims).SignedString(secretKey)
 	if rErr != nil {

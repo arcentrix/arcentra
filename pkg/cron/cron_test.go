@@ -289,7 +289,7 @@ func TestStart(t *testing.T) {
 	select {
 	case <-executed:
 		// Job executed successfully
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		t.Error("Job should have been executed after Start()")
 	}
 

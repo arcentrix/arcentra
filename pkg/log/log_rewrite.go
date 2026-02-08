@@ -15,6 +15,7 @@
 package log
 
 import (
+	"strings"
 	"sync"
 
 	"go.uber.org/zap"
@@ -96,7 +97,14 @@ func Sync() error {
 	mu.RLock()
 	defer mu.RUnlock()
 	if logger != nil {
-		return logger.Sync()
+		err := logger.Sync()
+		if err == nil {
+			return nil
+		}
+		if strings.Contains(err.Error(), "bad file descriptor") {
+			return nil
+		}
+		return err
 	}
 	return nil
 }

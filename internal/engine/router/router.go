@@ -166,6 +166,9 @@ func (rt *Router) routerGroup(r fiber.Router) {
 	// WebSocket
 	rt.wsRouter(r, auth)
 
+	// SCM (webhook/polling) - no auth middleware
+	rt.scmRouter(r)
+
 	// 版本信息
 	r.Get("/version", func(c *fiber.Ctx) error {
 		return c.JSON(version.GetVersion())

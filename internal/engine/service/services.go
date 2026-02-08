@@ -34,6 +34,7 @@ type Services struct {
 	Secret            *SecretService
 	GeneralSettings   *GeneralSettingsService
 	Project           *ProjectService
+	Scm               *ScmService
 	UserExt           *UserExt
 	Menu              *MenuService
 	Role              *RoleService
@@ -62,6 +63,7 @@ func NewServices(
 	uploadService := NewUploadService(repos.Storage)
 	secretService := NewSecretService(repos.Secret)
 	projectService := NewProjectService(repos.Project)
+	scmService := NewScmService(repos.Project)
 	userExt := NewUserExt(repos.UserExt)
 	roleService := NewRoleService(repos.Role)
 	pluginService := NewPluginService(repos.Plugin)
@@ -77,6 +79,7 @@ func NewServices(
 		Secret:            secretService,
 		GeneralSettings:   generalSettingsService,
 		Project:           projectService,
+		Scm:               scmService,
 		UserExt:           userExt,
 		Menu:              menuService,
 		Role:              roleService,

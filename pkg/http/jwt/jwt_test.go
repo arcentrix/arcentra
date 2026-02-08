@@ -48,7 +48,9 @@ func TestRefreshToken(t *testing.T) {
 	t.Logf("aToken: %s\n rToken: %s", aToken, rToken)
 
 	auth := &http.Auth{
-		SecretKey: secretKey,
+		SecretKey:     secretKey,
+		AccessExpire:  accessExpire,
+		RefreshExpire: refreshExpire,
 	}
 	newRefreshToken, err := RefreshToken(auth, userId, rToken)
 	if err != nil {
@@ -59,12 +61,13 @@ func TestRefreshToken(t *testing.T) {
 
 func TestParseToken(t *testing.T) {
 
-	token := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +
-		"eyJ1c2VySWQiOiIxYjhiZTgyMDE3YmE0ZDQ5ODJkOWU2ZTQyOTQzOGNmOSIsImlzcyI6ImFyY2FkZSIsImV4cCI6MTcyOTYy" +
-		"MjU2MywibmJmIjoxNzI5NDA2NTYzfQ." +
-		"RfnTfjtvgy2j7GfYpAwW1nG1FWS-m-aW8z_DEK817TY"
+	userId := "test-user"
 	secretKey := "bf284d03-ba65-42d4-a9fe-0d2fbfe61060"
-	claims, err := ParseToken(token, secretKey)
+	aToken, _, err := GenToken(userId, []byte(secretKey), 10*time.Minute, 20*time.Minute)
+	if err != nil {
+		t.Errorf("GenToken error: %v", err)
+	}
+	claims, err := ParseToken(aToken, secretKey)
 	if err != nil {
 		t.Errorf("ParseToken error: %v", err)
 	}

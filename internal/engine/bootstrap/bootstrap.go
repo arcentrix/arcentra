@@ -25,8 +25,10 @@ import (
 	"github.com/arcentrix/arcentra/internal/engine/config"
 	"github.com/arcentrix/arcentra/internal/engine/repo"
 	"github.com/arcentrix/arcentra/internal/engine/router"
+	"github.com/arcentrix/arcentra/internal/engine/service"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
 	"github.com/arcentrix/arcentra/internal/pkg/storage"
+	"github.com/arcentrix/arcentra/pkg/cron"
 	"github.com/arcentrix/arcentra/pkg/database"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/metrics"
@@ -47,6 +49,7 @@ type App struct {
 	Storage       storage.StorageProvider
 	AppConf       *config.AppConfig
 	Repos         *repo.Repositories
+	Services      *service.Services
 	ShutdownMgr   *shutdown.Manager
 }
 
@@ -80,6 +83,7 @@ func NewApp(
 		Storage:       storage,
 		AppConf:       appConf,
 		Repos:         repos,
+		Services:      rt.Services,
 		ShutdownMgr:   shutdownMgr,
 	}
 
@@ -107,6 +111,9 @@ func NewApp(
 			log.Info("Shutting down gRPC server...")
 			grpcServer.Stop()
 		}
+
+		// stop global cron scheduler
+		cron.Stop()
 
 		// shutdown OpenTelemetry tracing
 		log.Info("Shutting down OpenTelemetry tracing...")
@@ -151,6 +158,20 @@ func Bootstrap(configFile string, pluginConfigFile string, initApp InitAppFunc) 
 // Run start app and wait for exit signal, then gracefully shutdown
 func Run(app *App, cleanup func()) {
 	appConf := app.AppConf
+
+	// Initialize and start global cron scheduler
+	cron.Init(app.Logger)
+	cron.Start()
+	log.Info("Cron scheduler started.")
+
+	// SCM polling job (webhook is primary, polling is fallback)
+	if app.Services != nil && app.Services.Scm != nil {
+		_ = cron.AddFunc("*/1 * * * *", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			defer cancel()
+			_ = app.Services.Scm.PollOnce(ctx)
+		}, "scm-poll")
+	}
 
 	// start metrics server
 	if app.MetricsServer != nil {
