@@ -22,8 +22,6 @@ import (
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	"github.com/arcentrix/arcentra/internal/agent/router"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/internal/pkg/queue"
-	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/metrics"
 	"github.com/google/wire"
@@ -35,14 +33,11 @@ func initAgent(configPath string) (*bootstrap.Agent, func(), error) {
 		config.ProviderSet,
 		// 日志层（依赖 config）
 		log.ProviderSet,
-		// 缓存层（依赖 config）
-		cache.ProviderSet,
-		// 任务队列层（依赖 config, cache）
-		queue.AgentProviderSet,
 		// 指标层（依赖 config）
 		metrics.ProviderSet,
 		// gRPC 客户端层（依赖 config 和 log）
 		grpc.ProviderSet,
+		// 路由层（依赖 config 和 log）
 		router.ProviderSet,
 		// 应用层
 		bootstrap.NewAgent,

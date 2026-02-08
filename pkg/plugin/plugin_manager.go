@@ -273,27 +273,6 @@ func (m *Manager) SafeExecute(pluginName string, action string, params json.RawM
 	return result, err
 }
 
-// HealthCheck 执行健康检查
-func (m *Manager) HealthCheck() map[string]bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	health := make(map[string]bool)
-	for name := range m.plugins {
-		// 对于直接内存中的插件，总是健康的
-		// 如果插件需要自定义健康检查，可以在Plugin接口中添加HealthCheck方法
-		health[name] = true
-	}
-
-	return health
-}
-
-// StartHeartbeat 启动心跳检查（兼容性方法，直接内存插件不需要心跳）
-func (m *Manager) StartHeartbeat(interval time.Duration) {
-	log.Infow("heartbeat started for plugin manager", "interval", interval)
-	// 直接内存插件不需要心跳检查，但保留此方法以保持API兼容性
-}
-
 // Close 关闭管理器
 func (m *Manager) Clear() error {
 	m.mu.Lock()

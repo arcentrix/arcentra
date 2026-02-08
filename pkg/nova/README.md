@@ -9,7 +9,7 @@ Nova is a flexible and high-performance task queue library for Go that supports 
 - **Priority Queues**: Support for high, normal, and low priority task queues
 - **Batch Processing**: Efficient batch processing with configurable aggregators
 - **Message Formats**: Support for JSON, Blob, Protobuf, and Sonic message formats
-- **Task Recording**: Optional ClickHouse-based task status tracking
+- **Task Recording**: Optional MySQL-based task status tracking
 - **Flexible Configuration**: Option pattern for clean and extensible configuration
 - **Thread-Safe**: Fully concurrent-safe implementation
 
@@ -258,19 +258,19 @@ queue, err := taskqueue.NewTaskQueue(
 )
 ```
 
-### 7. Task Recording (ClickHouse)
+### 7. Task Recording (MySQL)
 
-Optional task status tracking with ClickHouse:
+Optional task status tracking with MySQL:
 
 ```go
 import (
-    "gorm.io/driver/clickhouse"
+    "gorm.io/driver/mysql"
     "gorm.io/gorm"
 )
 
-dsn := "clickhouse://user:password@localhost:9000/database"
-db, _ := gorm.Open(clickhouse.Open(dsn), &gorm.Config{})
-recorder, _ := taskqueue.NewClickHouseTaskRecorder(db, "")
+dsn := "user:password@tcp(localhost:3306)/database?charset=utf8mb4&parseTime=True&loc=Local"
+db, _ := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+recorder, _ := taskqueue.NewMySQLTaskRecorder(db, "")
 
 queue, err := taskqueue.NewTaskQueue(
     taskqueue.WithKafka("localhost:9092"),

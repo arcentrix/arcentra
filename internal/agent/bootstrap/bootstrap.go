@@ -27,7 +27,6 @@ import (
 	"github.com/arcentrix/arcentra/internal/agent/router"
 	"github.com/arcentrix/arcentra/internal/agent/service"
 	grpcclient "github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/internal/pkg/queue"
 	"github.com/arcentrix/arcentra/pkg/cron"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/metrics"
@@ -41,7 +40,6 @@ import (
 type Agent struct {
 	HttpApp       *fiber.App
 	GrpcClient    *grpcclient.ClientWrapper
-	QueueClient   *queue.Client // 队列客户端（任务执行者）
 	MetricsServer *metrics.Server
 	Logger        *log.Logger
 	AgentConf     *config.AgentConfig
@@ -55,13 +53,9 @@ type InitAppFunc func(configPath string) (*Agent, func(), error)
 func NewAgent(
 	rt *router.Router,
 	grpcClient *grpcclient.ClientWrapper,
-	queueClient *queue.Client,
 	metricsServer *metrics.Server,
 	logger *log.Logger,
 	agentConf *config.AgentConfig,
-	pipelineHandler *queue.PipelineTaskHandler,
-	jobHandler *queue.JobTaskHandler,
-	stepHandler *queue.StepTaskHandler,
 	shutdownMgr *shutdown.Manager,
 ) (*Agent, func(), error) {
 	httpApp := rt.Router()
@@ -70,19 +64,7 @@ func NewAgent(
 	agentService := service.NewAgentService(agentConf, grpcClient)
 
 	// 注册步骤执行处理器（Agent 作为 worker 执行步骤执行）
-	if queueClient != nil {
-		queueClient.RegisterHandler(queue.TaskTypePipeline, pipelineHandler)
-		queueClient.RegisterHandler(queue.TaskTypeJob, jobHandler)
-		queueClient.RegisterHandler(queue.TaskTypeStep, stepHandler)
-	}
-
 	cleanup := func() {
-		// stop queue client
-		if queueClient != nil {
-			log.Info("Shutting down queue client...")
-			queueClient.Shutdown()
-		}
-
 		// stop metrics server
 		if metricsServer != nil {
 			log.Info("Shutting down metrics server...")
@@ -107,7 +89,6 @@ func NewAgent(
 	app := &Agent{
 		HttpApp:       httpApp,
 		GrpcClient:    grpcClient,
-		QueueClient:   queueClient,
 		MetricsServer: metricsServer,
 		Logger:        logger,
 		AgentConf:     agentConf,
@@ -142,11 +123,6 @@ func Run(app *Agent, cleanup func()) {
 	cron.Start()
 	log.Info("Cron scheduler started.")
 
-	// Register Task Queue metrics if queue client is available
-	if app.MetricsServer != nil && app.QueueClient != nil {
-		metrics.RegisterAsynqMetricsFromQueueClient(app.MetricsServer.GetSink(), app.QueueClient)
-	}
-
 	// start metrics server
 	if app.MetricsServer != nil {
 		if err := app.MetricsServer.Start(); err != nil {
@@ -173,16 +149,6 @@ func Run(app *Agent, cleanup func()) {
 		safe.Go(func() {
 			app.waitForRegistrationAndStartHeartbeat()
 		})
-	}
-
-	// start queue client (Agent 作为 worker 执行步骤执行)
-	if app.QueueClient != nil {
-		safe.Go(func() {
-			if err := app.QueueClient.Start(); err != nil {
-				log.Errorw("Queue client failed", "error", err)
-			}
-		})
-		log.Info("Queue client started")
 	}
 
 	// set signal listener (graceful shutdown)

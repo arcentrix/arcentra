@@ -28,7 +28,7 @@ import (
 
 // LogAggregator 日志聚合器
 type LogAggregator struct {
-	clickHouse    *gorm.DB
+	mysql         *gorm.DB
 	mu            sync.RWMutex
 	streams       map[string]*LogStream       // stepRunID -> LogStream
 	subscribers   map[string][]chan *LogEntry // stepRunID -> subscribers channels
@@ -60,57 +60,17 @@ type LogEntry struct {
 }
 
 // NewLogAggregator 创建日志聚合器
-func NewLogAggregator(redis *redis.Client, clickHouse *gorm.DB) *LogAggregator {
+func NewLogAggregator(redis *redis.Client, mysql *gorm.DB) *LogAggregator {
 	la := &LogAggregator{
-		clickHouse:    clickHouse,
+		mysql:         mysql,
 		streams:       make(map[string]*LogStream),
 		subscribers:   make(map[string][]chan *LogEntry),
 		bufferSize:    100,             // 缓冲100条日志后写入
 		flushInterval: 3 * time.Second, // 3秒强制刷新
-		tableName:     "step_run_logs",
-	}
-
-	// 创建表（如果不存在）
-	if clickHouse != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := la.createTableIfNotExists(ctx); err != nil {
-			log.Warnw("failed to create step run logs table", "error", err)
-		}
+		tableName:     "l_step_run_logs",
 	}
 
 	return la
-}
-
-// createTableIfNotExists 创建表（如果不存在）
-func (la *LogAggregator) createTableIfNotExists(ctx context.Context) error {
-	if la.clickHouse == nil {
-		return fmt.Errorf("clickhouse is nil")
-	}
-
-	sqlDB, err := la.clickHouse.DB()
-	if err != nil {
-		return fmt.Errorf("failed to get SQL DB from GORM: %w", err)
-	}
-
-	createTableSQL := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %s (
-			step_run_id String,
-			timestamp Int64,
-			line_number Int32,
-			level String,
-			content String,
-			stream String,
-			plugin_name String,
-			agent_id String
-		) ENGINE = MergeTree()
-		ORDER BY (step_run_id, line_number, timestamp)
-		PRIMARY KEY (step_run_id, line_number)
-		SETTINGS index_granularity = 8192
-	`, la.tableName)
-
-	_, err = sqlDB.ExecContext(ctx, createTableSQL)
-	return err
 }
 
 // PushLog 推送日志到聚合器
@@ -179,22 +139,22 @@ func (la *LogAggregator) flushStream(stream *LogStream) error {
 
 	// 异步写入，避免阻塞
 	safe.Go(func() {
-		// 写入 ClickHouse
-		if err := la.writeToClickHouse(logs); err != nil {
-			log.Errorw("failed to write logs to clickhouse", "logCount", len(logs), "error", err)
+		// 写入 MySQL
+		if err := la.writeToMySQL(logs); err != nil {
+			log.Errorw("failed to write logs to mysql", "logCount", len(logs), "error", err)
 		}
 	})
 
 	return nil
 }
 
-// writeToClickHouse 写入 ClickHouse
-func (la *LogAggregator) writeToClickHouse(logs []*LogEntry) error {
-	if la.clickHouse == nil {
-		return fmt.Errorf("clickhouse client is nil")
+// writeToMySQL 写入 MySQL
+func (la *LogAggregator) writeToMySQL(logs []*LogEntry) error {
+	if la.mysql == nil {
+		return fmt.Errorf("mysql client is nil")
 	}
 
-	sqlDB, err := la.clickHouse.DB()
+	sqlDB, err := la.mysql.DB()
 	if err != nil {
 		return fmt.Errorf("failed to get SQL DB from GORM: %w", err)
 	}
@@ -234,7 +194,7 @@ func (la *LogAggregator) writeToClickHouse(logs []*LogEntry) error {
 			logEntry.AgentID,
 		)
 		if err != nil {
-			return fmt.Errorf("insert log to clickhouse: %w", err)
+			return fmt.Errorf("insert log to mysql: %w", err)
 		}
 	}
 
@@ -295,13 +255,13 @@ func (la *LogAggregator) CloseStream(stepRunID string) error {
 	return nil
 }
 
-// GetLogsByStepRunID 从 ClickHouse 获取步骤执行日志
+// GetLogsByStepRunID 从 MySQL 获取步骤执行日志
 func (la *LogAggregator) GetLogsByStepRunID(stepRunID string, fromLine int32, limit int) ([]*LogEntry, error) {
-	if la.clickHouse == nil {
-		return nil, fmt.Errorf("clickhouse client is nil")
+	if la.mysql == nil {
+		return nil, fmt.Errorf("mysql client is nil")
 	}
 
-	sqlDB, err := la.clickHouse.DB()
+	sqlDB, err := la.mysql.DB()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get SQL DB from GORM: %w", err)
 	}
@@ -331,7 +291,7 @@ func (la *LogAggregator) GetLogsByStepRunID(stepRunID string, fromLine int32, li
 
 	rows, err := sqlDB.QueryContext(ctx, querySQL, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query logs from clickhouse: %w", err)
+		return nil, fmt.Errorf("query logs from mysql: %w", err)
 	}
 	defer rows.Close()
 

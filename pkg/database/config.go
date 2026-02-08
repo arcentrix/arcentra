@@ -58,19 +58,7 @@ type Database struct {
 	MaxLifetime  int  `mapstructure:"maxLifeTime"`
 	MaxIdleTime  int  `mapstructure:"maxIdleTime"`
 	// Data source configurations
-	MySQL      MySQLConfig      `mapstructure:"mysql"`
-	ClickHouse ClickHouseConfig `mapstructure:"clickhouse"`
-}
-
-// ClickHouseConfig represents ClickHouse data source configuration
-type ClickHouseConfig struct {
-	Host        string `mapstructure:"host"`
-	Port        int    `mapstructure:"port"`
-	DBName      string `mapstructure:"dbname"`
-	Username    string `mapstructure:"username"`
-	Password    string `mapstructure:"password"`
-	DialTimeout int    `mapstructure:"dialTimeout"` // Dial timeout in seconds
-	ReadTimeout int    `mapstructure:"readTimeout"` // Read timeout in seconds
+	MySQL MySQLConfig `mapstructure:"mysql"`
 }
 
 // GetConnMaxLifetime returns ConnMaxLifetime as time.Duration from common config

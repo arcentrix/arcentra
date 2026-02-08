@@ -1,7 +1,7 @@
 [Unit]
 Description=Arcentra CI/CD Platform Server
 Documentation=https://github.com/arcentrix/arcentra
-After=network.target mysql.service clickhouse.service
+After=network.target mysql.service
 Wants=network.target
 
 [Service]

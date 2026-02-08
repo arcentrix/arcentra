@@ -24,7 +24,6 @@ import (
 	"github.com/arcentrix/arcentra/internal/engine/router"
 	"github.com/arcentrix/arcentra/internal/engine/service"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/internal/pkg/queue"
 	"github.com/arcentrix/arcentra/internal/pkg/storage"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
@@ -44,9 +43,7 @@ func initApp(configPath string, pluginConfigs map[string]any) (*bootstrap.App, f
 		database.ProviderSet,
 		// 缓存层（依赖 config）
 		cache.ProviderSet,
-		// 任务队列层（依赖 config, cache）
-		queue.ProviderSet,
-		// 指标层（依赖 config, queue）
+		// 指标层（依赖 config）
 		metrics.ProviderSet,
 		// 仓储层（依赖 database）
 		repo.ProviderSet,

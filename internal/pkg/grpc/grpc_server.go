@@ -81,10 +81,10 @@ func NewGrpcServer(cfg Conf) *ServerWrapper {
 }
 
 // Register 注册所有 gRPC 服务
-func (s *ServerWrapper) Register(services *service.Services, redisClient *redis.Client, clickHouse *gorm.DB) {
+func (s *ServerWrapper) Register(services *service.Services, redisClient *redis.Client, mysqlDB *gorm.DB) {
 	agentv1.RegisterAgentServiceServer(s.svr, service.NewAgentServiceImpl(services.Agent))
 	steprunv1.RegisterStepRunServiceServer(s.svr, &service.StepRunServiceImpl{})
-	streamv1.RegisterStreamServiceServer(s.svr, service.NewStreamService(redisClient, clickHouse))
+	streamv1.RegisterStreamServiceServer(s.svr, service.NewStreamService(redisClient, mysqlDB))
 	pipelinev1.RegisterPipelineServiceServer(s.svr, &service.PipelineServiceImpl{})
 	// reflection（调试）
 	reflection.Register(s.svr)

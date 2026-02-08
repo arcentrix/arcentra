@@ -28,13 +28,10 @@ import (
 	"gorm.io/plugin/dbresolver"
 )
 
-// Manager defines the unified database interface for managing MySQL and ClickHouse connections
+// Manager defines the unified database interface for managing MySQL connections
 type Manager interface {
 	// MySQL returns the MySQL database connection
 	MySQL() *gorm.DB
-
-	// ClickHouse returns the ClickHouse database connection
-	ClickHouse() *gorm.DB
 
 	// Close closes all database connections
 	Close() error
@@ -42,18 +39,12 @@ type Manager interface {
 
 // managerImpl implements the Manager interface
 type managerImpl struct {
-	mysql      *gorm.DB
-	clickHouse *gorm.DB
+	mysql *gorm.DB
 }
 
 // MySQL returns the MySQL database connection
 func (m *managerImpl) MySQL() *gorm.DB {
 	return m.mysql
-}
-
-// ClickHouse returns the ClickHouse database connection
-func (m *managerImpl) ClickHouse() *gorm.DB {
-	return m.clickHouse
 }
 
 // Close closes all database connections
@@ -69,15 +60,6 @@ func (m *managerImpl) Close() error {
 		}
 	}
 
-	if m.clickHouse != nil {
-		sqlDB, err := m.clickHouse.DB()
-		if err == nil {
-			if err := sqlDB.Close(); err != nil {
-				errs = append(errs, fmt.Errorf("failed to close ClickHouse: %w", err))
-			}
-		}
-	}
-
 	if len(errs) > 0 {
 		return fmt.Errorf("errors closing databases: %v", errs)
 	}
@@ -85,7 +67,7 @@ func (m *managerImpl) Close() error {
 	return nil
 }
 
-// NewManager creates a new database manager with MySQL and ClickHouse connections
+// NewManager creates a new database manager with MySQL connections
 func NewManager(cfg Database) (Manager, error) {
 	m := &managerImpl{}
 
@@ -98,23 +80,6 @@ func NewManager(cfg Database) (Manager, error) {
 	log.Info("MySQL database connected successfully")
 	if err := inject.RegisterGormPlugin(m.mysql, false, false); err != nil {
 		log.Warnw("failed to register OpenTelemetry gorm plugin (mysql)", "error", err)
-	}
-
-	// Initialize ClickHouse connection if configured
-	if cfg.ClickHouse.Host != "" && cfg.ClickHouse.DBName != "" && cfg.ClickHouse.Username != "" {
-		chDB, err := newClickHouseConnection(cfg.ClickHouse, cfg)
-		if err != nil {
-			// Cleanup MySQL connection if ClickHouse fails
-			if sqlDB, closeErr := mysqlDB.DB(); closeErr == nil {
-				_ = sqlDB.Close()
-			}
-			return nil, fmt.Errorf("failed to connect ClickHouse: %w", err)
-		}
-		m.clickHouse = chDB
-		log.Info("ClickHouse database connected successfully")
-		if err := inject.RegisterGormPlugin(m.clickHouse, false, false); err != nil {
-			log.Warnw("failed to register OpenTelemetry gorm plugin (clickhouse)", "error", err)
-		}
 	}
 
 	return m, nil
@@ -212,7 +177,3 @@ func newMySQLConnection(mysqlCfg MySQLConfig, commonCfg Database) (*gorm.DB, err
 	return db, nil
 }
 
-// newClickHouseConnection creates a ClickHouse connection using GORM
-func newClickHouseConnection(chCfg ClickHouseConfig, commonCfg Database) (*gorm.DB, error) {
-	return NewClickHouseConnection(chCfg, commonCfg)
-}

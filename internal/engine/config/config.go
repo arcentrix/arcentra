@@ -31,17 +31,6 @@ import (
 	"github.com/arcentrix/arcentra/pkg/trace"
 )
 
-type TaskQueueConfig struct {
-	Concurrency      int            `mapstructure:"concurrency"`
-	StrictPriority   bool           `mapstructure:"strictPriority"`
-	Priority         map[string]int `mapstructure:"priority"`         // 优先级配置：队列名 -> 优先级权重
-	LogLevel         string         `mapstructure:"logLevel"`         // 日志级别: debug, info, warn, error
-	ShutdownTimeout  int            `mapstructure:"shutdownTimeout"`  // 关闭超时时间（秒）
-	GroupGracePeriod int            `mapstructure:"groupGracePeriod"` // 组优雅关闭周期（秒）
-	GroupMaxDelay    int            `mapstructure:"groupMaxDelay"`    // 组最大延迟（秒）
-	GroupMaxSize     int            `mapstructure:"groupMaxSize"`     // 组最大大小
-}
-
 type EventsKafkaConfig struct {
 	Enabled          bool       `mapstructure:"enabled"`
 	BootstrapServers string     `mapstructure:"bootstrapServers"`
@@ -74,16 +63,15 @@ type EventsConfig struct {
 }
 
 type AppConfig struct {
-	Log       log.Conf
-	Grpc      grpc.Conf
-	Http      http.Http
-	Database  database.Database
-	Redis     cache.Redis
-	TaskQueue TaskQueueConfig
-	Events    EventsConfig
-	Metrics   metrics.MetricsConfig
-	Pprof     pprof.PprofConfig
-	Trace     trace.TraceConfig
+	Log      log.Conf
+	Grpc     grpc.Conf
+	Http     http.Http
+	Database database.Database
+	Redis    cache.Redis
+	Events   EventsConfig
+	Metrics  metrics.MetricsConfig
+	Pprof    pprof.PprofConfig
+	Trace    trace.TraceConfig
 }
 
 var (

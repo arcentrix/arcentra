@@ -22,23 +22,6 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: muP4woo9Aidiph2jeX8u
 
-  clickhouse:
-    image: clickhouse/clickhouse-server
-    container_name: clickhouse
-    restart: always
-    ports:
-      - 8123:8123  # HTTP interface
-      - 9000:9000  # Native interface
-    volumes:
-      - ./clickhouse/data:/var/lib/clickhouse
-      - ./clickhouse/log:/var/log/clickhouse-server
-    environment:
-      CLICKHOUSE_PASSWORD: Doh4Pur5lix6ru0OoK0t
-    ulimits:
-      nofile:
-        soft: 262144
-        hard: 262144
-      
   arcentra:
     image: go-arcentra/arcentra:latest
     container_name: arcentra

@@ -33,7 +33,7 @@ type StreamServiceImpl struct {
 	streamv1.UnimplementedStreamServiceServer
 	logAggregator *LogAggregator
 	redis         *redis.Client
-	clickHouse    *gorm.DB
+	mysql         *gorm.DB
 	mu            sync.RWMutex
 	subscribers   map[string][]*LogSubscriber // stepRunID -> subscribers
 }
@@ -46,11 +46,11 @@ type LogSubscriber struct {
 }
 
 // NewStreamService 创建Stream服务实例
-func NewStreamService(redis *redis.Client, clickHouse *gorm.DB) *StreamServiceImpl {
+func NewStreamService(redis *redis.Client, mysql *gorm.DB) *StreamServiceImpl {
 	return &StreamServiceImpl{
-		logAggregator: NewLogAggregator(redis, clickHouse),
+		logAggregator: NewLogAggregator(redis, mysql),
 		redis:         redis,
-		clickHouse:    clickHouse,
+		mysql:         mysql,
 		subscribers:   make(map[string][]*LogSubscriber),
 	}
 }
@@ -118,7 +118,7 @@ func (s *StreamServiceImpl) StreamStepRunLog(req *streamv1.StreamStepRunLogReque
 
 	log.Infow("client requesting log stream", "stepRunId", stepRunID, "fromLine", req.FromLine, "follow", req.Follow)
 
-	// 先从 ClickHouse 获取历史日志
+	// 先从 MySQL 获取历史日志
 	historicalLogs, err := s.logAggregator.GetLogsByStepRunID(stepRunID, req.FromLine, 1000)
 	if err != nil {
 		log.Errorw("failed to get historical logs", "stepRunId", stepRunID, "error", err)

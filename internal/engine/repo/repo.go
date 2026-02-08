@@ -44,7 +44,7 @@ type Repositories struct {
 }
 
 // NewRepositories 初始化所有 repository
-func NewRepositories(db database.IDatabase, clickHouse *gorm.DB, cache cache.ICache) *Repositories {
+func NewRepositories(db database.IDatabase, cache cache.ICache) *Repositories {
 	return &Repositories{
 		User:                 NewUserRepo(db, cache),
 		Agent:                NewAgentRepo(db, cache),

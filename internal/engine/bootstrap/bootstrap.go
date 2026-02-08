@@ -27,7 +27,6 @@ import (
 	"github.com/arcentrix/arcentra/internal/engine/repo"
 	"github.com/arcentrix/arcentra/internal/engine/router"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/internal/pkg/queue"
 	"github.com/arcentrix/arcentra/internal/pkg/storage"
 	"github.com/arcentrix/arcentra/pkg/database"
 	"github.com/arcentrix/arcentra/pkg/log"
@@ -38,14 +37,12 @@ import (
 	"github.com/arcentrix/arcentra/pkg/trace"
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 )
 
 type App struct {
 	HttpApp       *fiber.App
 	PluginMgr     *plugin.Manager
 	GrpcServer    *grpc.ServerWrapper
-	QueueServer   *queue.Server // 队列服务器（任务发布者）
 	MetricsServer *metrics.Server
 	Logger        *log.Logger
 	Storage       storage.StorageProvider
@@ -62,10 +59,8 @@ func NewApp(
 	logger *log.Logger,
 	pluginMgr *plugin.Manager,
 	grpcServer *grpc.ServerWrapper,
-	queueServer *queue.Server,
 	metricsServer *metrics.Server,
 	storage storage.StorageProvider,
-	clickHouse *gorm.DB,
 	appConf *config.AppConfig,
 	db database.IDatabase,
 	repos *repo.Repositories,
@@ -81,7 +76,6 @@ func NewApp(
 		HttpApp:       httpApp,
 		PluginMgr:     pluginMgr,
 		GrpcServer:    grpcServer,
-		QueueServer:   queueServer,
 		MetricsServer: metricsServer,
 		Logger:        logger,
 		Storage:       storage,
@@ -91,11 +85,6 @@ func NewApp(
 	}
 
 	cleanup := func() {
-		// stop queue server
-		if queueServer != nil {
-			queueServer.Shutdown()
-		}
-
 		// stop metrics server
 		if metricsServer != nil {
 			log.Info("Shutting down metrics server...")
@@ -164,20 +153,11 @@ func Bootstrap(configFile string, pluginConfigFile string, initApp InitAppFunc) 
 func Run(app *App, cleanup func()) {
 	appConf := app.AppConf
 
-	// plugin manager is initialized in wire
-	// optional: start heartbeat check
-	app.PluginMgr.StartHeartbeat(30 * time.Second)
-
 	// 同步插件信息到数据库
 	if err := syncPluginsToDatabase(app.PluginMgr, app.Repos); err != nil {
 		log.Warnw("failed to sync plugins to database", zap.Error(err))
 	} else {
 		log.Info("plugins synced to database successfully")
-	}
-
-	// Register Task Queue metrics if queue server is available
-	if app.MetricsServer != nil && app.QueueServer != nil {
-		metrics.RegisterAsynqMetricsFromQueueServer(app.MetricsServer.GetSink(), app.QueueServer)
 	}
 
 	// start metrics server

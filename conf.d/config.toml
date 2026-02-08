@@ -14,7 +14,7 @@ enabled = true
 # trace exporter type: "jaeger", "otlp-grpc", "otlp-http", or "none"
 exporterType = "otlp-grpc"
 # trace endpoint
-endpoint = "openobserv.arcentra.io:4317"
+endpoint = "openobserv.arcentra.co:4317"
 # trace insecure
 insecure = true
 # trace headers
@@ -22,6 +22,7 @@ headers = {}
 
 # trace batch config
 [trace.batch]
+# max queue size
 maxQueueSize = 2048
 # trace batch timeout (duration string, e.g., "5s", "10s", or number as seconds)
 batchTimeout = "5s"
@@ -33,7 +34,7 @@ maxExportBatchSize = 512
 
 [events]
 # enable event publishing, false or true
-enabled = false
+enabled = true
 # event source prefix, e.g. urn:arcentra:executor
 sourcePrefix = "urn:arcentra:executor"
 # publish timeout (seconds)
@@ -56,13 +57,19 @@ securityProtocol = ""
 [events.kafka.sasl]
 # mechanism: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
 mechanism = ""
+# sasl username
 username = ""
+# sasl password
 password = ""
 
 [events.kafka.ssl]
+# ssl ca file
 caFile = ""
+# ssl cert file
 certFile = ""
+# ssl key file
 keyFile = ""
+# ssl password
 password = ""
 
 [log]
@@ -93,7 +100,9 @@ maxConnections = 1000
 readWriteTimeout = 5
 
 [http]
+# http server host
 host = "0.0.0.0"
+# http server port
 port = 8080
 # access log, false or true
 accessLog = true
@@ -141,22 +150,16 @@ maxIdleTime = 60
 
 # MySQL data source configuration
 [database.mysql]
+# mysql host
 host = "127.0.0.1"
+# mysql port
 port = "3306"
+# mysql user
 user = "root"
+# mysql password
 password = "muP4woo9Aidiph2jeX8u"
+# mysql database name
 dbname = "arcentra"
-
-# ClickHouse data source configuration
-[database.clickhouse]
-host = "localhost"
-port = 9000
-dbname = "arcentra"
-username = "default"
-password = "Doh4Pur5lix6ru0OoK0t"
-# unit: second
-dialTimeout = 10
-readTimeout = 20
 
 [redis]
 # support single, cluster, sentinel
@@ -164,8 +167,11 @@ mode = "single"
 # address, ip:port or ip1:port,ip2:port for cluster and sentinel(SentinelAddrs)
 # For cluster mode: address = "127.0.0.1:7000,127.0.0.1:7001,127.0.0.1:7002"
 address = "127.0.0.1:6379"
+# redis password
 password = ""
+# redis database
 db = 0
+# redis pool size
 poolSize = 50
 #useTLS = false
 #tlsMinVersion = "1.0"

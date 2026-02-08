@@ -23,7 +23,7 @@ import (
 // ProviderSet provides database-related dependencies
 var ProviderSet = wire.NewSet(
 	ProvideManager,
-	ProvideClickHouse,
+	ProvideMySQL,
 	ProvideIDatabase,
 )
 
@@ -32,10 +32,9 @@ func ProvideManager(conf Database, logger *log.Logger) (Manager, error) {
 	return NewManager(conf)
 }
 
-// ProvideClickHouse provides ClickHouse database instance from Manager
-// Returns nil if ClickHouse is not configured (optional)
-func ProvideClickHouse(manager Manager) *gorm.DB {
-	return manager.ClickHouse()
+// ProvideMySQL provides MySQL database instance from Manager
+func ProvideMySQL(manager Manager) *gorm.DB {
+	return manager.MySQL()
 }
 
 // ProvideIDatabase provides IDatabase interface instance for backward compatibility

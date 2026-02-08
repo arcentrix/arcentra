@@ -1,0 +1,111 @@
+-- MySQL DDL for logs and task records
+
+CREATE TABLE IF NOT EXISTS l_step_run_logs (
+  step_run_id VARCHAR(64) NOT NULL,
+  timestamp BIGINT NOT NULL,
+  line_number INT NOT NULL,
+  level VARCHAR(16) NOT NULL,
+  content TEXT NOT NULL,
+  stream VARCHAR(16) NOT NULL,
+  plugin_name VARCHAR(64) DEFAULT NULL,
+  agent_id VARCHAR(64) DEFAULT NULL,
+  PRIMARY KEY (step_run_id, line_number),
+  KEY idx_step_run_timestamp (step_run_id, timestamp)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS l_terminal_logs (
+  session_id VARCHAR(64) NOT NULL,
+  session_type VARCHAR(32) NOT NULL,
+  environment VARCHAR(32) NOT NULL,
+  step_run_id VARCHAR(64) DEFAULT NULL,
+  pipeline_id VARCHAR(64) DEFAULT NULL,
+  pipeline_run_id VARCHAR(64) DEFAULT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  hostname VARCHAR(255) NOT NULL,
+  working_directory VARCHAR(255) NOT NULL,
+  command TEXT NOT NULL,
+  exit_code INT DEFAULT NULL,
+  logs JSON DEFAULT NULL,
+  metadata JSON DEFAULT NULL,
+  status VARCHAR(32) NOT NULL,
+  start_time DATETIME NOT NULL,
+  end_time DATETIME DEFAULT NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  PRIMARY KEY (session_id),
+  KEY idx_pipeline_run_id (pipeline_run_id),
+  KEY idx_user_id (user_id),
+  KEY idx_status (status),
+  KEY idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS l_build_artifacts_logs (
+  artifact_id VARCHAR(64) NOT NULL,
+  step_run_id VARCHAR(64) NOT NULL,
+  operation VARCHAR(32) NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  file_size BIGINT NOT NULL,
+  storage_type VARCHAR(32) NOT NULL,
+  storage_path TEXT NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  error_message TEXT DEFAULT NULL,
+  duration_ms BIGINT NOT NULL,
+  timestamp DATETIME NOT NULL,
+  PRIMARY KEY (artifact_id, timestamp, operation),
+  KEY idx_step_run_id (step_run_id),
+  KEY idx_user_id (user_id),
+  KEY idx_timestamp (timestamp)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS l_step_run_queue_records (
+  step_run_id VARCHAR(64) NOT NULL,
+  step_run_type VARCHAR(64) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  queue VARCHAR(64) NOT NULL,
+  priority INT NOT NULL,
+  pipeline_id VARCHAR(64) DEFAULT NULL,
+  pipeline_run_id VARCHAR(64) DEFAULT NULL,
+  stage_id VARCHAR(64) DEFAULT NULL,
+  job_id VARCHAR(64) DEFAULT NULL,
+  job_run_id VARCHAR(64) DEFAULT NULL,
+  agent_id VARCHAR(64) DEFAULT NULL,
+  payload JSON DEFAULT NULL,
+  create_time DATETIME NOT NULL,
+  start_time DATETIME DEFAULT NULL,
+  end_time DATETIME DEFAULT NULL,
+  duration BIGINT DEFAULT NULL,
+  retry_count INT NOT NULL,
+  current_retry INT NOT NULL,
+  error_message TEXT DEFAULT NULL,
+  PRIMARY KEY (step_run_id),
+  KEY idx_pipeline_run_id (pipeline_run_id),
+  KEY idx_agent_id (agent_id),
+  KEY idx_status (status),
+  KEY idx_create_time (create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS l_task_records (
+  task_id VARCHAR(64) NOT NULL,
+  task_type VARCHAR(64) NOT NULL,
+  task_payload JSON NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  queue VARCHAR(64) NOT NULL,
+  priority INT NOT NULL,
+  created_at DATETIME NOT NULL,
+  queued_at DATETIME DEFAULT NULL,
+  process_at DATETIME DEFAULT NULL,
+  started_at DATETIME DEFAULT NULL,
+  completed_at DATETIME DEFAULT NULL,
+  failed_at DATETIME DEFAULT NULL,
+  error TEXT DEFAULT NULL,
+  retry_count INT NOT NULL,
+  metadata JSON DEFAULT NULL,
+  PRIMARY KEY (task_id),
+  KEY idx_status (status),
+  KEY idx_queue (queue),
+  KEY idx_priority (priority),
+  KEY idx_created_at (created_at),
+  KEY idx_queued_at (queued_at),
+  KEY idx_completed_at (completed_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
