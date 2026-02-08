@@ -39,6 +39,8 @@ type Services struct {
 	Role              *RoleService
 	Plugin            *PluginService
 	ProjectMemberRepo repo.IProjectMemberRepository
+	StepRunRepo       repo.IStepRunRepository
+	LogAggregator     *LogAggregator
 }
 
 // NewServices 初始化所有 service
@@ -63,6 +65,7 @@ func NewServices(
 	userExt := NewUserExt(repos.UserExt)
 	roleService := NewRoleService(repos.Role)
 	pluginService := NewPluginService(repos.Plugin)
+	logAggregator := NewLogAggregator(nil, db.Database())
 
 	return &Services{
 		User:              userService,
@@ -79,6 +82,8 @@ func NewServices(
 		Role:              roleService,
 		Plugin:            pluginService,
 		ProjectMemberRepo: repos.ProjectMember,
+		StepRunRepo:       repos.StepRun,
+		LogAggregator:     logAggregator,
 	}
 }
 

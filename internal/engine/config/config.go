@@ -20,6 +20,7 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
 	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
@@ -32,36 +33,13 @@ import (
 	"github.com/arcentrix/arcentra/pkg/trace"
 )
 
-type SaslConfig struct {
-	Mechanism string `mapstructure:"mechanism"`
-	Username  string `mapstructure:"username"`
-	Password  string `mapstructure:"password"`
-}
-
-type SslConfig struct {
-	CaFile   string `mapstructure:"caFile"`
-	CertFile string `mapstructure:"certFile"`
-	KeyFile  string `mapstructure:"keyFile"`
-	Password string `mapstructure:"password"`
-}
-
 type EventsConfig struct {
 	SourcePrefix string `mapstructure:"sourcePrefix"`
 	Timeout      int    `mapstructure:"timeout"`
 }
 
-type KafkaConfig struct {
-	BootstrapServers string     `mapstructure:"bootstrapServers"`
-	Acks             string     `mapstructure:"acks"`
-	Retries          int        `mapstructure:"retries"`
-	Compression      string     `mapstructure:"compression"`
-	SecurityProtocol string     `mapstructure:"securityProtocol"`
-	Sasl             SaslConfig `mapstructure:"sasl"`
-	Ssl              SslConfig  `mapstructure:"ssl"`
-}
-
 type MessageQueueConfig struct {
-	Kafka KafkaConfig `mapstructure:"kafka"`
+	Kafka kafka.KafkaConfig `mapstructure:"kafka"`
 }
 
 type TaskQueueConfig struct {

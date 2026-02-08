@@ -15,6 +15,7 @@
 package router
 
 import (
+	"github.com/arcentrix/arcentra/internal/engine/config"
 	"github.com/arcentrix/arcentra/internal/engine/service"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/http"
@@ -39,11 +40,13 @@ func ProvideRouter(
 	cache cache.ICache,
 	services *service.Services,
 	shutdownMgr *shutdown.Manager,
+	appConf *config.AppConfig,
 ) *Router {
 	return NewRouter(
 		httpConf,
 		cache,
 		services,
 		shutdownMgr,
+		appConf,
 	)
 }

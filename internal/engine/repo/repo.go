@@ -41,6 +41,7 @@ type Repositories struct {
 	NotificationTemplate INotificationTemplateRepository
 	NotificationChannel  INotificationChannelRepository
 	Plugin               IPluginRepository
+	StepRun              IStepRunRepository
 }
 
 // NewRepositories 初始化所有 repository
@@ -65,6 +66,7 @@ func NewRepositories(db database.IDatabase, cache cache.ICache) *Repositories {
 		NotificationTemplate: NewNotificationTemplateRepo(db),
 		NotificationChannel:  NewNotificationChannelRepo(db),
 		Plugin:               NewPluginRepo(db),
+		StepRun:              NewStepRunRepo(db),
 	}
 }
 

@@ -31,6 +31,7 @@ type conn struct {
 	id        string
 	ctx       context.Context
 	ctxMu     sync.RWMutex
+	writeMu   sync.Mutex
 	hub       Hub
 	handler   Handler
 	closeOnce sync.Once
@@ -39,7 +40,7 @@ type conn struct {
 
 const (
 	readlimit  = 1024 * 1024 * 10    // 10MB
-	pongWait   = 60 * time.Second    // 等待 pong 响应的超时时间
+	pongWait   = 5 * time.Minute     // 等待 pong 响应的超时时间
 	pingPeriod = (pongWait * 9) / 10 // ping 发送周期，应该小于 pongWait
 	writeWait  = 10 * time.Second    // 写入超时时间
 )
@@ -68,11 +69,26 @@ func (c *conn) ReadMessage() (messageType int, p []byte, err error) {
 
 // WriteMessage 写入一条消息
 func (c *conn) WriteMessage(messageType int, data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	// 每次写入都设置写超时，避免沿用过期的 deadline 导致 i/o timeout
+	_ = c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+	defer func() {
+		// 复位，避免影响后续写入
+		_ = c.Conn.SetWriteDeadline(time.Time{})
+	}()
 	return c.Conn.WriteMessage(messageType, data)
 }
 
 // WriteJSON 写入 JSON 消息
 func (c *conn) WriteJSON(v any) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	// 每次写入都设置写超时，避免沿用过期的 deadline 导致 i/o timeout
+	_ = c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+	defer func() {
+		_ = c.Conn.SetWriteDeadline(time.Time{})
+	}()
 	return c.Conn.WriteJSON(v)
 }
 
@@ -185,9 +201,7 @@ func (c *conn) pingTicker() {
 	for {
 		select {
 		case <-ticker.C:
-			// 设置写入超时
-			_ = c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.Conn.WriteMessage(PingMessage, nil); err != nil {
+			if err := c.WriteMessage(PingMessage, nil); err != nil {
 				return
 			}
 		case <-c.closed:

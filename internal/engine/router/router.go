@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/arcentrix/arcentra/internal/engine/config"
 	"github.com/arcentrix/arcentra/internal/engine/service"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/http"
@@ -27,7 +28,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/shutdown"
 	"github.com/arcentrix/arcentra/pkg/trace/inject"
 	"github.com/arcentrix/arcentra/pkg/version"
-	fiberi18n "github.com/gofiber/contrib/fiberi18n/v2"
+	"github.com/gofiber/contrib/fiberi18n/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/pprof"
@@ -40,6 +41,7 @@ type Router struct {
 	Cache       cache.ICache
 	Services    *service.Services
 	ShutdownMgr *shutdown.Manager
+	AppConf     *config.AppConfig
 }
 
 const (
@@ -55,12 +57,14 @@ func NewRouter(
 	cache cache.ICache,
 	services *service.Services,
 	shutdownMgr *shutdown.Manager,
+	appConf *config.AppConfig,
 ) *Router {
 	return &Router{
 		Http:        httpConf,
 		Cache:       cache,
 		Services:    services,
 		ShutdownMgr: shutdownMgr,
+		AppConf:     appConf,
 	}
 }
 
@@ -135,9 +139,6 @@ func (rt *Router) Router() *fiber.App {
 	// API路由
 	api := app.Group(apiContextPath)
 	{
-		// WebSocket
-		// api.Post("/ws", ws.Handle)
-
 		// 核心路由
 		rt.routerGroup(api)
 	}
@@ -161,6 +162,9 @@ func (rt *Router) Router() *fiber.App {
 
 func (rt *Router) routerGroup(r fiber.Router) {
 	auth := middleware.AuthorizationMiddleware(rt.Http.Auth.SecretKey, rt.Cache)
+
+	// WebSocket
+	rt.wsRouter(r, auth)
 
 	// 版本信息
 	r.Get("/version", func(c *fiber.Ctx) error {
