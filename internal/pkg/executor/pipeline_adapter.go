@@ -155,7 +155,7 @@ func NewExecutorManagerWithDefaultsAndEvents(
 	if publisher != nil {
 		manager.SetEventPublisher(publisher, BuildEventEmitterConfig(appConf))
 	}
-	logPublisher, err := NewKafkaLogPublisherFromConfig(appConf)
+	logPublisher, err := NewKafkaLogPublisher(convertKafkaConfig(appConf.MessageQueue.Kafka), "arcentra-agent")
 	if err != nil {
 		log.Warnw("failed to create kafka log publisher", "error", err)
 	} else if logPublisher != nil {

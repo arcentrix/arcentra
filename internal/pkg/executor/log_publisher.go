@@ -37,16 +37,8 @@ type KafkaLogPublisher struct {
 	producer *kafka.Producer
 }
 
-// NewKafkaLogPublisherFromConfig creates a Kafka log publisher from app config.
-func NewKafkaLogPublisherFromConfig(appConf *config.AppConfig) (*KafkaLogPublisher, error) {
-	if appConf == nil {
-		return nil, nil
-	}
-	cfg := appConf.MessageQueue.Kafka
-	if cfg.BootstrapServers == "" {
-		return nil, nil
-	}
-
+// NewKafkaLogPublisher creates a Kafka log publisher from Kafka config.
+func NewKafkaLogPublisher(cfg kafka.KafkaConfig, clientID string) (*KafkaLogPublisher, error) {
 	clientOptions := []kafka.ClientOption{
 		kafka.WithSecurityProtocol(cfg.SecurityProtocol),
 		kafka.WithSaslMechanism(cfg.Sasl.Mechanism),
@@ -60,7 +52,7 @@ func NewKafkaLogPublisherFromConfig(appConf *config.AppConfig) (*KafkaLogPublish
 
 	producer, err := kafka.NewProducer(
 		cfg.BootstrapServers,
-		"arcentra",
+		clientID,
 		kafka.WithProducerClientOptions(clientOptions...),
 		kafka.WithProducerAcks(cfg.Acks),
 		kafka.WithProducerRetries(cfg.Retries),
@@ -73,6 +65,27 @@ func NewKafkaLogPublisherFromConfig(appConf *config.AppConfig) (*KafkaLogPublish
 	return &KafkaLogPublisher{producer: producer}, nil
 }
 
+func convertKafkaConfig(cfg config.KafkaConfig) kafka.KafkaConfig {
+	return kafka.KafkaConfig{
+		BootstrapServers: cfg.BootstrapServers,
+		Acks:             cfg.Acks,
+		Retries:          cfg.Retries,
+		Compression:      cfg.Compression,
+		SecurityProtocol: cfg.SecurityProtocol,
+		Sasl: kafka.SaslConfig{
+			Mechanism: cfg.Sasl.Mechanism,
+			Username:  cfg.Sasl.Username,
+			Password:  cfg.Sasl.Password,
+		},
+		Ssl: kafka.SslConfig{
+			CaFile:   cfg.Ssl.CaFile,
+			CertFile: cfg.Ssl.CertFile,
+			KeyFile:  cfg.Ssl.KeyFile,
+			Password: cfg.Ssl.Password,
+		},
+	}
+}
+
 // Publish sends a build log message to Kafka.
 func (p *KafkaLogPublisher) Publish(ctx context.Context, msg *logstream.BuildLogMessage) error {
 	if p == nil || p.producer == nil || msg == nil {
@@ -82,7 +95,7 @@ func (p *KafkaLogPublisher) Publish(ctx context.Context, msg *logstream.BuildLog
 	if err != nil {
 		return fmt.Errorf("marshal build log message: %w", err)
 	}
-	return p.producer.Send(ctx, buildLogsTopic, logstream.BuildLogKey(msg), payload, nil)
+	return p.producer.Send(ctx, buildLogsTopic, msg.BuildLogKey(), payload, nil)
 }
 
 // Close closes the Kafka producer.

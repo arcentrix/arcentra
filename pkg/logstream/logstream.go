@@ -35,15 +35,15 @@ type BuildLogMessage struct {
 }
 
 // BuildLogKey returns a composite key for log message partitioning.
-func BuildLogKey(msg *BuildLogMessage) string {
-	if msg == nil {
+func (m *BuildLogMessage) BuildLogKey() string {
+	if m == nil {
 		return ""
 	}
 	parts := []string{
-		msg.ProjectId,
-		msg.PipelineId,
-		msg.PipelineRunId,
-		msg.StepRunId,
+		m.ProjectId,
+		m.PipelineId,
+		m.PipelineRunId,
+		m.StepRunId,
 	}
 	return strings.Trim(strings.Join(parts, ":"), ":")
 }
