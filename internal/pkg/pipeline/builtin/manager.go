@@ -88,6 +88,16 @@ func (m *Manager) registerBuiltins() {
 		"send.template": m.handleStdoutSendTemplate,
 		"send.batch":    m.handleStdoutSendBatch,
 	})
+
+	// Register scm builtin
+	m.registerBuiltin("scm", &Info{
+		Name:        "scm",
+		Description: "SCM integration builtin for webhook parsing and event polling",
+		Actions:     []string{"webhook.parse", "events.poll"},
+	}, map[string]ActionHandler{
+		"webhook.parse": m.handleScmWebhookParse,
+		"events.poll":   m.handleScmEventsPoll,
+	})
 }
 
 // registerBuiltin registers a builtin function

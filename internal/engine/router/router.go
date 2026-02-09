@@ -30,7 +30,6 @@ import (
 	"github.com/arcentrix/arcentra/pkg/version"
 	"github.com/gofiber/contrib/fiberi18n/v2"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/pprof"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"golang.org/x/text/language"
@@ -91,7 +90,7 @@ func (rt *Router) Router() *fiber.App {
 		middleware.RequestMiddleware(), // 设置 request_id 到 Locals("request_id")
 		inject.FiberMiddleware(),       // trace middleware 读取 request_id/ip 并传播上下文
 		recover.New(),
-		cors.New(),
+		middleware.CorsMiddleware(),
 		middleware.UnifiedResponseMiddleware(),
 		middleware.AccessLogMiddleware(rt.Http),
 	)

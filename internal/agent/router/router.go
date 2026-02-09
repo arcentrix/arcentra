@@ -23,7 +23,6 @@ import (
 	"github.com/arcentrix/arcentra/pkg/shutdown"
 	"github.com/arcentrix/arcentra/pkg/version"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/pprof"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 )
@@ -64,7 +63,7 @@ func (rt *Router) Router() *fiber.App {
 	// 中间件
 	app.Use(
 		recover.New(),
-		cors.New(),
+		middleware.CorsMiddleware(),
 		middleware.UnifiedResponseMiddleware(),
 	)
 

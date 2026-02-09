@@ -18,7 +18,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"net/http"
+	"strings"
 
 	"golang.org/x/oauth2"
 )
@@ -120,5 +122,97 @@ func (p *OAuthProvider) GetRawUserInfo(ctx context.Context, token *oauth2.Token)
 		return nil, err
 	}
 
+	// GitHub-specific fallback:
+	// - https://api.github.com/user often returns email null unless the email is public.
+	// - With scope "user:email", we can call https://api.github.com/user/emails to get the primary email.
+	// To avoid creating placeholder emails like "<username>@GitHub.com", try to populate email here.
+	if isEmptyString(dataMap["email"]) && looksLikeGitHubUserInfoURL(p.UserInfoURL) {
+		if email, err := fetchGitHubPrimaryEmail(ctx, token); err == nil && email != "" {
+			dataMap["email"] = email
+		}
+	}
+
 	return dataMap, nil
+}
+
+func isEmptyString(v any) bool {
+	switch vv := v.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(vv) == ""
+	default:
+		// GitHub may return email: null, but other providers might return non-string types.
+		// Treat non-string as "present" to avoid surprising overwrites.
+		return false
+	}
+}
+
+func looksLikeGitHubUserInfoURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	// Common GitHub userinfo endpoints:
+	// - https://api.github.com/user
+	// - https://github.com/api/v3/user (GitHub Enterprise)
+	host := strings.ToLower(u.Host)
+	path := strings.TrimSuffix(u.Path, "/")
+	if !strings.Contains(host, "github") {
+		return false
+	}
+	return path == "/user" || strings.HasSuffix(path, "/api/v3/user")
+}
+
+type gitHubEmailItem struct {
+	Email    string `json:"email"`
+	Primary  bool   `json:"primary"`
+	Verified bool   `json:"verified"`
+}
+
+func fetchGitHubPrimaryEmail(ctx context.Context, token *oauth2.Token) (string, error) {
+	// NOTE: GitHub requires "user:email" scope for this endpoint.
+	const emailsURL = "https://api.github.com/user/emails"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, emailsURL, nil)
+	if err != nil {
+		return "", err
+	}
+	token.SetAuthHeader(req)
+	// GitHub API likes an explicit accept header.
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("github emails request failed: %s", resp.Status)
+	}
+
+	var items []gitHubEmailItem
+	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+		return "", err
+	}
+	// Prefer primary+verified, then primary, then first verified, then first.
+	for _, it := range items {
+		if it.Primary && it.Verified && strings.TrimSpace(it.Email) != "" {
+			return it.Email, nil
+		}
+	}
+	for _, it := range items {
+		if it.Primary && strings.TrimSpace(it.Email) != "" {
+			return it.Email, nil
+		}
+	}
+	for _, it := range items {
+		if it.Verified && strings.TrimSpace(it.Email) != "" {
+			return it.Email, nil
+		}
+	}
+	if len(items) > 0 {
+		return strings.TrimSpace(items[0].Email), nil
+	}
+	return "", nil
 }

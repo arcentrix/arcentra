@@ -15,6 +15,9 @@
 package middleware
 
 import (
+	"os"
+	"strings"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 )
@@ -27,8 +30,32 @@ var (
 
 // CorsMiddleware 跨域中间件
 func CorsMiddleware() fiber.Handler {
+	// NOTE:
+	// - When AllowCredentials is true, Fiber CORS forbids AllowOrigins="*".
+	// - For local dev (Vite/React), requests typically come from http://localhost:5173.
+	//
+	// Configure allowed origins via env:
+	//   ARCENTRA_CORS_ALLOW_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
+	// If not set, we default to localhost dev origins.
+	allowed := strings.TrimSpace(os.Getenv("ARCENTRA_CORS_ALLOW_ORIGINS"))
+	allowedSet := map[string]struct{}{}
+	if allowed == "" {
+		allowed = "http://localhost:5173,http://127.0.0.1:5173"
+	}
+	for o := range strings.SplitSeq(allowed, ",") {
+		o = strings.ToLower(strings.TrimSpace(o))
+		if o == "" {
+			continue
+		}
+		allowedSet[o] = struct{}{}
+	}
+
 	return cors.New(cors.Config{
-		AllowOrigins:     "*",
+		AllowOriginsFunc: func(origin string) bool {
+			origin = strings.ToLower(strings.TrimSpace(origin))
+			_, ok := allowedSet[origin]
+			return ok
+		},
 		AllowMethods:     allowMethods,
 		AllowHeaders:     allowHeaders,
 		ExposeHeaders:    exposeHeaders,
