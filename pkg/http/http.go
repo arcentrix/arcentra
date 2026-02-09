@@ -38,8 +38,8 @@ type Auth struct {
 
 // TokenInfo token information stored in Redis
 type TokenInfo struct {
-	AccessToken  string `json:"accessToken"`
-	RefreshToken string `json:"refreshToken"`
+	AccessToken  string `json:"accessToken,omitempty"`
+	RefreshToken string `json:"refreshToken,omitempty"`
 	ExpireAt     int64  `json:"expireAt"`
 	CreateAt     int64  `json:"createAt"`
 }
@@ -71,5 +71,21 @@ func (h *Http) SetDefaults() {
 	}
 	if h.Auth.RefreshExpire == 0 {
 		h.Auth.RefreshExpire = 7200 * time.Minute
+	}
+
+	// Normalize auth expire units.
+	//
+	// Config files document these values as "minutes" and often provide plain numbers
+	// (e.g. accessExpire = 3600). When unmarshaled into time.Duration via mapstructure,
+	// a plain number becomes nanoseconds. That makes tokens expire almost immediately.
+	//
+	// Rule:
+	// - If value is < 1 minute, treat it as "minutes" and convert.
+	// - If value is already a duration string (e.g. "60m", "1h"), keep as-is.
+	if h.Auth.AccessExpire > 0 && h.Auth.AccessExpire < time.Minute {
+		h.Auth.AccessExpire = h.Auth.AccessExpire * time.Minute
+	}
+	if h.Auth.RefreshExpire > 0 && h.Auth.RefreshExpire < time.Minute {
+		h.Auth.RefreshExpire = h.Auth.RefreshExpire * time.Minute
 	}
 }

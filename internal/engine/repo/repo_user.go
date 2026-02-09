@@ -41,7 +41,8 @@ type IUserRepository interface {
 	GetUserList(offset int, pageSize int) ([]UserWithExt, int64, error)
 	GetUsersByRole(roleId string, roleName string, offset int, pageSize int) ([]UserWithExt, int64, error)
 	SetToken(userId, aToken string, auth http.Auth) (string, error)
-	SetLoginRespInfo(accessExpire time.Duration, loginResp *model.LoginResp) error
+	SetRefreshToken(userId, rToken string, auth http.Auth) (string, error)
+	SetLoginRespInfo(auth http.Auth, loginResp *model.LoginResp) error
 	GetToken(key string) (string, error)
 	DelToken(key string) error
 	GetUserPassword(userId string) (string, error)
@@ -283,8 +284,8 @@ func (ur *UserRepo) SetToken(userId, aToken string, auth http.Auth) (string, err
 	now := time.Now()
 	tokenInfo := http.TokenInfo{
 		AccessToken:  aToken,
-		RefreshToken: "", // refresh token 在这个方法中不需要更新
-		ExpireAt:     now.Add(auth.AccessExpire * time.Second).Unix(),
+		RefreshToken: "", // refresh token stored in its own key
+		ExpireAt:     now.Add(auth.AccessExpire).Unix(),
 		CreateAt:     now.Unix(),
 	}
 
@@ -295,13 +296,40 @@ func (ur *UserRepo) SetToken(userId, aToken string, auth http.Auth) (string, err
 	}
 
 	key := consts.UserTokenKey + userId
-	if err := ur.ICache.Set(ctx, key, tokenInfoJson, auth.AccessExpire*time.Second).Err(); err != nil {
+	if err := ur.ICache.Set(ctx, key, tokenInfoJson, auth.AccessExpire).Err(); err != nil {
 		return "", fmt.Errorf("failed to set token in Redis: %w", err)
 	}
 	return key, nil
 }
 
-func (ur *UserRepo) SetLoginRespInfo(accessExpire time.Duration, loginResp *model.LoginResp) error {
+func (ur *UserRepo) SetRefreshToken(userId, rToken string, auth http.Auth) (string, error) {
+	if ur.ICache == nil {
+		return "", fmt.Errorf("cache not available")
+	}
+	ctx := context.Background()
+
+	// 构建 TokenInfo 结构（refresh token 专用）
+	now := time.Now()
+	tokenInfo := http.TokenInfo{
+		AccessToken:  "",
+		RefreshToken: rToken,
+		ExpireAt:     now.Add(auth.RefreshExpire).Unix(),
+		CreateAt:     now.Unix(),
+	}
+
+	tokenInfoJson, err := sonic.MarshalString(&tokenInfo)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal token info: %w", err)
+	}
+
+	key := consts.UserRefreshTokenKey + userId
+	if err := ur.ICache.Set(ctx, key, tokenInfoJson, auth.RefreshExpire).Err(); err != nil {
+		return "", fmt.Errorf("failed to set refresh token in Redis: %w", err)
+	}
+	return key, nil
+}
+
+func (ur *UserRepo) SetLoginRespInfo(auth http.Auth, loginResp *model.LoginResp) error {
 	if ur.ICache == nil {
 		return fmt.Errorf("cache not available")
 	}
@@ -309,21 +337,37 @@ func (ur *UserRepo) SetLoginRespInfo(accessExpire time.Duration, loginResp *mode
 
 	pipe := ur.ICache.Pipeline()
 
-	tokenInfo := http.TokenInfo{
+	accessTokenInfo := http.TokenInfo{
 		AccessToken:  loginResp.Token["accessToken"],
-		RefreshToken: loginResp.Token["refreshToken"],
+		RefreshToken: "",
 		ExpireAt:     loginResp.ExpireAt,
 		CreateAt:     loginResp.CreateAt,
 	}
 
-	tokenInfoJson, err := sonic.Marshal(&tokenInfo)
+	accessTokenInfoJson, err := sonic.Marshal(&accessTokenInfo)
 	if err != nil {
 		return fmt.Errorf("failed to marshal token info: %w", err)
 	}
 
 	tokenKey := consts.UserTokenKey + loginResp.UserInfo.UserId
-	if err := pipe.Set(ctx, tokenKey, tokenInfoJson, accessExpire*time.Minute).Err(); err != nil {
+	if err := pipe.Set(ctx, tokenKey, accessTokenInfoJson, auth.AccessExpire).Err(); err != nil {
 		return fmt.Errorf("failed to set token in Redis: %w", err)
+	}
+
+	refreshTokenInfo := http.TokenInfo{
+		AccessToken:  "",
+		RefreshToken: loginResp.Token["refreshToken"],
+		ExpireAt:     time.Now().Add(auth.RefreshExpire).Unix(),
+		CreateAt:     time.Now().Unix(),
+	}
+	refreshTokenInfoJson, err := sonic.Marshal(&refreshTokenInfo)
+	if err != nil {
+		return fmt.Errorf("failed to marshal refresh token info: %w", err)
+	}
+
+	refreshTokenKey := consts.UserRefreshTokenKey + loginResp.UserInfo.UserId
+	if err := pipe.Set(ctx, refreshTokenKey, refreshTokenInfoJson, auth.RefreshExpire).Err(); err != nil {
+		return fmt.Errorf("failed to set refresh token in Redis: %w", err)
 	}
 
 	userInfoJson, err := sonic.Marshal(&loginResp.UserInfo)
@@ -332,7 +376,7 @@ func (ur *UserRepo) SetLoginRespInfo(accessExpire time.Duration, loginResp *mode
 	}
 
 	userInfoKey := consts.UserInfoKey + loginResp.UserInfo.UserId
-	if err := pipe.Set(ctx, userInfoKey, userInfoJson, accessExpire*time.Minute).Err(); err != nil {
+	if err := pipe.Set(ctx, userInfoKey, userInfoJson, auth.AccessExpire).Err(); err != nil {
 		return fmt.Errorf("failed to set user info in Redis: %w", err)
 	}
 

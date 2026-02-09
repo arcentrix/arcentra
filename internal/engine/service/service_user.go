@@ -111,7 +111,7 @@ func (ul *UserService) Login(login *usermodel.Login, auth http.Auth) (*usermodel
 
 	now := time.Now()
 	createAt := now.Unix()
-	expireAt := now.Add(auth.AccessExpire * time.Minute).Unix()
+	expireAt := now.Add(auth.AccessExpire).Unix()
 
 	// 获取用户的角色信息和路由信息
 	roles, routes, err := ul.GetUserRolesAndRoutes(userInfo.UserId, "")
@@ -143,13 +143,16 @@ func (ul *UserService) Login(login *usermodel.Login, auth http.Auth) (*usermodel
 		CreateAt: createAt,
 	}
 
-	safe.Go(func() {
-		if err = ul.userRepo.SetLoginRespInfo(auth.AccessExpire, resp); err != nil {
-			log.Errorw("failed to set login response info", "userId", userInfo.UserId, "error", err)
-			return
-		}
+	// Persist token/user cache synchronously.
+	// Authorization middleware depends on Redis token info; making this async can cause
+	// "token expired" responses immediately after login due to race conditions.
+	if err = ul.userRepo.SetLoginRespInfo(auth, resp); err != nil {
+		log.Errorw("failed to set login response info", "userId", userInfo.UserId, "error", err)
+		return nil, err
+	}
 
-		// update last login time in userInfo ext
+	// update last login time in userInfo ext (non-critical)
+	safe.Go(func() {
 		if ul.userExtRepo != nil {
 			if err := ul.userExtRepo.UpdateLastLogin(userInfo.UserId); err != nil {
 				log.Warnw("failed to update last login time", "userId", userInfo.UserId, "error", err)
@@ -168,13 +171,17 @@ func (ul *UserService) Refresh(userId, rToken string, auth *http.Auth) (map[stri
 	}
 
 	// calculate token expiration time
-	expireAt := time.Now().Add(auth.AccessExpire * time.Minute).Unix()
+	expireAt := time.Now().Add(auth.AccessExpire).Unix()
 	token["expireAt"] = fmt.Sprintf("%d", expireAt)
 
-	k, err := ul.userRepo.SetToken(userId, token["accessToken"], *auth)
-	log.Debugw("token key", "key", k)
+	_, err = ul.userRepo.SetToken(userId, token["accessToken"], *auth)
 	if err != nil {
 		log.Errorw("failed to set token in Redis", "userId", userId, "error", err)
+		return token, err
+	}
+
+	if _, err := ul.userRepo.SetRefreshToken(userId, token["refreshToken"], *auth); err != nil {
+		log.Errorw("failed to set refresh token in Redis", "userId", userId, "error", err)
 		return token, err
 	}
 
@@ -215,6 +222,11 @@ func (ul *UserService) Logout(userId string) error {
 	if err := ul.userRepo.DelToken(tokenKey); err != nil {
 		log.Errorw("failed to delete token", "userId", userId, "error", err)
 		return errors.New(http.TokenBeEmpty.Msg)
+	}
+
+	refreshTokenKey := consts.UserRefreshTokenKey + userId
+	if err := ul.userRepo.DelToken(refreshTokenKey); err != nil {
+		log.Errorw("failed to delete refresh token", "userId", userId, "error", err)
 	}
 
 	// delete user info cache
@@ -401,6 +413,11 @@ func (ul *UserService) ResetPassword(userId string, req *usermodel.ResetPassword
 	if err := ul.userRepo.DelToken(tokenKey); err != nil {
 		log.Warnw("failed to delete token after password reset", "userId", userId, "error", err)
 		// this is not critical, continue
+	}
+
+	refreshTokenKey := consts.UserRefreshTokenKey + userId
+	if err := ul.userRepo.DelToken(refreshTokenKey); err != nil {
+		log.Warnw("failed to delete refresh token after password reset", "userId", userId, "error", err)
 	}
 
 	log.Infow("user password reset successfully", "userId", userId)

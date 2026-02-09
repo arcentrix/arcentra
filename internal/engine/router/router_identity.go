@@ -118,7 +118,7 @@ func (rt *Router) callback(c *fiber.Ctx) error {
 		expireAt = time.Unix(expireAtUnix, 0)
 	} else {
 		// 如果解析失败，使用默认过期时间（AccessExpire 分钟）
-		expireAt = time.Now().Add(rt.Http.Auth.AccessExpire * time.Minute)
+		expireAt = time.Now().Add(rt.Http.Auth.AccessExpire)
 	}
 
 	// 从数据库获取 cookie path，如果获取失败则使用默认值 "/"
@@ -137,7 +137,7 @@ func (rt *Router) callback(c *fiber.Ctx) error {
 	})
 
 	// 设置 refreshToken cookie（HTTP-only）
-	refreshExpireAt := time.Now().Add(rt.Http.Auth.RefreshExpire * time.Minute)
+	refreshExpireAt := time.Now().Add(rt.Http.Auth.RefreshExpire)
 	c.Cookie(&fiber.Cookie{
 		Name:     "refreshToken",
 		Value:    loginResp.Token["refreshToken"],

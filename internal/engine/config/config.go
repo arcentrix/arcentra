@@ -116,12 +116,20 @@ func LoadConfigFile(confDir string) (AppConfig, error) {
 			log.Errorw("failed to unmarshal configuration file", "error", err, "file", e.Name)
 			return
 		}
+		// Apply defaults/normalization after reload (e.g. auth token expiry units).
+		cfg.Http.SetDefaults()
+		cfg.Metrics.SetDefaults()
+		cfg.Pprof.SetDefaults()
 		mu.Unlock()
 		log.Infow("configuration reloaded successfully", "file", e.Name)
 	})
 	if err := config.Unmarshal(&cfg); err != nil {
 		return cfg, fmt.Errorf("failed to unmarshal configuration file: %v", err)
 	}
+	// Apply defaults/normalization after initial load (e.g. auth token expiry units).
+	cfg.Http.SetDefaults()
+	cfg.Metrics.SetDefaults()
+	cfg.Pprof.SetDefaults()
 	log.Infow("config file loaded",
 		"path", confDir,
 	)

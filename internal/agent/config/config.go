@@ -157,6 +157,10 @@ func loadConfigFile(confDir string) (AgentConfig, error) {
 			log.Errorw("failed to unmarshal configuration file", "error", err, "file", e.Name)
 			return
 		}
+		// Apply defaults/normalization after reload (e.g. auth token expiry units).
+		ac.Http.SetDefaults()
+		ac.Metrics.SetDefaults()
+		ac.Pprof.SetDefaults()
 		if err := ac.parseServerAddr(); err != nil {
 			mu.Unlock()
 			log.Errorw("failed to parse server address after config reload", "error", err, "file", e.Name)
@@ -168,6 +172,11 @@ func loadConfigFile(confDir string) (AgentConfig, error) {
 	if err := config.Unmarshal(&ac); err != nil {
 		return ac, fmt.Errorf("failed to unmarshal configuration file: %v", err)
 	}
+
+	// Apply defaults/normalization after initial load (e.g. auth token expiry units).
+	ac.Http.SetDefaults()
+	ac.Metrics.SetDefaults()
+	ac.Pprof.SetDefaults()
 
 	// parse ServerAddr to gRPC client config
 	if err := ac.parseServerAddr(); err != nil {
