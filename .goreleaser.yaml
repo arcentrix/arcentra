@@ -1,0 +1,115 @@
+version: 2
+
+project_name: arcentra
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: arcentra
+    main: ./cmd/arcentra
+    binary: arcentra
+    env:
+      # NOTE: arcentra uses kafka (confluent-kafka-go) in the codebase; keep CGO enabled.
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    ldflags: &ldflags_common
+      - -s -w
+      - -X 'github.com/arcentrix/arcentra/pkg/version.Version={{ .Version }}'
+      - -X 'github.com/arcentrix/arcentra/pkg/version.GitBranch={{ .Branch }}'
+      - -X 'github.com/arcentrix/arcentra/pkg/version.GitCommit={{ .Commit }}'
+      - -X 'github.com/arcentrix/arcentra/pkg/version.BuildTime={{ .Date }}'
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+  - id: arcentra-agent
+    main: ./cmd/arcentra-agent
+    binary: arcentra-agent
+    env:
+      - CGO_ENABLED=1
+    flags:
+      - -trimpath
+    ldflags: *ldflags_common
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+  # - id: arcentra-cli
+  #   main: ./cmd/cli
+  #   binary: arcentra-cli
+  #   env:
+  #     - CGO_ENABLED=0
+  #   flags:
+  #     - -trimpath
+  #   ldflags: *ldflags_common
+  #   goos:
+  #     - linux
+  #     - darwin
+  #   goarch:
+  #     - amd64
+  #     - arm64
+
+archives:
+  - id: arcentra
+    builds: [arcentra]
+    format: tar.gz
+    wrap_in_directory: true
+    name_template: >-
+      {{ .ProjectName }}_{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - LICENSE
+      - conf.d/*.toml
+      - deploy/*
+
+  - id: arcentra-agent
+    builds: [arcentra-agent]
+    format: tar.gz
+    wrap_in_directory: true
+    name_template: >-
+      {{ .ProjectName }}_{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - LICENSE
+      - conf.d/*.toml
+      - deploy/*
+
+  # - id: arcentra-cli
+  #   builds: [arcentra-cli]
+  #   format: tar.gz
+  #   wrap_in_directory: true
+  #   name_template: >-
+  #     {{ .ProjectName }}_{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+  #   files:
+  #     - README.md
+  #     - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "^refactor:"
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
+
+release:
+  # If you use tags like v25.1.2.3, keep it; GoReleaser will strip the v in {{ .Version }}.
+  prerelease: auto
+

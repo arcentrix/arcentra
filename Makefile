@@ -2,38 +2,28 @@ SHELL := /bin/sh
 .ONESHELL:
 .SHELLFLAGS := -eu -o pipefail -c
 
-.PHONY: help prebuild build proto proto-clean proto-install wire wire-install wire-clean staticcheck staticcheck-install staticcheck-check version version-check version-tag
+.DEFAULT_GOAL := help
 
-# git
+# -----------------------------------------------------------------------------
+# Version / build metadata
+# -----------------------------------------------------------------------------
 # Version format: YY.Major.Minor.Patch (e.g., 25.1.2.3, where 25 represents 2025)
-# Priority: 1. VERSION env var, 2. VERSION file, 3. git tag, 4. default (current 2-digit year.0.0.0)
+# Priority: 1) VERSION env var, 2) VERSION file, 3) git tag, 4) default (YY.0.0.0)
 CURRENT_YEAR := $(shell date +%y)
 VERSION_FILE := $(shell if [ -f VERSION ]; then cat VERSION | tr -d '[:space:]\n\r'; fi)
 GIT_TAG := $(shell git describe --tags --exact-match 2>/dev/null || echo "")
 ifeq ($(VERSION),)
   ifneq ($(VERSION_FILE),)
-    # Read from VERSION file
     VERSION := $(VERSION_FILE)
   else ifneq ($(GIT_TAG),)
-    # Remove 'v' prefix if present
     VERSION := $(shell echo $(GIT_TAG) | sed 's/^v//')
   else
-    # Default to current 2-digit year.0.0.0 if no tag found
     VERSION := $(CURRENT_YEAR).0.0.0
   endif
 endif
-GIT_BRANCH = $(shell git rev-parse --abbrev-ref HEAD)
-#GIT_COMMIT = $(shell git rev-parse --short=7 HEAD)
-GIT_COMMIT = $(shell git rev-parse HEAD)
+GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
+GIT_COMMIT := $(shell git rev-parse HEAD)
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-
-# proto
-PROTO_DIR := api
-PROTO_OUT_DIR := proto
-PROTO_FILES := $(shell find $(PROTO_DIR) -path '*/proto/*.proto')
-PROTOC := protoc
-PROTOC_GEN_GO := $(shell go env GOPATH)/bin/protoc-gen-go
-PROTOC_GEN_GO_GRPC := $(shell go env GOPATH)/bin/protoc-gen-go-grpc
 
 LDFLAGS := \
  -X 'github.com/arcentrix/arcentra/pkg/version.Version=$(VERSION)' \
@@ -41,13 +31,36 @@ LDFLAGS := \
  -X 'github.com/arcentrix/arcentra/pkg/version.GitCommit=$(GIT_COMMIT)' \
  -X 'github.com/arcentrix/arcentra/pkg/version.BuildTime=$(BUILD_TIME)'
 
-.DEFAULT_GOAL := help
+# -----------------------------------------------------------------------------
+# Common vars
+# -----------------------------------------------------------------------------
+JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 
-deps-sync:
-	go mod tidy
-	go mod verify
+PROTO_DIR ?= api
+## Target name (also Dockerfile stage and binary name): arcentra / arcentra-agent
+TARGET ?= arcentra 
 
-help: ## show help information
+## Container image name (override with IMG=repo/name:tag)
+IMG ?= arcentra:latest
+
+## Container tool (docker/podman)
+CONTAINER_TOOL ?= docker
+
+## Multi-arch platforms for docker-buildx
+PLATFORMS ?= linux/arm64,linux/amd64
+
+## Location to install dependencies to
+LOCALBIN ?= $(shell pwd)/bin
+GOLANGCI_LINT := $(LOCALBIN)/golangci-lint
+
+$(LOCALBIN):
+	mkdir -p $(LOCALBIN)
+
+# -----------------------------------------------------------------------------
+# Help
+# -----------------------------------------------------------------------------
+.PHONY: help ## show help information
+help:
 	@echo "arcentra CI/CD platform Makefile commands"
 	@echo ""
 	@echo "Usage: make [command]"
@@ -56,128 +69,214 @@ help: ## show help information
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Examples:"
-	@echo "  make proto-install  # install proto tool"
-	@echo "  make proto          # generate proto code"
+	@echo "  make buf-install    # install buf tool if missing"
+	@echo "  make buf            # generate proto code by buf"
 	@echo "  make all            # full build"
 
-all: deps-sync prebuild plugins build ## full build (frontend+plugins+main program)
+# -----------------------------------------------------------------------------
+# Dependencies / lint
+# -----------------------------------------------------------------------------
+.PHONY: deps-sync ## sync dependencies
+deps-sync:
+	go mod tidy
+	go mod verify
 
-JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+.PHONY: golangci-lint ## ensure golangci-lint exists in LOCALBIN
+golangci-lint: $(GOLANGCI_LINT)
 
-prebuild: ## download and embed the front-end file
-	echo "begin download and embed the front-end file..."
-	sh dl.sh
-	echo "web file download and embedding completed."
+$(GOLANGCI_LINT): | $(LOCALBIN)
+	@echo ">> installing golangci-lint to $(LOCALBIN)..."
+	@GOBIN="$(LOCALBIN)" go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@echo ">> golangci-lint installed: $(GOLANGCI_LINT)"
 
-build: wire buf ## build main program
+.PHONY: lint ## Run golangci-lint linter
+lint: golangci-lint
+	$(GOLANGCI_LINT) run
+
+.PHONY: lint-fix ## Run golangci-lint linter and perform fixes
+lint-fix: golangci-lint
+	$(GOLANGCI_LINT) run --fix
+
+.PHONY: lint-config ## Verify golangci-lint linter configuration
+lint-config: golangci-lint
+	$(GOLANGCI_LINT) config verify
+
+# -----------------------------------------------------------------------------
+# Build / run
+# -----------------------------------------------------------------------------
+.PHONY: all ## full build (prebuild+main program)
+all: deps-sync prebuild build
+
+.PHONY: prebuild ## prepare assets before build (optional)
+prebuild:
+	@if [ -x ./dl.sh ]; then \
+		echo ">> running ./dl.sh ..."; \
+		./dl.sh; \
+	elif [ -x ./scripts/prebuild.sh ]; then \
+		echo ">> running ./scripts/prebuild.sh ..."; \
+		./scripts/prebuild.sh; \
+	else \
+		echo ">> prebuild: no prebuild script found, skip."; \
+	fi
+
+.PHONY: build ## build main program
+build: TARGET=arcentra
+build: wire buf
 	go build -ldflags "${LDFLAGS}" -o arcentra ./cmd/arcentra/
 
-build-agent: wire buf ## build agent program
+.PHONY: build-agent ## build agent program
+build-agent: TARGET=arcentra-agent
+build-agent: wire buf
 	go build -ldflags "${LDFLAGS}" -o arcentra-agent ./cmd/arcentra-agent/
 
-build-cli: ## build CLI tool
+.PHONY: build-target ## build selected target binary (TARGET=arcentra|arcentra-agent)
+build-target: wire buf
+	go build -ldflags "${LDFLAGS}" -o "$(TARGET)" ./cmd/"$(TARGET)"/
+
+.PHONY: build-cli ## build CLI tool
+build-cli:
 	go build -ldflags "${LDFLAGS}" -o arcentra-cli ./cmd/cli/
 
+.PHONY: run ## run main program
+run: TARGET=arcentra
 run: deps-sync wire buf
 	go run -ldflags "${LDFLAGS}" ./cmd/arcentra/
 
+.PHONY: run-agent ## run agent program
+run-agent: TARGET=arcentra-agent
 run-agent: deps-sync wire buf
 	go run ./cmd/arcentra-agent/
 
-release: ## create release version
+.PHONY: run-cli ## run CLI tool
+run-cli: deps-sync wire buf
+	go run ./cmd/cli/
+
+.PHONY: release ## create release version
+release:
 	goreleaser --skip-validate --skip-publish --snapshot
 
-# proto code generation
-buf-install: ## install buf related plugins
-	@echo ">> installing buf..."
-	@go install github.com/bufbuild/buf/cmd/buf@latest
+# -----------------------------------------------------------------------------
+# Container images
+# -----------------------------------------------------------------------------
+.PHONY: docker-build ## Build container image (uses Dockerfile)
+docker-build:
+	$(CONTAINER_TOOL) build --target $(TARGET) --build-arg TARGET=$(TARGET) -t $(IMG) .
+
+.PHONY: docker-push ## Push container image to registry
+docker-push:
+	$(CONTAINER_TOOL) push $(IMG)
+
+.PHONY: docker-buildx ## Build and push multi-arch image (requires buildx)
+docker-buildx:
+	$(CONTAINER_TOOL) run --rm --privileged tonistiigi/binfmt --install all
+	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
+	- $(CONTAINER_TOOL) buildx create --name arcentra-builder
+	$(CONTAINER_TOOL) buildx use arcentra-builder
+	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --provenance=false --target $(TARGET) --build-arg TARGET=$(TARGET) --tag $(IMG) -f Dockerfile.cross .
+	- $(CONTAINER_TOOL) buildx rm arcentra-builder
+	rm -f Dockerfile.cross
+
+# -----------------------------------------------------------------------------
+# Proto / code generation
+# -----------------------------------------------------------------------------
+.PHONY: buf-install ## ensure buf is installed (install if missing)
+buf-install:
+	@command -v buf >/dev/null 2>&1 || { \
+		echo ">> buf not found, installing..."; \
+		go install github.com/bufbuild/buf/cmd/buf@latest; \
+	}
 	@echo ">> buf installed: $$(which buf)"
 
-buf: buf-check ## generate buf code
+.PHONY: buf ## generate buf code
+buf: buf-install
 	@echo ">> generating buf code from $(PROTO_DIR)"
 	@cd $(PROTO_DIR) && buf generate --template buf.gen.yaml
 	@echo ">> buf code generation done."
 
-buf-check: ## check if buf tool is installed
-	@command -v buf >/dev/null 2>&1 || { \
-		echo "error: buf is not installed, please run make buf-install"; \
-		exit 1; \
-	}
-	@echo ">> buf installed: $$(which buf)"
-
-buf-lint: ## check buf code style
+.PHONY: buf-lint ## check buf code style
+buf-lint: buf-install
 	@echo ">> linting buf code..."
 	@cd $(PROTO_DIR) && buf lint
 	@echo ">> buf code linting done."
 
-buf-breaking: ## check buf code breaking changes
+.PHONY: buf-breaking ## check buf code breaking changes
+buf-breaking: buf-install
 	@echo ">> checking buf code breaking changes..."
 	@cd $(PROTO_DIR) && buf breaking
 	@echo ">> buf code breaking changes checking done."
 
-buf-push: ## push buf code
+.PHONY: buf-push ## push buf code
+buf-push: buf-install
 	@echo ">> pushing buf code..."
 	@cd $(PROTO_DIR) && buf push
 	@echo ">> buf code pushing done."
 
-buf-clean: ## clean generated buf code
+.PHONY: buf-clean ## clean generated buf code
+buf-clean:
 	@echo ">> cleaning generated protobuf files..."
 	@find $(PROTO_DIR) -type f \( -name "*.pb.go" -o -name "*_grpc.pb.go" \) -delete 2>/dev/null || true
 	@echo ">> protobuf files cleaned."
 
-wire-install: ## install wire tool
-	@echo ">> installing wire..."
-	@go install github.com/google/wire/cmd/wire@latest
+.PHONY: wire-install ## install wire tool
+wire-install:
+	@command -v wire >/dev/null 2>&1 || { \
+		echo ">> wire not found, installing..."; \
+		go install github.com/google/wire/cmd/wire@latest; \
+	}
 	@echo ">> wire installed: $$(which wire)"
 
-wire: ## generate wire dependency injection code
-	@echo ">> generating wire code..."
-	@cd cmd/arcentra && wire
-	@cd cmd/arcentra-agent && wire
+.PHONY: wire ## generate wire dependency injection code
+wire: wire-install
+	@if [ -z "$(TARGET)" ]; then \
+		echo "error: TARGET is empty (expected arcentra or arcentra-agent)"; \
+		exit 1; \
+	fi
+	@echo ">> generating wire code for $(TARGET)..."
+	@cd cmd/$(TARGET) && wire
 	@echo ">> wire code generation done."
 
-wire-clean: ## clean wire generated code
+.PHONY: wire-clean ## clean wire generated code
+wire-clean:
 	@echo ">> cleaning wire generated files..."
 	@find . -name "wire_gen.go" -type f -delete
 	@echo ">> wire files cleaned."
 
-# staticcheck code analysis
-staticcheck-install: ## install staticcheck tool
-	@echo ">> installing staticcheck..."
-	@go install honnef.co/go/tools/cmd/staticcheck@latest
-	@echo ">> staticcheck installed: $$(which staticcheck)"
-
-staticcheck-check: ## check if staticcheck tool is installed
+# -----------------------------------------------------------------------------
+# Static analysis / code quality
+# -----------------------------------------------------------------------------
+.PHONY: staticcheck-install ## ensure staticcheck is installed (install if missing)
+staticcheck-install:
 	@command -v staticcheck >/dev/null 2>&1 || { \
-		echo "error: staticcheck is not installed, please run make staticcheck-install"; \
-		exit 1; \
+		echo ">> staticcheck not found, installing..."; \
+		go install honnef.co/go/tools/cmd/staticcheck@latest; \
 	}
 	@echo ">> staticcheck installed: $$(which staticcheck)"
 
-staticcheck: staticcheck-check ## run staticcheck code analysis
+.PHONY: staticcheck ## run staticcheck code analysis
+staticcheck: staticcheck-install
 	@echo ">> running staticcheck..."
 	@staticcheck ./...
 	@echo ">> staticcheck analysis done."
 
-addlicense-install: ## install addlicense tool
-	@echo ">> installing addlicense..."
-	@go install github.com/onexstack/addlicense@latest
-	@echo ">> addlicense installed: $$(which addlicense)"
-
-addlicense-check: ## check if addlicense tool is installed
+.PHONY: addlicense-install ## install addlicense tool
+addlicense-install:
 	@command -v addlicense >/dev/null 2>&1 || { \
-		echo "error: addlicense is not installed, please run make addlicense-install"; \
-		exit 1; \
+		echo ">> addlicense not found, installing..."; \
+		go install github.com/onexstack/addlicense@latest; \
 	}
 	@echo ">> addlicense installed: $$(which addlicense)"
 
-addlicense: addlicense-check ## run addlicense code analysis
+.PHONY: addlicense ## run addlicense code analysis
+addlicense: addlicense-install
 	@echo ">> running addlicense..."
 	@addlicense -v -l apache -c "arcentra Team" $(find . -name "*.go" -not -name "wire_gen.go" -not -name "*.pb.go" -not -name "*_grpc.pb.go")
 	@echo ">> addlicense analysis done."
 
-# version management
-version: ## show current version information
+# -----------------------------------------------------------------------------
+# Version management
+# -----------------------------------------------------------------------------
+.PHONY: version ## show current version information
+version:
 	@echo "Current Version: $(VERSION)"
 	@if [ -f VERSION ]; then \
 		echo "VERSION file: $$(cat VERSION | tr -d '[:space:]')"; \
@@ -189,7 +288,8 @@ version: ## show current version information
 	@echo "Git Commit: $(GIT_COMMIT)"
 	@echo "Build Time: $(BUILD_TIME)"
 
-version-check: ## validate version format (YY.Major.Minor.Patch)
+.PHONY: version-check ## validate version format (YY.Major.Minor.Patch)
+version-check:
 	@echo ">> validating version format: $(VERSION)"
 	@if ! echo "$(VERSION)" | grep -qE '^[0-9]{2}\.[0-9]+\.[0-9]+\.[0-9]+$$'; then \
 		echo "error: invalid version format: $(VERSION)"; \
@@ -198,7 +298,8 @@ version-check: ## validate version format (YY.Major.Minor.Patch)
 	fi
 	@echo ">> version format is valid: $(VERSION)"
 
-version-tag: version-check ## create git tag with current version
+.PHONY: version-tag ## create git tag with current version
+version-tag: version-check
 	@echo ">> creating git tag: v$(VERSION)"
 	@git tag -a "v$(VERSION)" -m "Release version $(VERSION)"
 	@echo ">> git tag created: v$(VERSION)"

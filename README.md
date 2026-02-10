@@ -9,7 +9,7 @@ Rather than being another pipeline runner, Arcentra focuses on providing a **sta
 
 ---
 
-## ✨ Project Vision
+## Project Vision
 
 Modern engineering environments are increasingly complex: repositories multiply, pipelines fragment, and execution environments diversify. While tools are abundant, **a unifying control layer is often missing**.
 
@@ -24,7 +24,7 @@ Arcentra is designed for teams who:
 
 ---
 
-## 🧠 Name Origin
+## Name Origin
 
 **Arcentra** is derived from two roots:
 
@@ -37,7 +37,7 @@ Together, the name represents:
 
 ---
 
-## 🏗️ Core Capabilities
+## Core Capabilities
 
 Arcentra is built around a small set of durable abstractions:
 
@@ -68,7 +68,7 @@ Arcentra is built around a small set of durable abstractions:
 
 ---
 
-## 🌐 Cloud-Native by Design
+## Cloud-Native by Design
 
 Arcentra embraces cloud-native principles:
 
@@ -79,7 +79,7 @@ Arcentra embraces cloud-native principles:
 
 ---
 
-## 🎯 Use Cases
+## Use Cases
 
 * Organization-wide CI/CD platforms
 * Multi-cluster or multi-cloud build and delivery systems
@@ -88,7 +88,7 @@ Arcentra embraces cloud-native principles:
 
 ---
 
-## 🚧 Project Status
+## Project Status
 
 Arcentra is currently under **active development**. The project prioritizes:
 
@@ -100,7 +100,25 @@ Contributions, discussions, and design feedback are welcome.
 
 ---
 
-## 📄 License
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) (English) for development setup, checks, and the pull request process.
+
+---
+
+## Security
+
+For reporting security issues, see [SECURITY.md](./SECURITY.md) (English).
+
+---
+
+## Code of Conduct
+
+Please read and follow our [Code of Conduct](./CODE_OF_CONDUCT.md) to keep the community welcoming and respectful.
+
+---
+
+## License
 Copyright 2024 The Arcentra Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");

@@ -2,19 +2,29 @@ FROM golang:1.24.4 AS builder
 
 WORKDIR /app
 
+COPY go.mod go.sum ./
+RUN go mod download
+
 COPY ./ /app/
 
-RUN apt-get install -y unzip && \
-    make build
+ARG TARGET=arcentra
+RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/* && \
+    make build-target TARGET=$TARGET
 
-FROM FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static:nonroot AS arcentra
 
-WORKDIR /
-
-RUN mkdir -p /conf.d
+WORKDIR /conf.d
 
 COPY --from=builder /app/arcentra /arcentra
 
 EXPOSE 8080
 
-ENTRYPOINT [ "/arcentra -conf /conf.d/config.toml" ]
+ENTRYPOINT ["/arcentra", "-conf", "/conf.d/config.toml"]
+
+FROM gcr.io/distroless/static:nonroot AS arcentra-agent
+
+WORKDIR /conf.d
+
+COPY --from=builder /app/arcentra-agent /arcentra-agent
+
+ENTRYPOINT ["/arcentra-agent"]
