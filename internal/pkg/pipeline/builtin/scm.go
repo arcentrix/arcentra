@@ -1,4 +1,4 @@
-// Copyright 2025 Arcentra Team
+// Copyright 2025 Arcentra Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -117,4 +117,3 @@ func (m *Manager) handleScmEventsPoll(ctx context.Context, params json.RawMessag
 		"nextCursor": next,
 	})
 }
-

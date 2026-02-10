@@ -269,7 +269,7 @@ addlicense-install:
 .PHONY: addlicense ## run addlicense code analysis
 addlicense: addlicense-install
 	@echo ">> running addlicense..."
-	@addlicense -v -l apache -c "arcentra Team" $(find . -name "*.go" -not -name "wire_gen.go" -not -name "*.pb.go" -not -name "*_grpc.pb.go")
+	@addlicense -v -l apache -c "Arcentra Authors." $(find . -name "*.go" -not -name "wire_gen.go" -not -name "*.pb.go" -not -name "*_grpc.pb.go")
 	@echo ">> addlicense analysis done."
 
 # -----------------------------------------------------------------------------

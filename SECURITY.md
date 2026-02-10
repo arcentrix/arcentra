@@ -2,7 +2,7 @@ English | [简体中文](./SECURITY_zh_CN.md)
 
 # Reporting Security Issues
 
-The Arcentra team and community take security vulnerabilities seriously. We appreciate responsible disclosure and will make every effort to acknowledge your report and address issues promptly.
+The Arcentra Authors. and community take security vulnerabilities seriously. We appreciate responsible disclosure and will make every effort to acknowledge your report and address issues promptly.
 
 ## How to report a vulnerability
 

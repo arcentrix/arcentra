@@ -1,4 +1,4 @@
-// Copyright 2025 Arcentra Team
+// Copyright 2025 Arcentra Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,10 +24,10 @@ import (
 )
 
 const (
-	eventTopicPipeline   = "EVENT_PIPELINE"
-	eventTopicAgent      = "EVENT_AGENT"
-	eventTopicPlatform   = "EVENT_PLATFORM"
-	eventTopicArtifact   = "EVENT_ARTIFACT"
+	eventTopicPipeline = "EVENT_PIPELINE"
+	eventTopicAgent    = "EVENT_AGENT"
+	eventTopicPlatform = "EVENT_PLATFORM"
+	eventTopicArtifact = "EVENT_ARTIFACT"
 )
 
 // BuildEventEmitterConfig builds emitter config from app config.

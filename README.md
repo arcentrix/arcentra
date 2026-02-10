@@ -119,7 +119,7 @@ Please read and follow our [Code of Conduct](./CODE_OF_CONDUCT.md) to keep the c
 ---
 
 ## License
-Copyright 2024 The Arcentra Authors.
+Copyright 2025 The Arcentra Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

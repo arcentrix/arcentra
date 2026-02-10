@@ -1,4 +1,4 @@
-// Copyright 2025 Arcentra Team
+// Copyright 2025 Arcentra Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -281,7 +281,7 @@ func (p *Git) Type() plugin.PluginType {
 
 // Author returns the plugin author
 func (p *Git) Author() string {
-	return "Arcentra Team"
+	return "Arcentra Authors."
 }
 
 // Repository returns the plugin repository
