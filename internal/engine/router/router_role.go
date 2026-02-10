@@ -55,11 +55,11 @@ func (rt *Router) createRole(c *fiber.Ctx) error {
 func (rt *Router) listRole(c *fiber.Ctx) error {
 	roleLogic := rt.Services.Role
 
-	pageNum := queryInt(c, "pageNum")
+	pageNum := rt.Http.QueryInt(c, "pageNum")
 	if pageNum <= 0 {
 		pageNum = 1
 	}
-	pageSize := queryInt(c, "pageSize")
+	pageSize := rt.Http.QueryInt(c, "pageSize")
 	if pageSize <= 0 {
 		pageSize = 10
 	}

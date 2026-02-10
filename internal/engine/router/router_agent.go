@@ -56,11 +56,11 @@ func (rt *Router) createAgent(c *fiber.Ctx) error {
 func (rt *Router) listAgent(c *fiber.Ctx) error {
 	agentLogic := rt.Services.Agent
 
-	pageNum := queryInt(c, "pageNum")
+	pageNum := rt.Http.QueryInt(c, "pageNum")
 	if pageNum <= 0 {
 		pageNum = 1
 	}
-	pageSize := queryInt(c, "pageSize")
+	pageSize := rt.Http.QueryInt(c, "pageSize")
 	if pageSize <= 0 {
 		pageSize = 10
 	}

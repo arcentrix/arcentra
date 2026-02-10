@@ -31,6 +31,11 @@ type statusSubscription struct {
 	params WSParams
 }
 
+var (
+	statusTopic = "EVENT_PIPELINE"
+	clientId    = "arcentra-ws-status"
+)
+
 func (h *WSHandle) handleStatus(conn ws.Conn, action string, params WSParams) error {
 	switch action {
 	case actionUnsubscribe:
@@ -98,8 +103,8 @@ func (h *WSHandle) consumeStatusEvents() {
 
 	consumer, err := kafka.NewConsumer(
 		h.kafkaCfg.BootstrapServers,
-		"EVENT_PIPELINE",
-		"arcentra-ws-status",
+		statusTopic,
+		clientId,
 		kafka.WithConsumerClientOptions(clientOptions...),
 		kafka.WithConsumerAutoOffsetReset("earliest"),
 	)
@@ -109,7 +114,7 @@ func (h *WSHandle) consumeStatusEvents() {
 	}
 	defer consumer.Close()
 
-	if err := consumer.Subscribe([]string{"EVENT_PIPELINE"}); err != nil {
+	if err := consumer.Subscribe([]string{statusTopic}); err != nil {
 		log.Warnw("failed to subscribe status topic", "error", err)
 		return
 	}

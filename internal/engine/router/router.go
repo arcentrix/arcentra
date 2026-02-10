@@ -16,7 +16,6 @@ package router
 
 import (
 	"embed"
-	"strconv"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/engine/config"
@@ -201,18 +200,4 @@ func (rt *Router) routerGroup(r fiber.Router) {
 	// role
 	rt.roleRouter(r, auth)
 
-	// plugin
-	rt.pluginRouter(r, auth)
-}
-
-func queryInt(c *fiber.Ctx, key string) int {
-	value := c.Query(key)
-	if value == "" {
-		return 0
-	}
-	intValue, err := strconv.Atoi(value)
-	if err != nil {
-		return 0
-	}
-	return intValue
 }

@@ -172,15 +172,15 @@ func (rt *Router) getUserList(c *fiber.Ctx) error {
 	userLogic := rt.Services.User
 
 	// Support both "page" and "pageNum" parameters
-	pageNum := queryInt(c, "pageNum")
+	pageNum := rt.Http.QueryInt(c, "pageNum")
 	if pageNum == 0 {
-		pageNum = queryInt(c, "page")
+		pageNum = rt.Http.QueryInt(c, "page")
 	}
 	if pageNum == 0 {
 		pageNum = 1
 	}
 
-	pageSize := queryInt(c, "pageSize")
+	pageSize := rt.Http.QueryInt(c, "pageSize")
 	if pageSize == 0 {
 		pageSize = 10
 	}
@@ -244,15 +244,15 @@ func (rt *Router) getUsersByRole(c *fiber.Ctx) error {
 	}
 
 	// Support both "page" and "pageNum" parameters
-	pageNum := queryInt(c, "pageNum")
+	pageNum := rt.Http.QueryInt(c, "pageNum")
 	if pageNum == 0 {
-		pageNum = queryInt(c, "page")
+		pageNum = rt.Http.QueryInt(c, "page")
 	}
 	if pageNum == 0 {
 		pageNum = 1
 	}
 
-	pageSize := queryInt(c, "pageSize")
+	pageSize := rt.Http.QueryInt(c, "pageSize")
 	if pageSize == 0 {
 		pageSize = 10
 	}

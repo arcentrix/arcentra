@@ -159,6 +159,9 @@ func loadConfigFile(confDir string) (AgentConfig, error) {
 		}
 		// Apply defaults/normalization after reload (e.g. auth token expiry units).
 		ac.Http.SetDefaults()
+		if err := http.ApplyHTTPAuthExpiry(config, &ac.Http); err != nil {
+			log.Errorw("failed to parse http auth expiry from config", "error", err, "file", e.Name)
+		}
 		ac.Metrics.SetDefaults()
 		ac.Pprof.SetDefaults()
 		if err := ac.parseServerAddr(); err != nil {
@@ -175,6 +178,9 @@ func loadConfigFile(confDir string) (AgentConfig, error) {
 
 	// Apply defaults/normalization after initial load (e.g. auth token expiry units).
 	ac.Http.SetDefaults()
+	if err := http.ApplyHTTPAuthExpiry(config, &ac.Http); err != nil {
+		return ac, err
+	}
 	ac.Metrics.SetDefaults()
 	ac.Pprof.SetDefaults()
 

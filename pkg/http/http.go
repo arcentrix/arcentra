@@ -15,7 +15,14 @@
 package http
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
+
+	duration "github.com/arcentrix/arcentra/pkg/time"
+	"github.com/gofiber/fiber/v2"
+	"github.com/spf13/viper"
 )
 
 type Http struct {
@@ -88,4 +95,66 @@ func (h *Http) SetDefaults() {
 	if h.Auth.RefreshExpire > 0 && h.Auth.RefreshExpire < time.Minute {
 		h.Auth.RefreshExpire = h.Auth.RefreshExpire * time.Minute
 	}
+}
+
+// QueryInt queries the int value from the query string
+func (h *Http) QueryInt(c *fiber.Ctx, key string) int {
+	value := c.Query(key)
+	if value == "" {
+		return 0
+	}
+	intValue, err := strconv.Atoi(value)
+	if err != nil {
+		return 0
+	}
+	return intValue
+}
+
+// parseAuthExpire parses the auth expire from the config
+func parseAuthExpire(config *viper.Viper, key string) (string, bool) {
+	if config == nil || key == "" {
+		return "", false
+	}
+	if !config.IsSet(key) {
+		return "", false
+	}
+	s := strings.TrimSpace(config.GetString(key))
+	if s == "" {
+		return "", false
+	}
+	// Backward-compat: allow plain number minutes, e.g. "3600" => "3600m".
+	allDigits := true
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			allDigits = false
+			break
+		}
+	}
+	if allDigits {
+		s += "m"
+	}
+	return s, true
+}
+
+// ApplyHTTPAuthExpiry applies the auth expiry to the http config
+func ApplyHTTPAuthExpiry(config *viper.Viper, httpCfg *Http) error {
+	if httpCfg == nil {
+		return nil
+	}
+
+	if s, ok := parseAuthExpire(config, "http.auth.accessExpire"); ok {
+		d, err := duration.Parse(s)
+		if err != nil {
+			return fmt.Errorf("parse http.auth.accessExpire=%q: %w", s, err)
+		}
+		httpCfg.Auth.AccessExpire = d
+	}
+	if s, ok := parseAuthExpire(config, "http.auth.refreshExpire"); ok {
+		d, err := duration.Parse(s)
+		if err != nil {
+			return fmt.Errorf("parse http.auth.refreshExpire=%q: %w", s, err)
+		}
+		httpCfg.Auth.RefreshExpire = d
+	}
+	return nil
 }

@@ -118,6 +118,10 @@ func LoadConfigFile(confDir string) (AppConfig, error) {
 		}
 		// Apply defaults/normalization after reload (e.g. auth token expiry units).
 		cfg.Http.SetDefaults()
+		if err := http.ApplyHTTPAuthExpiry(config, &cfg.Http); err != nil {
+			// Keep running with defaults/previous values if parsing fails.
+			log.Errorw("failed to parse http auth expiry from config", "error", err, "file", e.Name)
+		}
 		cfg.Metrics.SetDefaults()
 		cfg.Pprof.SetDefaults()
 		mu.Unlock()
@@ -128,6 +132,9 @@ func LoadConfigFile(confDir string) (AppConfig, error) {
 	}
 	// Apply defaults/normalization after initial load (e.g. auth token expiry units).
 	cfg.Http.SetDefaults()
+	if err := http.ApplyHTTPAuthExpiry(config, &cfg.Http); err != nil {
+		return cfg, err
+	}
 	cfg.Metrics.SetDefaults()
 	cfg.Pprof.SetDefaults()
 	log.Infow("config file loaded",

@@ -15,7 +15,7 @@
 package middleware
 
 import (
-	httpx "github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -41,7 +41,7 @@ func UnifiedResponseMiddleware() fiber.Handler {
 
 		// 业务逻辑错误
 		if c.Response().StatusCode() != fiber.StatusOK {
-			return httpx.WithRepErrMsg(c, httpx.Failed.Code, httpx.Failed.Msg, c.Path())
+			return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 		}
 
 		// 如果未设置响应状态码，默认将状态码设置为200（OK）
@@ -52,12 +52,12 @@ func UnifiedResponseMiddleware() fiber.Handler {
 		// 业务逻辑正确, 设置响应数据
 		if c.Response().StatusCode() >= fiber.StatusOK && c.Response().StatusCode() < fiber.StatusMultipleChoices {
 			if detail := c.Locals(DETAIL); detail != nil {
-				return httpx.WithRepJSON(c, detail)
+				return http.WithRepJSON(c, detail)
 			}
 
 			// 业务逻辑正确, 无响应数据, 只返回结果
 			if c.Locals(OPERATION) != nil {
-				return httpx.WithRepNotDetail(c)
+				return http.WithRepNotDetail(c)
 			}
 		}
 

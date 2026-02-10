@@ -38,7 +38,6 @@ type Services struct {
 	UserExt           *UserExt
 	Menu              *MenuService
 	Role              *RoleService
-	Plugin            *PluginService
 	ProjectMemberRepo repo.IProjectMemberRepository
 	StepRunRepo       repo.IStepRunRepository
 	LogAggregator     *LogAggregator
@@ -66,7 +65,6 @@ func NewServices(
 	scmService := NewScmService(repos.Project)
 	userExt := NewUserExt(repos.UserExt)
 	roleService := NewRoleService(repos.Role)
-	pluginService := NewPluginService(repos.Plugin)
 	logAggregator := NewLogAggregator(nil, db.Database())
 
 	return &Services{
@@ -83,7 +81,6 @@ func NewServices(
 		UserExt:           userExt,
 		Menu:              menuService,
 		Role:              roleService,
-		Plugin:            pluginService,
 		ProjectMemberRepo: repos.ProjectMember,
 		StepRunRepo:       repos.StepRun,
 		LogAggregator:     logAggregator,

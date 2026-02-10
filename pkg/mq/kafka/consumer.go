@@ -82,11 +82,11 @@ type Consumer struct {
 }
 
 // NewConsumer creates a new Kafka consumer.
-func NewConsumer(bootstrapServers string, topicName string, programName string, opts ...ConsumerOption) (*Consumer, error) {
+func NewConsumer(bootstrapServers string, topicName string, clientId string, opts ...ConsumerOption) (*Consumer, error) {
 	if err := mq.RequireNonEmpty("topicName", topicName); err != nil {
 		return nil, err
 	}
-	if err := mq.RequireNonEmpty("programName", programName); err != nil {
+	if err := mq.RequireNonEmpty("clientId", clientId); err != nil {
 		return nil, err
 	}
 	cfg := ConsumerConfig{
@@ -111,13 +111,13 @@ func NewConsumer(bootstrapServers string, topicName string, programName string, 
 	if err != nil {
 		return nil, err
 	}
-	clientID, err := buildClientID(programName)
+	clientID, err := buildClientId(clientId)
 	if err != nil {
 		return nil, err
 	}
-	groupID := strings.ToUpper(fmt.Sprintf("%s_CONSUMER", strings.TrimSpace(topicName)))
+	groupId := strings.ToUpper(fmt.Sprintf("%s_CONSUMER", strings.TrimSpace(topicName)))
 	_ = config.SetKey("client.id", clientID)
-	_ = config.SetKey("group.id", groupID)
+	_ = config.SetKey("group.id", groupId)
 	_ = config.SetKey("auto.offset.reset", cfg.AutoOffsetReset)
 	_ = config.SetKey("enable.auto.commit", enableAutoCommit)
 	_ = config.SetKey("session.timeout.ms", cfg.SessionTimeoutMs)

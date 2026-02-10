@@ -22,6 +22,7 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/builtin"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/bytedance/sonic"
 )
 
@@ -200,6 +201,64 @@ func (r *StepRunner) executeBuiltin(ctx context.Context, builtinName string) err
 
 	// Resolve params with variable substitution
 	resolvedParams := r.ctx.ResolveVariables(r.step.Args)
+
+	// Apply builtin default config (from conf.d/plugins.toml -> [builtins.<name>])
+	// Merge strategy: defaults < step args.config
+	applyBuiltinDefaultConfig := func() {
+		defs := plugin.GetBuiltinConfig()
+		if defs == nil {
+			defs = map[string]any{}
+		}
+
+		def, ok := defs[builtinName]
+		// Backward-compat: some repos historically put builtin configs under [plugins.shell]/[plugins.stdout]
+		if !ok {
+			if legacy, ok2 := plugin.GetPluginConfig()[builtinName]; ok2 {
+				def = legacy
+				ok = true
+			}
+		}
+		if !ok || def == nil {
+			return
+		}
+
+		defMap, ok := def.(map[string]any)
+		if !ok {
+			// best-effort convert via json
+			b, err := sonic.Marshal(def)
+			if err != nil {
+				return
+			}
+			_ = sonic.Unmarshal(b, &defMap)
+			if defMap == nil {
+				return
+			}
+		}
+
+		// Read step-level config if any
+		var stepCfg map[string]any
+		if v, exists := resolvedParams["config"]; exists && v != nil {
+			if m, ok := v.(map[string]any); ok {
+				stepCfg = m
+			} else {
+				// if config exists but is not an object, don't override it
+				return
+			}
+		}
+
+		merged := make(map[string]any, len(defMap))
+		for k, v := range defMap {
+			merged[k] = v
+		}
+		for k, v := range stepCfg {
+			merged[k] = v
+		}
+
+		if len(merged) > 0 {
+			resolvedParams["config"] = merged
+		}
+	}
+	applyBuiltinDefaultConfig()
 
 	// Prepare params JSON
 	paramsJSON, err := sonic.Marshal(resolvedParams)

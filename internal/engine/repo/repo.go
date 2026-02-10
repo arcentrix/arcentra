@@ -40,7 +40,6 @@ type Repositories struct {
 	Role                 IRoleRepository
 	NotificationTemplate INotificationTemplateRepository
 	NotificationChannel  INotificationChannelRepository
-	Plugin               IPluginRepository
 	StepRun              IStepRunRepository
 }
 
@@ -65,7 +64,6 @@ func NewRepositories(db database.IDatabase, cache cache.ICache) *Repositories {
 		Role:                 NewRoleRepo(db),
 		NotificationTemplate: NewNotificationTemplateRepo(db),
 		NotificationChannel:  NewNotificationChannelRepo(db),
-		Plugin:               NewPluginRepo(db),
 		StepRun:              NewStepRunRepo(db),
 	}
 }
@@ -83,8 +81,8 @@ func Count(tx *gorm.DB) (int64, error) {
 	return count, nil
 }
 
-func Exist(tx *gorm.DB, where interface{}) bool {
-	var one interface{}
+func Exist(tx *gorm.DB, where any) bool {
+	var one any
 	if err := tx.Where(where).First(&one).Error; err != nil {
 		return false
 	}

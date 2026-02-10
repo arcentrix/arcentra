@@ -1,13 +1,30 @@
 # Plugin configuration file
 # Each plugin's configuration will be passed to the corresponding plugin's Init method
 
-# Shell plugin configuration
-[plugins.shell]
+# Builtin configuration file
+# Builtins are pipeline core features implemented in `internal/pkg/pipeline/builtin`.
+# Builtin configs are applied as default `args.config` for builtin steps; step-level config overrides these defaults.
+
+# Shell builtin configuration (preferred)
+[builtins.shell]
 # shell = "/bin/bash"
 shell = "/bin/zsh"
-workDir = "" # default working directory
-timeout = 300 # default timeout
+timeout = 300 # default timeout (seconds)
 allowDangerous = false # whether to allow dangerous commands
+
+# Stdout builtin configuration (preferred)
+[builtins.stdout]
+prefix = "" # prefix for stdout
+json = false
+
+# Artifacts builtin configuration (currently reserved for future use)
+[builtins.artifacts]
+
+# Reports builtin configuration (currently reserved for future use)
+[builtins.reports]
+
+# SCM builtin configuration (currently reserved for future use)
+[builtins.scm]
 
 # Git plugin configuration
 [plugins.git]
@@ -28,8 +45,3 @@ username = "" # default username
 password = "" # default password
 trustServerCert = false # whether to trust server certificates
 nonInteractive = true # whether to use non-interactive mode
-
-# Stdout plugin configuration
-[plugins.stdout]
-prefix = "" # prefix for stdout
-json = false

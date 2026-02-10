@@ -72,7 +72,7 @@ type Producer struct {
 }
 
 // NewProducer creates a new Kafka producer.
-func NewProducer(bootstrapServers string, programName string, opts ...ProducerOption) (*Producer, error) {
+func NewProducer(bootstrapServers string, clientId string, opts ...ProducerOption) (*Producer, error) {
 	cfg := ProducerConfig{
 		KafkaConfig: KafkaConfig{
 			BootstrapServers: bootstrapServers,
@@ -90,7 +90,7 @@ func NewProducer(bootstrapServers string, programName string, opts ...ProducerOp
 	if err != nil {
 		return nil, err
 	}
-	clientID, err := buildClientID(programName)
+	clientID, err := buildClientId(clientId)
 	if err != nil {
 		return nil, err
 	}

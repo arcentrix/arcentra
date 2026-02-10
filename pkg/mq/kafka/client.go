@@ -117,48 +117,27 @@ func buildBaseConfig(cfg KafkaConfig) (*kafka.ConfigMap, error) {
 	}
 
 	config := &kafka.ConfigMap{
-		"bootstrap.servers": cfg.BootstrapServers,
+		"bootstrap.servers":        cfg.BootstrapServers,
+		"security.protocol":        cfg.SecurityProtocol,
+		"sasl.mechanism":           cfg.Sasl.Mechanism,
+		"sasl.username":            cfg.Sasl.Username,
+		"sasl.password":            cfg.Sasl.Password,
+		"ssl.ca.location":          cfg.Ssl.CaFile,
+		"ssl.certificate.location": cfg.Ssl.CertFile,
+		"ssl.key.location":         cfg.Ssl.KeyFile,
+		"ssl.key.password":         cfg.Ssl.Password,
 	}
-
-	applyAuthConfig(config, cfg)
 
 	return config, nil
 }
 
-func applyAuthConfig(config *kafka.ConfigMap, cfg KafkaConfig) {
-	if cfg.SecurityProtocol != "" {
-		_ = config.SetKey("security.protocol", cfg.SecurityProtocol)
-	}
-	if cfg.Sasl.Mechanism != "" {
-		_ = config.SetKey("sasl.mechanism", cfg.Sasl.Mechanism)
-	}
-	if cfg.Sasl.Username != "" {
-		_ = config.SetKey("sasl.username", cfg.Sasl.Username)
-	}
-	if cfg.Sasl.Password != "" {
-		_ = config.SetKey("sasl.password", cfg.Sasl.Password)
-	}
-	if cfg.Ssl.CaFile != "" {
-		_ = config.SetKey("ssl.ca.location", cfg.Ssl.CaFile)
-	}
-	if cfg.Ssl.CertFile != "" {
-		_ = config.SetKey("ssl.certificate.location", cfg.Ssl.CertFile)
-	}
-	if cfg.Ssl.KeyFile != "" {
-		_ = config.SetKey("ssl.key.location", cfg.Ssl.KeyFile)
-	}
-	if cfg.Ssl.Password != "" {
-		_ = config.SetKey("ssl.key.password", cfg.Ssl.Password)
-	}
-}
-
-func buildClientID(programName string) (string, error) {
-	if err := mq.RequireNonEmpty("programName", programName); err != nil {
+func buildClientId(clientId string) (string, error) {
+	if err := mq.RequireNonEmpty("clientId", clientId); err != nil {
 		return "", err
 	}
 	hostname, err := os.Hostname()
 	if err != nil || strings.TrimSpace(hostname) == "" {
 		hostname = "UNKNOWN"
 	}
-	return strings.ToUpper(fmt.Sprintf("%s_CLIENT_%s", programName, hostname)), nil
+	return strings.ToUpper(fmt.Sprintf("%s_CLIENT_%s", clientId, hostname)), nil
 }

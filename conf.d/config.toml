@@ -121,10 +121,12 @@ bodyLimit = 104857600
 
 [http.auth]
 # jwt access token expire time
-# unit: minute
+# format: duration string like "60m", "1h", "7d"
+# backward-compat: plain numbers are treated as minutes (e.g. 3600 => "3600m")
 accessExpire = 3600
 # jwt refresh token expire time
-# unit: minute
+# format: duration string like "60m", "1h", "7d"
+# backward-compat: plain numbers are treated as minutes (e.g. 7200 => "7200m")
 refreshExpire = 7200
 # jwt secret key
 secretKey = "bf284d03-ba65-42d4-a9fe-0d2fbfe61060"
