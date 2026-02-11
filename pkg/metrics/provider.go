@@ -15,6 +15,8 @@
 package metrics
 
 import (
+	"github.com/arcentrix/arcentra/pkg/http/middleware"
+	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/google/wire"
 )
 
@@ -28,5 +30,9 @@ func NewMetricsServer(config MetricsConfig) *Server {
 	server := NewServer(config)
 	// Setup cron metrics with the sink
 	SetupCronMetrics(server.GetSink())
+	// Register HTTP metrics
+	if err := middleware.RegisterHttpMetrics(server.GetRegistry()); err != nil {
+		log.Warnw("failed to register HTTP metrics", "error", err)
+	}
 	return server
 }

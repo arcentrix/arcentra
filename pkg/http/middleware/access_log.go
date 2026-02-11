@@ -15,13 +15,10 @@
 package middleware
 
 import (
-	"strings"
 	"time"
 
-	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/logger"
 )
 
 type writerFunc func(p []byte) (int, error)
@@ -30,42 +27,21 @@ func (w writerFunc) Write(p []byte) (int, error) {
 	return w(p)
 }
 
-func AccessLogMiddleware(httpConfig *http.Http) fiber.Handler {
-	// exclude api path
-	// tips: 这里的路径是不需要记录日志的路径，url为端口后的全部路径
-	excludedPaths := []string{
-		"/health",
-		"/metrics",
-		"/debug/pprof/*",
-	}
+func AccessLogMiddleware() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		start := time.Now()
 
-	if httpConfig != nil && !httpConfig.AccessLog {
-		return func(c *fiber.Ctx) error {
-			return c.Next()
+		err := c.Next()
+
+		latency := time.Since(start)
+		status := c.Response().StatusCode()
+
+		if status < 400 && latency < 300*time.Millisecond {
+			return err
 		}
-	}
 
-	return logger.New(logger.Config{
-		TimeFormat: time.RFC3339Nano,
-		TimeZone:   "Local",
-		Format:     "ip:[${ip}] ips:[${ips}] method:[${method}] path:[${path}] latency:[${latency}] status:[${status}] resBody:[${resBody}] queryParams:[${queryParams}] body:[${body}] error:[${error}] header:[${header:}] reqHeader:[${reqHeader:}] respHeader:[${respHeader:}] query:[${query:}] form:[${form:}] cookie:[${cookie:}] locals:[${locals:}] ua:[${ua}] ",
-		Next: func(c *fiber.Ctx) bool {
-			path := c.Path()
-			for _, rule := range excludedPaths {
-				if before, ok := strings.CutSuffix(rule, "/*"); ok {
-					prefix := before
-					if strings.HasPrefix(path, prefix) {
-						return true
-					}
-				} else if path == rule {
-					return true
-				}
-			}
-			return false
-		},
-		Output: writerFunc(func(p []byte) (int, error) {
-			log.Debug(strings.TrimSpace(string(p)))
-			return len(p), nil
-		}),
-	})
+		log.Warnw("http access", "ip", c.IP(), "method", c.Method(), "path", c.Path(), "status", status, "latency", latency, "error", err)
+
+		return err
+	}
 }

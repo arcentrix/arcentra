@@ -58,11 +58,12 @@ func (rt *Router) Router() *fiber.App {
 		BodyLimit:    bodyLimit, // 请求体大小限制，用于插件上传等
 	})
 
-	app.Use(middleware.AccessLogMiddleware(rt.Http))
+	app.Use(middleware.AccessLogMiddleware())
 
 	// 中间件
 	app.Use(
 		recover.New(),
+		middleware.HttpMetricsMiddleware(),
 		middleware.CorsMiddleware(),
 		middleware.UnifiedResponseMiddleware(),
 	)

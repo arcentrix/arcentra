@@ -89,9 +89,10 @@ func (rt *Router) Router() *fiber.App {
 		middleware.RequestMiddleware(), // 设置 request_id 到 Locals("request_id")
 		inject.FiberMiddleware(),       // trace middleware 读取 request_id/ip 并传播上下文
 		recover.New(),
+		middleware.HttpMetricsMiddleware(),
 		middleware.CorsMiddleware(),
 		middleware.UnifiedResponseMiddleware(),
-		middleware.AccessLogMiddleware(rt.Http),
+		middleware.AccessLogMiddleware(),
 	)
 
 	// Configure i18n middleware with embedded filesystem

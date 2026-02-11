@@ -15,21 +15,25 @@
 package http
 
 import (
+	"time"
+
 	"github.com/gofiber/fiber/v2"
 )
 
 type Response struct {
-	Code   int    `json:"code"`
-	Detail any    `json:"detail,omitempty"`
-	Msg    string `json:"msg"`
+	Code      int    `json:"code"`
+	Detail    any    `json:"detail,omitempty"`
+	Msg       string `json:"msg"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 // WithRepJSON 只返回json数据
 func WithRepJSON(c *fiber.Ctx, detail any) error {
 	return c.JSON(Response{
-		Code:   Success.Code,
-		Detail: detail,
-		Msg:    Success.Msg,
+		Code:      Success.Code,
+		Detail:    detail,
+		Msg:       Success.Msg,
+		Timestamp: time.Now().UnixMilli(),
 	})
 }
 

@@ -48,7 +48,6 @@ require (
 	github.com/containerd/containerd v1.7.29
 	github.com/gofiber/contrib/fiberi18n/v2 v2.0.6
 	github.com/hashicorp/go-metrics v0.5.4
-	github.com/hibiken/asynq v0.24.1
 	github.com/opencontainers/runtime-spec v1.1.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.39.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.39.0
@@ -145,7 +144,6 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
-	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/savsgio/gotils v0.0.0-20250924091648-bce9a52d7761 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/tidwall/gjson v1.13.0 // indirect
