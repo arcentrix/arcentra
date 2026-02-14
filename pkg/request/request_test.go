@@ -185,7 +185,7 @@ func TestMultipartForm(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		data, _ := io.ReadAll(f)
 		if string(data) != "hello" {
 			w.WriteHeader(http.StatusBadRequest)

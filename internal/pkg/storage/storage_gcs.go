@@ -63,7 +63,7 @@ func (g *GCSStorage) GetObject(ctx context.Context, objectName string) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	buf := new(bytes.Buffer)
 	if _, err := buf.ReadFrom(reader); err != nil {
@@ -77,14 +77,14 @@ func (g *GCSStorage) PutObject(ctx context.Context, objectName string, file *mul
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	fullPath := getFullPath(g.s.BasePath, objectName)
 	writer := g.Bucket.Object(fullPath).NewWriter(ctx)
 	writer.ContentType = contentType
 
 	if _, err := io.Copy(writer, src); err != nil {
-		writer.Close()
+		_ = writer.Close()
 		return "", err
 	}
 
@@ -100,7 +100,7 @@ func (g *GCSStorage) Upload(ctx context.Context, objectName string, file *multip
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	fullPath := getFullPath(g.s.BasePath, objectName)
 	fileSize := file.Size
@@ -111,7 +111,7 @@ func (g *GCSStorage) Upload(ctx context.Context, objectName string, file *multip
 		writer.ContentType = contentType
 
 		if _, err := io.Copy(writer, src); err != nil {
-			writer.Close()
+			_ = writer.Close()
 			return "", err
 		}
 
@@ -137,7 +137,7 @@ func (g *GCSStorage) Upload(ctx context.Context, objectName string, file *multip
 			Key:      fullPath,
 			FileSize: fileSize,
 		}
-		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0644)
+		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0o644)
 	}
 
 	// 使用分段写入器，支持断点续传
@@ -167,7 +167,7 @@ func (g *GCSStorage) Upload(ctx context.Context, objectName string, file *multip
 			checkpoint.Parts = append(checkpoint.Parts, currentPart)
 			checkpoint.UploadedBytes = uploaded
 			checkpoint.UploadProgress = float64(uploaded) / float64(fileSize) * 100
-			_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0644)
+			_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0o644)
 
 			// 记录上传进度日志
 			// log.Debug("GCS upload progress: %s - %.2f%% (%d/%d bytes)",
@@ -179,7 +179,7 @@ func (g *GCSStorage) Upload(ctx context.Context, objectName string, file *multip
 
 	// 上传剩余数据
 	if _, err := io.Copy(writer, progressReader); err != nil {
-		writer.Close()
+		_ = writer.Close()
 		return "", err
 	}
 
@@ -199,7 +199,7 @@ func (g *GCSStorage) Download(ctx context.Context, objectName string) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	return io.ReadAll(reader)
 }

@@ -33,6 +33,7 @@ func NewSSEHub() *SSEHub {
 		closing: make(chan struct{}),
 	}
 }
+
 func (h *SSEHub) Broadcast(taskID string, payload any) {
 	data, _ := sonic.Marshal(payload)
 	h.mu.RLock()
@@ -66,6 +67,7 @@ func (h *SSEHub) Subscribe(taskID string) (ch chan []byte, cancel func()) {
 		close(ch)
 	}
 }
+
 func (h *SSEHub) HTTPHandler() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		taskID := c.Query("task_id")
@@ -83,7 +85,7 @@ func (h *SSEHub) HTTPHandler() fiber.Handler {
 				if !ok {
 					return c.SendStatus(fiber.StatusInternalServerError)
 				}
-				c.WriteString(string(data))
+				_, _ = c.WriteString(string(data))
 			case <-notify:
 				return c.SendStatus(fiber.StatusOK)
 			}

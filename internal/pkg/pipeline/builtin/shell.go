@@ -124,7 +124,7 @@ func (m *Manager) handleShellScript(ctx context.Context, params json.RawMessage,
 		return nil, fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer func() {
-		tmpFile.Close()
+		_ = tmpFile.Close()
 		if err := os.Remove(tmpFileName); err != nil {
 			// Ignore cleanup errors
 			_ = err
@@ -140,7 +140,7 @@ func (m *Manager) handleShellScript(ctx context.Context, params json.RawMessage,
 	}
 
 	// Set executable permissions
-	if err := os.Chmod(tmpFileName, 0755); err != nil {
+	if err := os.Chmod(tmpFileName, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to chmod script file: %w", err)
 	}
 

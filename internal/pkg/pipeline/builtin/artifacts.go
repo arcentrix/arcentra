@@ -66,7 +66,7 @@ func (m *Manager) handleArtifactsUpload(ctx context.Context, params json.RawMess
 	buildID := "latest" // TODO: Get build ID from context if available
 
 	artifactsDir := filepath.Join(workspaceRoot, pipelineName, buildID, "artifacts")
-	if err := os.MkdirAll(artifactsDir, 0755); err != nil {
+	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create artifacts directory: %w", err)
 	}
 
@@ -77,7 +77,7 @@ func (m *Manager) handleArtifactsUpload(ctx context.Context, params json.RawMess
 		dstPath := filepath.Join(artifactsDir, path)
 
 		// 确保目标目录存在
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 			return nil, fmt.Errorf("create destination directory: %w", err)
 		}
 
@@ -115,12 +115,6 @@ func (m *Manager) handleArtifactsDownload(ctx context.Context, params json.RawMe
 	workspaceRoot := execCtx.GetWorkspaceRoot()
 	pipelineName := execCtx.GetPipeline().Namespace
 	buildID := "latest" // TODO: Get build ID from context if available
-
-	// 确定源job
-	sourceJob := downloadParams.Job
-	if sourceJob == "" {
-		sourceJob = opts.Job.Name
-	}
 
 	artifactsDir := filepath.Join(workspaceRoot, pipelineName, buildID, "artifacts")
 
@@ -175,13 +169,13 @@ func (m *Manager) copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	dstFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer func() { _ = dstFile.Close() }()
 
 	_, err = io.Copy(dstFile, srcFile)
 	return err
@@ -189,7 +183,7 @@ func (m *Manager) copyFile(src, dst string) error {
 
 // copyDir copies a directory recursively
 func (m *Manager) copyDir(src, dst string) error {
-	if err := os.MkdirAll(dst, 0755); err != nil {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return err
 	}
 

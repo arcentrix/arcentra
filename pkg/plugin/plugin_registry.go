@@ -19,12 +19,10 @@ import (
 	"sync"
 )
 
-var (
-	// 全局插件注册表
-	reg = &registry{
-		plugins: make(map[string]Plugin),
-	}
-)
+// 全局插件注册表
+var reg = &registry{
+	plugins: make(map[string]Plugin),
+}
 
 // registry 是插件注册表
 type registry struct {

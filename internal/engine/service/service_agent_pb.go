@@ -41,7 +41,6 @@ func NewAgentServiceImpl(agentService *AgentService) *AgentServiceImpl {
 }
 
 func (a *AgentServiceImpl) Heartbeat(ctx context.Context, req *agentv1.HeartbeatRequest) (*agentv1.HeartbeatResponse, error) {
-
 	resp := &agentv1.HeartbeatResponse{
 		Success:   true,
 		Message:   "pong",

@@ -22,10 +22,8 @@ import (
 	"github.com/hashicorp/go-metrics"
 )
 
-var (
-	// cronMetricsOnce ensures metrics are registered only once
-	cronMetricsOnce sync.Once
-)
+// cronMetricsOnce ensures metrics are registered only once
+var cronMetricsOnce sync.Once
 
 // CronMetricsRecorder implements cron.MetricsRecorder interface
 type CronMetricsRecorder struct {

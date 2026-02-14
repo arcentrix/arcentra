@@ -69,7 +69,7 @@ func (p *OAuthProvider) GetUserInfo(ctx context.Context, token *oauth2.Token) (*
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("user info request failed: %s", resp.Status)
@@ -111,7 +111,7 @@ func (p *OAuthProvider) GetRawUserInfo(ctx context.Context, token *oauth2.Token)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("user info request failed: %s", resp.Status)
@@ -186,7 +186,7 @@ func fetchGitHubPrimaryEmail(ctx context.Context, token *oauth2.Token) (string, 
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("github emails request failed: %s", resp.Status)
 	}

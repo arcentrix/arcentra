@@ -269,7 +269,6 @@ func (tf *TaskFramework) executeStep(ctx context.Context, task *Task, step *spec
 			lastErr = tf.executeStepOnce(ctx, task, step)
 			return lastErr
 		}, retry.WithMaxAttempts(task.Job.Retry.MaxAttempts), retry.WithBackoff(retry.Fixed(delay)))
-
 		if err != nil {
 			return fmt.Errorf("step execution failed after retries: %w", lastErr)
 		}

@@ -100,7 +100,6 @@ func (c *FeishuCardChannel) fetchAccessTokenFromFeishu(ctx context.Context) (str
 		SetHeader("Content-Type", "application/json").
 		SetBody(payload).
 		Post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal")
-
 	if err != nil {
 		return "", fmt.Errorf("failed to get access token: %w", err)
 	}

@@ -312,7 +312,7 @@ func (s *ContainerdSandbox) Execute(ctx context.Context, containerID string, cmd
 		result.Duration = result.EndTime.Sub(result.StartTime)
 		return result, err
 	}
-	defer task.Delete(ctx)
+	defer func() { _, _ = task.Delete(ctx) }()
 
 	// Start task
 	if err = task.Start(ctx); err != nil {
@@ -564,7 +564,7 @@ func parseCPU(cpu string) (int64, uint64) {
 	if strings.HasSuffix(cpu, "m") {
 		millicores := strings.TrimSuffix(cpu, "m")
 		var m int64
-		fmt.Sscanf(millicores, "%d", &m)
+		_, _ = fmt.Sscanf(millicores, "%d", &m)
 		return m * 10000, 10000000 // quota = millicores * 10000, period = 10000000 (10ms)
 	}
 
@@ -592,20 +592,20 @@ func parseMemory(memory string) int64 {
 	var unit string
 
 	if strings.HasSuffix(memory, "G") {
-		fmt.Sscanf(memory, "%d%s", &size, &unit)
+		_, _ = fmt.Sscanf(memory, "%d%s", &size, &unit)
 		return size * 1024 * 1024 * 1024
 	}
 	if strings.HasSuffix(memory, "M") {
-		fmt.Sscanf(memory, "%d%s", &size, &unit)
+		_, _ = fmt.Sscanf(memory, "%d%s", &size, &unit)
 		return size * 1024 * 1024
 	}
 	if strings.HasSuffix(memory, "K") {
-		fmt.Sscanf(memory, "%d%s", &size, &unit)
+		_, _ = fmt.Sscanf(memory, "%d%s", &size, &unit)
 		return size * 1024
 	}
 
 	// No unit, assume bytes
-	fmt.Sscanf(memory, "%d", &size)
+	_, _ = fmt.Sscanf(memory, "%d", &size)
 	return size
 }
 

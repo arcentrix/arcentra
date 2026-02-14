@@ -260,23 +260,23 @@ func (p *Provider) parseMergeRequest(body []byte) ([]scm.Event, error) {
 	}}, nil
 }
 
-func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
-	var payload struct {
-		Ref     string `json:"ref"`
-		Project struct {
-			WebUrl            string `json:"web_url"`
-			PathWithNamespace string `json:"path_with_namespace"`
-		} `json:"project"`
-		UserName string `json:"user_name"`
-		After    string `json:"after"`
-	}
+type refPayload struct {
+	Ref     string `json:"ref"`
+	Project struct {
+		WebUrl            string `json:"web_url"`
+		PathWithNamespace string `json:"path_with_namespace"`
+	} `json:"project"`
+	UserName string `json:"user_name"`
+	After    string `json:"after"`
+}
+
+func (p *Provider) parseRefEvent(body []byte, eventType scm.EventType) ([]scm.Event, error) {
+	var payload refPayload
 	if err := sonic.Unmarshal(body, &payload); err != nil {
 		return nil, err
 	}
-
 	parts := strings.SplitN(payload.Project.PathWithNamespace, "/", 2)
-	owner := ""
-	name := ""
+	owner, name := "", ""
 	if len(parts) == 2 {
 		owner, name = parts[0], parts[1]
 	}
@@ -286,10 +286,9 @@ func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
 		FullName: payload.Project.PathWithNamespace,
 		Url:      payload.Project.WebUrl,
 	}
-
 	return []scm.Event{{
 		ProviderKind: scm.ProviderKindGitLab,
-		EventType:    scm.EventTypePush,
+		EventType:    eventType,
 		Repo:         repo,
 		ActorName:    payload.UserName,
 		CommitId:     payload.After,
@@ -298,41 +297,12 @@ func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
 	}}, nil
 }
 
-func (p *Provider) parseTagPush(body []byte) ([]scm.Event, error) {
-	var payload struct {
-		Ref     string `json:"ref"`
-		Project struct {
-			WebUrl            string `json:"web_url"`
-			PathWithNamespace string `json:"path_with_namespace"`
-		} `json:"project"`
-		UserName string `json:"user_name"`
-		After    string `json:"after"`
-	}
-	if err := sonic.Unmarshal(body, &payload); err != nil {
-		return nil, err
-	}
+func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
+	return p.parseRefEvent(body, scm.EventTypePush)
+}
 
-	parts := strings.SplitN(payload.Project.PathWithNamespace, "/", 2)
-	owner := ""
-	name := ""
-	if len(parts) == 2 {
-		owner, name = parts[0], parts[1]
-	}
-	repo := scm.Repo{
-		Owner:    owner,
-		Name:     name,
-		FullName: payload.Project.PathWithNamespace,
-		Url:      payload.Project.WebUrl,
-	}
-	return []scm.Event{{
-		ProviderKind: scm.ProviderKindGitLab,
-		EventType:    scm.EventTypeTag,
-		Repo:         repo,
-		ActorName:    payload.UserName,
-		CommitId:     payload.After,
-		Ref:          payload.Ref,
-		OccurredAt:   time.Now(),
-	}}, nil
+func (p *Provider) parseTagPush(body []byte) ([]scm.Event, error) {
+	return p.parseRefEvent(body, scm.EventTypeTag)
 }
 
 func init() {

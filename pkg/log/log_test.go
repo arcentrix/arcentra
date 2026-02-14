@@ -205,7 +205,7 @@ func TestGlobalLogFunctions(t *testing.T) {
 
 func TestGlobalLogFunctions_Formatted(t *testing.T) {
 	conf := SetDefaults()
-	Init(conf)
+	_ = Init(conf)
 
 	Infow("formatted info", "value", "test")
 	Debugw("formatted debug", "value", 123)
@@ -215,7 +215,7 @@ func TestGlobalLogFunctions_Formatted(t *testing.T) {
 
 func TestGlobalLogFunctions_WithFields(t *testing.T) {
 	conf := SetDefaults()
-	Init(conf)
+	_ = Init(conf)
 
 	Info("structured info", "key1", "value1", "key2", 123)
 	Debug("structured debug", "user", "alice", "action", "login")
@@ -233,7 +233,7 @@ const (
 
 func TestWithContext(t *testing.T) {
 	conf := SetDefaults()
-	Init(conf)
+	_ = Init(conf)
 
 	// 创建带有字段的 context
 	ctx := context.Background()
@@ -247,7 +247,7 @@ func TestWithContext(t *testing.T) {
 
 func TestWith(t *testing.T) {
 	conf := SetDefaults()
-	Init(conf)
+	_ = Init(conf)
 
 	// 直接使用全局日志函数记录日志
 	Info("message with fields", "component", "test", "version", "1.0")
@@ -255,7 +255,7 @@ func TestWith(t *testing.T) {
 
 func TestSync(t *testing.T) {
 	conf := SetDefaults()
-	Init(conf)
+	_ = Init(conf)
 
 	Info("test message")
 
@@ -269,7 +269,7 @@ func TestSync(t *testing.T) {
 
 func TestConcurrentLogging(t *testing.T) {
 	conf := SetDefaults()
-	Init(conf)
+	_ = Init(conf)
 
 	// 并发写日志
 	done := make(chan bool, 100)
@@ -353,7 +353,7 @@ func TestLogRotation(t *testing.T) {
 		sugar.Info("This is a test message to trigger log rotation. Message number:", i)
 	}
 
-	l.Sync()
+	_ = l.Sync()
 
 	// slog 不需要 Sync，日志会自动刷新
 
@@ -376,17 +376,16 @@ func TestLogRotation(t *testing.T) {
 
 func BenchmarkInfo(b *testing.B) {
 	conf := SetDefaults()
-	Init(conf)
+	_ = Init(conf)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		Info("benchmark message")
 	}
 }
 
 func BenchmarkInfow(b *testing.B) {
 	conf := SetDefaults()
-	Init(conf)
+	_ = Init(conf)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

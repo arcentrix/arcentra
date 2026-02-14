@@ -71,7 +71,7 @@ func (h *DefaultHub) run() {
 			h.mu.Lock()
 			if _, ok := h.conns[conn.ID()]; ok {
 				delete(h.conns, conn.ID())
-				conn.Close()
+				_ = conn.Close()
 			}
 			h.mu.Unlock()
 

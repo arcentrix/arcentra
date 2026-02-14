@@ -17,8 +17,6 @@ package pipeline
 import (
 	"context"
 	"fmt"
-
-	"github.com/arcentrix/arcentra/pkg/plugin"
 )
 
 func (tf *TaskFramework) emitJobEvent(eventType string, task *Task, data map[string]any) {
@@ -82,22 +80,4 @@ func (pe *PipelineExecutor) emitPipelineEvent(eventType, status string) {
 	}
 	subject := fmt.Sprintf("pipeline:%s", pe.execCtx.Pipeline.Namespace)
 	emitter.Emit(context.Background(), eventType, emitter.BuildSource("pipeline"), subject, buildPipelineEventData(pe.execCtx, status), buildPipelineExtensions(pe.execCtx))
-}
-
-func mapTaskStateToEvent(taskState TaskState, failed bool) string {
-	if failed {
-		return plugin.EventTypeJobFailed
-	}
-	switch taskState {
-	case TaskStateStarted:
-		return plugin.EventTypeJobStarted
-	case TaskStateSucceeded:
-		return plugin.EventTypeJobCompleted
-	case TaskStateFailed:
-		return plugin.EventTypeJobFailed
-	case TaskStateSkipped:
-		return plugin.EventTypeJobCancelled
-	default:
-		return ""
-	}
 }

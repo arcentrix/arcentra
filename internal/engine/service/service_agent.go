@@ -212,7 +212,6 @@ func (al *AgentService) DeleteAgentByAgentId(agentId string) error {
 
 func (al *AgentService) ListAgent(pageNum, pageSize int) ([]agentmodel.Agent, int64, error) {
 	agents, count, err := al.agentRepo.ListAgent(pageNum, pageSize)
-
 	if err != nil {
 		log.Errorw("list agent failed", "error", err)
 		return nil, 0, err

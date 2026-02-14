@@ -52,7 +52,7 @@ func (m *Manager) handleReportsDotenv(ctx context.Context, params json.RawMessag
 	buildID := "latest" // TODO: Get build ID from context if available
 
 	reportsDir := filepath.Join(workspaceRoot, pipelineName, buildID, "reports")
-	if err := os.MkdirAll(reportsDir, 0755); err != nil {
+	if err := os.MkdirAll(reportsDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create reports directory: %w", err)
 	}
 

@@ -95,7 +95,7 @@ func FiberMiddleware() fiber.Handler {
 
 		// Inject trace context into response headers
 		// TODO: 需要考虑是否需要注入响应头
-		//responseCarrier := &responseHeaderCarrier{c: c}
+		// responseCarrier := &responseHeaderCarrier{c: c}
 		// fiberPropagator.Inject(ctx, responseCarrier)
 
 		// Execute handler
@@ -147,22 +147,4 @@ func (c *headerCarrier) Keys() []string {
 		keys = append(keys, k)
 	}
 	return keys
-}
-
-// responseHeaderCarrier adapts HTTP response headers to propagation.TextMapCarrier
-type responseHeaderCarrier struct {
-	c *fiber.Ctx
-}
-
-func (c *responseHeaderCarrier) Get(key string) string {
-	return c.c.Get(key)
-}
-
-func (c *responseHeaderCarrier) Set(key, value string) {
-	c.c.Set(key, value)
-}
-
-func (c *responseHeaderCarrier) Keys() []string {
-	// For response headers, we don't need to enumerate keys
-	return nil
 }

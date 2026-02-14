@@ -21,10 +21,8 @@ import (
 	"github.com/arcentrix/arcentra/pkg/log"
 )
 
-var (
-	// ErrNotInitialized is returned when trying to use global cron before initialization
-	ErrNotInitialized = errors.New("global cron instance is not initialized")
-)
+// ErrNotInitialized is returned when trying to use global cron before initialization
+var ErrNotInitialized = errors.New("global cron instance is not initialized")
 
 var (
 	globalCron *Cron

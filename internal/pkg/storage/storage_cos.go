@@ -67,7 +67,7 @@ func (c *COSStorage) GetObject(ctx context.Context, objectName string) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	buf := new(bytes.Buffer)
 	if _, err := buf.ReadFrom(resp.Body); err != nil {
@@ -81,7 +81,7 @@ func (c *COSStorage) PutObject(ctx context.Context, objectName string, file *mul
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	fullPath := getFullPath(c.s.BasePath, objectName)
 	opt := &cos.ObjectPutOptions{
@@ -102,7 +102,7 @@ func (c *COSStorage) Upload(ctx context.Context, objectName string, file *multip
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	fullPath := getFullPath(c.s.BasePath, objectName)
 	fileSize := file.Size
@@ -145,7 +145,7 @@ func (c *COSStorage) Upload(ctx context.Context, objectName string, file *multip
 			Key:      fullPath,
 			FileSize: fileSize,
 		}
-		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0644)
+		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0o644)
 	}
 
 	var completedParts []cos.Object
@@ -196,7 +196,7 @@ func (c *COSStorage) Upload(ctx context.Context, objectName string, file *multip
 			// 更新进度信息
 			checkpoint.UploadedBytes = uploadedBytes
 			checkpoint.UploadProgress = float64(uploadedBytes) / float64(fileSize) * 100
-			_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0644)
+			_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0o644)
 
 			// 记录上传进度日志
 			// log.Debug("COS upload progress: %s - %.2f%% (%d/%d bytes)",
@@ -232,7 +232,7 @@ func (c *COSStorage) Download(ctx context.Context, objectName string) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return io.ReadAll(resp.Body)
 }

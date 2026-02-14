@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-
 type WaitStrategy interface {
 	Wait()
 }

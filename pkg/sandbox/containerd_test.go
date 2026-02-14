@@ -43,7 +43,7 @@ func TestContainerdSandbox_Create(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sandbox: %v", err)
 	}
-	defer sb.Close()
+	defer func() { _ = sb.Close() }()
 
 	ctx := context.Background()
 
@@ -91,7 +91,7 @@ func TestContainerdSandbox_Execute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create sandbox: %v", err)
 	}
-	defer sb.Close()
+	defer func() { _ = sb.Close() }()
 
 	ctx := context.Background()
 
@@ -106,7 +106,7 @@ func TestContainerdSandbox_Execute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create container: %v", err)
 	}
-	defer sb.Remove(ctx, containerID)
+	defer func() { _ = sb.Remove(ctx, containerID) }()
 
 	// Execute command
 	executeOpts := &ExecuteOptions{

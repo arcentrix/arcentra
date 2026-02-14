@@ -1,10 +1,8 @@
 package ringbuffer
 
 import (
-	"fmt"
 	"math"
 	"sync/atomic"
-	"time"
 )
 
 // RingBuffer is a Disruptor-like ring buffer for Single Producer, Multi Consumer.
@@ -143,7 +141,6 @@ func (r *RingBuffer[T]) PublishWith(write func(slot *T)) int64 {
 // Consume blocks until the next sequence is published, then returns the event.
 // Each consumer reads all events (fan-out model).
 func (r *RingBuffer[T]) Consume(c *Consumer) (T, int64) {
-
 	next := atomic.LoadInt64(&c.sequence) + 1
 
 	for {
@@ -159,44 +156,4 @@ func (r *RingBuffer[T]) Consume(c *Consumer) (T, int64) {
 	// advance consumer cursor (release)
 	atomic.StoreInt64(&c.sequence, next)
 	return v, next
-}
-
-// ---------------------- Demo ----------------------
-
-func main() {
-	rb := NewRingBuffer[int](1024, &YieldingWaitStrategy{})
-
-	// two consumers (both will see every event, in order)
-	c1 := rb.AddConsumer()
-	c2 := rb.AddConsumer()
-
-	// consumer 1
-	go func() {
-		for {
-			v, seq := rb.Consume(c1)
-			if seq%200000 == 0 {
-				fmt.Println("[c1] seq=", seq, "v=", v)
-			}
-		}
-	}()
-
-	// consumer 2 (simulate slower consumer)
-	go func() {
-		for {
-			v, seq := rb.Consume(c2)
-			if seq%200000 == 0 {
-				fmt.Println("[c2] seq=", seq, "v=", v)
-			}
-			if seq%1000 == 0 {
-				time.Sleep(1 * time.Millisecond)
-			}
-		}
-	}()
-
-	// producer (single)
-	for i := 0; i < 1_000_000; i++ {
-		rb.Publish(i)
-	}
-
-	time.Sleep(2 * time.Second)
 }

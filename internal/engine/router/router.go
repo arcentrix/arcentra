@@ -200,5 +200,4 @@ func (rt *Router) routerGroup(r fiber.Router) {
 
 	// role
 	rt.roleRouter(r, auth)
-
 }

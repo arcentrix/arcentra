@@ -29,8 +29,10 @@ var (
 	Video = fakeSearch("video")
 )
 
-type Result string
-type Search func(ctx context.Context, query string) (Result, error)
+type (
+	Result string
+	Search func(ctx context.Context, query string) (Result, error)
+)
 
 func fakeSearch(kind string) Search {
 	return func(_ context.Context, query string) (Result, error) {
@@ -43,19 +45,19 @@ func fakeSearch(kind string) Search {
 // the sync.WaitGroup example at https://golang.org/pkg/sync/#example_WaitGroup.
 func ExampleGroup_justErrors() {
 	g := GoGroup(context.Background())
-	var urls = []string{
+	urls := []string{
 		"http://www.golang.org/",
 		"http://www.google.com/",
 		"http://www.somestupidname.com/",
 	}
 	for _, url := range urls {
 		// Launch a goroutine to fetch the URL.
-		url := url // https://golang.org/doc/faq#closures_and_goroutines
+		// https://golang.org/doc/faq#closures_and_goroutines
 		g.Go(func(ctx context.Context) error {
 			// Fetch the URL.
 			resp, err := http.Get(url)
 			if err == nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 			return err
 		})
@@ -72,13 +74,11 @@ func ExampleGroup_justErrors() {
 // and error-handling.
 func ExampleGroup_parallel() {
 	Google := func(ctx context.Context, query string) ([]Result, error) {
-
 		g := GoGroup(context.Background())
 
 		searches := []Search{Web, Image, Video}
 		results := make([]Result, len(searches))
 		for i, search := range searches {
-			i, search := i, search // https://golang.org/doc/faq#closures_and_goroutines
 			g.Go(func(ctx context.Context) error {
 				result, err := search(ctx, query)
 				if err == nil {
@@ -130,7 +130,6 @@ func TestZeroGroup(t *testing.T) {
 
 		var firstErr error
 		for i, err := range tc.errs {
-			err := err
 			g.Go(func(context.Context) error { return err })
 
 			if firstErr == nil && err != nil {
@@ -163,7 +162,6 @@ func TestWithContext(t *testing.T) {
 		g := GoGroup(context.Background())
 
 		for _, err := range tc.errs {
-			err := err
 			g.Go(func(context.Context) error { return err })
 		}
 

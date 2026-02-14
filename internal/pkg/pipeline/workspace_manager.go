@@ -89,7 +89,7 @@ func (wm *WorkspaceManager) CreatePipelineWorkspace(name, buildID string) (*Work
 	}
 
 	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create pipeline workspace directory %s: %w", dir, err)
 		}
 	}
@@ -201,7 +201,7 @@ func (wm *WorkspaceManager) GetWorkspaceSize(path string) (int64, error) {
 // EnsureWorkspace ensures workspace directory exists, creates if not
 func (wm *WorkspaceManager) EnsureWorkspace(path string) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err := os.MkdirAll(path, 0755); err != nil {
+		if err := os.MkdirAll(path, 0o755); err != nil {
 			return fmt.Errorf("ensure workspace exists: %w", err)
 		}
 	}

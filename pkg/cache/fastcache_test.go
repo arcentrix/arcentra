@@ -519,7 +519,7 @@ func TestCachedQueryWithHybrid_Invalidate(t *testing.T) {
 	}
 
 	// Invalidate cache
-	cq.Invalidate(ctx)
+	_ = cq.Invalidate(ctx)
 
 	// Second call after invalidation
 	prod2, _ := cq.Get(ctx)

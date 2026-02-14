@@ -832,7 +832,6 @@ func TestPipelineAdapter_ExecuteStep(t *testing.T) {
 		map[string]string{"KEY": "value"},
 		nil,
 	)
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -879,7 +878,6 @@ func TestPipelineAdapter_ExecuteStep_WithOptions(t *testing.T) {
 		nil,
 		options,
 	)
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

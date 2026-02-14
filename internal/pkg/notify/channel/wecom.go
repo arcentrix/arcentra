@@ -16,12 +16,9 @@ package channel
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 
 	"github.com/arcentrix/arcentra/internal/pkg/notify/auth"
-	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/go-resty/resty/v2"
 )
 
@@ -87,42 +84,10 @@ func (c *WeComChannel) SendWithTemplate(ctx context.Context, template string, da
 	return c.sendRequest(ctx, payload)
 }
 
-// sendRequest sends HTTP request
 func (c *WeComChannel) sendRequest(ctx context.Context, payload map[string]interface{}) error {
-	req := c.client.R().SetContext(ctx)
-
-	// Add authentication header
-	if c.authProvider != nil {
-		key, value := c.authProvider.GetAuthHeader()
-		if key != "" && value != "" {
-			req.SetHeader(key, value)
-		}
-	}
-
-	req.SetHeader("Content-Type", "application/json")
-	req.SetBody(payload)
-
-	resp, err := req.Post(c.webhookURL)
-	if err != nil {
-		log.Errorw("wecom send request failed", "error", err)
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-
-	if resp.StatusCode() != http.StatusOK {
-		log.Errorw("wecom request failed", "statusCode", resp.StatusCode(), "response", resp.String())
-		return fmt.Errorf("wecom request failed with status %d", resp.StatusCode())
-	}
-
-	// Check for errors in response body
-	var result map[string]interface{}
-	if err := json.Unmarshal(resp.Body(), &result); err == nil {
-		if errcode, ok := result["errcode"].(float64); ok && errcode != 0 {
-			errmsg := result["errmsg"].(string)
-			return fmt.Errorf("wecom API error: errcode=%v, errmsg=%s", errcode, errmsg)
-		}
-	}
-
-	return nil
+	return sendWebhookRequest(ctx, c.client, c.webhookURL, c.authProvider, payload, webhookErrorConfig{
+		codeKey: "errcode", msgKey: "errmsg", logPrefix: "wecom",
+	})
 }
 
 // Receive receives messages (webhook callback)

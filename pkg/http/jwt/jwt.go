@@ -33,13 +33,10 @@ func (a *AuthClaims) Valid() error {
 	return nil
 }
 
-var (
-	issUser = "arcentra"
-)
+var issUser = "arcentra"
 
 // GenToken 生成 access_token 和 refresh_token
 func GenToken(userId string, secretKey []byte, accessExpired, refreshExpired time.Duration) (aToken, rToken string, err error) {
-
 	// aToken
 	aClaims := &AuthClaims{
 		UserId: userId,
@@ -79,7 +76,6 @@ func ParseToken(aToken, secretKey string) (claims *AuthClaims, err error) {
 		}
 		return []byte(secretKey), nil
 	})
-
 	if err != nil {
 		// 细化错误处理
 		if errors.Is(err, jwt.ErrTokenExpired) {

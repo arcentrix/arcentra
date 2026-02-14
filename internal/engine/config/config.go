@@ -95,9 +95,8 @@ func GetConfig() AppConfig {
 
 // LoadConfigFile load config file
 func LoadConfigFile(confDir string) (AppConfig, error) {
-
 	config := viper.New()
-	config.SetConfigFile(confDir) //文件名
+	config.SetConfigFile(confDir) // 文件名
 	if err := config.ReadInConfig(); err != nil {
 		return cfg, fmt.Errorf("failed to read configuration file: %v", err)
 	}

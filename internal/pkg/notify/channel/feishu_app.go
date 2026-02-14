@@ -19,14 +19,11 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/pkg/notify/auth"
-	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/go-resty/resty/v2"
 )
 
@@ -164,42 +161,10 @@ func (c *FeishuAppChannel) SendWithTemplate(ctx context.Context, template string
 	return c.sendRequest(ctx, payload)
 }
 
-// sendRequest sends HTTP request
 func (c *FeishuAppChannel) sendRequest(ctx context.Context, payload map[string]interface{}) error {
-	req := c.client.R().SetContext(ctx)
-
-	// Add authentication header
-	if c.authProvider != nil {
-		key, value := c.authProvider.GetAuthHeader()
-		if key != "" && value != "" {
-			req.SetHeader(key, value)
-		}
-	}
-
-	req.SetHeader("Content-Type", "application/json")
-	req.SetBody(payload)
-
-	resp, err := req.Post(c.webhookURL)
-	if err != nil {
-		log.Errorw("feishu send request failed", "error", err)
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-
-	if resp.StatusCode() != http.StatusOK {
-		log.Errorw("feishu request failed", "statusCode", resp.StatusCode(), "response", resp.String())
-		return fmt.Errorf("feishu request failed with status %d", resp.StatusCode())
-	}
-
-	// Check for errors in response body
-	var result map[string]interface{}
-	if err := json.Unmarshal(resp.Body(), &result); err == nil {
-		if code, ok := result["code"].(float64); ok && code != 0 {
-			msg := result["msg"].(string)
-			return fmt.Errorf("feishu API error: code=%v, msg=%s", code, msg)
-		}
-	}
-
-	return nil
+	return sendWebhookRequest(ctx, c.client, c.webhookURL, c.authProvider, payload, webhookErrorConfig{
+		codeKey: "code", msgKey: "msg", logPrefix: "feishu",
+	})
 }
 
 // Receive receives messages (webhook callback)

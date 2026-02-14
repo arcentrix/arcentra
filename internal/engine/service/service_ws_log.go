@@ -56,7 +56,7 @@ func (h *WSHandle) handleLog(conn ws.Conn, action string, params WSParams) error
 	h.logSubs[conn.ID()] = sub
 	h.logMu.Unlock()
 
-	h.sendMessage(conn, channelLog, "subscribed", params, nil)
+	_ = h.sendMessage(conn, channelLog, "subscribed", params, nil)
 	safe.Go(func() {
 		h.sendLogHistory(conn, params)
 	})

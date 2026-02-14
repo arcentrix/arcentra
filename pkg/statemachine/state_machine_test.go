@@ -170,9 +170,9 @@ func TestStateMachine_History(t *testing.T) {
 		Allow(OrderPaid, OrderShipped)
 
 	// 执行几次转移
-	sm.TransitTo(OrderPaid)
+	_ = sm.TransitTo(OrderPaid)
 	time.Sleep(10 * time.Millisecond)
-	sm.TransitTo(OrderShipped)
+	_ = sm.TransitTo(OrderShipped)
 
 	history := sm.History()
 	if len(history) != 2 {
@@ -217,7 +217,7 @@ func TestStateMachine_Reset(t *testing.T) {
 	sm := NewWithState(OrderCreated)
 	sm.Allow(OrderCreated, OrderPaid)
 
-	sm.TransitTo(OrderPaid)
+	_ = sm.TransitTo(OrderPaid)
 
 	if sm.Current() != OrderPaid {
 		t.Errorf("expected current state to be %v, got %v", OrderPaid, sm.Current())
@@ -278,7 +278,7 @@ func TestStateMachine_OnError(t *testing.T) {
 	})
 
 	// 尝试非法转移
-	sm.TransitTo(OrderShipped)
+	_ = sm.TransitTo(OrderShipped)
 
 	if !errorCaught {
 		t.Error("expected error handler to be called")

@@ -31,9 +31,7 @@ const (
 	gormTracerName = "github.com/arcentrix/arcentra/pkg/trace/inject/gorm"
 )
 
-var (
-	gormTracer = otel.Tracer(gormTracerName)
-)
+var gormTracer = otel.Tracer(gormTracerName)
 
 // GormPlugin implements gorm.Plugin interface for OpenTelemetry tracing
 type GormPlugin struct {
@@ -51,20 +49,20 @@ func (p *GormPlugin) Name() string {
 // Initialize initializes the plugin
 func (p *GormPlugin) Initialize(db *gorm.DB) error {
 	// Register before callbacks
-	db.Callback().Create().Before("gorm:create").Register("opentelemetry:before", p.beforeCallback)
-	db.Callback().Query().Before("gorm:query").Register("opentelemetry:before", p.beforeCallback)
-	db.Callback().Update().Before("gorm:update").Register("opentelemetry:before", p.beforeCallback)
-	db.Callback().Delete().Before("gorm:delete").Register("opentelemetry:before", p.beforeCallback)
-	db.Callback().Row().Before("gorm:row").Register("opentelemetry:before", p.beforeCallback)
-	db.Callback().Raw().Before("gorm:raw").Register("opentelemetry:before", p.beforeCallback)
+	_ = db.Callback().Create().Before("gorm:create").Register("opentelemetry:before", p.beforeCallback)
+	_ = db.Callback().Query().Before("gorm:query").Register("opentelemetry:before", p.beforeCallback)
+	_ = db.Callback().Update().Before("gorm:update").Register("opentelemetry:before", p.beforeCallback)
+	_ = db.Callback().Delete().Before("gorm:delete").Register("opentelemetry:before", p.beforeCallback)
+	_ = db.Callback().Row().Before("gorm:row").Register("opentelemetry:before", p.beforeCallback)
+	_ = db.Callback().Raw().Before("gorm:raw").Register("opentelemetry:before", p.beforeCallback)
 
 	// Register after callbacks
-	db.Callback().Create().After("gorm:create").Register("opentelemetry:after", p.afterCallback)
-	db.Callback().Query().After("gorm:query").Register("opentelemetry:after", p.afterCallback)
-	db.Callback().Update().After("gorm:update").Register("opentelemetry:after", p.afterCallback)
-	db.Callback().Delete().After("gorm:delete").Register("opentelemetry:after", p.afterCallback)
-	db.Callback().Row().After("gorm:row").Register("opentelemetry:after", p.afterCallback)
-	db.Callback().Raw().After("gorm:raw").Register("opentelemetry:after", p.afterCallback)
+	_ = db.Callback().Create().After("gorm:create").Register("opentelemetry:after", p.afterCallback)
+	_ = db.Callback().Query().After("gorm:query").Register("opentelemetry:after", p.afterCallback)
+	_ = db.Callback().Update().After("gorm:update").Register("opentelemetry:after", p.afterCallback)
+	_ = db.Callback().Delete().After("gorm:delete").Register("opentelemetry:after", p.afterCallback)
+	_ = db.Callback().Row().After("gorm:row").Register("opentelemetry:after", p.afterCallback)
+	_ = db.Callback().Raw().After("gorm:raw").Register("opentelemetry:after", p.afterCallback)
 
 	return nil
 }

@@ -189,7 +189,6 @@ func (ul *UserService) Refresh(userId, rToken string, auth *http.Auth) (map[stri
 }
 
 func (ul *UserService) Register(register *usermodel.Register) error {
-
 	var err error
 	register.UserId = id.GetUUIDWithoutDashes()
 	// set default values if not provided
@@ -268,7 +267,6 @@ func (ul *UserService) createUserExtIfNotExists(userId string) error {
 }
 
 func (ul *UserService) AddUser(addUserReq usermodel.AddUserReq) error {
-
 	var err error
 	addUserReq.UserId = id.GetUUIDWithoutDashes()
 	addUserReq.IsEnabled = 1
@@ -326,7 +324,6 @@ func buildUserUpdateMap(req *usermodel.UpdateUserReq) map[string]any {
 }
 
 func (ul *UserService) FetchUserInfo(userId string) (*usermodel.UserInfo, error) {
-
 	userInfo, err := ul.userRepo.FetchUserInfo(userId)
 	if err != nil {
 		return nil, err

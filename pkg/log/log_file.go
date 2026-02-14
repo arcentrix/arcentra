@@ -26,7 +26,7 @@ import (
 // getFileLogWriter returns the WriteSyncer for logging to a file.
 func getFileLogWriter(config *Conf) (zapcore.WriteSyncer, error) {
 	// confirm log directory if not exists
-	if err := os.MkdirAll(config.Path, 0755); err != nil {
+	if err := os.MkdirAll(config.Path, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 

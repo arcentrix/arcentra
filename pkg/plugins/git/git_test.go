@@ -183,7 +183,7 @@ func TestGitPlugin_Clone(t *testing.T) {
 	require.NoError(t, err)
 
 	// 添加一个文件并提交
-	err = os.WriteFile(filepath.Join(repoPath, "test.txt"), []byte("test"), 0644)
+	err = os.WriteFile(filepath.Join(repoPath, "test.txt"), []byte("test"), 0o644)
 	require.NoError(t, err)
 
 	cmd := exec.Command("git", "add", "test.txt")

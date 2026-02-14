@@ -55,9 +55,7 @@ var (
 	FailedToObtainUserInformation = failed(4504, "Failed to obtain user information")
 )
 
-var (
-	Success = success(200, "Request Success")
-)
+var Success = success(200, "Request Success")
 
 // failed 构造函数
 func failed(code int, msg string) *Response {

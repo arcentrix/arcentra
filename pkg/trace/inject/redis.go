@@ -32,9 +32,7 @@ const (
 	redisTracerName = "github.com/arcentrix/arcentra/pkg/trace/inject/redis"
 )
 
-var (
-	redisTracer = otel.Tracer(redisTracerName)
-)
+var redisTracer = otel.Tracer(redisTracerName)
 
 // RedisHook implements redis.Hook interface for OpenTelemetry tracing
 type RedisHook struct {
@@ -212,7 +210,9 @@ func (h *RedisHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
 		if err != nil {
 			return err
 		}
-		err = next(ctx, cmd)
+		if err = next(ctx, cmd); err != nil {
+			return err
+		}
 		return h.AfterProcess(ctx, cmd)
 	}
 }
@@ -224,7 +224,9 @@ func (h *RedisHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.Pr
 		if err != nil {
 			return err
 		}
-		err = next(ctx, cmds)
+		if err = next(ctx, cmds); err != nil {
+			return err
+		}
 		return h.AfterProcessPipeline(ctx, cmds)
 	}
 }

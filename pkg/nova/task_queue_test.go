@@ -78,7 +78,6 @@ func TestHandlerFunc_ProcessTask(t *testing.T) {
 
 	task := &Task{Type: "test", Payload: []byte("data")}
 	err := handler.ProcessTask(context.Background(), task)
-
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}

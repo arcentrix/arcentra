@@ -16,7 +16,6 @@ package service
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	streamv1 "github.com/arcentrix/arcentra/api/stream/v1"
@@ -36,7 +35,6 @@ type StreamServiceImpl struct {
 	logAggregator *LogAggregator
 	redis         *redis.Client
 	mysql         *gorm.DB
-	mu            sync.RWMutex
 	logConsumer   *kafka.Consumer
 }
 

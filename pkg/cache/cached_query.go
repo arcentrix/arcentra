@@ -25,10 +25,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var (
-	// ErrCacheMiss indicates that the key was not found in cache
-	ErrCacheMiss = redis.Nil
-)
+// ErrCacheMiss indicates that the key was not found in cache
+var ErrCacheMiss = redis.Nil
 
 // QueryFunc defines a function that queries data from database
 // T is the type of data to be queried

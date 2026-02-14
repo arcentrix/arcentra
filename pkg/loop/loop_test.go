@@ -29,7 +29,7 @@ func TestLoopMaxTimes(t *testing.T) {
 	count := 0
 	l := New(WithMaxTimes(20))
 	l.interval = 1 * time.Microsecond
-	l.Do(func() (bool, error) {
+	_ = l.Do(func() (bool, error) {
 		count += 1
 		return false, nil
 	})
@@ -40,7 +40,7 @@ func TestLoopInterval(t *testing.T) {
 	l := New(WithMaxTimes(10), WithInterval(time.Second*2))
 
 	start := time.Now()
-	l.Do(func() (bool, error) {
+	_ = l.Do(func() (bool, error) {
 		return false, nil
 	})
 	duration := time.Since(start)
@@ -52,7 +52,7 @@ func TestLoopInterval(t *testing.T) {
 func TestLoopRaiot(t *testing.T) {
 	l := New(WithDeclineRatio(1.5), WithDeclineLimit(time.Second*10))
 	begin := time.Now()
-	l.Do(func() (bool, error) {
+	_ = l.Do(func() (bool, error) {
 		executeTime := time.Now()
 		fmt.Println("interval:", executeTime.Sub(begin))
 		begin = executeTime
@@ -65,7 +65,7 @@ func TestWithContext(t *testing.T) {
 	cancel()
 	l := New(WithContext(ctx), WithMaxTimes(10))
 	executed := 0
-	l.Do(func() (bool, error) {
+	_ = l.Do(func() (bool, error) {
 		executed += 1
 		return false, errors.New("error")
 	})
@@ -77,7 +77,7 @@ func TestWithContext(t *testing.T) {
 	defer cancel()
 
 	l = New(WithContext(ctx), WithInterval(100*time.Millisecond), WithMaxTimes(3))
-	l.Do(func() (bool, error) {
+	_ = l.Do(func() (bool, error) {
 		executed += 1
 		return false, errors.New("error")
 	})

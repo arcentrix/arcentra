@@ -49,7 +49,6 @@ func LoadPluginConfig(configPath string) (map[string]any, error) {
 
 // loadPluginConfigFile 从文件加载插件配置
 func loadPluginConfigFile(configPath string) (map[string]any, map[string]any, error) {
-
 	if configPath == "" {
 		return make(map[string]any), make(map[string]any), nil // 文件不存在，返回空配置
 	}

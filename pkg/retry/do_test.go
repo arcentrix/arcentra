@@ -595,7 +595,6 @@ func TestDo_WithNilBackoff(t *testing.T) {
 		}
 		return nil
 	}, WithMaxAttempts(3), WithBackoff(nil))
-
 	// nil backoff should be ignored, use default
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
@@ -615,7 +614,6 @@ func TestDo_WithNilJitter(t *testing.T) {
 		}
 		return nil
 	}, WithMaxAttempts(3), WithJitter(nil))
-
 	// nil jitter should be ignored, use default
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
@@ -635,7 +633,6 @@ func TestDo_WithNilRetryIf(t *testing.T) {
 		}
 		return nil
 	}, WithMaxAttempts(3), WithRetryIf(nil))
-
 	// nil retryIf should be ignored, use default
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)

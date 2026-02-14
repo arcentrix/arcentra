@@ -174,13 +174,13 @@ func (la *LogAggregator) writeToMySQL(logs []*LogEntry) error {
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.PrepareContext(ctx, insertSQL)
 	if err != nil {
 		return fmt.Errorf("prepare statement: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, logEntry := range logs {
 		_, err := stmt.ExecContext(ctx,
@@ -226,7 +226,7 @@ func (la *LogAggregator) periodicFlush(stepRunID string) {
 		}
 
 		if time.Since(stream.lastFlush) >= la.flushInterval {
-			la.flushStream(stream)
+			_ = la.flushStream(stream)
 		}
 		stream.mu.Unlock()
 	}
@@ -293,7 +293,7 @@ func (la *LogAggregator) GetLogsByStepRunID(stepRunID string, fromLine int32, li
 	if err != nil {
 		return nil, fmt.Errorf("query logs from mysql: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var logs []*LogEntry
 	for rows.Next() {

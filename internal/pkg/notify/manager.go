@@ -80,7 +80,7 @@ func (nm *NotifyManager) LoadChannelsFromDatabase(ctx context.Context) error {
 			if authType != "" {
 				authProvider, err := nm.factory.CreateAuthProvider(auth.AuthType(authType), cfg.AuthConfig)
 				if err == nil {
-					ch.SetAuth(authProvider)
+					_ = ch.SetAuth(authProvider)
 				} else {
 					log.Warnw("failed to create auth provider", "channel", cfg.Name, "error", err)
 				}
@@ -166,7 +166,7 @@ func (nm *NotifyManager) SendToMultiple(ctx context.Context, channelNames []stri
 }
 
 // SendWithTemplate sends a message using template
-func (nm *NotifyManager) SendWithTemplate(ctx context.Context, channelName, template string, data map[string]interface{}) error {
+func (nm *NotifyManager) SendWithTemplate(ctx context.Context, channelName, template string, data map[string]any) error {
 	ch, err := nm.GetChannel(channelName)
 	if err != nil {
 		return err
@@ -215,126 +215,152 @@ func NewChannelFactory() *ChannelFactory {
 	return &ChannelFactory{}
 }
 
+// channelCreator creates a channel from config
+type channelCreator func(map[string]any) (channel.INotifyChannel, error)
+
+var channelCreators = map[ChannelType]channelCreator{
+	ChannelTypeFeishuApp:  createFeishuAppChannel,
+	ChannelTypeFeishuCard: createFeishuCardChannel,
+	ChannelTypeLarkApp:    createLarkAppChannel,
+	ChannelTypeLarkCard:   createLarkCardChannel,
+	ChannelTypeDingTalk:   createDingTalkChannel,
+	ChannelTypeWeCom:      createWeComChannel,
+	ChannelTypeWebhook:    createWebhookChannel,
+	ChannelTypeEmail:      createEmailChannel,
+	ChannelTypeSlack:      createSlackChannel,
+	ChannelTypeTelegram:   createTelegramChannel,
+	ChannelTypeDiscord:    createDiscordChannel,
+}
+
 // CreateChannel creates a notification channel based on type and configuration
-func (cf *ChannelFactory) CreateChannel(channelType ChannelType, config map[string]interface{}) (channel.INotifyChannel, error) {
-	switch channelType {
-	case ChannelTypeFeishuApp:
-		webhookURL, _ := config["webhook_url"].(string)
-		secret, _ := config["secret"].(string) // optional
-		if webhookURL == "" {
-			return nil, fmt.Errorf("webhook_url is required for feishu_app")
-		}
-		if secret != "" {
-			return channel.NewFeishuAppChannelWithSecret(webhookURL, secret), nil
-		}
-		return channel.NewFeishuAppChannel(webhookURL), nil
-
-	case ChannelTypeFeishuCard:
-		appID, _ := config["app_id"].(string)
-		appSecret, _ := config["app_secret"].(string)
-		if appID == "" || appSecret == "" {
-			return nil, fmt.Errorf("app_id and app_secret are required for feishu_card")
-		}
-		return channel.NewFeishuCardChannel(appID, appSecret), nil
-
-	case ChannelTypeLarkApp:
-		webhookURL, _ := config["webhook_url"].(string)
-		secret, _ := config["secret"].(string) // optional
-		if webhookURL == "" {
-			return nil, fmt.Errorf("webhook_url is required for lark_app")
-		}
-		if secret != "" {
-			return channel.NewLarkAppChannelWithSecret(webhookURL, secret), nil
-		}
-		return channel.NewLarkAppChannel(webhookURL), nil
-
-	case ChannelTypeLarkCard:
-		appID, _ := config["app_id"].(string)
-		appSecret, _ := config["app_secret"].(string)
-		if appID == "" || appSecret == "" {
-			return nil, fmt.Errorf("app_id and app_secret are required for lark_card")
-		}
-		return channel.NewLarkCardChannel(appID, appSecret), nil
-
-	case ChannelTypeDingTalk:
-		webhookURL, _ := config["webhook_url"].(string)
-		secret, _ := config["secret"].(string)
-		if webhookURL == "" {
-			return nil, fmt.Errorf("webhook_url is required for dingtalk")
-		}
-		return channel.NewDingTalkChannel(webhookURL, secret), nil
-
-	case ChannelTypeWeCom:
-		webhookURL, _ := config["webhook_url"].(string)
-		if webhookURL == "" {
-			return nil, fmt.Errorf("webhook_url is required for wecom")
-		}
-		return channel.NewWeComChannel(webhookURL), nil
-
-	case ChannelTypeWebhook:
-		webhookURL, _ := config["webhook_url"].(string)
-		method, _ := config["method"].(string)
-		if webhookURL == "" {
-			return nil, fmt.Errorf("webhook_url is required for webhook")
-		}
-		return channel.NewWebhookChannel(webhookURL, method), nil
-
-	case ChannelTypeEmail:
-		smtpHost, _ := config["smtp_host"].(string)
-		smtpPort, _ := config["smtp_port"].(int)
-		fromEmail, _ := config["from_email"].(string)
-		toEmailsRaw, _ := config["to_emails"].([]interface{})
-
-		var toEmails []string
-		for _, email := range toEmailsRaw {
-			if e, ok := email.(string); ok {
-				toEmails = append(toEmails, e)
-			}
-		}
-
-		if smtpHost == "" || smtpPort == 0 || fromEmail == "" || len(toEmails) == 0 {
-			return nil, fmt.Errorf("smtp_host, smtp_port, from_email, and to_emails are required for email")
-		}
-		return channel.NewEmailChannel(smtpHost, smtpPort, fromEmail, toEmails), nil
-
-	case ChannelTypeSlack:
-		webhookURL, _ := config["webhook_url"].(string)
-		if webhookURL == "" {
-			return nil, fmt.Errorf("webhook_url is required for slack")
-		}
-		return channel.NewSlackChannel(webhookURL), nil
-
-	case ChannelTypeTelegram:
-		botToken, _ := config["bot_token"].(string)
-		chatID, _ := config["chat_id"].(string)
-		parseMode, _ := config["parse_mode"].(string)
-		if botToken == "" || chatID == "" {
-			return nil, fmt.Errorf("bot_token and chat_id are required for telegram")
-		}
-		if parseMode != "" {
-			return channel.NewTelegramChannelWithParseMode(botToken, chatID, parseMode), nil
-		}
-		return channel.NewTelegramChannel(botToken, chatID), nil
-
-	case ChannelTypeDiscord:
-		webhookURL, _ := config["webhook_url"].(string)
-		username, _ := config["username"].(string)
-		avatarURL, _ := config["avatar_url"].(string)
-		if webhookURL == "" {
-			return nil, fmt.Errorf("webhook_url is required for discord")
-		}
-		if username != "" || avatarURL != "" {
-			return channel.NewDiscordChannelWithCustom(webhookURL, username, avatarURL), nil
-		}
-		return channel.NewDiscordChannel(webhookURL), nil
-
-	default:
-		return nil, fmt.Errorf("unsupported channel type: %s", channelType)
+func (cf *ChannelFactory) CreateChannel(channelType ChannelType, config map[string]any) (channel.INotifyChannel, error) {
+	if creator, ok := channelCreators[channelType]; ok {
+		return creator(config)
 	}
+	return nil, fmt.Errorf("unsupported channel type: %s", channelType)
+}
+
+func createFeishuAppChannel(config map[string]any) (channel.INotifyChannel, error) {
+	webhookURL, _ := config["webhook_url"].(string)
+	secret, _ := config["secret"].(string)
+	if webhookURL == "" {
+		return nil, fmt.Errorf("webhook_url is required for feishu_app")
+	}
+	if secret != "" {
+		return channel.NewFeishuAppChannelWithSecret(webhookURL, secret), nil
+	}
+	return channel.NewFeishuAppChannel(webhookURL), nil
+}
+
+func createFeishuCardChannel(config map[string]any) (channel.INotifyChannel, error) {
+	appID, _ := config["app_id"].(string)
+	appSecret, _ := config["app_secret"].(string)
+	if appID == "" || appSecret == "" {
+		return nil, fmt.Errorf("app_id and app_secret are required for feishu_card")
+	}
+	return channel.NewFeishuCardChannel(appID, appSecret), nil
+}
+
+func createLarkAppChannel(config map[string]any) (channel.INotifyChannel, error) {
+	webhookURL, _ := config["webhook_url"].(string)
+	secret, _ := config["secret"].(string)
+	if webhookURL == "" {
+		return nil, fmt.Errorf("webhook_url is required for lark_app")
+	}
+	if secret != "" {
+		return channel.NewLarkAppChannelWithSecret(webhookURL, secret), nil
+	}
+	return channel.NewLarkAppChannel(webhookURL), nil
+}
+
+func createLarkCardChannel(config map[string]any) (channel.INotifyChannel, error) {
+	appID, _ := config["app_id"].(string)
+	appSecret, _ := config["app_secret"].(string)
+	if appID == "" || appSecret == "" {
+		return nil, fmt.Errorf("app_id and app_secret are required for lark_card")
+	}
+	return channel.NewLarkCardChannel(appID, appSecret), nil
+}
+
+func createDingTalkChannel(config map[string]any) (channel.INotifyChannel, error) {
+	webhookURL, _ := config["webhook_url"].(string)
+	secret, _ := config["secret"].(string)
+	if webhookURL == "" {
+		return nil, fmt.Errorf("webhook_url is required for dingtalk")
+	}
+	return channel.NewDingTalkChannel(webhookURL, secret), nil
+}
+
+func createWeComChannel(config map[string]any) (channel.INotifyChannel, error) {
+	webhookURL, _ := config["webhook_url"].(string)
+	if webhookURL == "" {
+		return nil, fmt.Errorf("webhook_url is required for wecom")
+	}
+	return channel.NewWeComChannel(webhookURL), nil
+}
+
+func createWebhookChannel(config map[string]any) (channel.INotifyChannel, error) {
+	webhookURL, _ := config["webhook_url"].(string)
+	method, _ := config["method"].(string)
+	if webhookURL == "" {
+		return nil, fmt.Errorf("webhook_url is required for webhook")
+	}
+	return channel.NewWebhookChannel(webhookURL, method), nil
+}
+
+func createEmailChannel(config map[string]any) (channel.INotifyChannel, error) {
+	smtpHost, _ := config["smtp_host"].(string)
+	smtpPort, _ := config["smtp_port"].(int)
+	fromEmail, _ := config["from_email"].(string)
+	toEmailsRaw, _ := config["to_emails"].([]any)
+	var toEmails []string
+	for _, email := range toEmailsRaw {
+		if e, ok := email.(string); ok {
+			toEmails = append(toEmails, e)
+		}
+	}
+	if smtpHost == "" || smtpPort == 0 || fromEmail == "" || len(toEmails) == 0 {
+		return nil, fmt.Errorf("smtp_host, smtp_port, from_email, and to_emails are required for email")
+	}
+	return channel.NewEmailChannel(smtpHost, smtpPort, fromEmail, toEmails), nil
+}
+
+func createSlackChannel(config map[string]any) (channel.INotifyChannel, error) {
+	webhookURL, _ := config["webhook_url"].(string)
+	if webhookURL == "" {
+		return nil, fmt.Errorf("webhook_url is required for slack")
+	}
+	return channel.NewSlackChannel(webhookURL), nil
+}
+
+func createTelegramChannel(config map[string]any) (channel.INotifyChannel, error) {
+	botToken, _ := config["bot_token"].(string)
+	chatID, _ := config["chat_id"].(string)
+	parseMode, _ := config["parse_mode"].(string)
+	if botToken == "" || chatID == "" {
+		return nil, fmt.Errorf("bot_token and chat_id are required for telegram")
+	}
+	if parseMode != "" {
+		return channel.NewTelegramChannelWithParseMode(botToken, chatID, parseMode), nil
+	}
+	return channel.NewTelegramChannel(botToken, chatID), nil
+}
+
+func createDiscordChannel(config map[string]any) (channel.INotifyChannel, error) {
+	webhookURL, _ := config["webhook_url"].(string)
+	username, _ := config["username"].(string)
+	avatarURL, _ := config["avatar_url"].(string)
+	if webhookURL == "" {
+		return nil, fmt.Errorf("webhook_url is required for discord")
+	}
+	if username != "" || avatarURL != "" {
+		return channel.NewDiscordChannelWithCustom(webhookURL, username, avatarURL), nil
+	}
+	return channel.NewDiscordChannel(webhookURL), nil
 }
 
 // CreateAuthProvider creates an authentication provider based on type and configuration
-func (cf *ChannelFactory) CreateAuthProvider(authType auth.AuthType, config map[string]interface{}) (auth.IAuthProvider, error) {
+func (cf *ChannelFactory) CreateAuthProvider(authType auth.AuthType, config map[string]any) (auth.IAuthProvider, error) {
 	switch authType {
 	case auth.AuthTypeToken:
 		token, _ := config["token"].(string)

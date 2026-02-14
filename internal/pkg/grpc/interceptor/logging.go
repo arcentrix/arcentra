@@ -51,7 +51,6 @@ func logClientCall(callType string, method string, duration time.Duration, err e
 
 // LoggingUnaryInterceptor unary server interceptor (can filter heartbeat interface)
 func LoggingUnaryInterceptor() grpc.UnaryServerInterceptor {
-
 	return func(
 		ctx context.Context,
 		req any,
@@ -74,7 +73,6 @@ func LoggingUnaryInterceptor() grpc.UnaryServerInterceptor {
 
 // LoggingStreamInterceptor stream server interceptor (can filter heartbeat interface)
 func LoggingStreamInterceptor() grpc.StreamServerInterceptor {
-
 	return func(
 		srv any,
 		ss grpc.ServerStream,
@@ -97,7 +95,6 @@ func LoggingStreamInterceptor() grpc.StreamServerInterceptor {
 
 // LoggingUnaryClientInterceptor unary client interceptor
 func LoggingUnaryClientInterceptor() grpc.UnaryClientInterceptor {
-
 	return func(
 		ctx context.Context,
 		method string,
@@ -118,7 +115,6 @@ func LoggingUnaryClientInterceptor() grpc.UnaryClientInterceptor {
 
 // LoggingStreamClientInterceptor stream client interceptor
 func LoggingStreamClientInterceptor() grpc.StreamClientInterceptor {
-
 	return func(
 		ctx context.Context,
 		desc *grpc.StreamDesc,

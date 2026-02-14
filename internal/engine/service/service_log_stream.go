@@ -99,7 +99,7 @@ func (h *LogStreamHandler) Upgrade() fiber.Handler {
 				var req LogStreamRequest
 				if err := sonic.Unmarshal(message, &req); err != nil {
 					log.Errorw("failed to unmarshal request", "error", err)
-					sendResponse(&LogStreamResponse{
+					_ = sendResponse(&LogStreamResponse{
 						Type:  "error",
 						Error: fmt.Sprintf("invalid request format: %v", err),
 					})
@@ -130,7 +130,6 @@ func (h *LogStreamHandler) Upgrade() fiber.Handler {
 					if currentStepRunID != "" && currentStepRunID != req.StepRunID {
 						// 取消之前的订阅
 						cancel()
-						activeSubscription = nil
 					}
 
 					currentStepRunID = req.StepRunID
@@ -141,7 +140,7 @@ func (h *LogStreamHandler) Upgrade() fiber.Handler {
 						historicalLogs, err := h.logAggregator.GetLogsByStepRunID(req.StepRunID, req.FromLine, 1000)
 						if err != nil {
 							log.Errorw("failed to get historical logs", "stepRunId", req.StepRunID, "error", err)
-							sendResponse(&LogStreamResponse{
+							_ = sendResponse(&LogStreamResponse{
 								Type:      "error",
 								StepRunID: req.StepRunID,
 								Error:     fmt.Sprintf("failed to load history: %v", err),
@@ -162,7 +161,7 @@ func (h *LogStreamHandler) Upgrade() fiber.Handler {
 						}
 
 						// 发送历史日志完成标记
-						sendResponse(&LogStreamResponse{
+						_ = sendResponse(&LogStreamResponse{
 							Type:      "message",
 							StepRunID: req.StepRunID,
 							Message:   "historical logs loaded",
@@ -173,7 +172,7 @@ func (h *LogStreamHandler) Upgrade() fiber.Handler {
 					activeSubscription = h.logAggregator.Subscribe(ctx, req.StepRunID)
 
 					// 确认订阅成功
-					sendResponse(&LogStreamResponse{
+					_ = sendResponse(&LogStreamResponse{
 						Type:      "message",
 						StepRunID: req.StepRunID,
 						Message:   "subscribed",
@@ -185,7 +184,7 @@ func (h *LogStreamHandler) Upgrade() fiber.Handler {
 						currentStepRunID = ""
 						activeSubscription = nil
 
-						sendResponse(&LogStreamResponse{
+						_ = sendResponse(&LogStreamResponse{
 							Type:      "message",
 							StepRunID: req.StepRunID,
 							Message:   "unsubscribed",
@@ -193,7 +192,7 @@ func (h *LogStreamHandler) Upgrade() fiber.Handler {
 					}
 
 				default:
-					sendResponse(&LogStreamResponse{
+					_ = sendResponse(&LogStreamResponse{
 						Type:  "error",
 						Error: fmt.Sprintf("unknown request type: %s", req.Type),
 					})
@@ -204,7 +203,7 @@ func (h *LogStreamHandler) Upgrade() fiber.Handler {
 					// channel关闭
 					activeSubscription = nil
 					if currentStepRunID != "" {
-						sendResponse(&LogStreamResponse{
+						_ = sendResponse(&LogStreamResponse{
 							Type:      "complete",
 							StepRunID: currentStepRunID,
 							Message:   "log stream completed",

@@ -15,14 +15,12 @@
 package shutdown
 
 import (
-	"sync"
 	"sync/atomic"
 )
 
 // Manager manages graceful shutdown state
 type Manager struct {
 	shuttingDown int32 // atomic flag: 0 = running, 1 = shutting down
-	mu           sync.RWMutex
 	shutdownChan chan struct{}
 }
 

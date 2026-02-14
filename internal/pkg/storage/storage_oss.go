@@ -58,7 +58,7 @@ func (o *OSSStorage) GetObject(ctx context.Context, objectName string) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	buf := new(bytes.Buffer)
 	if _, err := buf.ReadFrom(body); err != nil {
@@ -72,7 +72,7 @@ func (o *OSSStorage) PutObject(ctx context.Context, objectName string, file *mul
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	fullPath := getFullPath(o.s.BasePath, objectName)
 	err = o.Bucket.PutObject(fullPath, src, oss.ContentType(contentType))
@@ -87,7 +87,7 @@ func (o *OSSStorage) Upload(ctx context.Context, objectName string, file *multip
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	fullPath := getFullPath(o.s.BasePath, objectName)
 	fileSize := file.Size
@@ -122,7 +122,7 @@ func (o *OSSStorage) Upload(ctx context.Context, objectName string, file *multip
 			Key:      fullPath,
 			FileSize: fileSize,
 		}
-		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0644)
+		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0o644)
 	}
 
 	var parts []oss.UploadPart
@@ -159,7 +159,7 @@ func (o *OSSStorage) Upload(ctx context.Context, objectName string, file *multip
 			// 更新进度信息
 			checkpoint.UploadedBytes = uploadedBytes
 			checkpoint.UploadProgress = float64(uploadedBytes) / float64(fileSize) * 100
-			_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0644)
+			_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0o644)
 
 			// 记录上传进度日志
 			// log.Debug("OSS upload progress: %s - %.2f%% (%d/%d bytes)",
@@ -187,7 +187,7 @@ func (o *OSSStorage) Download(ctx context.Context, objectName string) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 
 	return io.ReadAll(body)
 }

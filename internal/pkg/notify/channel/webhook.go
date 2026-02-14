@@ -21,6 +21,7 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/pkg/notify/auth"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/bytedance/sonic"
 	"github.com/go-resty/resty/v2"
 )
 
@@ -149,5 +150,47 @@ func (c *WebhookChannel) Validate() error {
 
 // Close closes the connection
 func (c *WebhookChannel) Close() error {
+	return nil
+}
+
+// webhookErrorConfig defines how to parse API error responses
+type webhookErrorConfig struct {
+	codeKey   string // "code" or "errcode"
+	msgKey    string // "msg" or "errmsg"
+	logPrefix string // "feishu" or "wecom"
+}
+
+func sendWebhookRequest(ctx context.Context, client *resty.Client, url string, authProvider auth.IAuthProvider, payload map[string]interface{}, cfg webhookErrorConfig) error {
+	req := client.R().SetContext(ctx)
+
+	if authProvider != nil {
+		key, value := authProvider.GetAuthHeader()
+		if key != "" && value != "" {
+			req.SetHeader(key, value)
+		}
+	}
+
+	req.SetHeader("Content-Type", "application/json")
+	req.SetBody(payload)
+
+	resp, err := req.Post(url)
+	if err != nil {
+		log.Errorw(cfg.logPrefix+" send request failed", "error", err)
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+
+	if resp.StatusCode() != http.StatusOK {
+		log.Errorw(cfg.logPrefix+" request failed", "statusCode", resp.StatusCode(), "response", resp.String())
+		return fmt.Errorf("%s request failed with status %d", cfg.logPrefix, resp.StatusCode())
+	}
+
+	var result map[string]interface{}
+	if err := sonic.Unmarshal(resp.Body(), &result); err == nil {
+		if code, ok := result[cfg.codeKey].(float64); ok && code != 0 {
+			msg, _ := result[cfg.msgKey].(string)
+			return fmt.Errorf("%s API error: %s=%v, %s=%s", cfg.logPrefix, cfg.codeKey, code, cfg.msgKey, msg)
+		}
+	}
+
 	return nil
 }

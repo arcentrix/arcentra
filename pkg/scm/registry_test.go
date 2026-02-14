@@ -14,12 +14,14 @@ func (p *dummyProvider) Kind() ProviderKind { return p.kind }
 func (p *dummyProvider) Capabilities() CapSet {
 	return CapSet{CapWebhookVerify: true, CapWebhookParse: true, CapPollEvents: true}
 }
+
 func (p *dummyProvider) VerifyWebhook(_ context.Context, _ WebhookRequest, secret string) error {
 	if secret == "" {
 		return Err("missing secret")
 	}
 	return nil
 }
+
 func (p *dummyProvider) ParseWebhook(_ context.Context, _ WebhookRequest) ([]Event, error) {
 	return []Event{{
 		ProviderKind: p.kind,
@@ -31,6 +33,7 @@ func (p *dummyProvider) ParseWebhook(_ context.Context, _ WebhookRequest) ([]Eve
 		OccurredAt:   time.Unix(1, 0).UTC(),
 	}}, nil
 }
+
 func (p *dummyProvider) PollEvents(_ context.Context, _ Repo, cursor Cursor) ([]Event, Cursor, error) {
 	next := cursor
 	next.Since = time.Unix(2, 0).UTC()

@@ -54,7 +54,7 @@ func (h *WSHandle) handleStatus(conn ws.Conn, action string, params WSParams) er
 		return h.sendError(conn, channelStatus, params, "step run not found")
 	}
 
-	h.sendMessage(conn, channelStatus, "status_snapshot", params, stepRun)
+	_ = h.sendMessage(conn, channelStatus, "status_snapshot", params, stepRun)
 
 	if !isRunningStatus(stepRun.Status) {
 		return nil
@@ -112,7 +112,7 @@ func (h *WSHandle) consumeStatusEvents() {
 		log.Warnw("failed to create kafka status consumer", "error", err)
 		return
 	}
-	defer consumer.Close()
+	defer func() { _ = consumer.Close() }()
 
 	if err := consumer.Subscribe([]string{statusTopic}); err != nil {
 		log.Warnw("failed to subscribe status topic", "error", err)

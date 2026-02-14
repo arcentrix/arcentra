@@ -54,7 +54,6 @@ func (r *PipelineRunner) Run(ctx context.Context, p *spec.Pipeline) error {
 	// Run jobs with concurrency control
 	eg, egCtx := errgroup.WithContext(ctx)
 	for _, jobs := range concurrencyGroups {
-		jobs := jobs
 		eg.Go(func() error {
 			// Jobs with same concurrency key run sequentially
 			for _, job := range jobs {
@@ -72,7 +71,6 @@ func (r *PipelineRunner) Run(ctx context.Context, p *spec.Pipeline) error {
 
 	// Run jobs without concurrency control in parallel
 	for _, job := range noConcurrencyJobs {
-		job := job
 		eg.Go(func() error {
 			jr := NewJobRunner(r.execCtx, job)
 			return jr.Run(ctx)

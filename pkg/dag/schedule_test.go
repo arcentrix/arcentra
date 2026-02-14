@@ -20,7 +20,6 @@ import (
 )
 
 func testGraph(t *testing.T) *DAG {
-
 	//  b     a     c
 	//  |    / \
 	//  |   |   x

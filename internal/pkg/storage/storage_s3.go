@@ -65,9 +65,9 @@ func (s *S3Storage) GetObject(ctx context.Context, objectName string) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	defer out.Body.Close()
+	defer func() { _ = out.Body.Close() }()
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(out.Body)
+	_, _ = buf.ReadFrom(out.Body)
 	return buf.Bytes(), nil
 }
 
@@ -76,7 +76,7 @@ func (s *S3Storage) PutObject(ctx context.Context, objectName string, file *mult
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	fullPath := getFullPath(s.s.BasePath, objectName)
 	_, err = s.Client.PutObject(ctx, &s3.PutObjectInput{
@@ -93,7 +93,7 @@ func (s *S3Storage) Upload(ctx context.Context, objectName string, file *multipa
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	fullPath := getFullPath(s.s.BasePath, objectName)
 	fileSize := file.Size
@@ -135,7 +135,7 @@ func (s *S3Storage) Upload(ctx context.Context, objectName string, file *multipa
 			Key:      fullPath,
 			FileSize: fileSize,
 		}
-		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0644)
+		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0o644)
 	}
 
 	var completedParts []s3types.CompletedPart
@@ -177,7 +177,7 @@ func (s *S3Storage) Upload(ctx context.Context, objectName string, file *multipa
 		// 更新进度信息
 		checkpoint.UploadedBytes = uploadedBytes
 		checkpoint.UploadProgress = float64(uploadedBytes) / float64(fileSize) * 100
-		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0644)
+		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0o644)
 
 		// 记录上传进度日志
 		log.Debugw("S3 upload progress", "fullPath", fullPath, "progress", checkpoint.UploadProgress, "uploadedBytes", uploadedBytes, "fileSize", fileSize)
@@ -213,9 +213,9 @@ func (s *S3Storage) Download(ctx context.Context, objectName string) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
-	defer out.Body.Close()
+	defer func() { _ = out.Body.Close() }()
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(out.Body)
+	_, _ = buf.ReadFrom(out.Body)
 	return buf.Bytes(), nil
 }
 
@@ -236,7 +236,6 @@ func (s *S3Storage) GetPresignedURL(ctx context.Context, objectName string, expi
 		Bucket: aws.String(s.s.Bucket),
 		Key:    aws.String(fullPath),
 	}, s3.WithPresignExpires(expiry))
-
 	if err != nil {
 		return "", err
 	}

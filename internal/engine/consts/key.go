@@ -14,9 +14,11 @@
 
 package consts
 
-const UserInfoKey = "user:info:"
-const UserTokenKey = "user:token:"
-const UserRefreshTokenKey = "user:refresh_token:"
-const UserRolesRoutesKey = "user:roles_routes:"
-const AgentDetailKey = "agent:detail:"
-const GeneralSettingsKeyByName = "general:settings:"
+const (
+	UserInfoKey              = "user:info:"
+	UserTokenKey             = "user:token:"
+	UserRefreshTokenKey      = "user:refresh_token:"
+	UserRolesRoutesKey       = "user:roles_routes:"
+	AgentDetailKey           = "agent:detail:"
+	GeneralSettingsKeyByName = "general:settings:"
+)

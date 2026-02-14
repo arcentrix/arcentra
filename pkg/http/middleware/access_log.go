@@ -21,12 +21,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-type writerFunc func(p []byte) (int, error)
-
-func (w writerFunc) Write(p []byte) (int, error) {
-	return w(p)
-}
-
 func AccessLogMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		start := time.Now()

@@ -133,7 +133,6 @@ func NewConf(confDir string) *AgentConfig {
 
 // LoadConfigFile load config file
 func loadConfigFile(confDir string) (AgentConfig, error) {
-
 	config := viper.New()
 	config.SetConfigFile(confDir)
 	config.SetConfigType("toml")

@@ -22,7 +22,6 @@ import (
 )
 
 func TestJwt(t *testing.T) {
-
 	userId := "1"
 	secretKey := []byte("1111111111111111")
 	accessExpired := time.Hour * 24
@@ -36,7 +35,6 @@ func TestJwt(t *testing.T) {
 }
 
 func TestRefreshToken(t *testing.T) {
-
 	userId := "1"
 	secretKey := "bf284d03-ba65-42d4-a9fe-0d2fbfe61060"
 	accessExpire := 3600 * time.Second
@@ -60,7 +58,6 @@ func TestRefreshToken(t *testing.T) {
 }
 
 func TestParseToken(t *testing.T) {
-
 	userId := "test-user"
 	secretKey := "bf284d03-ba65-42d4-a9fe-0d2fbfe61060"
 	aToken, _, err := GenToken(userId, []byte(secretKey), 10*time.Minute, 20*time.Minute)

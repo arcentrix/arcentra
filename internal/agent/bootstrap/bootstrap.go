@@ -305,7 +305,6 @@ func (app *Agent) startPeriodicHeartbeat() {
 			// }
 		}
 	}, "agent-heartbeat")
-
 	if err != nil {
 		log.Errorw("Failed to add heartbeat cron job", "error", err)
 		return

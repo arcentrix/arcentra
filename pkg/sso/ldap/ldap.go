@@ -90,7 +90,7 @@ func (c *LDAPClient) Authenticate(username, password string) (*UserInfo, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// 使用 BindDN 绑定
 	if c.BindDN != "" && c.BindPassword != "" {

@@ -129,7 +129,7 @@ func (m *AgentIDManager) saveToFile() error {
 
 	// 确保目录存在
 	dir := filepath.Dir(m.idFilePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("创建目录失败: %w", err)
 	}
 
@@ -141,7 +141,7 @@ func (m *AgentIDManager) saveToFile() error {
 
 	// 写入文件（原子写入：先写临时文件再重命名）
 	tempFile := m.idFilePath + ".tmp"
-	if err := os.WriteFile(tempFile, data, 0600); err != nil {
+	if err := os.WriteFile(tempFile, data, 0o600); err != nil {
 		return fmt.Errorf("写入agent id文件失败: %w", err)
 	}
 

@@ -24,11 +24,9 @@ var (
 )
 
 func Noop(string, ...interface{}) {
-
 }
 
 func init() {
-
 	var err error
 	Hostname, err = os.Hostname()
 	if err != nil {

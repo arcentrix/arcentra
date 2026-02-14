@@ -55,9 +55,9 @@ func (m *MinioStorage) GetObject(ctx context.Context, objectName string) ([]byte
 	if err != nil {
 		return nil, err
 	}
-	defer obj.Close()
+	defer func() { _ = obj.Close() }()
 	buf := new(bytes.Buffer)
-	buf.ReadFrom(obj)
+	_, _ = buf.ReadFrom(obj)
 	return buf.Bytes(), nil
 }
 
@@ -66,7 +66,7 @@ func (m *MinioStorage) PutObject(ctx context.Context, objectName string, file *m
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	fullPath := getFullPath(m.s.BasePath, objectName)
 	_, err = m.Client.PutObject(ctx, m.s.Bucket, fullPath, src, file.Size, minio.PutObjectOptions{
@@ -83,7 +83,7 @@ func (m *MinioStorage) Upload(ctx context.Context, objectName string, file *mult
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	fullPath := getFullPath(m.s.BasePath, objectName)
 	fileSize := file.Size
@@ -115,7 +115,7 @@ func (m *MinioStorage) Upload(ctx context.Context, objectName string, file *mult
 			Key:      fullPath,
 			FileSize: fileSize,
 		}
-		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0644)
+		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0o644)
 	}
 
 	// 使用 PutObject，MinIO SDK 会自动处理大文件的分片上传
@@ -143,7 +143,7 @@ func (m *MinioStorage) Upload(ctx context.Context, objectName string, file *mult
 			checkpoint.Parts = append(checkpoint.Parts, currentPart)
 			checkpoint.UploadedBytes = uploaded
 			checkpoint.UploadProgress = float64(uploaded) / float64(fileSize) * 100
-			_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0644)
+			_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0o644)
 
 			// 记录上传进度日志
 			// log.Debug("MinIO upload progress: %s - %.2f%% (%d/%d bytes)",
@@ -168,7 +168,7 @@ func (m *MinioStorage) Download(ctx context.Context, objectName string) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	defer obj.Close()
+	defer func() { _ = obj.Close() }()
 
 	buf := new(bytes.Buffer)
 	if _, err := buf.ReadFrom(obj); err != nil {

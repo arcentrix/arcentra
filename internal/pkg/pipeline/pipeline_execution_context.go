@@ -92,14 +92,14 @@ func (c *ExecutionContext) GetWorkspaceRoot() string {
 // JobWorkspace returns workspace path for job
 func (c *ExecutionContext) JobWorkspace(jobName string) string {
 	p := filepath.Join(c.WorkspaceRoot, c.Pipeline.Namespace, jobName)
-	_ = os.MkdirAll(p, 0755)
+	_ = os.MkdirAll(p, 0o755)
 	return p
 }
 
 // StepWorkspace returns workspace path for step
 func (c *ExecutionContext) StepWorkspace(jobName, stepName string) string {
 	p := filepath.Join(c.JobWorkspace(jobName), stepName)
-	_ = os.MkdirAll(p, 0755)
+	_ = os.MkdirAll(p, 0o755)
 	return p
 }
 

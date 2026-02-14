@@ -34,7 +34,6 @@ func (my *MyNode) PrevNodeNames() []string {
 }
 
 func TestNew_Parallel(t *testing.T) {
-
 	// 并行
 	//    a   b   c
 
@@ -50,7 +49,6 @@ func TestNew_Parallel(t *testing.T) {
 }
 
 func TestNew_JoinMultipleRoots(t *testing.T) {
-
 	//   a    b   c
 	//   | \ /
 	//   x  y
@@ -75,7 +73,6 @@ func TestNew_JoinMultipleRoots(t *testing.T) {
 }
 
 func TestBuild_FanInFanOut(t *testing.T) {
-
 	//   a
 	//  / \
 	// d   e
@@ -110,19 +107,20 @@ func TestNew_Invalid(t *testing.T) {
 	tcs := []struct {
 		caseName string
 		nodes    []NamedNode
-	}{{
-		caseName: "self-link-after",
-		nodes:    []NamedNode{aSelfLinkAfterA},
-	}, {
-		caseName: "cycle-runAfter",
-		nodes:    []NamedNode{xRunAfterA, zRunAfterX, aRunAfterZ},
-	}, {
-		caseName: "duplicate-node",
-		nodes:    []NamedNode{a, a},
-	}, {
-		caseName: "invalid-task-name-after",
-		nodes:    []NamedNode{aInvalidTaskAfterNone},
-	},
+	}{
+		{
+			caseName: "self-link-after",
+			nodes:    []NamedNode{aSelfLinkAfterA},
+		}, {
+			caseName: "cycle-runAfter",
+			nodes:    []NamedNode{xRunAfterA, zRunAfterX, aRunAfterZ},
+		}, {
+			caseName: "duplicate-node",
+			nodes:    []NamedNode{a, a},
+		}, {
+			caseName: "invalid-task-name-after",
+			nodes:    []NamedNode{aInvalidTaskAfterNone},
+		},
 	}
 	for _, tc := range tcs {
 		t.Run(tc.caseName, func(t *testing.T) {

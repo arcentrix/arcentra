@@ -74,7 +74,6 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*Exe
 		return result, err
 	}
 
-	// 从 step args 中提取 HTTP 配置
 	httpConfig, err := e.extractHTTPConfig(req.Step.Args)
 	if err != nil {
 		err = fmt.Errorf("extract HTTP config: %w", err)
@@ -82,7 +81,16 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*Exe
 		return result, err
 	}
 
-	// 设置超时 context
+	method := strings.ToUpper(httpConfig.Method)
+	if method == "" {
+		method = "GET"
+	}
+	if httpConfig.URL == "" {
+		err = fmt.Errorf("URL is required for HTTP execution")
+		result.Complete(false, -1, err)
+		return result, err
+	}
+
 	requestCtx := ctx
 	if httpConfig.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -90,123 +98,26 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*Exe
 		defer cancel()
 	}
 
-	// 选择 client（根据重定向策略）
-	// 注意：resty v2 的重定向策略在 client 级别设置
-	client := e.client
-	if !httpConfig.FollowRedirects {
-		// 创建一个不跟随重定向的临时 client
-		tempClient := resty.New()
-		if httpConfig.Timeout > 0 {
-			tempClient.SetTimeout(time.Duration(httpConfig.Timeout) * time.Second)
-		} else {
-			tempClient.SetTimeout(30 * time.Second)
-		}
-		tempClient.SetRedirectPolicy(resty.NoRedirectPolicy())
-		client = tempClient
-	}
+	client := e.getHTTPClient(httpConfig)
+	restyReq := e.buildHTTPRequest(client.R().SetContext(requestCtx), httpConfig, method, req.Env)
 
-	// 创建请求
-	restyReq := client.R().SetContext(requestCtx)
-
-	// 设置请求方法
-	method := strings.ToUpper(httpConfig.Method)
-	if method == "" {
-		method = "GET"
-	}
-
-	// 设置 URL
-	url := httpConfig.URL
-	if url == "" {
-		err = fmt.Errorf("URL is required for HTTP execution")
-		result.Complete(false, -1, err)
-		return result, err
-	}
-
-	// 设置请求头
-	if len(httpConfig.Headers) > 0 {
-		restyReq.SetHeaders(httpConfig.Headers)
-	}
-
-	// 设置查询参数
-	if len(httpConfig.Query) > 0 {
-		restyReq.SetQueryParams(httpConfig.Query)
-	}
-
-	// 设置请求体（对于 POST, PUT, PATCH）
-	if httpConfig.Body != "" && (method == "POST" || method == "PUT" || method == "PATCH") {
-		restyReq.SetBody(httpConfig.Body)
-	}
-
-	// 设置环境变量（通过请求头传递）
-	if len(req.Env) > 0 {
-		for k, v := range req.Env {
-			restyReq.SetHeader(fmt.Sprintf("X-Env-%s", k), v)
-		}
-	}
-
-	// 执行请求
-	var resp *resty.Response
-	var httpErr error
-
-	startTime := time.Now()
-	switch method {
-	case "GET":
-		resp, httpErr = restyReq.Get(url)
-	case "POST":
-		resp, httpErr = restyReq.Post(url)
-	case "PUT":
-		resp, httpErr = restyReq.Put(url)
-	case "PATCH":
-		resp, httpErr = restyReq.Patch(url)
-	case "DELETE":
-		resp, httpErr = restyReq.Delete(url)
-	case "HEAD":
-		resp, httpErr = restyReq.Head(url)
-	case "OPTIONS":
-		resp, httpErr = restyReq.Options(url)
-	default:
-		err = fmt.Errorf("unsupported HTTP method: %s", method)
-		result.Complete(false, -1, err)
-		return result, err
-	}
-	duration := time.Since(startTime)
-
-	// 处理响应
+	resp, httpErr, duration := e.executeHTTP(restyReq, method, httpConfig.URL)
 	if httpErr != nil {
 		err = fmt.Errorf("HTTP request failed: %w", httpErr)
 		result.Complete(false, -1, err)
 		return result, err
 	}
 
-	// 检查状态码
 	statusCode := resp.StatusCode()
 	result.ExitCode = int32(statusCode)
-
-	// 检查是否在期望的状态码范围内
 	expectedStatus := httpConfig.ExpectedStatus
 	if len(expectedStatus) == 0 {
-		// 默认期望 2xx
 		expectedStatus = []int32{200, 201, 202, 204}
 	}
-
-	isSuccess := false
-	for _, code := range expectedStatus {
-		if statusCode == int(code) {
-			isSuccess = true
-			break
-		}
-	}
-
-	// 如果没有匹配的期望状态码，检查是否是 2xx
-	if !isSuccess && statusCode >= 200 && statusCode < 300 {
-		isSuccess = true
-	}
+	isSuccess := e.checkExpectedStatus(statusCode, expectedStatus)
 
 	result.Success = isSuccess
-	result.Output = string(resp.Body())
 	result.Duration = duration
-
-	// 构建响应结果
 	responseData := map[string]any{
 		"status_code": statusCode,
 		"headers":     resp.Header(),
@@ -214,27 +125,87 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*Exe
 		"duration_ms": duration.Milliseconds(),
 		"success":     isSuccess,
 	}
-
 	responseJSON, _ := sonic.Marshal(responseData)
 	result.Output = string(responseJSON)
-
 	if !isSuccess {
 		result.Error = fmt.Sprintf("HTTP request returned status code %d, expected one of %v", statusCode, expectedStatus)
 	}
-
 	result.Complete(result.Success, result.ExitCode, nil)
 
 	if e.logger.Log != nil {
 		e.logger.Log.Debugw("HTTP execution completed",
 			"step", req.Step.Name,
-			"url", url,
+			"url", httpConfig.URL,
 			"method", method,
 			"status_code", statusCode,
 			"success", result.Success,
 			"duration", duration)
 	}
-
 	return result, nil
+}
+
+func (e *HTTPExecutor) getHTTPClient(cfg *HTTPConfig) *resty.Client {
+	if cfg.FollowRedirects {
+		return e.client
+	}
+	client := resty.New()
+	if cfg.Timeout > 0 {
+		client.SetTimeout(time.Duration(cfg.Timeout) * time.Second)
+	} else {
+		client.SetTimeout(30 * time.Second)
+	}
+	client.SetRedirectPolicy(resty.NoRedirectPolicy())
+	return client
+}
+
+func (e *HTTPExecutor) buildHTTPRequest(req *resty.Request, cfg *HTTPConfig, method string, env map[string]string) *resty.Request {
+	if len(cfg.Headers) > 0 {
+		req.SetHeaders(cfg.Headers)
+	}
+	if len(cfg.Query) > 0 {
+		req.SetQueryParams(cfg.Query)
+	}
+	if cfg.Body != "" && (method == "POST" || method == "PUT" || method == "PATCH") {
+		req.SetBody(cfg.Body)
+	}
+	for k, v := range env {
+		req.SetHeader(fmt.Sprintf("X-Env-%s", k), v)
+	}
+	return req
+}
+
+func (e *HTTPExecutor) executeHTTP(req *resty.Request, method, url string) (*resty.Response, error, time.Duration) {
+	start := time.Now()
+	var resp *resty.Response
+	var err error
+	switch method {
+	case "GET":
+		resp, err = req.Get(url)
+	case "POST":
+		resp, err = req.Post(url)
+	case "PUT":
+		resp, err = req.Put(url)
+	case "PATCH":
+		resp, err = req.Patch(url)
+	case "DELETE":
+		resp, err = req.Delete(url)
+	case "HEAD":
+		resp, err = req.Head(url)
+	case "OPTIONS":
+		resp, err = req.Options(url)
+	default:
+		return nil, fmt.Errorf("unsupported HTTP method: %s", method), 0
+	}
+	return resp, err, time.Since(start)
+}
+
+func (e *HTTPExecutor) checkExpectedStatus(statusCode int, expected []int32) bool {
+	for _, code := range expected {
+		if statusCode == int(code) {
+			return true
+		}
+	}
+	return statusCode >= 200 && statusCode < 300
 }
 
 // HTTPConfig HTTP 配置

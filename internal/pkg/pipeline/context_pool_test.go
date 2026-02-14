@@ -140,8 +140,8 @@ func TestContextPool(t *testing.T) {
 	}
 
 	// Test LRU eviction
-	pool.Get(context.Background(), pipeline2, execCtx)
-	pool.Get(context.Background(), pipeline3, execCtx)
+	_, _ = pool.Get(context.Background(), pipeline2, execCtx)
+	_, _ = pool.Get(context.Background(), pipeline3, execCtx)
 
 	stats = pool.Stats()
 	if stats.ActiveContexts > config.MaxActiveContexts {
@@ -214,7 +214,7 @@ func TestResetForReuse(t *testing.T) {
 	ctx.Store("store1", "value1")
 	ctx.Error(fmt.Errorf("test error"))
 	ctx.SetCurrentJob(&spec.Job{Name: "job1"}, 0)
-	ctx.TransitionTo(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING)
+	_ = ctx.TransitionTo(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING)
 
 	// Reset for reuse
 	ctx.ResetForReuse(context.Background(), pipeline2, execCtx)

@@ -19,11 +19,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
-
-	"strings"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
