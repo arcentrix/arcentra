@@ -9,10 +9,6 @@ import (
 	"time"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
 // Func defines a retryable function.
 // The function must respect the provided context.
 type Func func(ctx context.Context) error

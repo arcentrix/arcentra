@@ -117,7 +117,7 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*Exe
 	// 设置 URL
 	url := httpConfig.URL
 	if url == "" {
-		err := fmt.Errorf("URL is required for HTTP execution")
+		err = fmt.Errorf("URL is required for HTTP execution")
 		result.Complete(false, -1, err)
 		return result, err
 	}
@@ -165,7 +165,7 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*Exe
 	case "OPTIONS":
 		resp, httpErr = restyReq.Options(url)
 	default:
-		err := fmt.Errorf("unsupported HTTP method: %s", method)
+		err = fmt.Errorf("unsupported HTTP method: %s", method)
 		result.Complete(false, -1, err)
 		return result, err
 	}

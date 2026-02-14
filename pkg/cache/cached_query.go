@@ -106,7 +106,7 @@ func (cq *CachedQuery[T]) Get(ctx context.Context, params ...any) (T, error) {
 		cacheData, err := cq.cache.Get(ctx, cacheKey).Result()
 		if err == nil && cacheData != "" {
 			var result T
-			if err := sonic.UnmarshalString(cacheData, &result); err == nil {
+			if unmarshalErr := sonic.UnmarshalString(cacheData, &result); unmarshalErr == nil {
 				log.Debugw(cq.logPrefix+" cache hit", "key", cacheKey)
 				return result, nil
 			}
@@ -167,7 +167,7 @@ func (cq *CachedQuery[T]) GetOrSet(ctx context.Context, setFunc func(ctx context
 		cacheData, err := cq.cache.Get(ctx, cacheKey).Result()
 		if err == nil && cacheData != "" {
 			var result T
-			if err := sonic.UnmarshalString(cacheData, &result); err == nil {
+			if unmarshalErr := sonic.UnmarshalString(cacheData, &result); unmarshalErr == nil {
 				log.Debugw(cq.logPrefix+" cache hit", "key", cacheKey)
 				return result, nil
 			}
@@ -279,12 +279,12 @@ func (cq *CachedHashQuery[T]) Get(ctx context.Context, params ...any) (T, error)
 	if cq.cache != nil {
 		hashData, err := cq.cache.HGetAll(ctx, cacheKey).Result()
 		if err == nil && len(hashData) > 0 {
-			result, err := cq.hashUnmarshal(hashData)
-			if err == nil {
+			result, unmarshalErr := cq.hashUnmarshal(hashData)
+			if unmarshalErr == nil {
 				log.Debugw(cq.logPrefix+" cache hit (hash)", "key", cacheKey)
 				return result, nil
 			}
-			log.Warnw(cq.logPrefix+" failed to unmarshal hash data", "key", cacheKey, "error", err)
+			log.Warnw(cq.logPrefix+" failed to unmarshal hash data", "key", cacheKey, "error", unmarshalErr)
 		} else if !errors.Is(err, ErrCacheMiss) && err != nil {
 			log.Warnw(cq.logPrefix+" cache get error", "key", cacheKey, "error", err)
 		}

@@ -126,19 +126,19 @@ func (c *COSStorage) Upload(ctx context.Context, objectName string, file *multip
 	var checkpoint uploadCheckpoint
 
 	// 如果有断点记录则加载
-	if data, err := os.ReadFile(checkpointPath); err == nil {
+	if data, readErr := os.ReadFile(checkpointPath); readErr == nil {
 		_ = json.Unmarshal(data, &checkpoint)
 	}
 
 	// 初始化分片上传
 	if checkpoint.UploadID == "" {
-		result, _, err := c.Client.Object.InitiateMultipartUpload(context.Background(), fullPath, &cos.InitiateMultipartUploadOptions{
+		result, _, initErr := c.Client.Object.InitiateMultipartUpload(context.Background(), fullPath, &cos.InitiateMultipartUploadOptions{
 			ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
 				ContentType: contentType,
 			},
 		})
-		if err != nil {
-			return "", err
+		if initErr != nil {
+			return "", initErr
 		}
 		checkpoint = uploadCheckpoint{
 			UploadID: result.UploadID,
@@ -171,7 +171,7 @@ func (c *COSStorage) Upload(ctx context.Context, objectName string, file *multip
 		if skipPart {
 			uploadedBytes += int64(n)
 		} else {
-			resp, err := c.Client.Object.UploadPart(
+			resp, uploadErr := c.Client.Object.UploadPart(
 				context.Background(),
 				fullPath,
 				checkpoint.UploadID,
@@ -181,8 +181,8 @@ func (c *COSStorage) Upload(ctx context.Context, objectName string, file *multip
 					ContentLength: int64(n),
 				},
 			)
-			if err != nil {
-				return "", err
+			if uploadErr != nil {
+				return "", uploadErr
 			}
 
 			etag := resp.Header.Get("ETag")

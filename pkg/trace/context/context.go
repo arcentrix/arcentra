@@ -45,7 +45,7 @@ func init() {
 	}
 }
 
-// GetContext .
+// GetContext get context from goroutine context
 func GetContext() context.Context {
 	god := routine.Goid()
 	idx := god % bucketsSize
@@ -56,7 +56,7 @@ func GetContext() context.Context {
 	return ctx
 }
 
-// SetContext .
+// SetContext set context to goroutine context
 func SetContext(ctx context.Context) {
 	god := routine.Goid()
 	idx := god % bucketsSize
@@ -66,7 +66,7 @@ func SetContext(ctx context.Context) {
 	bucket.data[num.MustInt64(god)] = ctx
 }
 
-// ClearContext .
+// ClearContext clear context from goroutine context
 func ClearContext() {
 	god := routine.Goid()
 	idx := god % bucketsSize
@@ -76,14 +76,14 @@ func ClearContext() {
 	delete(bucket.data, num.MustInt64(god))
 }
 
-// RunWithContext .
+// RunWithContext run function with context
 func RunWithContext(ctx context.Context, fn func(ctx context.Context)) {
 	SetContext(ctx)
 	defer ClearContext()
 	fn(ctx)
 }
 
-// ContextWithSpan .
+// ContextWithSpan context with span
 func ContextWithSpan(ctx context.Context) context.Context {
 	if span := trace.SpanFromContext(ctx); !span.SpanContext().IsValid() {
 		pct := GetContext()

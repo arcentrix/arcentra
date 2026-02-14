@@ -60,9 +60,9 @@ func (m *Manager) handleScmWebhookParse(ctx context.Context, params json.RawMess
 
 	body := []byte(args.Body)
 	if args.BodyBase64 != "" {
-		raw, err := base64.StdEncoding.DecodeString(args.BodyBase64)
-		if err != nil {
-			return nil, fmt.Errorf("decode bodyBase64: %w", err)
+		raw, decodeErr := base64.StdEncoding.DecodeString(args.BodyBase64)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("decode bodyBase64: %w", decodeErr)
 		}
 		body = raw
 	}
@@ -72,7 +72,7 @@ func (m *Manager) handleScmWebhookParse(ctx context.Context, params json.RawMess
 		Body:    body,
 	}
 
-	if err := prov.VerifyWebhook(ctx, req, args.Secret); err != nil {
+	if err = prov.VerifyWebhook(ctx, req, args.Secret); err != nil {
 		return nil, err
 	}
 	events, err := prov.ParseWebhook(ctx, req)

@@ -128,18 +128,18 @@ func newMySQLConnection(mysqlCfg MySQLConfig, commonCfg Database) (*gorm.DB, err
 
 		// Build primary dialectors
 		if hasPrimary {
-			primaryDialectors, err := buildDialectors(mysqlCfg.Primary)
-			if err != nil {
-				return nil, fmt.Errorf("failed to build primary dialectors: %w", err)
+			primaryDialectors, buildErr := buildDialectors(mysqlCfg.Primary)
+			if buildErr != nil {
+				return nil, fmt.Errorf("failed to build primary dialectors: %w", buildErr)
 			}
 			resolverConfig.Sources = primaryDialectors
 		}
 
 		// Build replicas dialectors
 		if hasReplicas {
-			replicasDialectors, err := buildDialectors(mysqlCfg.Replicas)
-			if err != nil {
-				return nil, fmt.Errorf("failed to build replicas dialectors: %w", err)
+			replicasDialectors, buildErr := buildDialectors(mysqlCfg.Replicas)
+			if buildErr != nil {
+				return nil, fmt.Errorf("failed to build replicas dialectors: %w", buildErr)
 			}
 			resolverConfig.Replicas = replicasDialectors
 		}

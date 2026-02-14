@@ -315,7 +315,7 @@ func (s *ContainerdSandbox) Execute(ctx context.Context, containerID string, cmd
 	defer task.Delete(ctx)
 
 	// Start task
-	if err := task.Start(ctx); err != nil {
+	if err = task.Start(ctx); err != nil {
 		result.ExitCode = -1
 		result.Stderr = fmt.Sprintf("start task: %v", err)
 		result.EndTime = time.Now()

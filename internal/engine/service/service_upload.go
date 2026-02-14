@@ -113,7 +113,7 @@ func (us *UploadService) getStorageProvider(storageId string) (*storagemodel.Sto
 
 	// switch to specific storage if provided
 	if storageId != "" {
-		if err := storageProvider.SwitchStorageConfig(storageId); err != nil {
+		if err = storageProvider.SwitchStorageConfig(storageId); err != nil {
 			return nil, nil, fmt.Errorf("failed to switch storage config: %w", err)
 		}
 	}

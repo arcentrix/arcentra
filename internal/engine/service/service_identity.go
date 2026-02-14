@@ -144,12 +144,12 @@ func (iis *IdentityService) Callback(providerName, state, code string) (*model.R
 	switch integration.ProviderType {
 	case "oauth":
 		var oauthCfg model.OAuthConfig
-		if err := sonic.Unmarshal(integration.Config, &oauthCfg); err == nil {
+		if unmarshalErr := sonic.Unmarshal(integration.Config, &oauthCfg); unmarshalErr == nil {
 			coverAttributes = oauthCfg.CoverAttributes
 		}
 	case "oidc":
 		var oidcCfg model.OIDCConfig
-		if err := sonic.Unmarshal(integration.Config, &oidcCfg); err == nil {
+		if unmarshalErr := sonic.Unmarshal(integration.Config, &oidcCfg); unmarshalErr == nil {
 			coverAttributes = oidcCfg.CoverAttributes
 		}
 	}
@@ -288,7 +288,7 @@ func (iis *IdentityService) OIDCLogin(providerName string) (string, error) {
 	}
 
 	var oidcCfg model.OIDCConfig
-	if err := sonic.Unmarshal(integration.Config, &oidcCfg); err != nil {
+	if err = sonic.Unmarshal(integration.Config, &oidcCfg); err != nil {
 		return "", fmt.Errorf("unmarshal provider config failed: %w", err)
 	}
 
@@ -328,7 +328,7 @@ func (iis *IdentityService) LDAPLogin(providerName, username, password string) (
 	}
 
 	var ldapCfg model.LDAPConfig
-	if err := sonic.Unmarshal(integration.Config, &ldapCfg); err != nil {
+	if err = sonic.Unmarshal(integration.Config, &ldapCfg); err != nil {
 		return nil, fmt.Errorf("unmarshal provider config failed: %w", err)
 	}
 

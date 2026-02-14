@@ -181,23 +181,23 @@ func (s *ProjectService) UpdateProject(projectId string, req *model.UpdateProjec
 		updates["cron_expr"] = *req.CronExpr
 	}
 	if req.BuildConfig != nil {
-		buildConfigJSON, err := projectrepo.ConvertJSONToDatatypes(req.BuildConfig)
-		if err != nil {
-			return nil, fmt.Errorf("convert build config failed: %w", err)
+		buildConfigJSON, convertErr := projectrepo.ConvertJSONToDatatypes(req.BuildConfig)
+		if convertErr != nil {
+			return nil, fmt.Errorf("convert build config failed: %w", convertErr)
 		}
 		updates["build_config"] = buildConfigJSON
 	}
 	if req.EnvVars != nil {
-		envVarsJSON, err := projectrepo.ConvertJSONToDatatypes(req.EnvVars)
-		if err != nil {
-			return nil, fmt.Errorf("convert env vars failed: %w", err)
+		envVarsJSON, convertErr := projectrepo.ConvertJSONToDatatypes(req.EnvVars)
+		if convertErr != nil {
+			return nil, fmt.Errorf("convert env vars failed: %w", convertErr)
 		}
 		updates["env_vars"] = envVarsJSON
 	}
 	if req.Settings != nil {
-		settingsJSON, err := projectrepo.ConvertJSONToDatatypes(req.Settings)
-		if err != nil {
-			return nil, fmt.Errorf("convert settings failed: %w", err)
+		settingsJSON, convertErr := projectrepo.ConvertJSONToDatatypes(req.Settings)
+		if convertErr != nil {
+			return nil, fmt.Errorf("convert settings failed: %w", convertErr)
 		}
 		updates["settings"] = settingsJSON
 	}
@@ -231,7 +231,7 @@ func (s *ProjectService) UpdateProject(projectId string, req *model.UpdateProjec
 
 	// 3. 执行更新
 	if len(updates) > 0 {
-		if err := s.projectRepo.UpdateProject(projectId, updates); err != nil {
+		if err = s.projectRepo.UpdateProject(projectId, updates); err != nil {
 			log.Errorw("update project failed", "projectId", projectId, "error", err)
 			return nil, fmt.Errorf("update project failed: %w", err)
 		}
@@ -328,7 +328,7 @@ func (s *ProjectService) UpdateProjectStatistics(projectId string, stats *model.
 	}
 
 	// 更新统计信息
-	if err := s.projectRepo.UpdateProjectStatistics(projectId, stats); err != nil {
+	if err = s.projectRepo.UpdateProjectStatistics(projectId, stats); err != nil {
 		log.Errorw("update project statistics failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("update project statistics failed: %w", err)
 	}
@@ -356,7 +356,7 @@ func (s *ProjectService) EnableProject(projectId string) (*model.Project, error)
 	}
 
 	// 启用项目
-	if err := s.projectRepo.EnableProject(projectId); err != nil {
+	if err = s.projectRepo.EnableProject(projectId); err != nil {
 		log.Errorw("enable project failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("enable project failed: %w", err)
 	}
@@ -384,7 +384,7 @@ func (s *ProjectService) DisableProject(projectId string) (*model.Project, error
 	}
 
 	// 禁用项目
-	if err := s.projectRepo.DisableProject(projectId); err != nil {
+	if err = s.projectRepo.DisableProject(projectId); err != nil {
 		log.Errorw("disable project failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("disable project failed: %w", err)
 	}

@@ -124,7 +124,9 @@ func NewLog(conf *Conf) (*zap.Logger, error) {
 	}
 
 	core = zapcore.NewCore(encoder, writeSyncer, parseLogLevel(conf.Level))
-
+	core = &traceCore{
+		Core: core,
+	}
 	newLogger := zap.New(core, zap.AddCallerSkip(1), zap.AddCaller())
 
 	mu.Lock()

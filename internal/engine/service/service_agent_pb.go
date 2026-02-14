@@ -126,7 +126,7 @@ func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 	updates["last_heartbeat"] = time.Now()
 
 	if len(updates) > 0 {
-		if err := agentRepo.UpdateAgentById(existingAgent.ID, updates); err != nil {
+		if err = agentRepo.UpdateAgentById(existingAgent.ID, updates); err != nil {
 			log.Errorw("failed to update agent during registration", "agentId", agentId, "error", err)
 			return nil, status.Errorf(codes.Internal, "failed to update agent")
 		}

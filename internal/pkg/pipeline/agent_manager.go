@@ -108,7 +108,7 @@ func (am *AgentManager) ExecuteStepOnAgent(ctx context.Context, req *StepExecuti
 	// 2-5. 等待 agent 拉取步骤执行并执行，监听状态更新
 	timeout := 1 * time.Hour // Default timeout
 	if agentStepRun.Timeout != "" {
-		if duration, err := time.ParseDuration(agentStepRun.Timeout); err == nil {
+		if duration, parseErr := time.ParseDuration(agentStepRun.Timeout); parseErr == nil {
 			timeout = duration
 		}
 	}

@@ -388,7 +388,7 @@ func (rt *Router) getCookiePath() string {
 	}
 
 	var configData map[string]any
-	if err := sonic.Unmarshal(settings.Data, &configData); err != nil {
+	if err = sonic.Unmarshal(settings.Data, &configData); err != nil {
 		log.Warnw("failed to unmarshal cookie path configuration, using default", "category", category, "name", name, "error", err)
 		return defaultCookiePath
 	}
@@ -445,7 +445,7 @@ func (rt *Router) getBaseURL() string {
 	}
 
 	var configData map[string]any
-	if err := sonic.Unmarshal(settings.Data, &configData); err != nil {
+	if err = sonic.Unmarshal(settings.Data, &configData); err != nil {
 		log.Warnw("failed to unmarshal frontend base URL configuration, using default", "category", category, "name", name, "error", err)
 		return defaultBaseURL
 	}

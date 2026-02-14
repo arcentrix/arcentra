@@ -361,15 +361,15 @@ func (p *producer[T]) measure() (items uint, workDuration, stageDuration time.Du
 	start := time.Now()
 	var frameworkDuration time.Duration
 	err = p.fn(func() (item T, ok bool) {
-		start := time.Now()
+		iterStart := time.Now()
 		item, ok = p.getter()
-		frameworkDuration += time.Since(start)
+		frameworkDuration += time.Since(iterStart)
 		return item, ok
 	}, func(item T) {
-		start := time.Now()
+		iterStart := time.Now()
 		items++
 		p.outCh <- item
-		frameworkDuration += time.Since(start)
+		frameworkDuration += time.Since(iterStart)
 	})
 	stageDuration = time.Since(start)
 	workDuration = stageDuration - frameworkDuration

@@ -90,9 +90,9 @@ func (ul *UserService) Login(login *usermodel.Login, auth http.Auth) (*usermodel
 	// 如果提供了密码，则进行密码验证（用于普通登录）
 	// 如果密码为空，则跳过密码验证（用于 OAuth 登录）
 	if login.Password != "" {
-		pwd, err := base64.StdEncoding.DecodeString(login.Password)
-		if err != nil {
-			log.Errorw("failed to decode password", "error", err)
+		pwd, decodeErr := base64.StdEncoding.DecodeString(login.Password)
+		if decodeErr != nil {
+			log.Errorw("failed to decode password", "error", decodeErr)
 			return nil, errors.New(http.UserIncorrectPassword.Msg)
 		}
 

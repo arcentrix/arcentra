@@ -115,17 +115,17 @@ func TestNewLog_Stdout(t *testing.T) {
 		Level:  "DEBUG",
 	}
 
-	logger, err := NewLog(conf)
+	l, err := NewLog(conf)
 	if err != nil {
 		t.Fatalf("NewLog() error = %v", err)
 	}
 
-	if logger == nil {
+	if l == nil {
 		t.Fatal("expected non-nil logger")
 	}
 
 	// 测试日志输出
-	logger.Info("test message")
+	l.Info("test message")
 }
 
 func TestNewLog_File(t *testing.T) {
@@ -141,25 +141,25 @@ func TestNewLog_File(t *testing.T) {
 		RotateNum:  3,
 	}
 
-	logger, err := NewLog(conf)
+	l, err := NewLog(conf)
 	if err != nil {
 		t.Fatalf("NewLog() error = %v", err)
 	}
 
-	if logger == nil {
+	if l == nil {
 		t.Fatal("expected non-nil logger")
 	}
 
 	// 写入一些日志
-	logger.Info("test message 1")
-	logger.Debug("test message 2")
-	logger.Warn("test message 3")
+	l.Info("test message 1")
+	l.Debug("test message 2")
+	l.Warn("test message 3")
 
 	// slog 不需要 Sync，日志会自动刷新
 
 	// 验证日志文件存在
 	logFile := filepath.Join(tmpDir, "test.log")
-	if _, err := os.Stat(logFile); os.IsNotExist(err) {
+	if _, statErr := os.Stat(logFile); os.IsNotExist(statErr) {
 		t.Errorf("log file should exist at %s", logFile)
 	}
 }
@@ -342,24 +342,24 @@ func TestLogRotation(t *testing.T) {
 		RotateNum:  3,
 	}
 
-	logger, err := NewLog(conf)
+	l, err := NewLog(conf)
 	if err != nil {
 		t.Fatalf("NewLog() error = %v", err)
 	}
 
 	// 写入大量日志以触发轮转
-	sugar := logger.Sugar()
+	sugar := l.Sugar()
 	for i := 0; i < 10000; i++ {
 		sugar.Info("This is a test message to trigger log rotation. Message number:", i)
 	}
 
-	logger.Sync()
+	l.Sync()
 
 	// slog 不需要 Sync，日志会自动刷新
 
 	// 验证日志文件存在
 	logFile := filepath.Join(tmpDir, "test.log")
-	if _, err := os.Stat(logFile); os.IsNotExist(err) {
+	if _, statErr := os.Stat(logFile); os.IsNotExist(statErr) {
 		t.Errorf("log file should exist at %s", logFile)
 	}
 

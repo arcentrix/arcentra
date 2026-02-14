@@ -72,10 +72,10 @@ func (c *conn) WriteMessage(messageType int, data []byte) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	// 每次写入都设置写超时，避免沿用过期的 deadline 导致 i/o timeout
-	_ = c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+	_ = c.SetWriteDeadline(time.Now().Add(writeWait))
 	defer func() {
 		// 复位，避免影响后续写入
-		_ = c.Conn.SetWriteDeadline(time.Time{})
+		_ = c.SetWriteDeadline(time.Time{})
 	}()
 	return c.Conn.WriteMessage(messageType, data)
 }
@@ -85,9 +85,9 @@ func (c *conn) WriteJSON(v any) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	// 每次写入都设置写超时，避免沿用过期的 deadline 导致 i/o timeout
-	_ = c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+	_ = c.SetWriteDeadline(time.Now().Add(writeWait))
 	defer func() {
-		_ = c.Conn.SetWriteDeadline(time.Time{})
+		_ = c.SetWriteDeadline(time.Time{})
 	}()
 	return c.Conn.WriteJSON(v)
 }

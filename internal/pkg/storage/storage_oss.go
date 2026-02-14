@@ -106,7 +106,7 @@ func (o *OSSStorage) Upload(ctx context.Context, objectName string, file *multip
 	var checkpoint uploadCheckpoint
 
 	// 如果有断点记录则加载
-	if data, err := os.ReadFile(checkpointPath); err == nil {
+	if data, readErr := os.ReadFile(checkpointPath); readErr == nil {
 		_ = json.Unmarshal(data, &checkpoint)
 	}
 
@@ -148,9 +148,9 @@ func (o *OSSStorage) Upload(ctx context.Context, objectName string, file *multip
 		if skipPart {
 			uploadedBytes += int64(n)
 		} else {
-			part, err := o.Bucket.UploadPart(imur, bytes.NewReader(buf[:n]), int64(n), partNumber)
-			if err != nil {
-				return "", err
+			part, uploadErr := o.Bucket.UploadPart(imur, bytes.NewReader(buf[:n]), int64(n), partNumber)
+			if uploadErr != nil {
+				return "", uploadErr
 			}
 			parts = append(parts, part)
 			checkpoint.Parts = append(checkpoint.Parts, int32(partNumber))

@@ -117,18 +117,18 @@ func (s *S3Storage) Upload(ctx context.Context, objectName string, file *multipa
 	var checkpoint uploadCheckpoint
 
 	// 如果有断点记录则加载
-	if data, err := os.ReadFile(checkpointPath); err == nil {
+	if data, readErr := os.ReadFile(checkpointPath); readErr == nil {
 		_ = json.Unmarshal(data, &checkpoint)
 	}
 
 	if checkpoint.UploadID == "" {
-		createResp, err := s.Client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+		createResp, createErr := s.Client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
 			Bucket:      aws.String(s.s.Bucket),
 			Key:         aws.String(fullPath),
 			ContentType: aws.String(contentType),
 		})
-		if err != nil {
-			return "", err
+		if createErr != nil {
+			return "", createErr
 		}
 		checkpoint = uploadCheckpoint{
 			UploadID: *createResp.UploadId,
@@ -156,15 +156,15 @@ func (s *S3Storage) Upload(ctx context.Context, objectName string, file *multipa
 			continue
 		}
 
-		partOutput, err := s.Client.UploadPart(ctx, &s3.UploadPartInput{
+		partOutput, uploadErr := s.Client.UploadPart(ctx, &s3.UploadPartInput{
 			Bucket:     aws.String(s.s.Bucket),
 			Key:        aws.String(fullPath),
 			PartNumber: &partNumber,
 			UploadId:   aws.String(checkpoint.UploadID),
 			Body:       bytes.NewReader(buf[:n]),
 		})
-		if err != nil && !errors.Is(err, io.EOF) {
-			return "", err
+		if uploadErr != nil && !errors.Is(uploadErr, io.EOF) {
+			return "", uploadErr
 		}
 
 		completedParts = append(completedParts, s3types.CompletedPart{

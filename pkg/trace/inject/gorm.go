@@ -201,7 +201,7 @@ func gormStatementFromDB(db *gorm.DB) string {
 		return ""
 	}
 	if db.Dialector != nil {
-		return db.Dialector.Explain(sql, db.Statement.Vars...)
+		return db.Explain(sql, db.Statement.Vars...)
 	}
 	return sql
 }

@@ -48,7 +48,7 @@ func (s *ScmService) HandleWebhook(ctx context.Context, projectId string, header
 	}
 
 	req := scm.WebhookRequest{Headers: headers, Body: body}
-	if err := prov.VerifyWebhook(ctx, req, project.WebhookSecret); err != nil {
+	if err = prov.VerifyWebhook(ctx, req, project.WebhookSecret); err != nil {
 		return nil, err
 	}
 	events, err := prov.ParseWebhook(ctx, req)

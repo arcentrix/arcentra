@@ -335,7 +335,7 @@ func (ur *UserRepo) SetLoginRespInfo(auth http.Auth, loginResp *model.LoginResp)
 	}
 	ctx := context.Background()
 
-	pipe := ur.ICache.Pipeline()
+	pipe := ur.Pipeline()
 
 	accessTokenInfo := http.TokenInfo{
 		AccessToken:  loginResp.Token["accessToken"],
@@ -350,7 +350,7 @@ func (ur *UserRepo) SetLoginRespInfo(auth http.Auth, loginResp *model.LoginResp)
 	}
 
 	tokenKey := consts.UserTokenKey + loginResp.UserInfo.UserId
-	if err := pipe.Set(ctx, tokenKey, accessTokenInfoJson, auth.AccessExpire).Err(); err != nil {
+	if err = pipe.Set(ctx, tokenKey, accessTokenInfoJson, auth.AccessExpire).Err(); err != nil {
 		return fmt.Errorf("failed to set token in Redis: %w", err)
 	}
 
@@ -366,7 +366,7 @@ func (ur *UserRepo) SetLoginRespInfo(auth http.Auth, loginResp *model.LoginResp)
 	}
 
 	refreshTokenKey := consts.UserRefreshTokenKey + loginResp.UserInfo.UserId
-	if err := pipe.Set(ctx, refreshTokenKey, refreshTokenInfoJson, auth.RefreshExpire).Err(); err != nil {
+	if err = pipe.Set(ctx, refreshTokenKey, refreshTokenInfoJson, auth.RefreshExpire).Err(); err != nil {
 		return fmt.Errorf("failed to set refresh token in Redis: %w", err)
 	}
 
@@ -376,7 +376,7 @@ func (ur *UserRepo) SetLoginRespInfo(auth http.Auth, loginResp *model.LoginResp)
 	}
 
 	userInfoKey := consts.UserInfoKey + loginResp.UserInfo.UserId
-	if err := pipe.Set(ctx, userInfoKey, userInfoJson, auth.AccessExpire).Err(); err != nil {
+	if err = pipe.Set(ctx, userInfoKey, userInfoJson, auth.AccessExpire).Err(); err != nil {
 		return fmt.Errorf("failed to set user info in Redis: %w", err)
 	}
 

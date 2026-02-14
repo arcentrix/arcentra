@@ -116,9 +116,9 @@ func (s *TeamService) UpdateTeam(teamId string, req *model.UpdateTeamReq) (*mode
 
 	if req.Name != nil && *req.Name != "" {
 		// 检查新名称是否与其他团队冲突
-		exists, err := s.teamRepo.CheckTeamNameExists(teamEntity.OrgId, *req.Name, teamId)
-		if err != nil {
-			return nil, fmt.Errorf("check team name failed: %w", err)
+		exists, checkErr := s.teamRepo.CheckTeamNameExists(teamEntity.OrgId, *req.Name, teamId)
+		if checkErr != nil {
+			return nil, fmt.Errorf("check team name failed: %w", checkErr)
 		}
 		if exists {
 			return nil, errors.New("team name already exists")
@@ -147,9 +147,9 @@ func (s *TeamService) UpdateTeam(teamId string, req *model.UpdateTeamReq) (*mode
 	}
 
 	if req.Settings != nil {
-		settingsJSON, err := teamrepo.ConvertSettingsToJSON(req.Settings)
-		if err != nil {
-			return nil, fmt.Errorf("convert settings failed: %w", err)
+		settingsJSON, convertErr := teamrepo.ConvertSettingsToJSON(req.Settings)
+		if convertErr != nil {
+			return nil, fmt.Errorf("convert settings failed: %w", convertErr)
 		}
 		updates["settings"] = settingsJSON
 	}
@@ -157,7 +157,7 @@ func (s *TeamService) UpdateTeam(teamId string, req *model.UpdateTeamReq) (*mode
 	// 3. 执行更新
 	if len(updates) > 0 {
 		updates["updated_at"] = time.Now()
-		if err := s.teamRepo.UpdateTeam(teamId, updates); err != nil {
+		if err = s.teamRepo.UpdateTeam(teamId, updates); err != nil {
 			log.Errorw("update team failed", "teamId", teamId, "error", err)
 			return nil, fmt.Errorf("update team failed: %w", err)
 		}

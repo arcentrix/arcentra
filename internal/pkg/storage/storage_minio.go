@@ -104,7 +104,7 @@ func (m *MinioStorage) Upload(ctx context.Context, objectName string, file *mult
 	var checkpoint uploadCheckpoint
 
 	// 如果有断点记录则加载
-	if data, err := os.ReadFile(checkpointPath); err == nil {
+	if data, readErr := os.ReadFile(checkpointPath); readErr == nil {
 		_ = json.Unmarshal(data, &checkpoint)
 	}
 
