@@ -23,7 +23,7 @@ services:
       MYSQL_ROOT_PASSWORD: muP4woo9Aidiph2jeX8u
 
   arcentra:
-    image: go-arcentra/arcentra:latest
+    image: arcentrix/arcentra:latest
     container_name: arcentra
     restart: always
     ports:
@@ -35,7 +35,7 @@ services:
       - ./conf.d:/conf.d
   
   arcentra-agent:
-    image: go-arcentra/arcentra-agent:latest
+    image: arcentrix/arcentra-agent:latest
     container_name: arcentra-agent
     restart: always
     ports:

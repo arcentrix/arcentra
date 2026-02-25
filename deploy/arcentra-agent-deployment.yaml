@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: Arcentra-agent
+  name: arcentra-agent
   labels:
-    app: Arcentra-agent
+    app: arcentra-agent
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: Arcentra-agent
+      app: arcentra-agent
   template:
     metadata:
       labels:
-        app: Arcentra-agent
+        app: arcentra-agent
     spec:
       containers:
       - name: arcentra-agent
-        image: go-Arcentra/Arcentra-agent:latest
+        image: arcentrix/arcentra-agent:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8081
@@ -60,9 +60,9 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: Arcentra-agent
+  name: arcentra-agent
   labels:
-    app: Arcentra-agent
+    app: arcentra-agent
 spec:
   type: ClusterIP
   ports:
@@ -79,5 +79,5 @@ spec:
     protocol: TCP
     name: grpc
   selector:
-    app: Arcentra-agent
+    app: arcentra-agent
 

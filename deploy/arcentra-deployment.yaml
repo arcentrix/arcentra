@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: Arcentra
+  name: arcentra
   labels:
-    app: Arcentra
+    app: arcentra
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: Arcentra
+      app: arcentra
   template:
     metadata:
       labels:
-        app: Arcentra
+        app: arcentra
     spec:
       containers:
       - name: arcentra
-        image: go-Arcentra/Arcentra:latest
+        image: arcentrix/arcentra:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
@@ -60,7 +60,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: Arcentra
+  name: arcentra
   labels:
     app: Arcentra
 spec:
@@ -80,4 +80,3 @@ spec:
     name: metrics
   selector:
     app: Arcentra
-
