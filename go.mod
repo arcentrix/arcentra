@@ -172,7 +172,7 @@ require (
 
 require (
 	cloud.google.com/go/storage v1.37.0
-	filippo.io/edwards25519 v1.1.0 // indirect
+	filippo.io/edwards25519 v1.1.1 // indirect
 	github.com/aliyun/aliyun-oss-go-sdk v3.0.2+incompatible
 	github.com/bytedance/sonic v1.14.1
 	github.com/bytedance/sonic/loader v0.3.0 // indirect
