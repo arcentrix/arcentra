@@ -109,18 +109,14 @@ func (pe *PipelineExecutor) Execute(ctx context.Context) error {
 				return fmt.Errorf("reconcile: %w", err)
 			}
 			if !hasMore && reconciler.IsCompleted() {
-				if pe.logger.Log != nil {
-					pe.logger.Log.Infow("pipeline execution completed", "namespace", pe.execCtx.Pipeline.Namespace)
-				}
+				pe.logger.Infow("pipeline execution completed", "namespace", pe.execCtx.Pipeline.Namespace)
 				pe.emitPipelineEvent(plugin.EventTypePipelineCompleted, "completed")
 				return nil
 			}
 		case <-ticker.C:
 			// Fallback: periodic check
 			if reconciler.IsCompleted() {
-				if pe.logger.Log != nil {
-					pe.logger.Log.Infow("pipeline execution completed", "namespace", pe.execCtx.Pipeline.Namespace)
-				}
+				pe.logger.Infow("pipeline execution completed", "namespace", pe.execCtx.Pipeline.Namespace)
 				pe.emitPipelineEvent(plugin.EventTypePipelineCompleted, "completed")
 				return nil
 			}

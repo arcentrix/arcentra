@@ -23,7 +23,7 @@ import (
 )
 
 func TestDSLParser_Parse(t *testing.T) {
-	logger := log.Logger{Log: log.GetLogger()}
+	logger := log.Logger{log.GetLogger()}
 	parser := NewDSLParser(logger)
 
 	tests := []struct {
@@ -111,7 +111,7 @@ func TestDSLParser_Parse(t *testing.T) {
 }
 
 func TestDSLParser_ToJSON(t *testing.T) {
-	logger := log.Logger{Log: log.GetLogger()}
+	logger := log.Logger{log.GetLogger()}
 	parser := NewDSLParser(logger)
 
 	pipeline := &spec.Pipeline{
@@ -151,7 +151,7 @@ func TestDSLParser_ToJSON(t *testing.T) {
 }
 
 func TestValidator_Validate(t *testing.T) {
-	logger := log.Logger{Log: log.GetLogger()}
+	logger := log.Logger{SugaredLogger: log.GetLogger()}
 	parser := NewDSLParser(logger)
 	basicValidator := NewPipelineBasicValidatorAdapter(parser)
 	validator := validation.NewValidator(basicValidator)

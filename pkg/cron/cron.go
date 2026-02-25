@@ -446,7 +446,7 @@ func (c *Cron) run() {
 // Logs an error to stderr or to the configured error log
 func (c *Cron) logf(format string, args ...interface{}) {
 	if c.ErrorLog != nil {
-		c.ErrorLog.Log.Infof(format, args...)
+		c.ErrorLog.Infof(format, args...)
 	}
 }
 

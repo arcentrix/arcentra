@@ -130,9 +130,7 @@ func (tf *TaskFramework) prepare(_ context.Context, task *Task) error {
 		}
 	}
 
-	if tf.logger.Log != nil {
-		tf.logger.Log.Infow("task prepared", "task", task.Name)
-	}
+	tf.logger.Infow("task prepared", "task", task.Name)
 	return nil
 }
 
@@ -154,9 +152,7 @@ func (tf *TaskFramework) create(ctx context.Context, task *Task) error {
 		}
 	}
 
-	if tf.logger.Log != nil {
-		tf.logger.Log.Infow("task created", "task", task.Name)
-	}
+	tf.logger.Infow("task created", "task", task.Name)
 	return nil
 }
 
@@ -166,9 +162,7 @@ func (tf *TaskFramework) start(_ context.Context, task *Task) error {
 	task.StartedAt = &now
 	task.State = TaskStateStarted
 
-	if tf.logger.Log != nil {
-		tf.logger.Log.Infow("task started", "task", task.Name)
-	}
+	tf.logger.Infow("task started", "task", task.Name)
 	tf.emitJobEvent(plugin.EventTypeJobStarted, task, map[string]any{
 		"status": "started",
 	})
@@ -179,9 +173,7 @@ func (tf *TaskFramework) start(_ context.Context, task *Task) error {
 func (tf *TaskFramework) queue(_ context.Context, task *Task) error {
 	task.State = TaskStateQueued
 
-	if tf.logger.Log != nil {
-		tf.logger.Log.Infow("task queued", "task", task.Name)
-	}
+	tf.logger.Infow("task queued", "task", task.Name)
 	if tf.execCtx.TaskQueue != nil {
 		for i := range task.Job.Steps {
 			step := &task.Job.Steps[i]
@@ -307,9 +299,7 @@ func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *
 	stepRunner := NewStepRunner(tf.execCtx, task.Job, step)
 	if err := stepRunner.Run(ctx); err != nil {
 		if step.ContinueOnError {
-			if tf.logger.Log != nil {
-				tf.logger.Log.Warnw("step failed but continuing", "task", task.Name, "step", step.Name, "error", err)
-			}
+			tf.logger.Warnw("step failed but continuing", "task", task.Name, "step", step.Name, "error", err)
 			tf.emitStepEvent(plugin.EventTypeStepFailed, task, step.Name, map[string]any{
 				"status": "failed",
 				"error":  err.Error(),

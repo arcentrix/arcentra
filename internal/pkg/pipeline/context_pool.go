@@ -25,6 +25,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/safe"
 	"github.com/arcentrix/arcentra/pkg/statemachine"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -245,7 +246,7 @@ type ContextPool struct {
 	// Cleanup goroutine management
 	cleanupCtx    context.Context
 	cleanupCancel context.CancelFunc
-	cleanupWg     sync.WaitGroup
+	cleanupEg     *errgroup.Group
 	cleanupOnce   sync.Once
 }
 
@@ -413,14 +414,14 @@ func (p *ContextPool) startCleanup() {
 			cleanupInterval = 5 * time.Minute
 		}
 
-		p.cleanupWg.Add(1)
-		go p.cleanupLoop(cleanupInterval)
+		p.cleanupEg.Go(func() error {
+			return p.cleanupLoop(cleanupInterval)
+		})
 	})
 }
 
 // cleanupLoop periodically cleans up idle contexts
-func (p *ContextPool) cleanupLoop(interval time.Duration) {
-	defer p.cleanupWg.Done()
+func (p *ContextPool) cleanupLoop(interval time.Duration) error {
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -428,7 +429,7 @@ func (p *ContextPool) cleanupLoop(interval time.Duration) {
 	for {
 		select {
 		case <-p.cleanupCtx.Done():
-			return
+			return nil
 		case <-ticker.C:
 			p.cleanupIdleContexts()
 		}
@@ -465,22 +466,22 @@ func (p *ContextPool) cleanupIdleContexts() {
 	// Remove expired contexts
 	for _, item := range expiredItems {
 		if ctx, ok := p.lru.remove(item.key); ok {
-			if p.config.Logger.Log != nil {
-				p.config.Logger.Log.Infow("Evicting idle context", "pipelineId", item.key, "idleTime", item.idleTime)
-			}
+			p.config.Logger.Infow("Evicting idle context", "pipelineId", item.key, "idleTime", item.idleTime)
 			p.handleEvictedContext(context.Background(), ctx)
 		}
 	}
 
-	if len(expiredItems) > 0 && p.config.Logger.Log != nil {
-		p.config.Logger.Log.Infow("Cleaned up idle contexts", "pipelineId", len(expiredItems))
+	if len(expiredItems) > 0 {
+		p.config.Logger.Infow("Cleaned up idle contexts", "pipelineId", len(expiredItems))
 	}
 }
 
 // Stop stops the cleanup goroutine and releases resources
 func (p *ContextPool) Stop() {
 	p.cleanupCancel()
-	p.cleanupWg.Wait()
+	if err := p.cleanupEg.Wait(); err != nil {
+		p.config.Logger.Errorw("Failed to cleanup context pool", "error", err)
+	}
 }
 
 // Shutdown gracefully shuts down the pool, cleaning up all contexts
@@ -508,9 +509,7 @@ func (p *ContextPool) Shutdown() {
 	p.activeCount = 0
 	p.mu.Unlock()
 
-	if p.config.Logger.Log != nil {
-		p.config.Logger.Log.Info("Context pool shutdown complete")
-	}
+	p.config.Logger.Info("Context pool shutdown complete")
 }
 
 // PoolStats contains pool statistics
@@ -638,9 +637,7 @@ func (p *ContextPool) handleEvictedContext(ctx context.Context, pc *Context) {
 
 	// Note: In a real implementation, you would serialize this properly (e.g., JSON, protobuf)
 	// For now, we'll just log and store metadata
-	if p.config.Logger.Log != nil {
-		p.config.Logger.Log.Infow("Evicting context to cold storage", "pipelineId", pipelineId)
-	}
+	p.config.Logger.Infow("Evicting context to cold storage", "pipelineId", pipelineId)
 
 	// Store to cold storage (async to avoid blocking)
 	safe.Go(func() {

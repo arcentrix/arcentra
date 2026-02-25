@@ -74,13 +74,11 @@ func (p *DSLProcessor) ProcessConfig(
 		return nil, nil, fmt.Errorf("validate pipeline: %w", err)
 	}
 
-	if p.logger.Log != nil {
-		p.logger.Log.Infow("processed pipeline DSL",
-			"namespace", pl.Namespace,
-			"version", pl.Version,
-			"jobs_count", len(pl.Jobs),
-		)
-	}
+	p.logger.Infow("processed pipeline DSL",
+		"namespace", pl.Namespace,
+		"version", pl.Version,
+		"jobs_count", len(pl.Jobs),
+	)
 
 	return pl, execCtx, nil
 }

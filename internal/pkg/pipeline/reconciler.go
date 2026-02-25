@@ -107,9 +107,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) (bool, error) {
 		currentTask := task
 		safe.Go(func() {
 			if err := r.taskFramework.Execute(ctx, currentTask); err != nil {
-				if r.logger.Log != nil {
-					r.logger.Log.Errorw("task execution failed", "task", currentTaskName, "error", err)
-				}
+				r.logger.Errorw("task execution failed", "task", currentTaskName, "error", err)
 			}
 			r.markCompleted(currentTaskName)
 		})

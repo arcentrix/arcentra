@@ -105,16 +105,12 @@ func (c *ExecutionContext) StepWorkspace(jobName, stepName string) string {
 
 // LogJob logs job message
 func (c *ExecutionContext) LogJob(job, msg string) {
-	if c.Logger.Log != nil {
-		c.Logger.Log.Infof("[job:%s] %s", job, msg)
-	}
+	c.Logger.Infof("[job:%s] %s", job, msg)
 }
 
 // LogStep logs step message
 func (c *ExecutionContext) LogStep(job, step, msg string) {
-	if c.Logger.Log != nil {
-		c.Logger.Log.Infof("[job:%s][step:%s] %s", job, step, msg)
-	}
+	c.Logger.Infof("[job:%s][step:%s] %s", job, step, msg)
 }
 
 // EvalCondition evaluates when condition expression using expr-lang/expr

@@ -22,8 +22,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/arcentrix/arcentra/pkg/safe"
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -88,7 +88,7 @@ type TaskQueueImpl struct {
 	codec          MessageCodec // Message codec
 	ctx            context.Context
 	cancel         context.CancelFunc
-	wg             sync.WaitGroup
+	eg             *errgroup.Group
 	mu             sync.RWMutex
 	running        bool
 	priorityQueues map[Priority]string
@@ -294,10 +294,8 @@ func (q *TaskQueueImpl) Start(handler IHandler) error {
 	}
 
 	// Start consumption goroutine
-	q.wg.Add(1)
-	safe.Go(func() {
-		defer q.wg.Done()
-		_ = q.broker.Subscribe(q.ctx, topics, q.handleMessage)
+	q.eg.Go(func() error {
+		return q.broker.Subscribe(q.ctx, topics, q.handleMessage)
 	})
 
 	return nil
@@ -337,10 +335,8 @@ func (q *TaskQueueImpl) StartBatch(handler IBatchHandler, agg IAggregator) error
 	}
 
 	// Start batch consumption goroutine
-	q.wg.Add(1)
-	safe.Go(func() {
-		defer q.wg.Done()
-		_ = q.broker.Subscribe(q.ctx, topics, q.handleBatchMessage)
+	q.eg.Go(func() error {
+		return q.broker.Subscribe(q.ctx, topics, q.handleBatchMessage)
 	})
 
 	return nil
@@ -364,7 +360,9 @@ func (q *TaskQueueImpl) Stop() error {
 	}
 
 	// Wait for all goroutines to exit
-	q.wg.Wait()
+	if err := q.eg.Wait(); err != nil {
+		return fmt.Errorf("failed to stop task queue: %w", err)
+	}
 
 	// Close broker
 	if err := q.broker.Close(); err != nil {

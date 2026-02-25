@@ -19,11 +19,11 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"sync"
 	"time"
 
 	mqkafka "github.com/arcentrix/arcentra/pkg/mq/kafka"
 	ckafka "github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -43,7 +43,7 @@ type DelayTopicManager struct {
 	codec        MessageCodec  // Message codec
 	ctx          context.Context
 	cancel       context.CancelFunc
-	wg           sync.WaitGroup
+	eg           *errgroup.Group
 }
 
 // DelayMessage represents a delayed message structure
@@ -102,8 +102,9 @@ func (dm *DelayTopicManager) Start() error {
 	}
 
 	// Start consumption goroutine
-	dm.wg.Add(1)
-	go dm.consumeDelayMessages()
+	dm.eg.Go(func() error {
+		return dm.consumeDelayMessages(dm.ctx)
+	})
 
 	return nil
 }
@@ -112,7 +113,9 @@ func (dm *DelayTopicManager) Start() error {
 func (dm *DelayTopicManager) Stop() error {
 	dm.cancel()
 	dm.timerWheel.Stop()
-	dm.wg.Wait()
+	if err := dm.eg.Wait(); err != nil {
+		return fmt.Errorf("failed to stop delay topic manager: %w", err)
+	}
 	return nil
 }
 
@@ -191,13 +194,11 @@ func (dm *DelayTopicManager) selectDelayTopic(executeAt time.Time) int {
 }
 
 // consumeDelayMessages consumes messages from delay topics
-func (dm *DelayTopicManager) consumeDelayMessages() {
-	defer dm.wg.Done()
-
+func (dm *DelayTopicManager) consumeDelayMessages(ctx context.Context) error {
 	for {
 		select {
-		case <-dm.ctx.Done():
-			return
+		case <-ctx.Done():
+			return ctx.Err()
 		default:
 			msg, err := dm.consumer.ReadMessage(100 * time.Millisecond)
 			if err != nil {

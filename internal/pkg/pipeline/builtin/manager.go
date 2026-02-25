@@ -115,9 +115,7 @@ func (m *Manager) registerBuiltin(name string, info *Info, handlers map[string]A
 
 	m.infos[name] = info
 
-	if m.logger.Log != nil {
-		m.logger.Log.Debugw("registered builtin", "name", name, "actions", info.Actions)
-	}
+	m.logger.Debugw("registered builtin", "name", name, "actions", info.Actions)
 }
 
 // Execute executes a builtin function

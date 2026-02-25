@@ -27,7 +27,7 @@ func TestContainerdSandbox_Create(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	logger := log.Logger{Log: log.GetLogger()}
+	logger := log.Logger{SugaredLogger: log.GetLogger()}
 	config := &ContainerdConfig{
 		UnixSocket:   "/run/containerd/containerd.sock",
 		Namespace:    "arcentra-test",
@@ -79,7 +79,7 @@ func TestContainerdSandbox_Execute(t *testing.T) {
 		t.Skip("skipping integration test")
 	}
 
-	logger := log.Logger{Log: log.GetLogger()}
+	logger := log.Logger{SugaredLogger: log.GetLogger()}
 	config := &ContainerdConfig{
 		UnixSocket:   "/run/containerd/containerd.sock",
 		Namespace:    "arcentra-test",

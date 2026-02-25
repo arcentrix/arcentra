@@ -94,9 +94,7 @@ func (wm *WorkspaceManager) CreatePipelineWorkspace(name, buildID string) (*Work
 		}
 	}
 
-	if wm.logger.Log != nil {
-		wm.logger.Log.Debugw("created pipeline workspace", "path", buildPath, "name", name, "build_id", buildID)
-	}
+	wm.logger.Debugw("created pipeline workspace", "path", buildPath, "name", name, "build_id", buildID)
 
 	return paths, nil
 }
@@ -128,9 +126,7 @@ func (wm *WorkspaceManager) CleanupWorkspace(path string) error {
 		return fmt.Errorf("cleanup workspace %s: %w", path, err)
 	}
 
-	if wm.logger.Log != nil {
-		wm.logger.Log.Debugw("cleaned up workspace", "path", path)
-	}
+	wm.logger.Debugw("cleaned up workspace", "path", path)
 
 	return nil
 }
@@ -165,17 +161,15 @@ func (wm *WorkspaceManager) CleanupWorkspaces(name string, maxAge time.Duration)
 		age := now.Sub(info.ModTime())
 		if age > maxAge {
 			if err := wm.CleanupWorkspace(buildIDPath); err != nil {
-				if wm.logger.Log != nil {
-					wm.logger.Log.Warnw("failed to cleanup old workspace", "path", buildIDPath, "error", err)
-				}
+				wm.logger.Warnw("failed to cleanup old workspace", "path", buildIDPath, "error", err)
 				continue
 			}
 			cleaned++
 		}
 	}
 
-	if wm.logger.Log != nil && cleaned > 0 {
-		wm.logger.Log.Infow("cleaned up old workspaces", "count", cleaned, "name", name)
+	if cleaned > 0 {
+		wm.logger.Infow("cleaned up old workspaces", "count", cleaned, "name", name)
 	}
 
 	return nil

@@ -190,13 +190,11 @@ func (e *UnifiedExecutor) executeRemotely(ctx context.Context, req *ExecutionReq
 
 	result.Complete(result.Success, result.ExitCode, nil)
 
-	if e.logger.Log != nil {
-		e.logger.Log.Debugw("remote execution completed",
-			"step", req.Step.Name,
-			"success", result.Success,
-			"exit_code", result.ExitCode,
-			"duration", result.Duration)
-	}
+	e.logger.Debugw("remote execution completed",
+		"step", req.Step.Name,
+		"success", result.Success,
+		"exit_code", result.ExitCode,
+		"duration", result.Duration)
 
 	return result, nil
 }
@@ -301,13 +299,11 @@ func (e *UnifiedExecutor) executeLocally(ctx context.Context, req *ExecutionRequ
 
 	result.Complete(result.Success, result.ExitCode, nil)
 
-	if e.logger.Log != nil {
-		e.logger.Log.Debugw("local execution completed",
-			"step", req.Step.Name,
-			"success", result.Success,
-			"exit_code", result.ExitCode,
-			"duration", result.Duration)
-	}
+	e.logger.Debugw("local execution completed",
+		"step", req.Step.Name,
+		"success", result.Success,
+		"exit_code", result.ExitCode,
+		"duration", result.Duration)
 
 	return result, nil
 }

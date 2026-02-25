@@ -41,7 +41,7 @@ func ProvideLogger(conf *Conf) (*Logger, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Logger{Log: zapLogger.Sugar()}, nil
+	return &Logger{zapLogger.Sugar()}, nil
 }
 
 // Conf holds Conf configuration options.
@@ -90,7 +90,7 @@ func (c *Conf) Validate() error {
 }
 
 type Logger struct {
-	Log *zap.SugaredLogger
+	*zap.SugaredLogger
 }
 
 type Option func(*Logger)

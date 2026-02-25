@@ -174,13 +174,11 @@ func (e *PluginExecutor) executePlugin(ctx context.Context, req *ExecutionReques
 
 	result.Complete(result.Success, result.ExitCode, nil)
 
-	if e.logger.Log != nil {
-		e.logger.Log.Debugw("plugin execution completed",
-			"step", req.Step.Name,
-			"success", result.Success,
-			"exit_code", result.ExitCode,
-			"duration", result.Duration)
-	}
+	e.logger.Debugw("plugin execution completed",
+		"step", req.Step.Name,
+		"success", result.Success,
+		"exit_code", result.ExitCode,
+		"duration", result.Duration)
 
 	return result, nil
 }
@@ -188,11 +186,9 @@ func (e *PluginExecutor) executePlugin(ctx context.Context, req *ExecutionReques
 // executeHTTP 通过 HTTP 执行（HTTP 类型）
 // 当 step args 包含 url 字段时，使用 HTTP 执行器执行 HTTP 请求
 func (e *PluginExecutor) executeHTTP(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
-	if e.logger.Log != nil {
-		e.logger.Log.Debugw("executing step via HTTP",
-			"step", req.Step.Name,
-			"url", req.Step.Args["url"])
-	}
+	e.logger.Debugw("executing step via HTTP",
+		"step", req.Step.Name,
+		"url", req.Step.Args["url"])
 	// 使用 HTTP 执行器执行
 	return e.httpExecutor.Execute(ctx, req)
 }

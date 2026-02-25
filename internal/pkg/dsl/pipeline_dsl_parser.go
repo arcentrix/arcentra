@@ -53,13 +53,11 @@ func (p *DSLParser) Parse(dslJSON string) (*spec.Pipeline, error) {
 		return nil, fmt.Errorf("validate pipeline: %w", err)
 	}
 
-	if p.logger.Log != nil {
-		p.logger.Log.Debugw("parsed pipeline DSL",
-			"namespace", pipeline.Namespace,
-			"version", pipeline.Version,
-			"jobs_count", len(pipeline.Jobs),
-		)
-	}
+	p.logger.Debugw("parsed pipeline DSL",
+		"namespace", pipeline.Namespace,
+		"version", pipeline.Version,
+		"jobs_count", len(pipeline.Jobs),
+	)
 
 	return &pipeline, nil
 }

@@ -123,9 +123,7 @@ func (am *ApprovalManager) CreateApproval(ctx context.Context, jobName, stepName
 		return nil, fmt.Errorf("create approval in plugin: %w", err)
 	}
 
-	if am.logger.Log != nil {
-		am.logger.Log.Infow("created approval request", "request", requestID, "job", jobName, "step", stepName)
-	}
+	am.logger.Infow("created approval request", "request", requestID, "job", jobName, "step", stepName)
 	am.emitApprovalEvent(plugin.EventTypePipelineApprovalRequested, request, "")
 
 	return request, nil
@@ -200,9 +198,7 @@ func (am *ApprovalManager) Approve(requestID, approvedBy, reason string) error {
 	request.ApprovedBy = approvedBy
 	request.Reason = reason
 
-	if am.logger.Log != nil {
-		am.logger.Log.Infow("approval request approved", "request", requestID, "approved_by", approvedBy)
-	}
+	am.logger.Infow("approval request approved", "request", requestID, "approved_by", approvedBy)
 	am.emitApprovalEvent(plugin.EventTypePipelineApprovalApproved, request, reason)
 
 	return nil
@@ -226,9 +222,7 @@ func (am *ApprovalManager) Reject(requestID, rejectedBy, reason string) error {
 	request.RejectedBy = rejectedBy
 	request.Reason = reason
 
-	if am.logger.Log != nil {
-		am.logger.Log.Infow("approval request rejected", "request", requestID, "rejected_by", rejectedBy, "reason", reason)
-	}
+	am.logger.Infow("approval request rejected", "request", requestID, "rejected_by", rejectedBy, "reason", reason)
 	am.emitApprovalEvent(plugin.EventTypePipelineApprovalRejected, request, reason)
 
 	return nil

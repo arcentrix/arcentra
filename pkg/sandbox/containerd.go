@@ -87,11 +87,9 @@ func NewContainerdSandbox(config *ContainerdConfig, logger log.Logger) (*Contain
 		containers: make(map[string]containerd.Container),
 	}
 
-	if logger.Log != nil {
-		logger.Log.Infow("containerd sandbox initialized",
-			"socket", config.UnixSocket,
-			"namespace", config.Namespace)
-	}
+	logger.Infow("containerd sandbox initialized",
+		"socket", config.UnixSocket,
+		"namespace", config.Namespace)
 
 	return sb, nil
 }
@@ -115,9 +113,7 @@ func (s *ContainerdSandbox) Create(ctx context.Context, opts *CreateOptions) (st
 	// Pull image if needed
 	img, err := s.client.GetImage(ctx, image)
 	if err != nil {
-		if logger := s.logger.Log; logger != nil {
-			logger.Debugw("pulling image", "image", image)
-		}
+		s.logger.Infow("pulling image", "image", image)
 		img, err = s.client.Pull(ctx, image, containerd.WithPullUnpack)
 		if err != nil {
 			return "", fmt.Errorf("pull image %s: %w", image, err)
@@ -222,11 +218,7 @@ func (s *ContainerdSandbox) Create(ctx context.Context, opts *CreateOptions) (st
 
 	s.containers[containerID] = container
 
-	if s.logger.Log != nil {
-		s.logger.Log.Debugw("container created",
-			"container_id", containerID,
-			"image", image)
-	}
+	s.logger.Debugw("container created", "container_id", containerID, "image", image)
 
 	return containerID, nil
 }
@@ -249,9 +241,7 @@ func (s *ContainerdSandbox) Start(ctx context.Context, containerID string) error
 		return fmt.Errorf("start task: %w", err)
 	}
 
-	if s.logger.Log != nil {
-		s.logger.Log.Debugw("container started", "container_id", containerID)
-	}
+	s.logger.Debugw("container started", "container_id", containerID)
 
 	return nil
 }
@@ -339,13 +329,7 @@ func (s *ContainerdSandbox) Execute(ctx context.Context, containerID string, cmd
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime)
 
-	if s.logger.Log != nil {
-		s.logger.Log.Debugw("command executed",
-			"container_id", containerID,
-			"command", strings.Join(cmd, " "),
-			"exit_code", result.ExitCode,
-			"duration", result.Duration)
-	}
+	s.logger.Debugw("command executed", "container_id", containerID, "command", strings.Join(cmd, " "), "exit_code", result.ExitCode, "duration", result.Duration)
 
 	return result, nil
 }
@@ -415,9 +399,7 @@ func (s *ContainerdSandbox) Remove(ctx context.Context, containerID string) erro
 
 	delete(s.containers, containerID)
 
-	if s.logger.Log != nil {
-		s.logger.Log.Debugw("container removed", "container_id", containerID)
-	}
+	s.logger.Debugw("container removed", "container_id", containerID)
 
 	return nil
 }
@@ -462,9 +444,7 @@ func (s *ContainerdSandbox) Cleanup(ctx context.Context) error {
 
 	s.containers = make(map[string]containerd.Container)
 
-	if s.logger.Log != nil {
-		s.logger.Log.Infow("sandbox cleanup completed")
-	}
+	s.logger.Infow("sandbox cleanup completed")
 
 	return nil
 }
@@ -472,9 +452,7 @@ func (s *ContainerdSandbox) Cleanup(ctx context.Context) error {
 // Close closes the sandbox client connection
 func (s *ContainerdSandbox) Close() error {
 	if err := s.Cleanup(context.Background()); err != nil {
-		if s.logger.Log != nil {
-			s.logger.Log.Warnw("cleanup failed during close", "error", err)
-		}
+		s.logger.Warnw("cleanup failed during close", "error", err)
 	}
 
 	if s.client != nil {

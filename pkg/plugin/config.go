@@ -111,7 +111,7 @@ func loadPluginConfigFile(configPath string) (map[string]any, map[string]any, er
 		builtins = make(map[string]any)
 	}
 
-	log.Infow("plugin config file loaded", "path", configPath, "plugin_count", len(configs), "builtin_count", len(builtins))
+	log.Infow("plugin config file loaded", "path", configPath, "plugin_count", len(configs), "builtin_plugin_count", len(builtins))
 	return configs, builtins, nil
 }
 

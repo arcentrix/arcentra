@@ -132,15 +132,13 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*Exe
 	}
 	result.Complete(result.Success, result.ExitCode, nil)
 
-	if e.logger.Log != nil {
-		e.logger.Log.Debugw("HTTP execution completed",
-			"step", req.Step.Name,
-			"url", httpConfig.URL,
-			"method", method,
-			"status_code", statusCode,
-			"success", result.Success,
-			"duration", duration)
-	}
+	e.logger.Debugw("HTTP execution completed",
+		"step", req.Step.Name,
+		"url", httpConfig.URL,
+		"method", method,
+		"status_code", statusCode,
+		"success", result.Success,
+		"duration", duration)
 	return result, nil
 }
 

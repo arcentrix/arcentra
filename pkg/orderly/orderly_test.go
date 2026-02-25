@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/arcentrix/arcentra/pkg/safe"
+	"golang.org/x/sync/errgroup"
 )
 
 func TestNew(t *testing.T) {
@@ -344,37 +345,42 @@ func TestMap_ToSlice(t *testing.T) {
 func TestMap_Concurrent(t *testing.T) {
 	t.Run("concurrent Set and Get", func(t *testing.T) {
 		m := New(100)
-		var wg sync.WaitGroup
+		var eg errgroup.Group
 		workers := 10
 		opsPerWorker := 100
 
 		// concurrent writes
-		wg.Add(workers)
-		for i := 0; i < workers; i++ {
-			id := i
-			safe.Go(func() {
-				defer wg.Done()
-				for j := 0; j < opsPerWorker; j++ {
-					key := string(rune('a'+id)) + string(rune('0'+j))
-					m.Set(key, id*opsPerWorker+j)
-				}
-			})
-		}
-		wg.Wait()
+		eg.Go(func() error {
+			for i := 0; i < workers; i++ {
+				id := i
+				eg.Go(func() error {
+					for j := 0; j < opsPerWorker; j++ {
+						key := string(rune('a'+id)) + string(rune('0'+j))
+						m.Set(key, id*opsPerWorker+j)
+					}
+					return nil
+				})
+			}
+			return nil
+		})
+
+		eg.Wait()
 
 		// concurrent reads
-		wg.Add(workers)
-		for i := 0; i < workers; i++ {
-			id := i
-			safe.Go(func() {
-				defer wg.Done()
-				for j := 0; j < opsPerWorker; j++ {
-					key := string(rune('a'+id)) + string(rune('0'+j))
-					_, _ = m.Get(key)
-				}
-			})
-		}
-		wg.Wait()
+		eg.Go(func() error {
+			for i := 0; i < workers; i++ {
+				id := i
+				eg.Go(func() error {
+					for j := 0; j < opsPerWorker; j++ {
+						key := string(rune('a'+id)) + string(rune('0'+j))
+						_, _ = m.Get(key)
+					}
+					return nil
+				})
+			}
+			return nil
+		})
+		eg.Wait()
 
 		// verify data consistency
 		keys := m.Keys()

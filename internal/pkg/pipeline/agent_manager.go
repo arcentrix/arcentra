@@ -86,9 +86,7 @@ func (am *AgentManager) ExecuteStepOnAgent(ctx context.Context, req *StepExecuti
 		return nil, fmt.Errorf("select agent: %w", err)
 	}
 
-	if am.logger.Log != nil {
-		am.logger.Log.Infow("executing step on agent", "job", req.JobName, "step", req.StepName, "agent", agentID)
-	}
+	am.logger.Infow("executing step on agent", "job", req.JobName, "step", req.StepName, "agent", agentID)
 
 	// Convert step to agent step run
 	agentStepRun, err := am.convertStepToStepRun(req)
@@ -101,9 +99,7 @@ func (am *AgentManager) ExecuteStepOnAgent(ctx context.Context, req *StepExecuti
 		return nil, fmt.Errorf("create step run: %w", err)
 	}
 
-	if am.logger.Log != nil {
-		am.logger.Log.Infow("created step run for step, waiting for agent to fetch", "stepRun", stepRunID, "job", req.JobName, "step", req.StepName)
-	}
+	am.logger.Infow("created step run for step, waiting for agent to fetch", "stepRun", stepRunID, "job", req.JobName, "step", req.StepName)
 
 	// 2-5. 等待 agent 拉取步骤执行并执行，监听状态更新
 	timeout := 1 * time.Hour // Default timeout
@@ -181,10 +177,7 @@ func (am *AgentManager) matchAgentLabels(agent *AgentStatus, selector *spec.Agen
 		if len(agentLabels) == 0 {
 			// Agent labels not available in cache, cannot match
 			// TODO: Query agent labels from database if needed
-			if am.logger.Log != nil {
-				am.logger.Log.Debugw("agent has no labels in cache, skipping label match",
-					"agent", agent.AgentID)
-			}
+			am.logger.Debugw("agent has no labels in cache, skipping label match", "agent", agent.AgentID)
 			return false
 		}
 	}
@@ -630,9 +623,7 @@ func (am *AgentManager) WaitForStepRunCompletion(ctx context.Context, stepRunID 
 			if ctx.Err() == context.DeadlineExceeded {
 				// Mark step run as timeout
 				if err := am.cancelStepRun(ctx, stepRunID, "step run execution timeout"); err != nil {
-					if am.logger.Log != nil {
-						am.logger.Log.Warnw("failed to cancel timeout step run", "stepRun", stepRunID, "error", err)
-					}
+					am.logger.Warnw("failed to cancel timeout step run", "stepRun", stepRunID, "error", err)
 				}
 				return nil, fmt.Errorf("step run %s execution timeout after %v", stepRunID, timeout)
 			}
@@ -642,9 +633,7 @@ func (am *AgentManager) WaitForStepRunCompletion(ctx context.Context, stepRunID 
 			// Poll step run status
 			stepRun, err := am.getStepRunStatus(ctx, stepRunID)
 			if err != nil {
-				if am.logger.Log != nil {
-					am.logger.Log.Warnw("failed to get step run status", "stepRun", stepRunID, "error", err)
-				}
+				am.logger.Warnw("failed to get step run status", "stepRun", stepRunID, "error", err)
 				continue
 			}
 
@@ -666,9 +655,7 @@ func (am *AgentManager) WaitForStepRunCompletion(ctx context.Context, stepRunID 
 				if stepRun.StartedAt > 0 {
 					result.StartTime = time.Unix(stepRun.StartedAt/1000, (stepRun.StartedAt%1000)*1000000)
 				}
-				if am.logger.Log != nil {
-					am.logger.Log.Infow("step run completed successfully", "stepRun", stepRunID)
-				}
+				am.logger.Infow("step run completed successfully", "stepRun", stepRunID)
 				return result, nil
 
 			case steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED:
@@ -684,9 +671,7 @@ func (am *AgentManager) WaitForStepRunCompletion(ctx context.Context, stepRunID 
 				if stepRun.StartedAt > 0 {
 					result.StartTime = time.Unix(stepRun.StartedAt/1000, (stepRun.StartedAt%1000)*1000000)
 				}
-				if am.logger.Log != nil {
-					am.logger.Log.Errorw("step run failed", "stepRun", stepRunID, "error", stepRun.ErrorMessage)
-				}
+				am.logger.Errorw("step run failed", "stepRun", stepRunID, "error", stepRun.ErrorMessage)
 				return result, fmt.Errorf("step run execution failed: %s", stepRun.ErrorMessage)
 
 			case steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED:
@@ -695,9 +680,7 @@ func (am *AgentManager) WaitForStepRunCompletion(ctx context.Context, stepRunID 
 				result.ExitCode = -1
 				result.Error = "step run cancelled"
 				result.EndTime = time.Now()
-				if am.logger.Log != nil {
-					am.logger.Log.Warnw("step run was cancelled", "stepRun", stepRunID)
-				}
+				am.logger.Warnw("step run was cancelled", "stepRun", stepRunID)
 				return result, fmt.Errorf("step run was cancelled")
 
 			case steprunv1.StepRunStatus_STEP_RUN_STATUS_TIMEOUT:
@@ -706,9 +689,7 @@ func (am *AgentManager) WaitForStepRunCompletion(ctx context.Context, stepRunID 
 				result.ExitCode = -1
 				result.Error = "step run execution timeout"
 				result.EndTime = time.Now()
-				if am.logger.Log != nil {
-					am.logger.Log.Warnw("step run timed out", "stepRun", stepRunID)
-				}
+				am.logger.Warnw("step run timed out", "stepRun", stepRunID)
 				return result, fmt.Errorf("step run execution timeout")
 
 			case steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING:
@@ -788,9 +769,7 @@ func (am *AgentManager) CancelStepRun(ctx context.Context, agentID, stepRunID, r
 		return fmt.Errorf("cancel step run: %w", err)
 	}
 
-	if am.logger.Log != nil {
-		am.logger.Log.Infow("cancelled step run on agent", "stepRun", stepRunID, "agent", agentID, "reason", reason)
-	}
+	am.logger.Infow("cancelled step run on agent", "stepRun", stepRunID, "agent", agentID, "reason", reason)
 
 	return nil
 }
@@ -847,9 +826,7 @@ func (am *AgentManager) UpdateAgentStatusFromHeartbeat(req *agentv1.HeartbeatReq
 
 	am.agentStatusCache[req.AgentId] = status
 
-	if am.logger.Log != nil {
-		am.logger.Log.Debugw("updated agent status", "agent", req.AgentId, "status", status.Status, "running_step_runs", req.RunningStepRunsCount)
-	}
+	am.logger.Debugw("updated agent status", "agent", req.AgentId, "status", status.Status, "running_step_runs", req.RunningStepRunsCount)
 }
 
 // convertAgentStatusToString converts agent status enum to string
@@ -892,9 +869,7 @@ func (am *AgentManager) RemoveAgentStatus(agentID string) {
 
 	delete(am.agentStatusCache, agentID)
 
-	if am.logger.Log != nil {
-		am.logger.Log.Debugw("removed agent from status cache", "agent", agentID)
-	}
+	am.logger.Debugw("removed agent from status cache", "agent", agentID)
 }
 
 // AgentStatus represents agent status information
