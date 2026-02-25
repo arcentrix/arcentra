@@ -11,7 +11,7 @@ require (
 	github.com/expr-lang/expr v1.17.7
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-resty/resty/v2 v2.16.5
-	github.com/gofiber/fiber/v2 v2.52.11
+	github.com/gofiber/fiber/v2 v2.52.12
 	github.com/gofiber/websocket/v2 v2.2.1
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
