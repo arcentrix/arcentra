@@ -15,37 +15,43 @@
 package http
 
 import (
+	"time"
+
 	"github.com/gofiber/fiber/v2"
 )
 
 type ResponseErr struct {
-	ErrCode int    `json:"code"`
-	ErrMsg  any    `json:"errMsg"`
-	Path    string `json:"path,omitempty"`
+	ErrCode   int    `json:"code"`
+	ErrMsg    any    `json:"errMsg"`
+	Path      string `json:"path,omitempty"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 // WithRepErr 返回操作结果，返回结构体有path字段
 func WithRepErr(c *fiber.Ctx, code int, errMsg string, path string) error {
 	return c.JSON(ResponseErr{
-		ErrCode: code,
-		ErrMsg:  errMsg,
-		Path:    path,
+		ErrCode:   code,
+		ErrMsg:    errMsg,
+		Path:      path,
+		Timestamp: time.Now().Unix(),
 	})
 }
 
 // WithRepErrMsg 只返回json数据
 func WithRepErrMsg(c *fiber.Ctx, code int, errMsg string, path string) error {
 	return c.JSON(ResponseErr{
-		ErrCode: code,
-		ErrMsg:  errMsg,
-		Path:    path,
+		ErrCode:   code,
+		ErrMsg:    errMsg,
+		Path:      path,
+		Timestamp: time.Now().Unix(),
 	})
 }
 
 // WithRepErrNotData 只失败的返回操作结果，返回结构体没有path字段
 func WithRepErrNotData(c *fiber.Ctx, errMsg string) error {
 	return c.JSON(ResponseErr{
-		ErrCode: Success.Code,
-		ErrMsg:  errMsg,
+		ErrCode:   Success.Code,
+		ErrMsg:    errMsg,
+		Timestamp: time.Now().Unix(),
 	})
 }

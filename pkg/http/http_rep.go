@@ -33,31 +33,34 @@ func WithRepJSON(c *fiber.Ctx, detail any) error {
 		Code:      Success.Code,
 		Detail:    detail,
 		Msg:       Success.Msg,
-		Timestamp: time.Now().UnixMilli(),
+		Timestamp: time.Now().Unix(),
 	})
 }
 
 // WithRepMsg 返回自定义code, msg
 func WithRepMsg(c *fiber.Ctx, code int, msg string) error {
 	return c.JSON(Response{
-		Code: code,
-		Msg:  msg,
+		Code:      code,
+		Msg:       msg,
+		Timestamp: time.Now().Unix(),
 	})
 }
 
 // WithRepDetail 返回自定义code, msg, detail
 func WithRepDetail(c *fiber.Ctx, code int, msg string, detail any) error {
 	return c.JSON(Response{
-		Code:   code,
-		Detail: detail,
-		Msg:    msg,
+		Code:      code,
+		Detail:    detail,
+		Msg:       msg,
+		Timestamp: time.Now().Unix(),
 	})
 }
 
 // WithRepNotDetail 只成功的返回操作结果，返回结构体没有detail字段
 func WithRepNotDetail(c *fiber.Ctx) error {
 	return c.JSON(Response{
-		Code: Success.Code,
-		Msg:  Success.Msg,
+		Code:      Success.Code,
+		Msg:       Success.Msg,
+		Timestamp: time.Now().Unix(),
 	})
 }
