@@ -53,10 +53,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Extract version from tag
+      - name: Extract version
         id: vars
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -f VERSION ]; then
+            VERSION=$(cat VERSION | tr -d '[:space:]\n\r')
+          elif [ -n "$GITHUB_REF_NAME" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(date +%y).0.0.0"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
