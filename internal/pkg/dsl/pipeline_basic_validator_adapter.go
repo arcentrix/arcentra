@@ -19,14 +19,14 @@ import (
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/validation"
 )
 
-// PipelineBasicValidatorAdapter adapts DSLParser to implement PipelineBasicValidator interface
-// This adapter decouples the Validator from the specific DSLParser implementation
+// PipelineBasicValidatorAdapter adapts Parser to implement PipelineBasicValidator interface
+// This adapter decouples the Validator from the specific Parser implementation
 type PipelineBasicValidatorAdapter struct {
-	parser *DSLParser
+	parser *Parser
 }
 
 // NewPipelineBasicValidatorAdapter creates a new adapter
-func NewPipelineBasicValidatorAdapter(parser *DSLParser) *PipelineBasicValidatorAdapter {
+func NewPipelineBasicValidatorAdapter(parser *Parser) *PipelineBasicValidatorAdapter {
 	return &PipelineBasicValidatorAdapter{
 		parser: parser,
 	}

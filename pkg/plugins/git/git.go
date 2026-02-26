@@ -31,15 +31,15 @@ import (
 	"github.com/bytedance/sonic"
 )
 
-// GitConfig is the plugin's configuration structure
-type GitConfig struct {
+// Config is the plugin's configuration structure
+type Config struct {
 	// Git executable path (default: git)
 	GitPath string `json:"gitPath"`
 	// Default timeout in seconds (0 means no timeout)
 	Timeout int `json:"timeout"`
 	// Default working directory
 	WorkDir string `json:"workDir"`
-	// Default user name for commits
+	// Default username for commits
 	UserName string `json:"userName"`
 	// Default user email for commits
 	UserEmail string `json:"userEmail"`
@@ -141,11 +141,11 @@ type Commit struct {
 
 // Git implements the git plugin
 type Git struct {
-	*plugin.PluginBase
+	*plugin.Base
 	name        string
 	description string
 	version     string
-	cfg         GitConfig
+	cfg         Config
 }
 
 // Action definitions
@@ -168,11 +168,11 @@ var (
 // NewGit creates a new git plugin instance
 func NewGit() *Git {
 	p := &Git{
-		PluginBase:  plugin.NewPluginBase(),
+		Base:        plugin.NewPluginBase(),
 		name:        "git",
 		description: "Git version control plugin for repository operations",
 		version:     "1.0.0",
-		cfg: GitConfig{
+		cfg: Config{
 			GitPath: "git",
 			Timeout: 300, // 5 minutes default
 			Shallow: false,
@@ -188,73 +188,87 @@ func NewGit() *Git {
 // registerActions registers all actions for this plugin
 func (p *Git) registerActions() {
 	// Register "clone" action
-	if err := p.Registry().RegisterFunc("clone", actions["clone"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.clone(params, opts)
-	}); err != nil {
+	if err := p.Registry().RegisterFunc("clone", actions["clone"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.clone(params, opts)
+		}); err != nil {
 		return
 	}
 
 	// Register "checkout" action
-	if err := p.Registry().RegisterFunc("checkout", actions["checkout"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.checkout(params, opts)
-	}); err != nil {
+	if err := p.Registry().RegisterFunc("checkout", actions["checkout"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.checkout(params, opts)
+		}); err != nil {
 		return
 	}
 
 	// Register "pull" action
-	if err := p.Registry().RegisterFunc("pull", actions["pull"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.pull(params, opts)
-	}); err != nil {
+	if err := p.Registry().RegisterFunc("pull", actions["pull"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.pull(params, opts)
+		}); err != nil {
 		return
 	}
 
 	// Register "status" action
-	if err := p.Registry().RegisterFunc("status", actions["status"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.status(params, opts)
-	}); err != nil {
+	if err := p.Registry().RegisterFunc("status", actions["status"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.status(params, opts)
+		}); err != nil {
 		return
 	}
 
 	// Register "log" action
-	if err := p.Registry().RegisterFunc("log", actions["log"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.log(params, opts)
-	}); err != nil {
+	if err := p.Registry().RegisterFunc("log", actions["log"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.log(params, opts)
+		}); err != nil {
 		return
 	}
 
 	// Register "branch" action
-	if err := p.Registry().RegisterFunc("branch", actions["branch"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.branch(params, opts)
-	}); err != nil {
+	if err := p.Registry().RegisterFunc("branch", actions["branch"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.branch(params, opts)
+		}); err != nil {
 		return
 	}
 
 	// Register "tag" action
-	if err := p.Registry().RegisterFunc("tag", actions["tag"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.tag(params, opts)
-	}); err != nil {
+	if err := p.Registry().RegisterFunc("tag", actions["tag"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.tag(params, opts)
+		}); err != nil {
 		return
 	}
 
 	// Register structured actions
-	if err := p.Registry().RegisterFunc("branches.list", actions["branches.list"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.branchesList(params, opts)
-	}); err != nil {
+	if err := p.Registry().RegisterFunc("branches.list", actions["branches.list"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.branchesList(params, opts)
+		}); err != nil {
 		return
 	}
-	if err := p.Registry().RegisterFunc("tags.list", actions["tags.list"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.tagsList(params, opts)
-	}); err != nil {
+
+	if err := p.Registry().RegisterFunc("tags.list", actions["tags.list"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.tagsList(params, opts)
+		}); err != nil {
 		return
 	}
-	if err := p.Registry().RegisterFunc("commits.list", actions["commits.list"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.commitsList(params, opts)
-	}); err != nil {
+
+	if err := p.Registry().RegisterFunc("commits.list", actions["commits.list"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.commitsList(params, opts)
+		}); err != nil {
 		return
 	}
-	if err := p.Registry().RegisterFunc("commit.get", actions["commit.get"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.commitGet(params, opts)
-	}); err != nil {
+
+	if err := p.Registry().RegisterFunc("commit.get", actions["commit.get"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.commitGet(params, opts)
+		}); err != nil {
 		return
 	}
 }
@@ -275,7 +289,7 @@ func (p *Git) Version() string {
 }
 
 // Type returns the plugin type
-func (p *Git) Type() plugin.PluginType {
+func (p *Git) Type() plugin.Type {
 	return plugin.TypeSource
 }
 
@@ -319,7 +333,7 @@ func (p *Git) Cleanup() error {
 
 // Execute executes git operations using Action Registry
 func (p *Git) Execute(action string, params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-	return p.PluginBase.Execute(action, params, opts)
+	return p.Base.Execute(action, params, opts)
 }
 
 // clone clones a git repository
@@ -683,7 +697,14 @@ func (p *Git) branchesList(params json.RawMessage, opts json.RawMessage) (json.R
 
 	branches := make([]Branch, 0)
 	for _, ref := range refs {
-		result, err := p.runGitCommand([]string{"for-each-ref", "--format=%(refname:short)%x1f%(objectname)%x1f%(HEAD)%x1f%(upstream:short)", ref}, nil, branchParams.Env, branchParams.Path)
+		result, err := p.runGitCommand(
+			[]string{
+				"for-each-ref",
+				"--format=%(refname:short)%x1f%(objectname)%x1f%(HEAD)%x1f%(upstream:short)",
+				ref,
+			}, nil,
+			branchParams.Env,
+			branchParams.Path)
 		if err != nil {
 			return nil, err
 		}
@@ -835,7 +856,14 @@ func (p *Git) commitGet(params json.RawMessage, opts json.RawMessage) (json.RawM
 		return nil, fmt.Errorf("commitId is required")
 	}
 
-	result, err := p.runGitCommand([]string{"show", "-s", "--date=iso-strict", "--pretty=format:%H%x1f%an%x1f%ae%x1f%ad%x1f%s", args.CommitId}, nil, args.Env, args.Path)
+	result, err := p.runGitCommand(
+		[]string{
+			"show",
+			"-s",
+			"--date=iso-strict",
+			"--pretty=format:%H%x1f%an%x1f%ae%x1f%ad%x1f%s",
+			args.CommitId,
+		}, nil, args.Env, args.Path)
 	if err != nil {
 		return nil, err
 	}

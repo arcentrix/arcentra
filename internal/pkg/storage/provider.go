@@ -15,6 +15,8 @@
 package storage
 
 import (
+	"context"
+
 	"github.com/arcentrix/arcentra/internal/engine/repo"
 	"github.com/google/wire"
 )
@@ -25,8 +27,8 @@ var ProviderSet = wire.NewSet(
 )
 
 // ProvideStorageFromDB 从数据库提供存储提供者
-func ProvideStorageFromDB(repos *repo.Repositories) (StorageProvider, error) {
-	dbProvider, err := NewStorageDBProvider(repos.Storage)
+func ProvideStorageFromDB(repos *repo.Repositories) (IStorage, error) {
+	dbProvider, err := NewStorageDBProvider(context.Background(), repos.Storage)
 	if err != nil {
 		return nil, err
 	}

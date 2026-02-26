@@ -15,16 +15,19 @@
 package repo
 
 import (
+	"context"
+
 	"github.com/arcentrix/arcentra/internal/engine/model"
 	"github.com/arcentrix/arcentra/pkg/database"
 )
 
+// IRoleMenuBindingRepository defines role menu binding persistence with context support.
 type IRoleMenuBindingRepository interface {
-	GetRoleMenuBindings(roleId string) ([]model.RoleMenuBinding, error)
-	GetRoleMenuBindingsByResource(roleId, resourceId string) ([]model.RoleMenuBinding, error)
-	GetMenuBindingsByRoles(roleIds []string, resourceId string) ([]model.RoleMenuBinding, error)
-	CreateRoleMenuBinding(binding *model.RoleMenuBinding) error
-	DeleteRoleMenuBinding(roleMenuId string) error
+	List(ctx context.Context, roleId string) ([]model.RoleMenuBinding, error)
+	ListByResource(ctx context.Context, roleId, resourceId string) ([]model.RoleMenuBinding, error)
+	ListByRoles(ctx context.Context, roleIds []string, resourceId string) ([]model.RoleMenuBinding, error)
+	Create(ctx context.Context, binding *model.RoleMenuBinding) error
+	Delete(ctx context.Context, roleMenuId string) error
 }
 
 type RoleMenuBindingRepo struct {
@@ -37,18 +40,18 @@ func NewRoleMenuBindingRepo(db database.IDatabase) IRoleMenuBindingRepository {
 	}
 }
 
-// GetRoleMenuBindings 获取角色的所有菜单绑定
-func (r *RoleMenuBindingRepo) GetRoleMenuBindings(roleId string) ([]model.RoleMenuBinding, error) {
+// List returns role menu bindings by roleId.
+func (r *RoleMenuBindingRepo) List(ctx context.Context, roleId string) ([]model.RoleMenuBinding, error) {
 	var bindings []model.RoleMenuBinding
-	err := r.Database().Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
 		Where("role_id = ? AND is_accessible = ?", roleId, model.RoleMenuAccessible).Find(&bindings).Error
 	return bindings, err
 }
 
-// GetRoleMenuBindingsByResource 获取角色在指定资源下的菜单绑定
-func (r *RoleMenuBindingRepo) GetRoleMenuBindingsByResource(roleId, resourceId string) ([]model.RoleMenuBinding, error) {
+// ListByResource returns role menu bindings by roleId and resourceId.
+func (r *RoleMenuBindingRepo) ListByResource(ctx context.Context, roleId, resourceId string) ([]model.RoleMenuBinding, error) {
 	var bindings []model.RoleMenuBinding
-	query := r.Database().Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
+	query := r.Database().WithContext(ctx).Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
 		Where("role_id = ? AND is_accessible = ?", roleId, model.RoleMenuAccessible)
 	if resourceId == "" {
 		query = query.Where("resource_id IS NULL OR resource_id = ''")
@@ -59,13 +62,13 @@ func (r *RoleMenuBindingRepo) GetRoleMenuBindingsByResource(roleId, resourceId s
 	return bindings, err
 }
 
-// GetMenuBindingsByRoles 获取多个角色在指定资源下的菜单绑定
-func (r *RoleMenuBindingRepo) GetMenuBindingsByRoles(roleIds []string, resourceId string) ([]model.RoleMenuBinding, error) {
+// ListByRoles returns role menu bindings by roleIds and resourceId.
+func (r *RoleMenuBindingRepo) ListByRoles(ctx context.Context, roleIds []string, resourceId string) ([]model.RoleMenuBinding, error) {
 	if len(roleIds) == 0 {
 		return []model.RoleMenuBinding{}, nil
 	}
 	var bindings []model.RoleMenuBinding
-	query := r.Database().Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
+	query := r.Database().WithContext(ctx).Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
 		Where("role_id IN ? AND is_accessible = ?", roleIds, model.RoleMenuAccessible)
 	if resourceId == "" {
 		query = query.Where("resource_id IS NULL OR resource_id = ''")
@@ -76,12 +79,12 @@ func (r *RoleMenuBindingRepo) GetMenuBindingsByRoles(roleIds []string, resourceI
 	return bindings, err
 }
 
-// CreateRoleMenuBinding 创建角色菜单绑定
-func (r *RoleMenuBindingRepo) CreateRoleMenuBinding(binding *model.RoleMenuBinding) error {
-	return r.Database().Create(binding).Error
+// Create creates a role menu binding.
+func (r *RoleMenuBindingRepo) Create(ctx context.Context, binding *model.RoleMenuBinding) error {
+	return r.Database().WithContext(ctx).Create(binding).Error
 }
 
-// DeleteRoleMenuBinding 删除角色菜单绑定
-func (r *RoleMenuBindingRepo) DeleteRoleMenuBinding(roleMenuId string) error {
-	return r.Database().Where("role_menu_id = ?", roleMenuId).Delete(&model.RoleMenuBinding{}).Error
+// Delete deletes role menu binding by roleMenuId.
+func (r *RoleMenuBindingRepo) Delete(ctx context.Context, roleMenuId string) error {
+	return r.Database().WithContext(ctx).Where("role_menu_id = ?", roleMenuId).Delete(&model.RoleMenuBinding{}).Error
 }

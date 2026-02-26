@@ -180,8 +180,14 @@ func StreamServerInterceptor() grpc.StreamServerInterceptor {
 
 // UnaryClientInterceptor unary client interceptor
 func UnaryClientInterceptor() grpc.UnaryClientInterceptor {
-	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		ctx = ContextWithSpan(ctx)
+	return func(ctx context.Context,
+		method string,
+		req, reply any,
+		cc *grpc.ClientConn,
+		invoker grpc.UnaryInvoker,
+		opts ...grpc.CallOption,
+	) error {
+		ctx = WithSpan(ctx)
 		name := spanName(method)
 		start := time.Now()
 		ctx, span := getTracer().Start(ctx, name, trace.WithSpanKind(trace.SpanKindClient))
@@ -223,7 +229,7 @@ func UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 // StreamClientInterceptor stream client interceptor
 func StreamClientInterceptor() grpc.StreamClientInterceptor {
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-		ctx = ContextWithSpan(ctx)
+		ctx = WithSpan(ctx)
 		name := spanName(method)
 		start := time.Now()
 		ctx, span := getTracer().Start(ctx, name, trace.WithSpanKind(trace.SpanKindClient))

@@ -32,7 +32,7 @@ func (s *ScmService) HandleWebhook(ctx context.Context, projectId string, header
 	if projectId == "" {
 		return nil, fmt.Errorf("project id is required")
 	}
-	project, err := s.projectRepo.GetProjectById(projectId)
+	project, err := s.projectRepo.Get(ctx, projectId)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (s *ScmService) HandleWebhook(ctx context.Context, projectId string, header
 func (s *ScmService) PollOnce(ctx context.Context) error {
 	query := &model.ProjectQueryReq{PageNum: 1, PageSize: 100}
 	for {
-		projects, total, err := s.projectRepo.ListProjects(query)
+		projects, total, err := s.projectRepo.List(ctx, query)
 		if err != nil {
 			return err
 		}
@@ -101,9 +101,9 @@ func (s *ScmService) pollProject(ctx context.Context, p *model.Project) error {
 	if kind == "" {
 		return nil
 	}
-	repo, ok := parseRepoFromUrl(p.RepoUrl)
+	fromUrl, ok := parseRepoFromUrl(p.RepoUrl)
 	if ok {
-		repo.Url = p.RepoUrl
+		fromUrl.Url = p.RepoUrl
 	}
 	cursor, err := s.loadCursor(p, kind)
 	if err != nil {
@@ -114,14 +114,14 @@ func (s *ScmService) pollProject(ctx context.Context, p *model.Project) error {
 	if err != nil {
 		return err
 	}
-	events, next, err := prov.PollEvents(ctx, repo, cursor)
+	events, next, err := prov.PollEvents(ctx, fromUrl, cursor)
 	if err != nil {
 		return err
 	}
 	if len(events) == 0 {
 		return nil
 	}
-	if err := s.saveCursor(p.ProjectId, kind, next); err != nil {
+	if err := s.saveCursor(ctx, p.ProjectId, kind, next); err != nil {
 		return err
 	}
 	log.Infow("polled scm events", "projectId", p.ProjectId, "kind", kind, "count", len(events))
@@ -194,8 +194,8 @@ func (s *ScmService) loadCursor(p *model.Project, kind scm.ProviderKind) (scm.Cu
 }
 
 // saveCursor saves the cursor to the project
-func (s *ScmService) saveCursor(projectId string, kind scm.ProviderKind, cursor scm.Cursor) error {
-	p, err := s.projectRepo.GetProjectById(projectId)
+func (s *ScmService) saveCursor(ctx context.Context, projectId string, kind scm.ProviderKind, cursor scm.Cursor) error {
+	p, err := s.projectRepo.Get(ctx, projectId)
 	if err != nil {
 		return err
 	}
@@ -219,12 +219,12 @@ func (s *ScmService) saveCursor(projectId string, kind scm.ProviderKind, cursor 
 	if err != nil {
 		return err
 	}
-	return s.projectRepo.UpdateProject(projectId, map[string]any{
+	return s.projectRepo.Update(ctx, projectId, map[string]any{
 		"settings": datatypes.JSON(b),
 	})
 }
 
-// unmarshalSettings unmarshals the settings from the project
+// unmarshalSettings unmarshal the settings from the project
 func unmarshalSettings(settings datatypes.JSON) (map[string]any, error) {
 	if len(settings) == 0 {
 		return map[string]any{}, nil

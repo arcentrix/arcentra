@@ -38,7 +38,7 @@ func NewChannelRepositoryAdapter(repo repo.INotificationChannelRepository) *Chan
 
 // ListActiveChannels 列出所有活跃的通知配置（转换为 ChannelConfig）
 func (a *ChannelRepositoryAdapter) ListActiveChannels(ctx context.Context) ([]*ChannelConfig, error) {
-	models, err := a.repo.ListActiveChannels(ctx)
+	models, err := a.repo.ListActive(ctx)
 	if err != nil {
 		return nil, err
 	}

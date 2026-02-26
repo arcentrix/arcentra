@@ -15,17 +15,20 @@
 package repo
 
 import (
+	"context"
+
 	"github.com/arcentrix/arcentra/internal/engine/model"
 	"github.com/arcentrix/arcentra/pkg/database"
 )
 
+// IProjectTeamAccessRepository defines project team access persistence with context support.
 type IProjectTeamAccessRepository interface {
-	GetProjectTeamAccess(projectId, teamId string) (*model.ProjectTeamAccess, error)
-	ListProjectTeams(projectId string) ([]model.ProjectTeamAccess, error)
-	ListTeamProjects(teamId string) ([]model.ProjectTeamAccess, error)
-	GrantTeamAccess(access *model.ProjectTeamAccess) error
-	UpdateTeamAccessLevel(projectId, teamId, accessLevel string) error
-	RevokeTeamAccess(projectId, teamId string) error
+	Get(ctx context.Context, projectId, teamId string) (*model.ProjectTeamAccess, error)
+	ListProjectTeams(ctx context.Context, projectId string) ([]model.ProjectTeamAccess, error)
+	ListTeamProjects(ctx context.Context, teamId string) ([]model.ProjectTeamAccess, error)
+	GrantTeamAccess(ctx context.Context, access *model.ProjectTeamAccess) error
+	UpdateTeamAccessLevel(ctx context.Context, projectId, teamId, accessLevel string) error
+	RevokeTeamAccess(ctx context.Context, projectId, teamId string) error
 }
 
 type ProjectTeamAccessRepo struct {
@@ -36,44 +39,44 @@ func NewProjectTeamAccessRepo(db database.IDatabase) IProjectTeamAccessRepositor
 	return &ProjectTeamAccessRepo{IDatabase: db}
 }
 
-// GetProjectTeamAccess 获取项目团队访问权限
-func (r *ProjectTeamAccessRepo) GetProjectTeamAccess(projectId, teamId string) (*model.ProjectTeamAccess, error) {
+// Get returns project team access by projectId and teamId.
+func (r *ProjectTeamAccessRepo) Get(ctx context.Context, projectId, teamId string) (*model.ProjectTeamAccess, error) {
 	var access model.ProjectTeamAccess
-	err := r.Database().Select("id", "project_id", "team_id", "access_level", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "project_id", "team_id", "access_level", "created_at", "updated_at").
 		Where("project_id = ? AND team_id = ?", projectId, teamId).First(&access).Error
 	return &access, err
 }
 
-// ListProjectTeams 列出项目的所有团队
-func (r *ProjectTeamAccessRepo) ListProjectTeams(projectId string) ([]model.ProjectTeamAccess, error) {
+// ListProjectTeams lists project teams.
+func (r *ProjectTeamAccessRepo) ListProjectTeams(ctx context.Context, projectId string) ([]model.ProjectTeamAccess, error) {
 	var accesses []model.ProjectTeamAccess
-	err := r.Database().Select("id", "project_id", "team_id", "access_level", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "project_id", "team_id", "access_level", "created_at", "updated_at").
 		Where("project_id = ?", projectId).Find(&accesses).Error
 	return accesses, err
 }
 
-// ListTeamProjects 列出团队可访问的所有项目
-func (r *ProjectTeamAccessRepo) ListTeamProjects(teamId string) ([]model.ProjectTeamAccess, error) {
+// ListTeamProjects lists team projects.
+func (r *ProjectTeamAccessRepo) ListTeamProjects(ctx context.Context, teamId string) ([]model.ProjectTeamAccess, error) {
 	var accesses []model.ProjectTeamAccess
-	err := r.Database().Select("id", "project_id", "team_id", "access_level", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "project_id", "team_id", "access_level", "created_at", "updated_at").
 		Where("team_id = ?", teamId).Find(&accesses).Error
 	return accesses, err
 }
 
-// GrantTeamAccess 授予团队访问权限
-func (r *ProjectTeamAccessRepo) GrantTeamAccess(access *model.ProjectTeamAccess) error {
-	return r.Database().Create(access).Error
+// GrantTeamAccess grants team access.
+func (r *ProjectTeamAccessRepo) GrantTeamAccess(ctx context.Context, access *model.ProjectTeamAccess) error {
+	return r.Database().WithContext(ctx).Create(access).Error
 }
 
-// UpdateTeamAccessLevel 更新团队访问级别
-func (r *ProjectTeamAccessRepo) UpdateTeamAccessLevel(projectId, teamId, accessLevel string) error {
-	return r.Database().Model(&model.ProjectTeamAccess{}).
+// UpdateTeamAccessLevel updates team access level.
+func (r *ProjectTeamAccessRepo) UpdateTeamAccessLevel(ctx context.Context, projectId, teamId, accessLevel string) error {
+	return r.Database().WithContext(ctx).Model(&model.ProjectTeamAccess{}).
 		Where("project_id = ? AND team_id = ?", projectId, teamId).
 		Update("access_level", accessLevel).Error
 }
 
-// RevokeTeamAccess 撤销团队访问权限
-func (r *ProjectTeamAccessRepo) RevokeTeamAccess(projectId, teamId string) error {
-	return r.Database().Where("project_id = ? AND team_id = ?", projectId, teamId).
+// RevokeTeamAccess revokes team access.
+func (r *ProjectTeamAccessRepo) RevokeTeamAccess(ctx context.Context, projectId, teamId string) error {
+	return r.Database().WithContext(ctx).Where("project_id = ? AND team_id = ?", projectId, teamId).
 		Delete(&model.ProjectTeamAccess{}).Error
 }

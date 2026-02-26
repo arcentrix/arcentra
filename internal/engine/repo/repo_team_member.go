@@ -15,17 +15,20 @@
 package repo
 
 import (
+	"context"
+
 	"github.com/arcentrix/arcentra/internal/engine/model"
 	"github.com/arcentrix/arcentra/pkg/database"
 )
 
+// ITeamMemberRepository defines team member persistence with context support.
 type ITeamMemberRepository interface {
-	GetTeamMember(teamId, userId string) (*model.TeamMember, error)
-	ListTeamMembers(teamId string) ([]model.TeamMember, error)
-	ListUserTeams(userId string) ([]model.TeamMember, error)
-	AddTeamMember(member *model.TeamMember) error
-	UpdateTeamMemberRole(teamId, userId, role string) error
-	RemoveTeamMember(teamId, userId string) error
+	Get(ctx context.Context, teamId, userId string) (*model.TeamMember, error)
+	ListTeamMembers(ctx context.Context, teamId string) ([]model.TeamMember, error)
+	ListUserTeams(ctx context.Context, userId string) ([]model.TeamMember, error)
+	AddTeamMember(ctx context.Context, member *model.TeamMember) error
+	UpdateTeamMemberRole(ctx context.Context, teamId, userId, role string) error
+	RemoveTeamMember(ctx context.Context, teamId, userId string) error
 }
 
 type TeamMemberRepo struct {
@@ -36,44 +39,44 @@ func NewTeamMemberRepo(db database.IDatabase) ITeamMemberRepository {
 	return &TeamMemberRepo{IDatabase: db}
 }
 
-// GetTeamMember 获取团队成员
-func (r *TeamMemberRepo) GetTeamMember(teamId, userId string) (*model.TeamMember, error) {
+// Get returns team member by teamId and userId.
+func (r *TeamMemberRepo) Get(ctx context.Context, teamId, userId string) (*model.TeamMember, error) {
 	var member model.TeamMember
-	err := r.Database().Select("id", "team_id", "user_id", "role_id", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "team_id", "user_id", "role_id", "created_at", "updated_at").
 		Where("team_id = ? AND user_id = ?", teamId, userId).First(&member).Error
 	return &member, err
 }
 
-// ListTeamMembers 列出团队成员
-func (r *TeamMemberRepo) ListTeamMembers(teamId string) ([]model.TeamMember, error) {
+// ListTeamMembers lists team members.
+func (r *TeamMemberRepo) ListTeamMembers(ctx context.Context, teamId string) ([]model.TeamMember, error) {
 	var members []model.TeamMember
-	err := r.Database().Select("id", "team_id", "user_id", "role_id", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "team_id", "user_id", "role_id", "created_at", "updated_at").
 		Where("team_id = ?", teamId).Find(&members).Error
 	return members, err
 }
 
-// ListUserTeams 列出用户所在的团队
-func (r *TeamMemberRepo) ListUserTeams(userId string) ([]model.TeamMember, error) {
+// ListUserTeams lists user's teams.
+func (r *TeamMemberRepo) ListUserTeams(ctx context.Context, userId string) ([]model.TeamMember, error) {
 	var members []model.TeamMember
-	err := r.Database().Select("id", "team_id", "user_id", "role_id", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "team_id", "user_id", "role_id", "created_at", "updated_at").
 		Where("user_id = ?", userId).Find(&members).Error
 	return members, err
 }
 
-// AddTeamMember 添加团队成员
-func (r *TeamMemberRepo) AddTeamMember(member *model.TeamMember) error {
-	return r.Database().Create(member).Error
+// AddTeamMember adds a team member.
+func (r *TeamMemberRepo) AddTeamMember(ctx context.Context, member *model.TeamMember) error {
+	return r.Database().WithContext(ctx).Create(member).Error
 }
 
-// UpdateTeamMemberRole 更新团队成员角色
-func (r *TeamMemberRepo) UpdateTeamMemberRole(teamId, userId, role string) error {
-	return r.Database().Model(&model.TeamMember{}).
+// UpdateTeamMemberRole updates team member role.
+func (r *TeamMemberRepo) UpdateTeamMemberRole(ctx context.Context, teamId, userId, role string) error {
+	return r.Database().WithContext(ctx).Model(&model.TeamMember{}).
 		Where("team_id = ? AND user_id = ?", teamId, userId).
 		Update("role", role).Error
 }
 
-// RemoveTeamMember 移除团队成员
-func (r *TeamMemberRepo) RemoveTeamMember(teamId, userId string) error {
-	return r.Database().Where("team_id = ? AND user_id = ?", teamId, userId).
+// RemoveTeamMember removes a team member.
+func (r *TeamMemberRepo) RemoveTeamMember(ctx context.Context, teamId, userId string) error {
+	return r.Database().WithContext(ctx).Where("team_id = ? AND user_id = ?", teamId, userId).
 		Delete(&model.TeamMember{}).Error
 }

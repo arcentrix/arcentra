@@ -15,6 +15,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -60,7 +61,7 @@ type WSHandle struct {
 	hub         ws.Hub
 	logAgg      *LogAggregator
 	stepRunRepo repo.IStepRunRepository
-	kafkaCfg    kafka.KafkaConfig
+	kafkaCfg    kafka.Config
 
 	logMu   sync.Mutex
 	logSubs map[string]*logSubscription
@@ -71,7 +72,7 @@ type WSHandle struct {
 	statusStop    chan struct{}
 }
 
-func NewWSHandle(hub ws.Hub, logAgg *LogAggregator, stepRunRepo repo.IStepRunRepository, kafkaCfg kafka.KafkaConfig) *WSHandle {
+func NewWSHandle(hub ws.Hub, logAgg *LogAggregator, stepRunRepo repo.IStepRunRepository, kafkaCfg kafka.Config) *WSHandle {
 	return &WSHandle{
 		hub:         hub,
 		logAgg:      logAgg,
@@ -122,7 +123,8 @@ func (h *WSHandle) OnDisconnect(conn ws.Conn, err error) {
 
 	// 客户端主动断开通常会触发 CloseNormalClosure(1000) / CloseGoingAway(1001)
 	if err != nil && fws.IsCloseError(err, fws.CloseNormalClosure, fws.CloseGoingAway) {
-		if ce, ok := err.(*fws.CloseError); ok {
+		var ce *fws.CloseError
+		if errors.As(err, &ce) {
 			log.Infow("ws client disconnected", "conn", conn.ID(), "remote", conn.RemoteAddr(), "code", ce.Code, "text", ce.Text)
 			return
 		}

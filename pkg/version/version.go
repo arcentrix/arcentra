@@ -35,7 +35,7 @@ var (
 	Platform  = ""
 )
 
-var VersionCmd = &cobra.Command{
+var Cmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the application version information",
 	Run: func(cmd *cobra.Command, args []string) {
@@ -44,8 +44,8 @@ var VersionCmd = &cobra.Command{
 	},
 }
 
-// VersionInfo represents a version in YY.Major.Minor.Patch format (YY is 2-digit year)
-type VersionInfo struct {
+// Number represents a version in YY.Major.Minor.Patch format (YY is 2-digit year)
+type Number struct {
 	Year  int `json:"year"` // 2-digit year (e.g., 25 for 2025)
 	Major int `json:"major"`
 	Minor int `json:"minor"`
@@ -53,13 +53,13 @@ type VersionInfo struct {
 }
 
 // String returns the version string in YY.Major.Minor.Patch format
-func (v *VersionInfo) String() string {
+func (v *Number) String() string {
 	return fmt.Sprintf("%02d.%d.%d.%d", v.Year, v.Major, v.Minor, v.Patch)
 }
 
 // ParseVersion parses a version string in YY.Major.Minor.Patch format (YY is 2-digit year)
 // Returns error if the format is invalid
-func ParseVersion(versionStr string) (*VersionInfo, error) {
+func ParseVersion(versionStr string) (*Number, error) {
 	if versionStr == "" {
 		return nil, fmt.Errorf("version string is empty")
 	}
@@ -102,7 +102,7 @@ func ParseVersion(versionStr string) (*VersionInfo, error) {
 		return nil, fmt.Errorf("year must be between 20 and 99 (representing 2020-2099), got: %d", year)
 	}
 
-	return &VersionInfo{
+	return &Number{
 		Year:  year,
 		Major: major,
 		Minor: minor,
@@ -118,7 +118,7 @@ func ValidateVersion(versionStr string) error {
 
 // Compare compares two versions
 // Returns: -1 if v < other, 0 if v == other, 1 if v > other
-func (v *VersionInfo) Compare(other *VersionInfo) int {
+func (v *Number) Compare(other *Number) int {
 	if v.Year != other.Year {
 		if v.Year < other.Year {
 			return -1
@@ -170,11 +170,8 @@ func GetVersion() *Info {
 
 // GetParsedVersion returns the parsed version object
 // Returns nil if version string is empty or invalid
-func GetParsedVersion() (*VersionInfo, error) {
-	if Version == "" {
-		return nil, fmt.Errorf("version is not set")
-	}
-	return ParseVersion(Version)
+func GetParsedVersion() (*Number, error) {
+	return nil, fmt.Errorf("version is not set")
 }
 
 func (v *Info) Json() json.RawMessage {

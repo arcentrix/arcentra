@@ -16,6 +16,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -179,7 +180,7 @@ func TestAbort(t *testing.T) {
 	if !ctx2.IsAborted() {
 		t.Error("context should be aborted after AbortWithError()")
 	}
-	if ctx2.AbortError() != err {
+	if !errors.Is(err, ctx2.AbortError()) {
 		t.Error("abort error not set correctly")
 	}
 	// Test that AbortWithError transitions to CANCELED state

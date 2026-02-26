@@ -32,8 +32,8 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
-// TraceConfig represents the configuration for OpenTelemetry tracing
-type TraceConfig struct {
+// Config represents the configuration for OpenTelemetry tracing
+type Config struct {
 	// Enabled enables or disables tracing
 	Enabled bool `mapstructure:"enabled"`
 	// ServiceName is the name of the service
@@ -68,7 +68,7 @@ type BatchConfig struct {
 }
 
 // SetDefaults sets default values for the configuration
-func (c *TraceConfig) SetDefaults() {
+func (c *Config) SetDefaults() {
 	if c.ServiceName == "" {
 		c.ServiceName = "arcentra"
 	}
@@ -119,7 +119,7 @@ var (
 )
 
 // Init initializes OpenTelemetry tracing with the given configuration
-func Init(cfg TraceConfig) error {
+func Init(cfg Config) error {
 	cfg.SetDefaults()
 
 	if !cfg.Enabled || cfg.ExporterType == "none" {
@@ -202,7 +202,7 @@ func Init(cfg TraceConfig) error {
 }
 
 // createJaegerExporter creates a Jaeger exporter using OTLP HTTP
-func createJaegerExporter(cfg TraceConfig) (sdktrace.SpanExporter, error) {
+func createJaegerExporter(cfg Config) (sdktrace.SpanExporter, error) {
 	opts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpoint(cfg.Endpoint),
 	}
@@ -220,7 +220,7 @@ func createJaegerExporter(cfg TraceConfig) (sdktrace.SpanExporter, error) {
 }
 
 // createOTLPGRPCExporter creates an OTLP gRPC exporter
-func createOTLPGRPCExporter(cfg TraceConfig) (sdktrace.SpanExporter, error) {
+func createOTLPGRPCExporter(cfg Config) (sdktrace.SpanExporter, error) {
 	opts := []otlptracegrpc.Option{
 		otlptracegrpc.WithEndpoint(cfg.Endpoint),
 	}
@@ -238,7 +238,7 @@ func createOTLPGRPCExporter(cfg TraceConfig) (sdktrace.SpanExporter, error) {
 }
 
 // createOTLPHTTPExporter creates an OTLP HTTP exporter
-func createOTLPHTTPExporter(cfg TraceConfig) (sdktrace.SpanExporter, error) {
+func createOTLPHTTPExporter(cfg Config) (sdktrace.SpanExporter, error) {
 	opts := []otlptracehttp.Option{
 		otlptracehttp.WithEndpoint(cfg.Endpoint),
 	}

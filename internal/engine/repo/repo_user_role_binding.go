@@ -15,16 +15,19 @@
 package repo
 
 import (
+	"context"
+
 	"github.com/arcentrix/arcentra/internal/engine/model"
 	"github.com/arcentrix/arcentra/pkg/database"
 )
 
+// IUserRoleBindingRepository defines user role binding persistence with context support.
 type IUserRoleBindingRepository interface {
-	GetUserRoleBindings(userId string) ([]model.UserRoleBinding, error)
-	GetUserRoleBindingByRole(userId, roleId string) (*model.UserRoleBinding, error)
-	CreateUserRoleBinding(binding *model.UserRoleBinding) error
-	DeleteUserRoleBinding(bindingId string) error
-	DeleteUserRoleBindingsByUser(userId string) error
+	List(ctx context.Context, userId string) ([]model.UserRoleBinding, error)
+	GetByRole(ctx context.Context, userId, roleId string) (*model.UserRoleBinding, error)
+	Create(ctx context.Context, binding *model.UserRoleBinding) error
+	Delete(ctx context.Context, bindingId string) error
+	DeleteByUser(ctx context.Context, userId string) error
 }
 
 type UserRoleBindingRepo struct {
@@ -37,18 +40,18 @@ func NewUserRoleBindingRepo(db database.IDatabase) IUserRoleBindingRepository {
 	}
 }
 
-// GetUserRoleBindings 获取用户的所有角色绑定
-func (r *UserRoleBindingRepo) GetUserRoleBindings(userId string) ([]model.UserRoleBinding, error) {
+// List returns user role bindings by userId.
+func (r *UserRoleBindingRepo) List(ctx context.Context, userId string) ([]model.UserRoleBinding, error) {
 	var bindings []model.UserRoleBinding
-	err := r.Database().Select("binding_id", "user_id", "role_id", "granted_by", "create_time", "update_time").
+	err := r.Database().WithContext(ctx).Select("binding_id", "user_id", "role_id", "granted_by", "create_time", "update_time").
 		Where("user_id = ?", userId).Find(&bindings).Error
 	return bindings, err
 }
 
-// GetUserRoleBindingByRole 获取用户指定角色的绑定
-func (r *UserRoleBindingRepo) GetUserRoleBindingByRole(userId, roleId string) (*model.UserRoleBinding, error) {
+// GetByRole returns user role binding by userId and roleId.
+func (r *UserRoleBindingRepo) GetByRole(ctx context.Context, userId, roleId string) (*model.UserRoleBinding, error) {
 	var binding model.UserRoleBinding
-	err := r.Database().Select("binding_id", "user_id", "role_id", "granted_by", "create_time", "update_time").
+	err := r.Database().WithContext(ctx).Select("binding_id", "user_id", "role_id", "granted_by", "create_time", "update_time").
 		Where("user_id = ? AND role_id = ?", userId, roleId).First(&binding).Error
 	if err != nil {
 		return nil, err
@@ -56,17 +59,17 @@ func (r *UserRoleBindingRepo) GetUserRoleBindingByRole(userId, roleId string) (*
 	return &binding, nil
 }
 
-// CreateUserRoleBinding 创建用户角色绑定
-func (r *UserRoleBindingRepo) CreateUserRoleBinding(binding *model.UserRoleBinding) error {
-	return r.Database().Create(binding).Error
+// Create creates a user role binding.
+func (r *UserRoleBindingRepo) Create(ctx context.Context, binding *model.UserRoleBinding) error {
+	return r.Database().WithContext(ctx).Create(binding).Error
 }
 
-// DeleteUserRoleBinding 删除用户角色绑定
-func (r *UserRoleBindingRepo) DeleteUserRoleBinding(bindingId string) error {
-	return r.Database().Where("binding_id = ?", bindingId).Delete(&model.UserRoleBinding{}).Error
+// Delete deletes user role binding by bindingId.
+func (r *UserRoleBindingRepo) Delete(ctx context.Context, bindingId string) error {
+	return r.Database().WithContext(ctx).Where("binding_id = ?", bindingId).Delete(&model.UserRoleBinding{}).Error
 }
 
-// DeleteUserRoleBindingsByUser 删除用户的所有角色绑定
-func (r *UserRoleBindingRepo) DeleteUserRoleBindingsByUser(userId string) error {
-	return r.Database().Where("user_id = ?", userId).Delete(&model.UserRoleBinding{}).Error
+// DeleteByUser deletes all user role bindings by userId.
+func (r *UserRoleBindingRepo) DeleteByUser(ctx context.Context, userId string) error {
+	return r.Database().WithContext(ctx).Where("user_id = ?", userId).Delete(&model.UserRoleBinding{}).Error
 }

@@ -83,7 +83,7 @@ type Context struct {
 // HandlerFunc defines the handler function signature for middleware
 type HandlerFunc func(*Context)
 
-// NewPipeline creates a new PipelineContext with the given context and pipeline.
+// NewContext NewPipeline creates a new PipelineContext with the given context and pipeline.
 func NewContext(ctx context.Context, pipeline *spec.Pipeline, execCtx *ExecutionContext) *Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -92,10 +92,19 @@ func NewContext(ctx context.Context, pipeline *spec.Pipeline, execCtx *Execution
 	// Create state machine with initial state PENDING
 	sm := statemachine.NewWithState(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING)
 	// Define state transition rules
-	sm.Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING, pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING, pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
-		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING, pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS, pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED, pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED).
-		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING).                                                     // Support retry
-		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED, pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING, pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED) // Support pause and resume
+	sm.Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING,
+		pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
+		pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
+		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED).
+		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING). // Support retry
+		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED) // Support pause and resume
 
 	pc := &Context{
 		ctx:          ctx,
@@ -112,34 +121,41 @@ func NewContext(ctx context.Context, pipeline *spec.Pipeline, execCtx *Execution
 	}
 
 	// Register hooks for terminal states to set endTime
-	sm.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS, func(state pipelinev1.PipelineStatus) error {
-		pc.mu.Lock()
-		if pc.endTime == nil {
-			now := time.Now()
-			pc.endTime = &now
-		}
-		pc.mu.Unlock()
-		return nil
-	})
-	sm.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, func(state pipelinev1.PipelineStatus) error {
-		pc.mu.Lock()
-		if pc.endTime == nil {
-			now := time.Now()
-			pc.endTime = &now
-		}
-		pc.mu.Unlock()
-		return nil
-	})
-	sm.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED, func(state pipelinev1.PipelineStatus) error {
-		pc.mu.Lock()
-		if pc.endTime == nil {
-			now := time.Now()
-			pc.endTime = &now
-		}
-		pc.mu.Unlock()
-		return nil
-	})
+	sm.OnEnter(
+		pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
+		func(state pipelinev1.PipelineStatus) error {
+			pc.mu.Lock()
+			if pc.endTime == nil {
+				now := time.Now()
+				pc.endTime = &now
+			}
+			pc.mu.Unlock()
+			return nil
+		})
 
+	sm.OnEnter(
+		pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+		func(state pipelinev1.PipelineStatus) error {
+			pc.mu.Lock()
+			if pc.endTime == nil {
+				now := time.Now()
+				pc.endTime = &now
+			}
+			pc.mu.Unlock()
+			return nil
+		})
+
+	sm.OnEnter(
+		pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED,
+		func(state pipelinev1.PipelineStatus) error {
+			pc.mu.Lock()
+			if pc.endTime == nil {
+				now := time.Now()
+				pc.endTime = &now
+			}
+			pc.mu.Unlock()
+			return nil
+		})
 	return pc
 }
 
@@ -154,10 +170,19 @@ func (c *Context) WithContext(ctx context.Context) *Context {
 	currentState := c.Status()
 	sm := statemachine.NewWithState(currentState)
 	// Define state transition rules
-	sm.Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING, pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING, pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
-		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING, pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS, pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED, pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED).
-		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING).
-		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED, pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING, pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED)
+	sm.Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING,
+		pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
+		pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
+		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED).
+		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING).
+		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED)
 
 	newCtx := &Context{
 		ctx:          ctx,
@@ -185,33 +210,41 @@ func (c *Context) WithContext(ctx context.Context) *Context {
 	}
 
 	// Register hooks for terminal states
-	sm.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS, func(state pipelinev1.PipelineStatus) error {
-		newCtx.mu.Lock()
-		if newCtx.endTime == nil {
-			now := time.Now()
-			newCtx.endTime = &now
-		}
-		newCtx.mu.Unlock()
-		return nil
-	})
-	sm.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, func(state pipelinev1.PipelineStatus) error {
-		newCtx.mu.Lock()
-		if newCtx.endTime == nil {
-			now := time.Now()
-			newCtx.endTime = &now
-		}
-		newCtx.mu.Unlock()
-		return nil
-	})
-	sm.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED, func(state pipelinev1.PipelineStatus) error {
-		newCtx.mu.Lock()
-		if newCtx.endTime == nil {
-			now := time.Now()
-			newCtx.endTime = &now
-		}
-		newCtx.mu.Unlock()
-		return nil
-	})
+	sm.OnEnter(
+		pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
+		func(state pipelinev1.PipelineStatus) error {
+			newCtx.mu.Lock()
+			if newCtx.endTime == nil {
+				now := time.Now()
+				newCtx.endTime = &now
+			}
+			newCtx.mu.Unlock()
+			return nil
+		})
+
+	sm.OnEnter(
+		pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+		func(state pipelinev1.PipelineStatus) error {
+			newCtx.mu.Lock()
+			if newCtx.endTime == nil {
+				now := time.Now()
+				newCtx.endTime = &now
+			}
+			newCtx.mu.Unlock()
+			return nil
+		})
+
+	sm.OnEnter(
+		pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED,
+		func(state pipelinev1.PipelineStatus) error {
+			newCtx.mu.Lock()
+			if newCtx.endTime == nil {
+				now := time.Now()
+				newCtx.endTime = &now
+			}
+			newCtx.mu.Unlock()
+			return nil
+		})
 
 	// Copy keys and store
 	c.mu.RLock()
@@ -591,7 +624,7 @@ func (c *Context) WithCancel() (*Context, context.CancelFunc) {
 	return c.WithContext(ctx), cancel
 }
 
-// Log logs a message at the job level
+// LogJob Log logs a message at the job level
 func (c *Context) LogJob(job, msg string) {
 	if c.execCtx != nil {
 		c.execCtx.LogJob(job, msg)

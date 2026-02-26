@@ -24,12 +24,13 @@ import (
 	"github.com/arcentrix/arcentra/pkg/database"
 )
 
+// IGeneralSettingsRepository defines general settings persistence with context support.
 type IGeneralSettingsRepository interface {
-	UpdateGeneralSettings(settings *model.GeneralSettings) error
-	GetGeneralSettingsByID(settingsId string) (*model.GeneralSettings, error)
-	GetGeneralSettingsByName(category, name string) (*model.GeneralSettings, error)
-	GetGeneralSettingsList(pageNum, pageSize int, category string) ([]*model.GeneralSettings, int64, error)
-	GetCategories() ([]string, error)
+	Update(ctx context.Context, settings *model.GeneralSettings) error
+	Get(ctx context.Context, settingsId string) (*model.GeneralSettings, error)
+	GetByName(ctx context.Context, category, name string) (*model.GeneralSettings, error)
+	List(ctx context.Context, pageNum, pageSize int, category string) ([]*model.GeneralSettings, int64, error)
+	GetCategories(ctx context.Context) ([]string, error)
 }
 
 const (
@@ -49,58 +50,50 @@ func NewGeneralSettingsRepo(db database.IDatabase, cache cache.ICache) IGeneralS
 	}
 }
 
-// UpdateGeneralSettings updates a general settings by settings ID
-func (gsr *GeneralSettingsRepo) UpdateGeneralSettings(settings *model.GeneralSettings) error {
-	err := gsr.Database().Table(settings.TableName()).
+// Update updates general settings by settingsId.
+func (gsr *GeneralSettingsRepo) Update(ctx context.Context, settings *model.GeneralSettings) error {
+	err := gsr.Database().WithContext(ctx).Table(settings.TableName()).
 		Omit("id", "settings_id", "category", "name").
 		Where("settings_id = ?", settings.SettingsId).
 		Updates(settings).Error
 	if err != nil {
 		return err
 	}
-
-	gsr.clearGeneralSettingsCache(settings.Name)
+	gsr.clearGeneralSettingsCache(ctx, settings.Name)
 	return nil
 }
 
-// GetGeneralSettingsByID gets a general settings by settings ID (with Redis JSON cache)
-func (gsr *GeneralSettingsRepo) GetGeneralSettingsByID(settingsId string) (*model.GeneralSettings, error) {
-	// First query database to get the name and category
+// Get returns general settings by settingsId.
+func (gsr *GeneralSettingsRepo) Get(ctx context.Context, settingsId string) (*model.GeneralSettings, error) {
 	var tempSettings model.GeneralSettings
-	err := gsr.Database().Table(tempSettings.TableName()).
+	err := gsr.Database().WithContext(ctx).Table(tempSettings.TableName()).
 		Select("name", "category").
 		Where("settings_id = ?", settingsId).
 		First(&tempSettings).Error
 	if err != nil {
 		return nil, err
 	}
-
-	// Use name as cache key (category is used in query but cache key is still by name)
-	return gsr.getGeneralSettingsByName(tempSettings.Name, tempSettings.Category, settingsId)
+	return gsr.getGeneralSettingsByName(ctx, tempSettings.Name, tempSettings.Category, settingsId)
 }
 
-// GetGeneralSettingsByName gets a general settings by category and name (with Redis JSON cache)
-func (gsr *GeneralSettingsRepo) GetGeneralSettingsByName(category, name string) (*model.GeneralSettings, error) {
-	return gsr.getGeneralSettingsByName(name, category, "")
+// GetByName returns general settings by category and name.
+func (gsr *GeneralSettingsRepo) GetByName(ctx context.Context, category, name string) (*model.GeneralSettings, error) {
+	return gsr.getGeneralSettingsByName(ctx, name, category, "")
 }
 
-// getGeneralSettingsByName gets general settings by name using CachedQuery (stores as JSON string in Redis)
-func (gsr *GeneralSettingsRepo) getGeneralSettingsByName(name string, category string, settingsId string) (*model.GeneralSettings, error) {
-	ctx := context.Background()
-
+func (gsr *GeneralSettingsRepo) getGeneralSettingsByName(ctx context.Context, name string, category string, settingsId string) (*model.GeneralSettings, error) {
 	keyFunc := func(params ...any) string {
 		return consts.GeneralSettingsKeyByName + params[0].(string)
 	}
 
 	queryFunc := func(ctx context.Context) (*model.GeneralSettings, error) {
 		var settings model.GeneralSettings
-		query := gsr.Database().Table(settings.TableName()).
+		query := gsr.Database().WithContext(ctx).Table(settings.TableName()).
 			Select("id", "settings_id", "category", "name", "display_name", "data", "schema", "description", "created_at", "updated_at")
 
 		if settingsId != "" {
 			query = query.Where("settings_id = ?", settingsId)
 		} else {
-			// Query by category and name
 			query = query.Where("category = ? AND name = ?", category, name)
 		}
 
@@ -122,14 +115,13 @@ func (gsr *GeneralSettingsRepo) getGeneralSettingsByName(name string, category s
 	return cq.Get(ctx, name)
 }
 
-// GetGeneralSettingsList gets general settings list with pagination and filters
-// Note: List queries are not cached because they return multiple records and cannot use a single name as cache key
-func (gsr *GeneralSettingsRepo) GetGeneralSettingsList(pageNum, pageSize int, category string) ([]*model.GeneralSettings, int64, error) {
+// List lists general settings with pagination and filters.
+func (gsr *GeneralSettingsRepo) List(ctx context.Context, pageNum, pageSize int, category string) ([]*model.GeneralSettings, int64, error) {
 	var settingsList []*model.GeneralSettings
 	var settings model.GeneralSettings
 	var total int64
 
-	query := gsr.Database().Table(settings.TableName())
+	query := gsr.Database().WithContext(ctx).Table(settings.TableName())
 
 	// apply filters
 	if category != "" {
@@ -152,22 +144,20 @@ func (gsr *GeneralSettingsRepo) GetGeneralSettingsList(pageNum, pageSize int, ca
 	return settingsList, total, err
 }
 
-// GetCategories gets all distinct categories
-func (gsr *GeneralSettingsRepo) GetCategories() ([]string, error) {
+// GetCategories returns all distinct categories.
+func (gsr *GeneralSettingsRepo) GetCategories(ctx context.Context) ([]string, error) {
 	var categories []string
 	var settings model.GeneralSettings
-	err := gsr.Database().Table(settings.TableName()).
+	err := gsr.Database().WithContext(ctx).Table(settings.TableName()).
 		Distinct("category").
 		Pluck("category", &categories).Error
 	return categories, err
 }
 
-// clearGeneralSettingsCache 清除通用设置的缓存（删除 Redis JSON 字符串）
-func (gsr *GeneralSettingsRepo) clearGeneralSettingsCache(name string) {
+func (gsr *GeneralSettingsRepo) clearGeneralSettingsCache(ctx context.Context, name string) {
 	if gsr.ICache == nil {
 		return
 	}
-	ctx := context.Background()
 
 	keyFunc := func(params ...any) string {
 		return consts.GeneralSettingsKeyByName + params[0].(string)

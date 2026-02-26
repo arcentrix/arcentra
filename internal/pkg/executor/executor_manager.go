@@ -22,9 +22,9 @@ import (
 	"github.com/arcentrix/arcentra/pkg/plugin"
 )
 
-// ExecutorManager 执行器管理器
+// Manager 执行器管理器
 // 负责管理和选择合适的执行器
-type ExecutorManager struct {
+type Manager struct {
 	executors []Executor
 	mu        sync.RWMutex
 	emitter   *EventEmitter
@@ -32,14 +32,14 @@ type ExecutorManager struct {
 }
 
 // NewExecutorManager 创建执行器管理器
-func NewExecutorManager() *ExecutorManager {
-	return &ExecutorManager{
+func NewExecutorManager() *Manager {
+	return &Manager{
 		executors: make([]Executor, 0),
 	}
 }
 
 // Register 注册执行器
-func (m *ExecutorManager) Register(executor Executor) {
+func (m *Manager) Register(executor Executor) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.executors = append(m.executors, executor)
@@ -47,7 +47,7 @@ func (m *ExecutorManager) Register(executor Executor) {
 
 // SelectExecutor 选择合适的执行器
 // 按照注册顺序检查每个执行器是否可以执行
-func (m *ExecutorManager) SelectExecutor(req *ExecutionRequest) (Executor, error) {
+func (m *Manager) SelectExecutor(req *ExecutionRequest) (Executor, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -62,7 +62,7 @@ func (m *ExecutorManager) SelectExecutor(req *ExecutionRequest) (Executor, error
 
 // Execute 执行 step
 // 自动选择合适的执行器并执行
-func (m *ExecutorManager) Execute(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
+func (m *Manager) Execute(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
 	executor, err := m.SelectExecutor(req)
 	if err != nil {
 		m.emitFailure(ctx, req, nil, err, "")
@@ -82,7 +82,7 @@ func (m *ExecutorManager) Execute(ctx context.Context, req *ExecutionRequest) (*
 }
 
 // ListExecutors 列出所有注册的执行器
-func (m *ExecutorManager) ListExecutors() []Executor {
+func (m *Manager) ListExecutors() []Executor {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -92,7 +92,7 @@ func (m *ExecutorManager) ListExecutors() []Executor {
 }
 
 // GetExecutor 根据名称获取执行器
-func (m *ExecutorManager) GetExecutor(name string) Executor {
+func (m *Manager) GetExecutor(name string) Executor {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -106,14 +106,14 @@ func (m *ExecutorManager) GetExecutor(name string) Executor {
 }
 
 // SetEventEmitter sets the EventEmitter for the manager.
-func (m *ExecutorManager) SetEventEmitter(emitter *EventEmitter) {
+func (m *Manager) SetEventEmitter(emitter *EventEmitter) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.emitter = emitter
 }
 
 // SetEventPublisher creates an EventEmitter with the given publisher.
-func (m *ExecutorManager) SetEventPublisher(publisher EventPublisher, config EventEmitterConfig) {
+func (m *Manager) SetEventPublisher(publisher EventPublisher, config EventEmitterConfig) {
 	if publisher == nil {
 		return
 	}
@@ -121,25 +121,25 @@ func (m *ExecutorManager) SetEventPublisher(publisher EventPublisher, config Eve
 }
 
 // SetLogPublisher sets the log publisher for build logs.
-func (m *ExecutorManager) SetLogPublisher(publisher LogPublisher) {
+func (m *Manager) SetLogPublisher(publisher LogPublisher) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.logPub = publisher
 }
 
-func (m *ExecutorManager) getEmitter() *EventEmitter {
+func (m *Manager) getEmitter() *EventEmitter {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.emitter
 }
 
-func (m *ExecutorManager) getLogPublisher() LogPublisher {
+func (m *Manager) getLogPublisher() LogPublisher {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.logPub
 }
 
-func (m *ExecutorManager) emitStarted(ctx context.Context, req *ExecutionRequest, executorName string) {
+func (m *Manager) emitStarted(ctx context.Context, req *ExecutionRequest, executorName string) {
 	emitter := m.getEmitter()
 	if emitter == nil {
 		return
@@ -156,7 +156,7 @@ func (m *ExecutorManager) emitStarted(ctx context.Context, req *ExecutionRequest
 	emitter.Emit(ctx, plugin.EventTypeTaskStarted, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
 }
 
-func (m *ExecutorManager) emitSuccess(ctx context.Context, req *ExecutionRequest, result *ExecutionResult, executorName string) {
+func (m *Manager) emitSuccess(ctx context.Context, req *ExecutionRequest, result *ExecutionResult, executorName string) {
 	emitter := m.getEmitter()
 	if emitter == nil {
 		return
@@ -177,7 +177,12 @@ func (m *ExecutorManager) emitSuccess(ctx context.Context, req *ExecutionRequest
 	m.emitFinished(ctx, emitter, eventCtx, executorName, "succeeded", durationMs)
 }
 
-func (m *ExecutorManager) emitFailure(ctx context.Context, req *ExecutionRequest, result *ExecutionResult, execErr error, executorName string) {
+func (m *Manager) emitFailure(ctx context.Context,
+	req *ExecutionRequest,
+	result *ExecutionResult,
+	execErr error,
+	executorName string,
+) {
 	emitter := m.getEmitter()
 	if emitter == nil {
 		return
@@ -201,7 +206,13 @@ func (m *ExecutorManager) emitFailure(ctx context.Context, req *ExecutionRequest
 	m.emitFinished(ctx, emitter, eventCtx, executorName, "failed", durationMs)
 }
 
-func (m *ExecutorManager) emitFinished(ctx context.Context, emitter *EventEmitter, eventCtx EventContext, executorName, status string, durationMs int64) {
+func (m *Manager) emitFinished(
+	ctx context.Context,
+	emitter *EventEmitter,
+	eventCtx EventContext,
+	executorName, status string,
+	durationMs int64,
+) {
 	data := map[string]any{
 		"status":     status,
 		"durationMs": durationMs,
@@ -209,7 +220,13 @@ func (m *ExecutorManager) emitFinished(ctx context.Context, emitter *EventEmitte
 	emitter.Emit(ctx, plugin.EventTypeTaskFinished, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
 }
 
-func (m *ExecutorManager) emitLogs(ctx context.Context, emitter *EventEmitter, eventCtx EventContext, executorName string, result *ExecutionResult) {
+func (m *Manager) emitLogs(
+	ctx context.Context,
+	emitter *EventEmitter,
+	eventCtx EventContext,
+	executorName string,
+	result *ExecutionResult,
+) {
 	if result == nil {
 		return
 	}
@@ -232,7 +249,7 @@ func (m *ExecutorManager) emitLogs(ctx context.Context, emitter *EventEmitter, e
 	}
 }
 
-func (m *ExecutorManager) publishBuildLog(ctx context.Context, publisher LogPublisher, eventCtx EventContext, content, stream string) {
+func (m *Manager) publishBuildLog(ctx context.Context, publisher LogPublisher, eventCtx EventContext, content, stream string) {
 	if publisher == nil || content == "" {
 		return
 	}
@@ -240,7 +257,13 @@ func (m *ExecutorManager) publishBuildLog(ctx context.Context, publisher LogPubl
 	_ = publisher.Publish(ctx, entry)
 }
 
-func (m *ExecutorManager) emitProgress(ctx context.Context, emitter *EventEmitter, eventCtx EventContext, executorName string, result *ExecutionResult) {
+func (m *Manager) emitProgress(
+	ctx context.Context,
+	emitter *EventEmitter,
+	eventCtx EventContext,
+	executorName string,
+	result *ExecutionResult,
+) {
 	if result == nil || len(result.Metadata) == 0 {
 		return
 	}
@@ -259,7 +282,13 @@ func (m *ExecutorManager) emitProgress(ctx context.Context, emitter *EventEmitte
 	emitter.Emit(ctx, plugin.EventTypeTaskProgress, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
 }
 
-func (m *ExecutorManager) emitArtifact(ctx context.Context, emitter *EventEmitter, eventCtx EventContext, executorName string, result *ExecutionResult) {
+func (m *Manager) emitArtifact(
+	ctx context.Context,
+	emitter *EventEmitter,
+	eventCtx EventContext,
+	executorName string,
+	result *ExecutionResult,
+) {
 	if result == nil || len(result.Metadata) == 0 {
 		return
 	}

@@ -15,6 +15,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -35,15 +36,13 @@ func NewProjectService(projectRepo projectrepo.IProjectRepository) *ProjectServi
 	}
 }
 
-// CreateProject 创建项目
-func (s *ProjectService) CreateProject(req *model.CreateProjectReq, createdBy string) (*model.Project, error) {
-	// 1. 验证组织ID
+// CreateProject creates a project.
+func (s *ProjectService) CreateProject(ctx context.Context, req *model.CreateProjectReq, createdBy string) (*model.Project, error) {
 	if req.OrgId == "" {
 		return nil, errors.New("organization id cannot be empty")
 	}
 
-	// 2. 检查项目名称是否已存在
-	exists, err := s.projectRepo.CheckProjectNameExists(req.OrgId, req.Name)
+	exists, err := s.projectRepo.NameExists(ctx, req.OrgId, req.Name)
 	if err != nil {
 		log.Errorw("check project name failed", "orgId", req.OrgId, "name", req.Name, "error", err)
 		return nil, fmt.Errorf("check project name failed: %w", err)
@@ -127,8 +126,7 @@ func (s *ProjectService) CreateProject(req *model.CreateProjectReq, createdBy st
 		Homepage:      req.Homepage,
 	}
 
-	// 7. 保存到数据库
-	if err := s.projectRepo.CreateProject(project); err != nil {
+	if err := s.projectRepo.Create(ctx, project); err != nil {
 		log.Errorw("create project failed", "name", project.Name, "error", err)
 		return nil, fmt.Errorf("create project failed: %w", err)
 	}
@@ -138,10 +136,9 @@ func (s *ProjectService) CreateProject(req *model.CreateProjectReq, createdBy st
 	return project, nil
 }
 
-// UpdateProject 更新项目
-func (s *ProjectService) UpdateProject(projectId string, req *model.UpdateProjectReq) (*model.Project, error) {
-	// 1. 检查项目是否存在
-	exists, err := s.projectRepo.CheckProjectExists(projectId)
+// UpdateProject updates a project.
+func (s *ProjectService) UpdateProject(ctx context.Context, projectId string, req *model.UpdateProjectReq) (*model.Project, error) {
+	exists, err := s.projectRepo.Exists(ctx, projectId)
 	if err != nil {
 		log.Errorw("check project exists failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("check project exists failed: %w", err)
@@ -229,16 +226,14 @@ func (s *ProjectService) UpdateProject(projectId string, req *model.UpdateProjec
 		updates["is_enabled"] = *req.IsEnabled
 	}
 
-	// 3. 执行更新
 	if len(updates) > 0 {
-		if err = s.projectRepo.UpdateProject(projectId, updates); err != nil {
+		if err = s.projectRepo.Update(ctx, projectId, updates); err != nil {
 			log.Errorw("update project failed", "projectId", projectId, "error", err)
 			return nil, fmt.Errorf("update project failed: %w", err)
 		}
 	}
 
-	// 4. 返回更新后的项目
-	project, err := s.projectRepo.GetProjectById(projectId)
+	project, err := s.projectRepo.Get(ctx, projectId)
 	if err != nil {
 		log.Errorw("get project failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("get project failed: %w", err)
@@ -249,10 +244,9 @@ func (s *ProjectService) UpdateProject(projectId string, req *model.UpdateProjec
 	return project, nil
 }
 
-// DeleteProject 删除项目
-func (s *ProjectService) DeleteProject(projectId string) error {
-	// 检查项目是否存在
-	exists, err := s.projectRepo.CheckProjectExists(projectId)
+// DeleteProject deletes a project.
+func (s *ProjectService) DeleteProject(ctx context.Context, projectId string) error {
+	exists, err := s.projectRepo.Exists(ctx, projectId)
 	if err != nil {
 		log.Errorw("check project exists failed", "projectId", projectId, "error", err)
 		return fmt.Errorf("check project exists failed: %w", err)
@@ -261,8 +255,7 @@ func (s *ProjectService) DeleteProject(projectId string) error {
 		return errors.New("project not found")
 	}
 
-	// 执行删除（软删除）
-	if err := s.projectRepo.DeleteProject(projectId); err != nil {
+	if err := s.projectRepo.Delete(ctx, projectId); err != nil {
 		log.Errorw("delete project failed", "projectId", projectId, "error", err)
 		return fmt.Errorf("delete project failed: %w", err)
 	}
@@ -272,9 +265,9 @@ func (s *ProjectService) DeleteProject(projectId string) error {
 	return nil
 }
 
-// GetProjectById 根据项目ID获取项目
-func (s *ProjectService) GetProjectById(projectId string) (*model.Project, error) {
-	project, err := s.projectRepo.GetProjectById(projectId)
+// GetProjectById returns project by projectId.
+func (s *ProjectService) GetProjectById(ctx context.Context, projectId string) (*model.Project, error) {
+	project, err := s.projectRepo.Get(ctx, projectId)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("project not found")
@@ -285,9 +278,9 @@ func (s *ProjectService) GetProjectById(projectId string) (*model.Project, error
 	return project, nil
 }
 
-// ListProjects 查询项目列表
-func (s *ProjectService) ListProjects(query *model.ProjectQueryReq) ([]*model.Project, int64, error) {
-	projects, total, err := s.projectRepo.ListProjects(query)
+// ListProjects lists projects with query.
+func (s *ProjectService) ListProjects(ctx context.Context, query *model.ProjectQueryReq) ([]*model.Project, int64, error) {
+	projects, total, err := s.projectRepo.List(ctx, query)
 	if err != nil {
 		log.Errorw("list projects failed", "error", err)
 		return nil, 0, fmt.Errorf("list projects failed: %w", err)
@@ -295,9 +288,9 @@ func (s *ProjectService) ListProjects(query *model.ProjectQueryReq) ([]*model.Pr
 	return projects, total, nil
 }
 
-// GetProjectsByOrgId 根据组织ID获取项目列表
-func (s *ProjectService) GetProjectsByOrgId(orgId string, pageNum, pageSize int, status *int) ([]*model.Project, int64, error) {
-	projects, total, err := s.projectRepo.GetProjectsByOrgId(orgId, pageNum, pageSize, status)
+// GetProjectsByOrgId lists projects by orgId.
+func (s *ProjectService) GetProjectsByOrgId(ctx context.Context, orgId string, pageNum, pageSize int, status *int) ([]*model.Project, int64, error) {
+	projects, total, err := s.projectRepo.ListByOrg(ctx, orgId, pageNum, pageSize, status)
 	if err != nil {
 		log.Errorw("get projects by org id failed", "orgId", orgId, "error", err)
 		return nil, 0, fmt.Errorf("get projects by org id failed: %w", err)
@@ -305,9 +298,9 @@ func (s *ProjectService) GetProjectsByOrgId(orgId string, pageNum, pageSize int,
 	return projects, total, nil
 }
 
-// GetProjectsByUserId 获取用户的项目列表
-func (s *ProjectService) GetProjectsByUserId(userId string, pageNum, pageSize int, orgId, role string) ([]*model.Project, int64, error) {
-	projects, total, err := s.projectRepo.GetProjectsByUserId(userId, pageNum, pageSize, orgId, role)
+// GetProjectsByUserId lists projects for user.
+func (s *ProjectService) GetProjectsByUserId(ctx context.Context, userId string, pageNum, pageSize int, orgId, role string) ([]*model.Project, int64, error) {
+	projects, total, err := s.projectRepo.ListByUser(ctx, userId, pageNum, pageSize, orgId, role)
 	if err != nil {
 		log.Errorw("get projects by user id failed", "userId", userId, "error", err)
 		return nil, 0, fmt.Errorf("get projects by user id failed: %w", err)
@@ -315,10 +308,9 @@ func (s *ProjectService) GetProjectsByUserId(userId string, pageNum, pageSize in
 	return projects, total, nil
 }
 
-// UpdateProjectStatistics 更新项目统计信息
-func (s *ProjectService) UpdateProjectStatistics(projectId string, stats *model.ProjectStatisticsReq) (*model.Project, error) {
-	// 检查项目是否存在
-	exists, err := s.projectRepo.CheckProjectExists(projectId)
+// UpdateProjectStatistics updates project statistics.
+func (s *ProjectService) UpdateProjectStatistics(ctx context.Context, projectId string, stats *model.ProjectStatisticsReq) (*model.Project, error) {
+	exists, err := s.projectRepo.Exists(ctx, projectId)
 	if err != nil {
 		log.Errorw("check project exists failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("check project exists failed: %w", err)
@@ -327,14 +319,12 @@ func (s *ProjectService) UpdateProjectStatistics(projectId string, stats *model.
 		return nil, errors.New("project not found")
 	}
 
-	// 更新统计信息
-	if err = s.projectRepo.UpdateProjectStatistics(projectId, stats); err != nil {
+	if err = s.projectRepo.UpdateStatistics(ctx, projectId, stats); err != nil {
 		log.Errorw("update project statistics failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("update project statistics failed: %w", err)
 	}
 
-	// 返回更新后的项目
-	project, err := s.projectRepo.GetProjectById(projectId)
+	project, err := s.projectRepo.Get(ctx, projectId)
 	if err != nil {
 		log.Errorw("get project failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("get project failed: %w", err)
@@ -343,10 +333,9 @@ func (s *ProjectService) UpdateProjectStatistics(projectId string, stats *model.
 	return project, nil
 }
 
-// EnableProject 启用项目
-func (s *ProjectService) EnableProject(projectId string) (*model.Project, error) {
-	// 检查项目是否存在
-	exists, err := s.projectRepo.CheckProjectExists(projectId)
+// EnableProject enables a project.
+func (s *ProjectService) EnableProject(ctx context.Context, projectId string) (*model.Project, error) {
+	exists, err := s.projectRepo.Exists(ctx, projectId)
 	if err != nil {
 		log.Errorw("check project exists failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("check project exists failed: %w", err)
@@ -355,14 +344,12 @@ func (s *ProjectService) EnableProject(projectId string) (*model.Project, error)
 		return nil, errors.New("project not found")
 	}
 
-	// 启用项目
-	if err = s.projectRepo.EnableProject(projectId); err != nil {
+	if err = s.projectRepo.Enable(ctx, projectId); err != nil {
 		log.Errorw("enable project failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("enable project failed: %w", err)
 	}
 
-	// 返回更新后的项目
-	project, err := s.projectRepo.GetProjectById(projectId)
+	project, err := s.projectRepo.Get(ctx, projectId)
 	if err != nil {
 		log.Errorw("get project failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("get project failed: %w", err)
@@ -371,10 +358,9 @@ func (s *ProjectService) EnableProject(projectId string) (*model.Project, error)
 	return project, nil
 }
 
-// DisableProject 禁用项目
-func (s *ProjectService) DisableProject(projectId string) (*model.Project, error) {
-	// 检查项目是否存在
-	exists, err := s.projectRepo.CheckProjectExists(projectId)
+// DisableProject disables a project.
+func (s *ProjectService) DisableProject(ctx context.Context, projectId string) (*model.Project, error) {
+	exists, err := s.projectRepo.Exists(ctx, projectId)
 	if err != nil {
 		log.Errorw("check project exists failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("check project exists failed: %w", err)
@@ -383,14 +369,12 @@ func (s *ProjectService) DisableProject(projectId string) (*model.Project, error
 		return nil, errors.New("project not found")
 	}
 
-	// 禁用项目
-	if err = s.projectRepo.DisableProject(projectId); err != nil {
+	if err = s.projectRepo.Disable(ctx, projectId); err != nil {
 		log.Errorw("disable project failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("disable project failed: %w", err)
 	}
 
-	// 返回更新后的项目
-	project, err := s.projectRepo.GetProjectById(projectId)
+	project, err := s.projectRepo.Get(ctx, projectId)
 	if err != nil {
 		log.Errorw("get project failed", "projectId", projectId, "error", err)
 		return nil, fmt.Errorf("get project failed: %w", err)

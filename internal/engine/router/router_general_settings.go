@@ -52,7 +52,7 @@ func (rt *Router) updateGeneralSettings(c *fiber.Ctx) error {
 		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request body", c.Path())
 	}
 
-	if err := generalSettingsService.UpdateGeneralSettings(settingsId, &settings); err != nil {
+	if err := generalSettingsService.UpdateGeneralSettings(c.Context(), settingsId, &settings); err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
 
@@ -71,7 +71,7 @@ func (rt *Router) getGeneralSettings(c *fiber.Ctx) error {
 		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid settings id", c.Path())
 	}
 
-	settings, err := generalSettingsService.GetGeneralSettingsByID(settingsId)
+	settings, err := generalSettingsService.GetGeneralSettingsByID(c.Context(), settingsId)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
@@ -92,7 +92,7 @@ func (rt *Router) getGeneralSettingsByName(c *fiber.Ctx) error {
 		return http.WithRepErrMsg(c, http.BadRequest.Code, "category and name are required", c.Path())
 	}
 
-	settings, err := generalSettingsService.GetGeneralSettingsByName(category, name)
+	settings, err := generalSettingsService.GetGeneralSettingsByName(c.Context(), category, name)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
@@ -111,7 +111,7 @@ func (rt *Router) getGeneralSettingsList(c *fiber.Ctx) error {
 	pageSize, _ := strconv.Atoi(c.Query("pageSize", "20"))
 	category := c.Query("category", "")
 
-	settingsList, total, err := generalSettingsService.GetGeneralSettingsList(pageNum, pageSize, category)
+	settingsList, total, err := generalSettingsService.GetGeneralSettingsList(c.Context(), pageNum, pageSize, category)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
@@ -133,7 +133,7 @@ func (rt *Router) getGeneralSettingsList(c *fiber.Ctx) error {
 func (rt *Router) getCategories(c *fiber.Ctx) error {
 	generalSettingsService := rt.Services.GeneralSettings
 
-	categories, err := generalSettingsService.GetCategories()
+	categories, err := generalSettingsService.GetCategories(c.Context())
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}

@@ -19,21 +19,21 @@ import (
 	"errors"
 )
 
-// AuthType represents the authentication type
-type AuthType string
+// Type represents the authentication type
+type Type string
 
 const (
-	AuthTypeToken  AuthType = "token"  // Token authentication
-	AuthTypeOAuth2 AuthType = "oauth2" // OAuth2 authentication
-	AuthTypeAPIKey AuthType = "apikey" // API Key authentication
-	AuthTypeBasic  AuthType = "basic"  // Basic authentication
-	AuthTypeBearer AuthType = "bearer" // Bearer token authentication
+	Token  Type = "token"  // Token authentication
+	OAuth2 Type = "oauth2" // OAuth2 authentication
+	ApiKey Type = "apikey" // API Key authentication
+	Basic  Type = "basic"  // Basic authentication
+	Bearer Type = "bearer" // Bearer token authentication
 )
 
 // IAuthProvider defines the interface for authentication providers
 type IAuthProvider interface {
 	// GetAuthType gets the authentication type
-	GetAuthType() AuthType
+	GetAuthType() Type
 	// Authenticate performs authentication and returns token or credentials
 	Authenticate(ctx context.Context) (string, error)
 	// GetAuthHeader gets the authentication header key and value
@@ -51,8 +51,8 @@ func NewTokenAuth(token string) *TokenAuth {
 	return &TokenAuth{Token: token}
 }
 
-func (a *TokenAuth) GetAuthType() AuthType {
-	return AuthTypeToken
+func (a *TokenAuth) GetAuthType() Type {
+	return Token
 }
 
 func (a *TokenAuth) Authenticate(ctx context.Context) (string, error) {
@@ -82,8 +82,8 @@ func NewBearerAuth(token string) *BearerAuth {
 	return &BearerAuth{Token: token}
 }
 
-func (a *BearerAuth) GetAuthType() AuthType {
-	return AuthTypeBearer
+func (a *BearerAuth) GetAuthType() Type {
+	return Bearer
 }
 
 func (a *BearerAuth) Authenticate(ctx context.Context) (string, error) {
@@ -121,8 +121,8 @@ func NewAPIKeyAuth(apiKey, headerName string) *APIKeyAuth {
 	}
 }
 
-func (a *APIKeyAuth) GetAuthType() AuthType {
-	return AuthTypeAPIKey
+func (a *APIKeyAuth) GetAuthType() Type {
+	return ApiKey
 }
 
 func (a *APIKeyAuth) Authenticate(ctx context.Context) (string, error) {
@@ -159,8 +159,8 @@ func NewBasicAuth(username, password string) *BasicAuth {
 	}
 }
 
-func (a *BasicAuth) GetAuthType() AuthType {
-	return AuthTypeBasic
+func (a *BasicAuth) GetAuthType() Type {
+	return Basic
 }
 
 func (a *BasicAuth) Authenticate(ctx context.Context) (string, error) {
@@ -201,8 +201,8 @@ func NewOAuth2Auth(clientID, clientSecret, tokenURL string) *OAuth2Auth {
 	}
 }
 
-func (a *OAuth2Auth) GetAuthType() AuthType {
-	return AuthTypeOAuth2
+func (a *OAuth2Auth) GetAuthType() Type {
+	return OAuth2
 }
 
 func (a *OAuth2Auth) Authenticate(ctx context.Context) (string, error) {

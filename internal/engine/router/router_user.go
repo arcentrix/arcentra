@@ -121,7 +121,7 @@ func (rt *Router) addUser(c *fiber.Ctx) error {
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
 
-	if err := userLogic.AddUser(*addUserReq); err != nil {
+	if err := userLogic.AddUser(c.Context(), *addUserReq); err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
 
@@ -350,7 +350,7 @@ func (rt *Router) uploadAvatar(c *fiber.Ctx) error {
 	}
 
 	// upload avatar to object storage
-	response, err := uploadService.UploadAvatar(file, claims.UserId)
+	response, err := uploadService.UploadAvatar(c.Context(), file, claims.UserId)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}

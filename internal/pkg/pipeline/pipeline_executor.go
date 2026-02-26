@@ -26,8 +26,8 @@ import (
 	"github.com/arcentrix/arcentra/pkg/safe"
 )
 
-// PipelineExecutor executes pipelines using DAG-based reconciliation
-type PipelineExecutor struct {
+// Executor executes pipelines using DAG-based reconciliation
+type Executor struct {
 	execCtx *ExecutionContext
 	logger  log.Logger
 }
@@ -38,9 +38,9 @@ func NewPipelineExecutor(
 	pluginMgr *plugin.Manager,
 	workspace string,
 	logger log.Logger,
-) *PipelineExecutor {
+) *Executor {
 	execCtx := NewExecutionContext(p, pluginMgr, workspace, logger)
-	return &PipelineExecutor{
+	return &Executor{
 		execCtx: execCtx,
 		logger:  logger,
 	}
@@ -53,17 +53,17 @@ func NewPipelineExecutorWithQueue(
 	workspace string,
 	logger log.Logger,
 	taskQueue nova.TaskQueue,
-) *PipelineExecutor {
+) *Executor {
 	execCtx := NewExecutionContext(p, pluginMgr, workspace, logger)
 	execCtx.SetTaskQueue(taskQueue)
-	return &PipelineExecutor{
+	return &Executor{
 		execCtx: execCtx,
 		logger:  logger,
 	}
 }
 
 // Execute executes the pipeline using DAG-based reconciliation
-func (pe *PipelineExecutor) Execute(ctx context.Context) error {
+func (pe *Executor) Execute(ctx context.Context) error {
 	pe.emitPipelineEvent(plugin.EventTypePipelineStarted, "started")
 	// Build DAG from pipeline jobs
 	graph, tasks, err := BuildDAG(pe.execCtx.Pipeline.Jobs)
@@ -125,7 +125,7 @@ func (pe *PipelineExecutor) Execute(ctx context.Context) error {
 }
 
 // ExecuteWithTimeout executes pipeline with timeout
-func (pe *PipelineExecutor) ExecuteWithTimeout(ctx context.Context, timeout time.Duration) error {
+func (pe *Executor) ExecuteWithTimeout(ctx context.Context, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -133,7 +133,7 @@ func (pe *PipelineExecutor) ExecuteWithTimeout(ctx context.Context, timeout time
 }
 
 // ExecuteAsync executes pipeline asynchronously
-func (pe *PipelineExecutor) ExecuteAsync(ctx context.Context) <-chan error {
+func (pe *Executor) ExecuteAsync(ctx context.Context) <-chan error {
 	errCh := make(chan error, 1)
 	safe.Go(func() {
 		errCh <- pe.Execute(ctx)

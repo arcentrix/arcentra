@@ -25,7 +25,7 @@ import (
 
 // ConsumerConfig represents Kafka consumer configuration.
 type ConsumerConfig struct {
-	KafkaConfig `json:",inline" mapstructure:",squash"`
+	Config `json:",inline" mapstructure:",squash"`
 
 	AutoOffsetReset   string `json:"autoOffsetReset" mapstructure:"autoOffsetReset"`
 	EnableAutoCommit  *bool  `json:"enableAutoCommit" mapstructure:"enableAutoCommit"`
@@ -47,7 +47,7 @@ func (fn consumerOptionFunc) apply(cfg *ConsumerConfig) {
 func WithConsumerClientOptions(opts ...ClientOption) ConsumerOption {
 	return consumerOptionFunc(func(cfg *ConsumerConfig) {
 		for _, opt := range opts {
-			opt.apply(&cfg.KafkaConfig)
+			opt.apply(&cfg.Config)
 		}
 	})
 }
@@ -90,7 +90,7 @@ func NewConsumer(bootstrapServers string, topicName string, clientId string, opt
 		return nil, err
 	}
 	cfg := ConsumerConfig{
-		KafkaConfig: KafkaConfig{
+		Config: Config{
 			BootstrapServers: bootstrapServers,
 		},
 		AutoOffsetReset:   "earliest",
@@ -107,7 +107,7 @@ func NewConsumer(bootstrapServers string, topicName string, clientId string, opt
 		enableAutoCommit = *cfg.EnableAutoCommit
 	}
 
-	config, err := buildBaseConfig(cfg.KafkaConfig)
+	config, err := buildBaseConfig(cfg.Config)
 	if err != nil {
 		return nil, err
 	}

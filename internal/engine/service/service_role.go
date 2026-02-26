@@ -15,6 +15,7 @@
 package service
 
 import (
+	"context"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/engine/model"
@@ -33,7 +34,7 @@ func NewRoleService(roleRepo repo.IRoleRepository) *RoleService {
 	}
 }
 
-func (rs *RoleService) CreateRole(createReq *model.CreateRoleReq) (*model.Role, error) {
+func (rs *RoleService) CreateRole(ctx context.Context, createReq *model.CreateRoleReq) (*model.Role, error) {
 	isEnabled := 1
 	if createReq.IsEnabled != nil {
 		isEnabled = *createReq.IsEnabled
@@ -47,7 +48,7 @@ func (rs *RoleService) CreateRole(createReq *model.CreateRoleReq) (*model.Role, 
 		IsEnabled:   isEnabled,
 	}
 
-	if err := rs.roleRepo.CreateRole(role); err != nil {
+	if err := rs.roleRepo.Create(ctx, role); err != nil {
 		log.Errorw("create role failed", "error", err)
 		return nil, err
 	}
@@ -55,8 +56,8 @@ func (rs *RoleService) CreateRole(createReq *model.CreateRoleReq) (*model.Role, 
 	return role, nil
 }
 
-func (rs *RoleService) GetRoleByRoleId(roleId string) (*model.Role, error) {
-	role, err := rs.roleRepo.GetRole(roleId)
+func (rs *RoleService) GetRoleByRoleId(ctx context.Context, roleId string) (*model.Role, error) {
+	role, err := rs.roleRepo.Get(ctx, roleId)
 	if err != nil {
 		log.Errorw("get role by roleId failed", "roleId", roleId, "error", err)
 		return nil, err
@@ -64,17 +65,8 @@ func (rs *RoleService) GetRoleByRoleId(roleId string) (*model.Role, error) {
 	return role, nil
 }
 
-func (rs *RoleService) GetRoleById(id uint64) (*model.Role, error) {
-	role, err := rs.roleRepo.GetRoleById(id)
-	if err != nil {
-		log.Errorw("get role by id failed", "id", id, "error", err)
-		return nil, err
-	}
-	return role, nil
-}
-
-func (rs *RoleService) ListRoles(pageNum, pageSize int) ([]model.Role, int64, error) {
-	roles, count, err := rs.roleRepo.ListRoles(pageNum, pageSize)
+func (rs *RoleService) ListRoles(ctx context.Context, pageNum, pageSize int) ([]model.Role, int64, error) {
+	roles, count, err := rs.roleRepo.List(ctx, pageNum, pageSize)
 	if err != nil {
 		log.Errorw("list roles failed", "error", err)
 		return nil, 0, err
@@ -82,19 +74,17 @@ func (rs *RoleService) ListRoles(pageNum, pageSize int) ([]model.Role, int64, er
 	return roles, count, err
 }
 
-func (rs *RoleService) UpdateRoleByRoleId(roleId string, updateReq *model.UpdateRoleReq) error {
-	// Check if role exists
-	_, err := rs.roleRepo.GetRole(roleId)
+func (rs *RoleService) UpdateRoleByRoleId(ctx context.Context, roleId string, updateReq *model.UpdateRoleReq) error {
+	_, err := rs.roleRepo.Get(ctx, roleId)
 	if err != nil {
 		log.Errorw("get role by roleId failed", "roleId", roleId, "error", err)
 		return err
 	}
 
-	// Build and update Role fields
 	updates := buildRoleUpdateMap(updateReq)
 	if len(updates) > 0 {
 		updates["updated_at"] = time.Now()
-		if err := rs.roleRepo.UpdateRoleByRoleId(roleId, updates); err != nil {
+		if err := rs.roleRepo.Update(ctx, roleId, updates); err != nil {
 			log.Errorw("update role failed", "roleId", roleId, "error", err)
 			return err
 		}
@@ -103,38 +93,9 @@ func (rs *RoleService) UpdateRoleByRoleId(roleId string, updateReq *model.Update
 	return nil
 }
 
-func (rs *RoleService) UpdateRoleById(id uint64, updateReq *model.UpdateRoleReq) error {
-	// Check if role exists
-	_, err := rs.roleRepo.GetRoleById(id)
-	if err != nil {
-		log.Errorw("get role by id failed", "id", id, "error", err)
-		return err
-	}
-
-	// Build and update Role fields
-	updates := buildRoleUpdateMap(updateReq)
-	if len(updates) > 0 {
-		updates["updated_at"] = time.Now()
-		if err := rs.roleRepo.UpdateRoleById(id, updates); err != nil {
-			log.Errorw("update role failed", "id", id, "error", err)
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (rs *RoleService) DeleteRoleByRoleId(roleId string) error {
-	if err := rs.roleRepo.DeleteRoleByRoleId(roleId); err != nil {
+func (rs *RoleService) DeleteRoleByRoleId(ctx context.Context, roleId string) error {
+	if err := rs.roleRepo.Delete(ctx, roleId); err != nil {
 		log.Errorw("delete role failed", "roleId", roleId, "error", err)
-		return err
-	}
-	return nil
-}
-
-func (rs *RoleService) DeleteRole(id uint64) error {
-	if err := rs.roleRepo.DeleteRole(id); err != nil {
-		log.Errorw("delete role failed", "id", id, "error", err)
 		return err
 	}
 	return nil

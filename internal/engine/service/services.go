@@ -49,7 +49,7 @@ func NewServices(
 	cache cache.ICache,
 	repos *repo.Repositories,
 	pluginManager *pluginpkg.Manager,
-	storageProvider storagepkg.StorageProvider,
+	storageProvider storagepkg.IStorage,
 ) *Services {
 	// 基础服务
 	menuService := NewMenuService(repos.Menu)

@@ -30,13 +30,8 @@ import (
 )
 
 // PermissionChecker 权限检查器接口
-// 用于检查用户是否有权限访问指定路由
 type PermissionChecker interface {
-	// GetUserRoutes 获取用户可访问的路由列表
-	// userId: 用户ID
-	// resourceId: 资源ID（组织ID/团队ID/项目ID，平台级为空字符串）
-	// 返回用户可访问的路由路径列表
-	GetUserRoutes(userId string, resourceId string) ([]string, error)
+	GetUserRoutes(ctx context.Context, userId string, resourceId string) ([]string, error)
 }
 
 // AuthorizationMiddleware 认证中间件
@@ -150,8 +145,7 @@ func PermissionMiddleware(permissionChecker PermissionChecker, excludedPaths []s
 		}
 		// 如果都没有，则为空字符串，表示平台级权限
 
-		// 获取用户可访问的路由列表
-		allowedRoutes, err := permissionChecker.GetUserRoutes(userId, resourceId)
+		allowedRoutes, err := permissionChecker.GetUserRoutes(c.Context(), userId, resourceId)
 		if err != nil {
 			log.Errorw("failed to get user routes", "userId", userId, "resourceId", resourceId, "error", err)
 			return http.WithRepErrMsg(c, http.InternalError.Code, http.InternalError.Msg, currentPath)

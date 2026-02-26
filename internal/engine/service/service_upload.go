@@ -87,33 +87,29 @@ const (
 var maxFileSize = int64(100 * 1024 * 1024) // 100MB for general files
 
 // getStorageProvider gets storage configuration and provider
-func (us *UploadService) getStorageProvider(storageId string) (*storagemodel.StorageConfig, storagepkg.StorageProvider, error) {
-	// get storage config
+func (us *UploadService) getStorageProvider(ctx context.Context, storageId string) (*storagemodel.StorageConfig, storagepkg.IStorage, error) {
 	var storageConfig *storagemodel.StorageConfig
 	var err error
 	if storageId != "" {
-		storageConfig, err = us.storageRepo.GetStorageConfigByID(storageId)
+		storageConfig, err = us.storageRepo.Get(ctx, storageId)
 	} else {
-		storageConfig, err = us.storageRepo.GetDefaultStorageConfig()
+		storageConfig, err = us.storageRepo.GetDefault(ctx)
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get storage config: %w", err)
 	}
 
-	// check if storage is enabled
 	if storageConfig.IsEnabled != 1 {
 		return nil, nil, fmt.Errorf("storage config is disabled")
 	}
 
-	// create storage provider
-	storageProvider, err := storagepkg.NewStorageDBProvider(us.storageRepo)
+	storageProvider, err := storagepkg.NewStorageDBProvider(ctx, us.storageRepo)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create storage provider: %w", err)
 	}
 
-	// switch to specific storage if provided
 	if storageId != "" {
-		if err = storageProvider.SwitchStorageConfig(storageId); err != nil {
+		if err = storageProvider.SwitchStorageConfig(ctx, storageId); err != nil {
 			return nil, nil, fmt.Errorf("failed to switch storage config: %w", err)
 		}
 	}
@@ -128,7 +124,7 @@ func (us *UploadService) getStorageProvider(storageId string) (*storagemodel.Sto
 }
 
 // uploadToStorage uploads file to storage and returns response
-func (us *UploadService) uploadToStorage(file *multipart.FileHeader, storageId, objectPath, contentType string) (*UploadResponse, error) {
+func (us *UploadService) uploadToStorage(ctx context.Context, file *multipart.FileHeader, storageId, objectPath, contentType string) (*UploadResponse, error) {
 	if file == nil {
 		return nil, fmt.Errorf("file is required")
 	}
@@ -136,8 +132,7 @@ func (us *UploadService) uploadToStorage(file *multipart.FileHeader, storageId, 
 		return nil, fmt.Errorf("file size cannot be zero")
 	}
 
-	// get storage config and provider
-	storageConfig, provider, err := us.getStorageProvider(storageId)
+	storageConfig, provider, err := us.getStorageProvider(ctx, storageId)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +164,7 @@ func (us *UploadService) uploadToStorage(file *multipart.FileHeader, storageId, 
 // UploadFile uploads a file to object storage
 // storageId: optional, if empty, use default storage
 // customPath: optional custom path, if empty, use default path structure
-func (us *UploadService) UploadFile(file *multipart.FileHeader, storageId string, customPath string) (*UploadResponse, error) {
+func (us *UploadService) UploadFile(ctx context.Context, file *multipart.FileHeader, storageId string, customPath string) (*UploadResponse, error) {
 	// validate file size (max 100MB for general files)
 	if file.Size > maxFileSize {
 		return nil, fmt.Errorf("file size exceeds maximum limit of %d bytes", maxFileSize)
@@ -184,8 +179,7 @@ func (us *UploadService) UploadFile(file *multipart.FileHeader, storageId string
 		contentType = getContentType(file.Filename)
 	}
 
-	// upload to storage
-	return us.uploadToStorage(file, storageId, objectName, contentType)
+	return us.uploadToStorage(ctx, file, storageId, objectName, contentType)
 }
 
 // generateObjectName generates a unique object name
@@ -265,7 +259,7 @@ func getContentType(filename string) string {
 }
 
 // UploadAvatar uploads user avatar image
-func (us *UploadService) UploadAvatar(file *multipart.FileHeader, userId string) (*UploadResponse, error) {
+func (us *UploadService) UploadAvatar(ctx context.Context, file *multipart.FileHeader, userId string) (*UploadResponse, error) {
 	// validate file size (max 5MB for avatar)
 	if file.Size > maxAvatarSize {
 		return nil, fmt.Errorf("avatar size exceeds maximum limit of 5MB")
@@ -289,7 +283,7 @@ func (us *UploadService) UploadAvatar(file *multipart.FileHeader, userId string)
 	objectPath := fmt.Sprintf("%s/%s/%s%s", userAvatarPath, userId, id.GetUUID(), ext)
 
 	// upload to storage
-	return us.uploadToStorage(file, "", objectPath, contentType)
+	return us.uploadToStorage(ctx, file, "", objectPath, contentType)
 }
 
 // UploadResponse response for file upload

@@ -76,7 +76,7 @@ func NewDelayTopicManager(
 		codec:        DefaultMessageCodec, // Default to JSON codec
 		ctx:          ctx,
 		cancel:       cancel,
-		timerWheel:   NewTimerWheel(DefaultDelaySlotCount, int64(DefaultDelaySlotDuration.Milliseconds())),
+		timerWheel:   NewTimerWheel(DefaultDelaySlotCount, DefaultDelaySlotDuration.Milliseconds()),
 	}
 
 	// Generate delay topic names

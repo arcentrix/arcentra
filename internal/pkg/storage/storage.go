@@ -15,6 +15,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,11 +29,11 @@ import (
 
 // 存储类型常量
 const (
-	StorageMinio = "minio"
-	StorageS3    = "s3"
-	StorageOSS   = "oss"
-	StorageGCS   = "gcs"
-	StorageCOS   = "cos"
+	Minio = "minio"
+	S3    = "s3"
+	Oss   = "oss"
+	Gcs   = "gcs"
+	Cos   = "cos"
 )
 
 // Storage 存储配置结构
@@ -47,8 +48,8 @@ type Storage struct {
 	BasePath  string
 }
 
-// StorageDBProvider 从数据库加载存储配置的提供者
-type StorageDBProvider struct {
+// DbProvider 从数据库加载存储配置的提供者
+type DbProvider struct {
 	storageRepo   storagerepo.IStorageRepository
 	storageConfig *storagemodel.StorageConfig
 }
@@ -103,39 +104,38 @@ func (pr *ProgressReader) LogProgress(progress float64) {
 }
 
 // NewStorage 根据配置创建存储提供者实例
-func NewStorage(s *Storage) (StorageProvider, error) {
+func NewStorage(s *Storage) (IStorage, error) {
 	switch s.Provider {
-	case StorageMinio:
+	case Minio:
 		return newMinio(s)
-	case StorageS3:
+	case S3:
 		return newS3(s)
-	case StorageOSS:
+	case Oss:
 		return newOSS(s)
-	case StorageGCS:
+	case Gcs:
 		return newGCS(s)
-	case StorageCOS:
+	case Cos:
 		return newCOS(s)
 	default:
 		return nil, fmt.Errorf("unsupported storage provider: %s", s.Provider)
 	}
 }
 
-// NewStorageDBProvider 创建从数据库加载存储配置的提供者
-func NewStorageDBProvider(storageRepo storagerepo.IStorageRepository) (*StorageDBProvider, error) {
-	// 获取默认存储配置
-	storageConfig, err := storageRepo.GetDefaultStorageConfig()
+// NewStorageDBProvider creates a storage provider that loads config from database.
+func NewStorageDBProvider(ctx context.Context, storageRepo storagerepo.IStorageRepository) (*DbProvider, error) {
+	storageConfig, err := storageRepo.GetDefault(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get default storage config: %w", err)
 	}
 
-	return &StorageDBProvider{
+	return &DbProvider{
 		storageRepo:   storageRepo,
 		storageConfig: storageConfig,
 	}, nil
 }
 
 // GetStorageProvider 获取存储提供者实例
-func (sdp *StorageDBProvider) GetStorageProvider() (StorageProvider, error) {
+func (sdp *DbProvider) GetStorageProvider() (IStorage, error) {
 	// 解析存储配置
 	config, err := sdp.storageRepo.ParseStorageConfig(sdp.storageConfig)
 	if err != nil {
@@ -180,9 +180,9 @@ func (sdp *StorageDBProvider) GetStorageProvider() (StorageProvider, error) {
 }
 
 // createMinIOStorage 创建 MinIO 存储实例
-func (sdp *StorageDBProvider) createMinIOStorage(config *storagemodel.MinIOConfig) (StorageProvider, error) {
+func (sdp *DbProvider) createMinIOStorage(config *storagemodel.MinIOConfig) (IStorage, error) {
 	storage := &Storage{
-		Provider:  StorageMinio,
+		Provider:  Minio,
 		Endpoint:  config.Endpoint,
 		AccessKey: config.AccessKey,
 		SecretKey: config.SecretKey,
@@ -195,9 +195,9 @@ func (sdp *StorageDBProvider) createMinIOStorage(config *storagemodel.MinIOConfi
 }
 
 // createS3Storage 创建 S3 存储实例
-func (sdp *StorageDBProvider) createS3Storage(config *storagemodel.S3Config) (StorageProvider, error) {
+func (sdp *DbProvider) createS3Storage(config *storagemodel.S3Config) (IStorage, error) {
 	storage := &Storage{
-		Provider:  StorageS3,
+		Provider:  S3,
 		Endpoint:  config.Endpoint,
 		AccessKey: config.AccessKey,
 		SecretKey: config.SecretKey,
@@ -210,9 +210,9 @@ func (sdp *StorageDBProvider) createS3Storage(config *storagemodel.S3Config) (St
 }
 
 // createOSSStorage 创建 OSS 存储实例
-func (sdp *StorageDBProvider) createOSSStorage(config *storagemodel.OSSConfig) (StorageProvider, error) {
+func (sdp *DbProvider) createOSSStorage(config *storagemodel.OSSConfig) (IStorage, error) {
 	storage := &Storage{
-		Provider:  StorageOSS,
+		Provider:  Oss,
 		Endpoint:  config.Endpoint,
 		AccessKey: config.AccessKey,
 		SecretKey: config.SecretKey,
@@ -225,9 +225,9 @@ func (sdp *StorageDBProvider) createOSSStorage(config *storagemodel.OSSConfig) (
 }
 
 // createGCSStorage 创建 GCS 存储实例
-func (sdp *StorageDBProvider) createGCSStorage(config *storagemodel.GCSConfig) (StorageProvider, error) {
+func (sdp *DbProvider) createGCSStorage(config *storagemodel.GCSConfig) (IStorage, error) {
 	storage := &Storage{
-		Provider:  StorageGCS,
+		Provider:  Gcs,
 		Endpoint:  config.Endpoint,
 		AccessKey: config.AccessKey,
 		Bucket:    config.Bucket,
@@ -238,9 +238,9 @@ func (sdp *StorageDBProvider) createGCSStorage(config *storagemodel.GCSConfig) (
 }
 
 // createCOSStorage 创建 COS 存储实例
-func (sdp *StorageDBProvider) createCOSStorage(config *storagemodel.COSConfig) (StorageProvider, error) {
+func (sdp *DbProvider) createCOSStorage(config *storagemodel.COSConfig) (IStorage, error) {
 	storage := &Storage{
-		Provider:  StorageCOS,
+		Provider:  Cos,
 		Endpoint:  config.Endpoint,
 		AccessKey: config.AccessKey,
 		SecretKey: config.SecretKey,
@@ -253,13 +253,13 @@ func (sdp *StorageDBProvider) createCOSStorage(config *storagemodel.COSConfig) (
 }
 
 // GetStorageConfig 获取当前存储配置
-func (sdp *StorageDBProvider) GetStorageConfig() *storagemodel.StorageConfig {
+func (sdp *DbProvider) GetStorageConfig() *storagemodel.StorageConfig {
 	return sdp.storageConfig
 }
 
-// RefreshStorageConfig 刷新存储配置（从数据库重新加载）
-func (sdp *StorageDBProvider) RefreshStorageConfig() error {
-	storageConfig, err := sdp.storageRepo.GetDefaultStorageConfig()
+// RefreshStorageConfig refreshes storage config from database.
+func (sdp *DbProvider) RefreshStorageConfig(ctx context.Context) error {
+	storageConfig, err := sdp.storageRepo.GetDefault(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to refresh storage config: %w", err)
 	}
@@ -267,30 +267,28 @@ func (sdp *StorageDBProvider) RefreshStorageConfig() error {
 	return nil
 }
 
-// GetStorageConfigByID 根据ID获取存储配置
-func (sdp *StorageDBProvider) GetStorageConfigByID(storageID string) (*storagemodel.StorageConfig, error) {
-	return sdp.storageRepo.GetStorageConfigByID(storageID)
+// GetStorageConfigByID returns storage config by ID.
+func (sdp *DbProvider) GetStorageConfigByID(ctx context.Context, storageId string) (*storagemodel.StorageConfig, error) {
+	return sdp.storageRepo.Get(ctx, storageId)
 }
 
-// GetAllStorageConfigs 获取所有存储配置
-func (sdp *StorageDBProvider) GetAllStorageConfigs() ([]storagemodel.StorageConfig, error) {
-	return sdp.storageRepo.GetEnabledStorageConfigs()
+// GetAllStorageConfigs returns all enabled storage configs.
+func (sdp *DbProvider) GetAllStorageConfigs(ctx context.Context) ([]storagemodel.StorageConfig, error) {
+	return sdp.storageRepo.ListEnabled(ctx)
 }
 
-// SwitchStorageConfig 切换存储配置
-func (sdp *StorageDBProvider) SwitchStorageConfig(storageID string) error {
-	storageConfig, err := sdp.storageRepo.GetStorageConfigByID(storageID)
+// SwitchStorageConfig switches to storage config by ID.
+func (sdp *DbProvider) SwitchStorageConfig(ctx context.Context, storageId string) error {
+	storageConfig, err := sdp.storageRepo.Get(ctx, storageId)
 	if err != nil {
-		return fmt.Errorf("failed to get storage config by ID %s: %w", storageID, err)
+		return fmt.Errorf("failed to get storage config by ID %s: %w", storageId, err)
 	}
 
-	// 设置为默认配置
-	err = sdp.storageRepo.SetDefaultStorageConfig(storageID)
+	err = sdp.storageRepo.SetDefault(ctx, storageId)
 	if err != nil {
 		return fmt.Errorf("failed to set default storage config: %w", err)
 	}
 
-	// 更新当前配置
 	sdp.storageConfig = storageConfig
 	return nil
 }

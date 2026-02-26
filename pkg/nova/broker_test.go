@@ -92,7 +92,7 @@ func TestMessageHandler(t *testing.T) {
 }
 
 func TestBrokerConfig_Interface(t *testing.T) {
-	// Test that KafkaConfig implements BrokerConfig interface
+	// Test that Config implements BrokerConfig interface
 	kafkaConfig := &KafkaConfig{
 		BootstrapServers: "localhost:9092",
 		GroupID:          "test-group",
@@ -100,7 +100,7 @@ func TestBrokerConfig_Interface(t *testing.T) {
 	}
 
 	// Test GetType (if implemented)
-	// Note: KafkaConfig doesn't explicitly implement BrokerConfig,
+	// Note: Config doesn't explicitly implement BrokerConfig,
 	// but we can test the fields it should have
 	if kafkaConfig.BootstrapServers == "" {
 		t.Error("expected BootstrapServers to be set")

@@ -33,8 +33,8 @@ type Manager struct {
 	plugins map[string]Plugin
 	// 插件配置映射（name -> RuntimePluginConfig）
 	configs map[string]*RuntimePluginConfig
-	// 插件信息映射（name -> PluginInfo）
-	infos map[string]*PluginInfo
+	// 插件信息映射（name -> Info）
+	infos map[string]*Info
 	// 管理器配置
 	config *ManagerConfig
 }
@@ -58,7 +58,7 @@ func NewManager(config *ManagerConfig) *Manager {
 	return &Manager{
 		plugins: make(map[string]Plugin),
 		configs: make(map[string]*RuntimePluginConfig),
-		infos:   make(map[string]*PluginInfo),
+		infos:   make(map[string]*Info),
 		config:  config,
 	}
 }
@@ -87,7 +87,7 @@ func (m *Manager) registerPluginLocked(name string, plugin Plugin, config *Runti
 	}
 
 	// 创建插件信息
-	info := &PluginInfo{
+	info := &Info{
 		Name:        plugin.Name(),
 		Description: plugin.Description(),
 		Version:     plugin.Version(),
@@ -205,7 +205,7 @@ func (m *Manager) GetPlugin(name string) (Plugin, error) {
 }
 
 // GetPluginInfo 获取插件信息
-func (m *Manager) GetPluginInfo(name string) (*PluginInfo, error) {
+func (m *Manager) GetPluginInfo(name string) (*Info, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -218,11 +218,11 @@ func (m *Manager) GetPluginInfo(name string) (*PluginInfo, error) {
 }
 
 // ListPlugins 列出所有插件的信息
-func (m *Manager) ListPlugins() map[string]*PluginInfo {
+func (m *Manager) ListPlugins() map[string]*Info {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	plugins := make(map[string]*PluginInfo, len(m.infos))
+	plugins := make(map[string]*Info, len(m.infos))
 	for name, info := range m.infos {
 		plugins[name] = info
 	}
@@ -250,7 +250,12 @@ func (m *Manager) Count() int {
 }
 
 // SafeExecute 执行插件操作
-func (m *Manager) SafeExecute(pluginName string, action string, params json.RawMessage, opts json.RawMessage) (result json.RawMessage, err error) {
+func (m *Manager) SafeExecute(
+	pluginName string,
+	action string,
+	params json.RawMessage,
+	opts json.RawMessage,
+) (result json.RawMessage, err error) {
 	plugin, err := m.GetPlugin(pluginName)
 	if err != nil {
 		return nil, err
@@ -273,7 +278,7 @@ func (m *Manager) SafeExecute(pluginName string, action string, params json.RawM
 	return result, err
 }
 
-// Close 关闭管理器
+// Clear Close 关闭管理器
 func (m *Manager) Clear() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -288,7 +293,7 @@ func (m *Manager) Clear() error {
 	// 清空映射
 	m.plugins = make(map[string]Plugin)
 	m.configs = make(map[string]*RuntimePluginConfig)
-	m.infos = make(map[string]*PluginInfo)
+	m.infos = make(map[string]*Info)
 
 	log.Info("plugin manager closed")
 	return nil

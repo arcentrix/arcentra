@@ -169,10 +169,10 @@ func TestDo_CustomRetryIf(t *testing.T) {
 		}
 		return nonRetryableErr
 	}, WithMaxAttempts(3), WithBackoff(Fixed(10*time.Millisecond)), WithRetryIf(func(err error) bool {
-		return err == retryableErr
+		return errors.Is(err, retryableErr)
 	}))
 
-	if err != nonRetryableErr {
+	if !errors.Is(err, nonRetryableErr) {
 		t.Errorf("expected non-retryable error, got %v", err)
 	}
 	if attempts != 2 {

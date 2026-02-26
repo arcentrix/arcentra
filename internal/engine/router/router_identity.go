@@ -15,6 +15,7 @@
 package router
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -58,12 +59,12 @@ func (rt *Router) authorize(c *fiber.Ctx) error {
 		return httpx.WithRepErrMsg(c, httpx.ProviderIsRequired.Code, httpx.ProviderIsRequired.Msg, c.Path())
 	}
 
-	url, err := identityService.Authorize(providerName)
+	authorize, err := identityService.Authorize(c.Context(), providerName)
 	if err != nil {
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
 	}
 
-	return c.Redirect(url, http.StatusTemporaryRedirect)
+	return c.Redirect(authorize, http.StatusTemporaryRedirect)
 }
 
 // callback handles OAuth/OIDC authorization callback
@@ -92,9 +93,7 @@ func (rt *Router) callback(c *fiber.Ctx) error {
 		code = codeRaw // fallback to raw value
 	}
 
-	log.Debugw("OAuth callback received", "provider", providerName, "state", state, "codeLength", len(code))
-
-	userInfo, _, err := identityService.Callback(providerName, state, code)
+	userInfo, _, err := identityService.Callback(c.Context(), providerName, state, code)
 	if err != nil {
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
 	}
@@ -148,20 +147,10 @@ func (rt *Router) callback(c *fiber.Ctx) error {
 		SameSite: fiber.CookieSameSiteLaxMode,
 	})
 
-	// Get frontend base URL from database configuration for redirect
-	baseURL := rt.getBaseURL()
-	log.Debugw("OAuth callback success, auto login completed, cookies set, redirecting to frontend",
-		"provider", providerName,
-		"username", userInfo.Username,
-		"userId", userInfo.UserId,
-		"baseURL", baseURL,
-		"cookiePath", cookiePath,
-		"host", c.Hostname())
-
 	// 在 Fiber 中，c.Cookie() 会立即将 cookie 添加到响应头
 	// c.Redirect() 会发送 302 响应，cookie 会随响应头一起发送
 	// 使用 StatusFound (302) 进行临时重定向
-	return c.Redirect(baseURL, http.StatusFound)
+	return c.Redirect(rt.getBaseURL(), http.StatusFound)
 }
 
 // listProviders lists all providers (supports ?type=xxx filter)
@@ -175,9 +164,9 @@ func (rt *Router) listProviders(c *fiber.Ctx) error {
 	var integrations any
 
 	if providerType != "" {
-		integrations, err = identityService.GetProviderByType(providerType)
+		integrations, err = identityService.GetProviderByType(c.Context(), providerType)
 	} else {
-		integrations, err = identityService.GetProviderList()
+		integrations, err = identityService.GetProviderList(c.Context())
 	}
 
 	if err != nil {
@@ -222,7 +211,7 @@ func (rt *Router) getProvider(c *fiber.Ctx) error {
 		return httpx.WithRepErrMsg(c, httpx.ProviderIsRequired.Code, httpx.ProviderIsRequired.Msg, c.Path())
 	}
 
-	provider, err := identityService.GetProvider(name)
+	provider, err := identityService.GetProvider(c.Context(), name)
 	if err != nil {
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
 	}
@@ -235,7 +224,7 @@ func (rt *Router) getProvider(c *fiber.Ctx) error {
 func (rt *Router) listProviderTypes(c *fiber.Ctx) error {
 	identityService := rt.Services.Identity
 
-	providerTypes, err := identityService.GetProviderTypeList()
+	providerTypes, err := identityService.GetProviderTypeList(c.Context())
 	if err != nil {
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
 	}
@@ -263,7 +252,7 @@ func (rt *Router) ldapLogin(c *fiber.Ctx) error {
 	}
 
 	// Step 1: Verify LDAP identity and map/create Arcentra user
-	userInfo, err := identityService.LDAPLogin(providerName, req.Username, req.Password)
+	userInfo, err := identityService.LDAPLogin(c.Context(), providerName, req.Username, req.Password)
 	if err != nil {
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
 	}
@@ -301,7 +290,7 @@ func (rt *Router) createProvider(c *fiber.Ctx) error {
 		return httpx.WithRepErrMsg(c, httpx.BadRequest.Code, "name and providerType are required fields", c.Path())
 	}
 
-	if err := identityService.CreateProvider(&provider); err != nil {
+	if err := identityService.CreateProvider(c.Context(), &provider); err != nil {
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
 	}
 
@@ -324,7 +313,7 @@ func (rt *Router) updateProvider(c *fiber.Ctx) error {
 		return httpx.WithRepErrMsg(c, httpx.BadRequest.Code, "invalid request parameters", c.Path())
 	}
 
-	if err := identityService.UpdateProvider(name, &provider); err != nil {
+	if err := identityService.UpdateProvider(c.Context(), name, &provider); err != nil {
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
 	}
 
@@ -341,7 +330,7 @@ func (rt *Router) toggleProvider(c *fiber.Ctx) error {
 		return httpx.WithRepErrMsg(c, httpx.ProviderIsRequired.Code, httpx.ProviderIsRequired.Msg, c.Path())
 	}
 
-	if err := identityService.ToggleProvider(name); err != nil {
+	if err := identityService.ToggleProvider(c.Context(), name); err != nil {
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
 	}
 
@@ -358,7 +347,7 @@ func (rt *Router) deleteProvider(c *fiber.Ctx) error {
 		return httpx.WithRepErrMsg(c, httpx.ProviderIsRequired.Code, httpx.ProviderIsRequired.Msg, c.Path())
 	}
 
-	if err := identityService.DeleteProvider(name); err != nil {
+	if err := identityService.DeleteProvider(c.Context(), name); err != nil {
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
 	}
 
@@ -375,7 +364,7 @@ func (rt *Router) getCookiePath() string {
 		name              = "base_path"
 	)
 
-	settings, err := rt.Services.GeneralSettings.GetGeneralSettingsByName(category, name)
+	settings, err := rt.Services.GeneralSettings.GetGeneralSettingsByName(context.Background(), category, name)
 	if err != nil {
 		log.Debugw("failed to get cookie path from database, using default", "category", category, "name", name, "error", err)
 		return defaultCookiePath
@@ -432,7 +421,7 @@ func (rt *Router) getBaseURL() string {
 		name           = "base_path"
 	)
 
-	settings, err := rt.Services.GeneralSettings.GetGeneralSettingsByName(category, name)
+	settings, err := rt.Services.GeneralSettings.GetGeneralSettingsByName(context.Background(), category, name)
 	if err != nil {
 		log.Debugw("failed to get frontend base URL from database, using default", "category", category, "name", name, "error", err)
 		return defaultBaseURL
@@ -476,6 +465,5 @@ func (rt *Router) getBaseURL() string {
 		frontendURL = fmt.Sprintf("%s://%s/", parsedURL.Scheme, parsedURL.Host)
 	}
 
-	log.Debugw("base URL extracted from base_path", "base_path", basePathStr, "frontendURL", frontendURL)
 	return frontendURL
 }

@@ -172,9 +172,9 @@ func (r *StepRunner) executeOnAgent(ctx context.Context) error {
 func (r *StepRunner) executeLocally(ctx context.Context) error {
 	// Check if it's a builtin function
 	if r.ctx.BuiltinManager != nil {
-		builtin, isBuiltin := r.ctx.BuiltinManager.IsBuiltin(r.step.Uses)
+		b, isBuiltin := r.ctx.BuiltinManager.IsBuiltin(r.step.Uses)
 		if isBuiltin {
-			return r.executeBuiltin(ctx, builtin)
+			return r.executeBuiltin(ctx, b)
 		}
 	}
 

@@ -24,7 +24,7 @@ import (
 	"regexp"
 	"strings"
 
-	executor "github.com/arcentrix/arcentra/internal/pkg/executor"
+	"github.com/arcentrix/arcentra/internal/pkg/executor"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/builtin"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/log"

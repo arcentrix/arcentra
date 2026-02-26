@@ -21,13 +21,27 @@ import (
 // UserExt user ext information table
 type UserExt struct {
 	BaseModel
-	UserId           string     `gorm:"column:user_id;uniqueIndex" json:"userId"`                           // user ID (foreign key)
-	Timezone         string     `gorm:"column:timezone;default:'UTC'" json:"timezone"`                      // user timezone (e.g., 'Asia/Shanghai', 'America/New_York')
-	LastLoginAt      *time.Time `gorm:"column:last_login_at" json:"lastLoginAt"`                            // last login timestamp
-	InvitationStatus string     `gorm:"column:invitation_status;default:'pending'" json:"invitationStatus"` // invitation status: pending, accepted, expired, revoked
-	InvitedBy        string     `gorm:"column:invited_by" json:"invitedBy"`                                 // invited by user ID
-	InvitedAt        *time.Time `gorm:"column:invited_at" json:"invitedAt"`                                 // invitation timestamp
-	AcceptedAt       *time.Time `gorm:"column:accepted_at" json:"acceptedAt"`                               // invitation accepted timestamp
+
+	UserId string `gorm:"column:user_id;uniqueIndex" json:"userId"`
+	// user ID (foreign key)
+
+	Timezone string `gorm:"column:timezone;default:'UTC'" json:"timezone"`
+	// user timezone (e.g., 'Asia/Shanghai', 'America/New_York')
+
+	LastLoginAt *time.Time `gorm:"column:last_login_at" json:"lastLoginAt"`
+	// last login timestamp
+
+	InvitationStatus string `gorm:"column:invitation_status;default:'pending'" json:"invitationStatus"`
+	// invitation status: pending, accepted, expired, revoked
+
+	InvitedBy string `gorm:"column:invited_by" json:"invitedBy"`
+	// invited by user ID
+
+	InvitedAt *time.Time `gorm:"column:invited_at" json:"invitedAt"`
+	// invitation timestamp
+
+	AcceptedAt *time.Time `gorm:"column:accepted_at" json:"acceptedAt"`
+	// invitation accepted timestamp
 }
 
 func (UserExt) TableName() string {

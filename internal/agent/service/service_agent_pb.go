@@ -25,23 +25,23 @@ import (
 	"github.com/arcentrix/arcentra/pkg/log"
 )
 
-// AgentService implements agent.v1.AgentServiceServer
-type AgentService struct {
+// AgentServiceImpl implements agent.v1.AgentServiceServer
+type AgentServiceImpl struct {
 	agentv1.UnimplementedAgentServiceServer
 	agentConf  *config.AgentConfig
 	grpcClient *grpcclient.ClientWrapper
 }
 
-// NewAgentService creates a new AgentService instance
-func NewAgentService(agentConf *config.AgentConfig, grpcClient *grpcclient.ClientWrapper) *AgentService {
-	return &AgentService{
+// NewAgentServiceImpl creates a new AgentService instance
+func NewAgentServiceImpl(agentConf *config.AgentConfig, grpcClient *grpcclient.ClientWrapper) *AgentServiceImpl {
+	return &AgentServiceImpl{
 		agentConf:  agentConf,
 		grpcClient: grpcClient,
 	}
 }
 
 // Heartbeat handles heartbeat requests from server
-func (s *AgentService) Heartbeat(ctx context.Context, req *agentv1.HeartbeatRequest) (*agentv1.HeartbeatResponse, error) {
+func (s *AgentServiceImpl) Heartbeat(ctx context.Context, req *agentv1.HeartbeatRequest) (*agentv1.HeartbeatResponse, error) {
 	log.Debugw("Heartbeat received", "agent_id", req.AgentId, "status", req.Status.String())
 
 	return &agentv1.HeartbeatResponse{
@@ -52,7 +52,7 @@ func (s *AgentService) Heartbeat(ctx context.Context, req *agentv1.HeartbeatRequ
 }
 
 // Register handles agent registration requests
-func (s *AgentService) Register(ctx context.Context, req *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
+func (s *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
 	log.Infow("Register request received", "agent_id", req.AgentId, "ip", req.Ip, "version", req.Version)
 
 	// TODO: Implement registration logic
@@ -66,7 +66,7 @@ func (s *AgentService) Register(ctx context.Context, req *agentv1.RegisterReques
 }
 
 // Unregister handles agent unregistration requests
-func (s *AgentService) Unregister(ctx context.Context, req *agentv1.UnregisterRequest) (*agentv1.UnregisterResponse, error) {
+func (s *AgentServiceImpl) Unregister(ctx context.Context, req *agentv1.UnregisterRequest) (*agentv1.UnregisterResponse, error) {
 	log.Infow("Unregister request received", "agent_id", req.AgentId, "reason", req.Reason)
 
 	// TODO: Implement unregistration logic
@@ -77,7 +77,7 @@ func (s *AgentService) Unregister(ctx context.Context, req *agentv1.UnregisterRe
 }
 
 // FetchStepRun handles step run fetching requests
-func (s *AgentService) FetchStepRun(ctx context.Context, req *agentv1.FetchStepRunRequest) (*agentv1.FetchStepRunResponse, error) {
+func (s *AgentServiceImpl) FetchStepRun(ctx context.Context, req *agentv1.FetchStepRunRequest) (*agentv1.FetchStepRunResponse, error) {
 	log.Debugw("FetchStepRun request received", "agent_id", req.AgentId, "max_step_runs", req.MaxStepRuns)
 
 	// TODO: Implement step run fetching logic
@@ -90,7 +90,7 @@ func (s *AgentService) FetchStepRun(ctx context.Context, req *agentv1.FetchStepR
 }
 
 // ReportStepRunStatus handles step run status reporting requests
-func (s *AgentService) ReportStepRunStatus(ctx context.Context, req *agentv1.ReportStepRunStatusRequest) (*agentv1.ReportStepRunStatusResponse, error) {
+func (s *AgentServiceImpl) ReportStepRunStatus(ctx context.Context, req *agentv1.ReportStepRunStatusRequest) (*agentv1.ReportStepRunStatusResponse, error) {
 	log.Debugw("ReportStepRunStatus request received", "agent_id", req.AgentId, "step_run_id", req.StepRunId, "status", req.Status.String())
 
 	// TODO: Implement step run status reporting logic
@@ -101,7 +101,7 @@ func (s *AgentService) ReportStepRunStatus(ctx context.Context, req *agentv1.Rep
 }
 
 // CancelStepRun handles step run cancellation requests from server
-func (s *AgentService) CancelStepRun(ctx context.Context, req *agentv1.CancelStepRunRequest) (*agentv1.CancelStepRunResponse, error) {
+func (s *AgentServiceImpl) CancelStepRun(ctx context.Context, req *agentv1.CancelStepRunRequest) (*agentv1.CancelStepRunResponse, error) {
 	log.Infow("CancelStepRun request received", "agent_id", req.AgentId, "step_run_id", req.StepRunId, "reason", req.Reason)
 
 	// TODO: Implement step run cancellation logic
@@ -113,7 +113,7 @@ func (s *AgentService) CancelStepRun(ctx context.Context, req *agentv1.CancelSte
 }
 
 // UpdateLabels handles agent labels update requests
-func (s *AgentService) UpdateLabels(ctx context.Context, req *agentv1.UpdateLabelsRequest) (*agentv1.UpdateLabelsResponse, error) {
+func (s *AgentServiceImpl) UpdateLabels(ctx context.Context, req *agentv1.UpdateLabelsRequest) (*agentv1.UpdateLabelsResponse, error) {
 	log.Infow("UpdateLabels request received", "agent_id", req.AgentId, "merge", req.Merge, "labels", req.Labels)
 
 	// TODO: Implement labels update logic

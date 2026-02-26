@@ -26,8 +26,8 @@ const (
 	dataTablePrefix = "t_"
 )
 
-// DatabaseSourceConfig represents a single database source/replica configuration
-type DatabaseSourceConfig struct {
+// SourceConfig represents a single database source/replica configuration
+type SourceConfig struct {
 	Host     string
 	Port     string
 	User     string
@@ -45,8 +45,8 @@ type MySQLConfig struct {
 	// Primary and Replicas for DBResolver support
 	// If Primary is empty, use Host/Port/User/Password/DBName as the default source
 	// If Replicas is empty, no read-write separation will be configured
-	Primary  []DatabaseSourceConfig `mapstructure:"primary"`
-	Replicas []DatabaseSourceConfig `mapstructure:"replicas"`
+	Primary  []SourceConfig `mapstructure:"primary"`
+	Replicas []SourceConfig `mapstructure:"replicas"`
 }
 
 // Database represents the database configuration with common settings and data sources
@@ -83,8 +83,8 @@ func buildMySQLDSN(user, password, host, port, db string) string {
 		user, password, host, port, db)
 }
 
-// buildDialectors converts DatabaseSourceConfig slice to gorm.Dialector slice
-func buildDialectors(configs []DatabaseSourceConfig) ([]gorm.Dialector, error) {
+// buildDialectors converts SourceConfig slice to gorm.Dialector slice
+func buildDialectors(configs []SourceConfig) ([]gorm.Dialector, error) {
 	if len(configs) == 0 {
 		return nil, nil
 	}

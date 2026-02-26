@@ -30,6 +30,7 @@ import (
 	"gorm.io/gorm"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
+	gatewayv1 "github.com/arcentrix/arcentra/api/gateway/v1"
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	steprunv1 "github.com/arcentrix/arcentra/api/steprun/v1"
 	streamv1 "github.com/arcentrix/arcentra/api/stream/v1"
@@ -81,10 +82,15 @@ func NewGrpcServer(cfg Conf) *ServerWrapper {
 }
 
 // Register 注册所有 gRPC 服务
-func (s *ServerWrapper) Register(services *service.Services, redisClient *redis.Client, mysqlDB *gorm.DB, kafkaSettings service.KafkaSettings) {
+func (s *ServerWrapper) Register(services *service.Services,
+	redisClient *redis.Client,
+	db *gorm.DB,
+	kafkaSettings service.KafkaSettings,
+) {
 	agentv1.RegisterAgentServiceServer(s.svr, service.NewAgentServiceImpl(services.Agent))
+	gatewayv1.RegisterGatewayServiceServer(s.svr, service.NewGatewayServiceImpl())
 	steprunv1.RegisterStepRunServiceServer(s.svr, &service.StepRunServiceImpl{})
-	streamv1.RegisterStreamServiceServer(s.svr, service.NewStreamService(redisClient, mysqlDB, kafkaSettings))
+	streamv1.RegisterStreamServiceServer(s.svr, service.NewStreamService(redisClient, db, kafkaSettings))
 	pipelinev1.RegisterPipelineServiceServer(s.svr, &service.PipelineServiceImpl{})
 	// reflection（调试）
 	reflection.Register(s.svr)

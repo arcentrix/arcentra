@@ -22,7 +22,7 @@ var PredefinedTemplates = []*Template{
 	{
 		ID:      "build_success",
 		Name:    "Build Success",
-		Type:    TemplateTypeBuild,
+		Type:    Build,
 		Channel: "all",
 		Title:   "Build Successful",
 		Content: `✅ **Build Success**
@@ -41,7 +41,7 @@ Build completed successfully!`,
 	{
 		ID:      "build_failed",
 		Name:    "Build Failed",
-		Type:    TemplateTypeBuild,
+		Type:    Build,
 		Channel: "all",
 		Title:   "Build Failed",
 		Content: `❌ **Build Failed**
@@ -61,7 +61,7 @@ Please check the build logs for details.`,
 	{
 		ID:      "build_started",
 		Name:    "Build Started",
-		Type:    TemplateTypeBuild,
+		Type:    Build,
 		Channel: "all",
 		Title:   "Build Started",
 		Content: `🚀 **Build Started**
@@ -81,7 +81,7 @@ Build is now in progress...`,
 	{
 		ID:      "approval_pending",
 		Name:    "Approval Pending",
-		Type:    TemplateTypeApproval,
+		Type:    Approval,
 		Channel: "all",
 		Title:   "Approval Required",
 		Content: `📋 **Approval Required**
@@ -99,7 +99,7 @@ Please review and approve this request.`,
 	{
 		ID:      "approval_approved",
 		Name:    "Approval Approved",
-		Type:    TemplateTypeApproval,
+		Type:    Approval,
 		Channel: "all",
 		Title:   "Approval Approved",
 		Content: `✅ **Approval Approved**
@@ -117,7 +117,7 @@ Your approval request has been approved.`,
 	{
 		ID:      "approval_rejected",
 		Name:    "Approval Rejected",
-		Type:    TemplateTypeApproval,
+		Type:    Approval,
 		Channel: "all",
 		Title:   "Approval Rejected",
 		Content: `❌ **Approval Rejected**
@@ -137,7 +137,7 @@ Your approval request has been rejected.`,
 	{
 		ID:      "dingtalk_build_success",
 		Name:    "DingTalk Build Success",
-		Type:    TemplateTypeBuild,
+		Type:    Build,
 		Channel: "dingtalk",
 		Title:   "构建成功",
 		Content: `✅ 构建成功
@@ -158,7 +158,7 @@ Your approval request has been rejected.`,
 	{
 		ID:      "feishu_approval_pending",
 		Name:    "Feishu Approval Pending",
-		Type:    TemplateTypeApproval,
+		Type:    Approval,
 		Channel: "feishu",
 		Title:   "审批待处理",
 		Content: `📋 **审批待处理**
@@ -176,7 +176,7 @@ Your approval request has been rejected.`,
 }
 
 // InitializePredefinedTemplates initializes predefined templates in the repository
-func InitializePredefinedTemplates(ctx context.Context, service *TemplateService) error {
+func InitializePredefinedTemplates(ctx context.Context, service *Service) error {
 	for _, tmpl := range PredefinedTemplates {
 		if err := service.CreateTemplate(ctx, tmpl); err != nil {
 			// Ignore if template already exists

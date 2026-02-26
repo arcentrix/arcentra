@@ -92,13 +92,13 @@ func TestGitPlugin_Type(t *testing.T) {
 func TestGitPlugin_Init(t *testing.T) {
 	tests := []struct {
 		name        string
-		config      GitConfig
+		config      Config
 		expectError bool
 		errorMsg    string
 	}{
 		{
 			name: "正常配置",
-			config: GitConfig{
+			config: Config{
 				GitPath: "git",
 				Timeout: 60,
 				WorkDir: "/tmp",
@@ -107,14 +107,14 @@ func TestGitPlugin_Init(t *testing.T) {
 		},
 		{
 			name: "空GitPath使用默认值",
-			config: GitConfig{
+			config: Config{
 				GitPath: "",
 			},
 			expectError: false,
 		},
 		{
 			name: "不存在的Git路径",
-			config: GitConfig{
+			config: Config{
 				GitPath: "/nonexistent/git",
 			},
 			expectError: true,

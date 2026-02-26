@@ -29,12 +29,12 @@ import (
 	"github.com/containerd/containerd/containers"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/containerd/containerd/oci"
-	specs "github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/opencontainers/runtime-spec/specs-go"
 	"golang.org/x/sys/unix"
 )
 
-// ContainerdSandbox implements Sandbox interface using containerd
-type ContainerdSandbox struct {
+// Containerd implements Sandbox interface using containerd
+type Containerd struct {
 	client     *containerd.Client
 	namespace  string
 	logger     log.Logger
@@ -61,7 +61,7 @@ type ContainerdConfig struct {
 }
 
 // NewContainerdSandbox creates a new containerd sandbox instance
-func NewContainerdSandbox(config *ContainerdConfig, logger log.Logger) (*ContainerdSandbox, error) {
+func NewContainerdSandbox(config *ContainerdConfig, logger log.Logger) (*Containerd, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -79,7 +79,7 @@ func NewContainerdSandbox(config *ContainerdConfig, logger log.Logger) (*Contain
 		return nil, fmt.Errorf("connect to containerd: %w", err)
 	}
 
-	sb := &ContainerdSandbox{
+	sb := &Containerd{
 		client:     client,
 		namespace:  config.Namespace,
 		logger:     logger,
@@ -95,7 +95,7 @@ func NewContainerdSandbox(config *ContainerdConfig, logger log.Logger) (*Contain
 }
 
 // Create creates a new sandbox container
-func (s *ContainerdSandbox) Create(ctx context.Context, opts *CreateOptions) (string, error) {
+func (s *Containerd) Create(ctx context.Context, opts *CreateOptions) (string, error) {
 	if opts == nil {
 		return "", fmt.Errorf("options are required")
 	}
@@ -224,7 +224,7 @@ func (s *ContainerdSandbox) Create(ctx context.Context, opts *CreateOptions) (st
 }
 
 // Start starts a sandbox container
-func (s *ContainerdSandbox) Start(ctx context.Context, containerID string) error {
+func (s *Containerd) Start(ctx context.Context, containerID string) error {
 	container, err := s.getContainer(containerID)
 	if err != nil {
 		return err
@@ -247,7 +247,7 @@ func (s *ContainerdSandbox) Start(ctx context.Context, containerID string) error
 }
 
 // Execute executes a command in the sandbox container
-func (s *ContainerdSandbox) Execute(ctx context.Context, containerID string, cmd []string, opts *ExecuteOptions) (*ExecuteResult, error) {
+func (s *Containerd) Execute(ctx context.Context, containerID string, cmd []string, opts *ExecuteOptions) (*ExecuteResult, error) {
 	result := &ExecuteResult{
 		StartTime: time.Now(),
 	}
@@ -329,13 +329,16 @@ func (s *ContainerdSandbox) Execute(ctx context.Context, containerID string, cmd
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime)
 
-	s.logger.Debugw("command executed", "container_id", containerID, "command", strings.Join(cmd, " "), "exit_code", result.ExitCode, "duration", result.Duration)
+	s.logger.Debugw("command executed",
+		"container_id", containerID,
+		"command", strings.Join(cmd, " "), "exit_code",
+		result.ExitCode, "duration", result.Duration)
 
 	return result, nil
 }
 
 // Stop stops a running sandbox container
-func (s *ContainerdSandbox) Stop(ctx context.Context, containerID string, timeout time.Duration) error {
+func (s *Containerd) Stop(ctx context.Context, containerID string, timeout time.Duration) error {
 	container, err := s.getContainer(containerID)
 	if err != nil {
 		return err
@@ -378,7 +381,7 @@ func (s *ContainerdSandbox) Stop(ctx context.Context, containerID string, timeou
 }
 
 // Remove removes a sandbox container
-func (s *ContainerdSandbox) Remove(ctx context.Context, containerID string) error {
+func (s *Containerd) Remove(ctx context.Context, containerID string) error {
 	container, err := s.getContainer(containerID)
 	if err != nil {
 		return err
@@ -405,7 +408,7 @@ func (s *ContainerdSandbox) Remove(ctx context.Context, containerID string) erro
 }
 
 // GetLogs retrieves logs from a sandbox container
-func (s *ContainerdSandbox) GetLogs(ctx context.Context, containerID string, opts *LogOptions) (io.ReadCloser, error) {
+func (s *Containerd) GetLogs(ctx context.Context, containerID string, opts *LogOptions) (io.ReadCloser, error) {
 	container, err := s.getContainer(containerID)
 	if err != nil {
 		return nil, err
@@ -433,7 +436,7 @@ func (s *ContainerdSandbox) GetLogs(ctx context.Context, containerID string, opt
 }
 
 // Cleanup cleans up resources
-func (s *ContainerdSandbox) Cleanup(ctx context.Context) error {
+func (s *Containerd) Cleanup(ctx context.Context) error {
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
 
 	for containerID := range s.containers {
@@ -450,7 +453,7 @@ func (s *ContainerdSandbox) Cleanup(ctx context.Context) error {
 }
 
 // Close closes the sandbox client connection
-func (s *ContainerdSandbox) Close() error {
+func (s *Containerd) Close() error {
 	if err := s.Cleanup(context.Background()); err != nil {
 		s.logger.Warnw("cleanup failed during close", "error", err)
 	}
@@ -463,7 +466,7 @@ func (s *ContainerdSandbox) Close() error {
 }
 
 // getContainer gets a container by ID
-func (s *ContainerdSandbox) getContainer(containerID string) (containerd.Container, error) {
+func (s *Containerd) getContainer(containerID string) (containerd.Container, error) {
 	container, ok := s.containers[containerID]
 	if !ok {
 		return nil, fmt.Errorf("container not found: %s", containerID)
@@ -472,7 +475,7 @@ func (s *ContainerdSandbox) getContainer(containerID string) (containerd.Contain
 }
 
 // withResources configures resource limits
-func (s *ContainerdSandbox) withResources(resources *Resources) oci.SpecOpts {
+func (s *Containerd) withResources(resources *Resources) oci.SpecOpts {
 	return func(ctx context.Context, client oci.Client, c *containers.Container, spec *specs.Spec) error {
 		if spec.Linux == nil {
 			spec.Linux = &specs.Linux{}
@@ -527,7 +530,7 @@ func (s *ContainerdSandbox) withResources(resources *Resources) oci.SpecOpts {
 }
 
 // getMountOptions returns mount options based on read-only flag
-func (s *ContainerdSandbox) getMountOptions(readOnly bool) []string {
+func (s *Containerd) getMountOptions(readOnly bool) []string {
 	if readOnly {
 		return []string{"ro"}
 	}

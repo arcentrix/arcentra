@@ -25,6 +25,7 @@ import (
 	"time"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
+	gatewayv1 "github.com/arcentrix/arcentra/api/gateway/v1"
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	steprunv1 "github.com/arcentrix/arcentra/api/steprun/v1"
 	streamv1 "github.com/arcentrix/arcentra/api/stream/v1"
@@ -56,6 +57,7 @@ type ClientWrapper struct {
 	StepRunClient  steprunv1.StepRunServiceClient
 	StreamClient   streamv1.StreamServiceClient
 	PipelineClient pipelinev1.PipelineServiceClient
+	GatewayClient  gatewayv1.GatewayServiceClient
 
 	// reconnection management
 	mu                  sync.RWMutex
@@ -128,6 +130,7 @@ func (c *ClientWrapper) initClients() {
 	c.StepRunClient = steprunv1.NewStepRunServiceClient(c.conn)
 	c.StreamClient = streamv1.NewStreamServiceClient(c.conn)
 	c.PipelineClient = pipelinev1.NewPipelineServiceClient(c.conn)
+	c.GatewayClient = gatewayv1.NewGatewayServiceClient(c.conn)
 }
 
 // GetConn get connection for advanced usage
@@ -216,7 +219,8 @@ func (c *ClientWrapper) reconnect() error {
 	if maxAttempts > 0 && c.reconnectAttempts >= maxAttempts {
 		if !c.maxReconnectReached {
 			c.maxReconnectReached = true
-			log.Errorw("Max reconnection attempts reached, stopping reconnection", "max_attempts", maxAttempts, "current_attempts", c.reconnectAttempts)
+			log.Errorw("Max reconnection attempts reached, stopping reconnection",
+				"max_attempts", maxAttempts, "current_attempts", c.reconnectAttempts)
 		}
 		return fmt.Errorf("max reconnection attempts (%d) reached", maxAttempts)
 	}

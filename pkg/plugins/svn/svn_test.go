@@ -69,14 +69,14 @@ func TestSVNPlugin_Type(t *testing.T) {
 func TestSVNPlugin_Init(t *testing.T) {
 	tests := []struct {
 		name        string
-		config      SVNConfig
+		config      Config
 		expectError bool
 		errorMsg    string
 		skipIfNoSVN bool
 	}{
 		{
 			name: "正常配置",
-			config: SVNConfig{
+			config: Config{
 				SVNPath:         "svn",
 				Timeout:         60,
 				WorkDir:         "/tmp",
@@ -87,7 +87,7 @@ func TestSVNPlugin_Init(t *testing.T) {
 		},
 		{
 			name: "空SVNPath使用默认值",
-			config: SVNConfig{
+			config: Config{
 				SVNPath: "",
 			},
 			expectError: false,
@@ -95,7 +95,7 @@ func TestSVNPlugin_Init(t *testing.T) {
 		},
 		{
 			name: "不存在的SVN路径",
-			config: SVNConfig{
+			config: Config{
 				SVNPath: "/nonexistent/svn",
 			},
 			expectError: true,

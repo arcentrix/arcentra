@@ -44,7 +44,7 @@ type Agent struct {
 	MetricsServer *metrics.Server
 	Logger        *log.Logger
 	AgentConf     *config.AgentConfig
-	AgentService  *service.AgentService
+	AgentService  *service.AgentServiceImpl
 	ConfigFile    string // Configuration file path
 	ShutdownMgr   *shutdown.Manager
 	TaskQueue     interface{ Stop() error }
@@ -63,7 +63,7 @@ func NewAgent(
 	httpApp := rt.Router()
 
 	// Create agent service
-	agentService := service.NewAgentService(agentConf, grpcClient)
+	agentService := service.NewAgentServiceImpl(agentConf, grpcClient)
 	taskQueue, err := agentqueue.StartWorker(context.Background(), agentConf)
 	if err != nil {
 		return nil, nil, err
@@ -219,7 +219,8 @@ func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 
 	// 检查是否已注册（有token、serverAddr和agent ID）
 	if appConf.Grpc.Token == "" || appConf.Grpc.ServerAddr == "" || appConf.Agent.ID == "" {
-		log.Warn("Agent not registered, skipping heartbeat startup. Please configure agent.id, grpc.serverAddr and grpc.token in configuration file")
+		log.Warn("Agent not registered, skipping heartbeat startup. " +
+			"Please configure agent.id, grpc.serverAddr and grpc.token in configuration file")
 		return
 	}
 

@@ -28,7 +28,7 @@ import (
 
 // HTTPExecutor HTTP 执行器
 // 执行 HTTP 类型的请求
-// 注意：HTTPExecutor 不应直接注册到 ExecutorManager，而是通过 PluginExecutor 内部调用
+// 注意：HTTPExecutor 不应直接注册到 Manager，而是通过 PluginExecutor 内部调用
 // PluginExecutor 会根据 step args 中是否包含 url 字段来判断是否使用 HTTP 执行
 type HTTPExecutor struct {
 	client *resty.Client

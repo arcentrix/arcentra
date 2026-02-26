@@ -23,20 +23,20 @@ import (
 	"github.com/bytedance/sonic"
 )
 
-// DSLParser parses Pipeline DSL from JSON format
-type DSLParser struct {
+// Parser parses Pipeline DSL from JSON format
+type Parser struct {
 	logger log.Logger
 }
 
 // NewDSLParser creates a new DSL parser
-func NewDSLParser(logger log.Logger) *DSLParser {
-	return &DSLParser{
+func NewDSLParser(logger log.Logger) *Parser {
+	return &Parser{
 		logger: logger,
 	}
 }
 
 // Parse parses DSL JSON string into Pipeline structure
-func (p *DSLParser) Parse(dslJSON string) (*spec.Pipeline, error) {
+func (p *Parser) Parse(dslJSON string) (*spec.Pipeline, error) {
 	if dslJSON == "" {
 		return nil, fmt.Errorf("dsl config is empty")
 	}
@@ -63,7 +63,7 @@ func (p *DSLParser) Parse(dslJSON string) (*spec.Pipeline, error) {
 }
 
 // ParseFromBytes parses DSL from byte array
-func (p *DSLParser) ParseFromBytes(data []byte) (*spec.Pipeline, error) {
+func (p *Parser) ParseFromBytes(data []byte) (*spec.Pipeline, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("dsl config is empty")
 	}
@@ -83,7 +83,7 @@ func (p *DSLParser) ParseFromBytes(data []byte) (*spec.Pipeline, error) {
 }
 
 // ParseFromMap parses DSL from map structure (useful for testing or dynamic config)
-func (p *DSLParser) ParseFromMap(data map[string]any) (*spec.Pipeline, error) {
+func (p *Parser) ParseFromMap(data map[string]any) (*spec.Pipeline, error) {
 	if data == nil {
 		return nil, fmt.Errorf("dsl config is nil")
 	}
@@ -98,7 +98,7 @@ func (p *DSLParser) ParseFromMap(data map[string]any) (*spec.Pipeline, error) {
 }
 
 // validate performs basic validation on parsed pipeline
-func (p *DSLParser) validate(pipeline *spec.Pipeline) error {
+func (p *Parser) validate(pipeline *spec.Pipeline) error {
 	// Validate namespace (required)
 	if pipeline.Namespace == "" {
 		return fmt.Errorf("pipeline namespace is required")
@@ -120,7 +120,7 @@ func (p *DSLParser) validate(pipeline *spec.Pipeline) error {
 }
 
 // validateJob validates a single job
-func (p *DSLParser) validateJob(job *spec.Job, index int) error {
+func (p *Parser) validateJob(job *spec.Job, index int) error {
 	// Job name is required
 	if job.Name == "" {
 		return fmt.Errorf("job name is required")
@@ -170,7 +170,7 @@ func (p *DSLParser) validateJob(job *spec.Job, index int) error {
 }
 
 // validateStep validates a single step
-func (p *DSLParser) validateStep(step *spec.Step, index int) error {
+func (p *Parser) validateStep(step *spec.Step, index int) error {
 	// Step name is required
 	if step.Name == "" {
 		return fmt.Errorf("step name is required")
@@ -185,7 +185,7 @@ func (p *DSLParser) validateStep(step *spec.Step, index int) error {
 }
 
 // validateSource validates source configuration
-func (p *DSLParser) validateSource(source *spec.Source) error {
+func (p *Parser) validateSource(source *spec.Source) error {
 	if source.Type == "" {
 		return fmt.Errorf("source type is required")
 	}
@@ -210,7 +210,7 @@ func (p *DSLParser) validateSource(source *spec.Source) error {
 }
 
 // validateApproval validates approval configuration
-func (p *DSLParser) validateApproval(approval *spec.Approval) error {
+func (p *Parser) validateApproval(approval *spec.Approval) error {
 	if approval.Required && approval.Plugin == "" {
 		return fmt.Errorf("approval plugin is required when approval is required")
 	}
@@ -229,7 +229,7 @@ func (p *DSLParser) validateApproval(approval *spec.Approval) error {
 }
 
 // validateTarget validates target configuration
-func (p *DSLParser) validateTarget(target *spec.Target) error {
+func (p *Parser) validateTarget(target *spec.Target) error {
 	if target.Type == "" {
 		return fmt.Errorf("target type is required")
 	}
@@ -249,7 +249,7 @@ func (p *DSLParser) validateTarget(target *spec.Target) error {
 }
 
 // validateNotify validates notify configuration
-func (p *DSLParser) validateNotify(notify *spec.Notify) error {
+func (p *Parser) validateNotify(notify *spec.Notify) error {
 	if notify.OnSuccess != nil {
 		if err := p.validateNotifyItem(notify.OnSuccess, "on_success"); err != nil {
 			return err
@@ -266,7 +266,7 @@ func (p *DSLParser) validateNotify(notify *spec.Notify) error {
 }
 
 // validateNotifyItem validates a notify item
-func (p *DSLParser) validateNotifyItem(item *spec.NotifyItem, context string) error {
+func (p *Parser) validateNotifyItem(item *spec.NotifyItem, context string) error {
 	if item.Plugin == "" {
 		return fmt.Errorf("%s plugin is required", context)
 	}
@@ -279,7 +279,7 @@ func (p *DSLParser) validateNotifyItem(item *spec.NotifyItem, context string) er
 }
 
 // ToJSON converts Pipeline structure back to JSON string
-func (p *DSLParser) ToJSON(pipeline *spec.Pipeline) (string, error) {
+func (p *Parser) ToJSON(pipeline *spec.Pipeline) (string, error) {
 	if pipeline == nil {
 		return "", fmt.Errorf("pipeline is nil")
 	}
@@ -293,7 +293,7 @@ func (p *DSLParser) ToJSON(pipeline *spec.Pipeline) (string, error) {
 }
 
 // ToJSONBytes converts Pipeline structure to JSON bytes
-func (p *DSLParser) ToJSONBytes(pipeline *spec.Pipeline) ([]byte, error) {
+func (p *Parser) ToJSONBytes(pipeline *spec.Pipeline) ([]byte, error) {
 	if pipeline == nil {
 		return nil, fmt.Errorf("pipeline is nil")
 	}

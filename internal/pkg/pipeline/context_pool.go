@@ -422,7 +422,6 @@ func (p *ContextPool) startCleanup() {
 
 // cleanupLoop periodically cleans up idle contexts
 func (p *ContextPool) cleanupLoop(interval time.Duration) error {
-
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -572,10 +571,19 @@ func (p *ContextPool) createNewContext(ctx context.Context, pipeline *spec.Pipel
 	// Create or reset state machine
 	if pc.stateMachine == nil {
 		sm := statemachine.NewWithState(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING)
-		sm.Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING, pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING, pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
-			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING, pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS, pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED, pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED).
-			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING).
-			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED, pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING, pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED)
+		sm.Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
+			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED).
+			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING).
+			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED)
 		pc.stateMachine = sm
 		p.registerStateMachineHooks(pc, sm)
 	} else {
@@ -587,7 +595,9 @@ func (p *ContextPool) createNewContext(ctx context.Context, pipeline *spec.Pipel
 
 // registerStateMachineHooks registers hooks for terminal states
 func (p *ContextPool) registerStateMachineHooks(pc *Context, sm *statemachine.StateMachine[pipelinev1.PipelineStatus]) {
-	sm.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS, func(state pipelinev1.PipelineStatus) error {
+	sm.OnEnter(
+		pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
+		func(state pipelinev1.PipelineStatus) error {
 		pc.mu.Lock()
 		if pc.endTime == nil {
 			now := time.Now()
@@ -673,89 +683,98 @@ func (p *ContextPool) returnToSyncPool(pc *Context) {
 }
 
 // ResetForReuse resets a context for reuse (called by Context)
-func (pc *Context) ResetForReuse(ctx context.Context, pipeline *spec.Pipeline, execCtx *ExecutionContext) {
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
+func (c *Context) ResetForReuse(ctx context.Context, pipeline *spec.Pipeline, execCtx *ExecutionContext) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	// Reset base context
 	if ctx != nil {
-		pc.ctx = ctx
+		c.ctx = ctx
 	}
 
 	// Reset pipeline and exec context
-	pc.pipeline = pipeline
-	pc.execCtx = execCtx
+	c.pipeline = pipeline
+	c.execCtx = execCtx
 
 	// Reset execution state
-	pc.currentJob = nil
-	pc.currentStep = nil
-	pc.jobIndex = 0
-	pc.stepIndex = 0
+	c.currentJob = nil
+	c.currentStep = nil
+	c.jobIndex = 0
+	c.stepIndex = 0
 
 	// Reset key-value storage
-	pc.keys = make(map[string]any)
-	pc.store = make(map[string]any)
+	c.keys = make(map[string]any)
+	c.store = make(map[string]any)
 
 	// Reset error handling
-	pc.errors = make([]error, 0)
-	pc.aborted = false
-	pc.abortError = nil
+	c.errors = make([]error, 0)
+	c.aborted = false
+	c.abortError = nil
 
 	// Reset middleware
-	pc.handlers = make([]HandlerFunc, 0)
-	pc.index = -1
+	c.handlers = make([]HandlerFunc, 0)
+	c.index = -1
 
 	// Reset metadata
-	pc.startTime = time.Now()
-	pc.endTime = nil
+	c.startTime = time.Now()
+	c.endTime = nil
 
 	// Reset pipeline ID and execution information
 	if pipeline != nil {
-		pc.pipelineId = pipeline.Namespace
+		c.pipelineId = pipeline.Namespace
 	}
-	pc.buildId = ""
-	pc.projectId = ""
-	pc.orgId = ""
-	pc.triggeredBy = ""
+	c.buildId = ""
+	c.projectId = ""
+	c.orgId = ""
+	c.triggeredBy = ""
 
 	// Reset state machine
-	if pc.stateMachine != nil {
-		pc.stateMachine.SetCurrent(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING)
+	if c.stateMachine != nil {
+		c.stateMachine.SetCurrent(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING)
 	} else {
 		sm := statemachine.NewWithState(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING)
-		sm.Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING, pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING, pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
-			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING, pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS, pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED, pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED).
-			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING).
-			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED, pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING, pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED)
-		pc.stateMachine = sm
+		sm.Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
+			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED).
+			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING).
+			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED)
+		c.stateMachine = sm
 	}
 
 	// Re-register hooks
-	pc.stateMachine.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS, func(state pipelinev1.PipelineStatus) error {
-		pc.mu.Lock()
-		if pc.endTime == nil {
+	c.stateMachine.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS, func(state pipelinev1.PipelineStatus) error {
+		c.mu.Lock()
+		if c.endTime == nil {
 			now := time.Now()
-			pc.endTime = &now
+			c.endTime = &now
 		}
-		pc.mu.Unlock()
+		c.mu.Unlock()
 		return nil
 	})
-	pc.stateMachine.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, func(state pipelinev1.PipelineStatus) error {
-		pc.mu.Lock()
-		if pc.endTime == nil {
+	c.stateMachine.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, func(state pipelinev1.PipelineStatus) error {
+		c.mu.Lock()
+		if c.endTime == nil {
 			now := time.Now()
-			pc.endTime = &now
+			c.endTime = &now
 		}
-		pc.mu.Unlock()
+		c.mu.Unlock()
 		return nil
 	})
-	pc.stateMachine.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED, func(state pipelinev1.PipelineStatus) error {
-		pc.mu.Lock()
-		if pc.endTime == nil {
+	c.stateMachine.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED, func(state pipelinev1.PipelineStatus) error {
+		c.mu.Lock()
+		if c.endTime == nil {
 			now := time.Now()
-			pc.endTime = &now
+			c.endTime = &now
 		}
-		pc.mu.Unlock()
+		c.mu.Unlock()
 		return nil
 	})
 }

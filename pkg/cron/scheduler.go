@@ -30,7 +30,7 @@ var (
 	once       sync.Once
 )
 
-// InitGlobal initializes the global cron instance
+// Init InitGlobal initializes the global cron instance
 func Init(logger *log.Logger, opts ...OpOption) {
 	once.Do(func() {
 		globalMu.Lock()
@@ -43,7 +43,7 @@ func Init(logger *log.Logger, opts ...OpOption) {
 	})
 }
 
-// GetGlobal returns the global cron instance
+// Get GetGlobal returns the global cron instance
 // Returns nil if not initialized
 func Get() *Cron {
 	globalMu.RLock()
@@ -51,7 +51,7 @@ func Get() *Cron {
 	return globalCron
 }
 
-// StartGlobal starts the global cron scheduler
+// Start StartGlobal starts the global cron scheduler
 func Start() {
 	globalMu.RLock()
 	c := globalCron

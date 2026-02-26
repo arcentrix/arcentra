@@ -21,6 +21,6 @@ type Event interface {
 	EventType() string
 }
 
-type EventHandler interface {
+type Handler interface {
 	Handle(event Event)
 }

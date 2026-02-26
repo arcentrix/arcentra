@@ -9,8 +9,8 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
-// KafkaConfig represents Kafka shared client configuration.
-type KafkaConfig struct {
+// Config represents Kafka shared client configuration.
+type Config struct {
 	BootstrapServers string     `mapstructure:"bootstrapServers"`
 	Acks             string     `mapstructure:"acks"`
 	Retries          int        `mapstructure:"retries"`
@@ -35,71 +35,71 @@ type SslConfig struct {
 
 // ClientOption defines optional configuration for ClientConfig.
 type ClientOption interface {
-	apply(*KafkaConfig)
+	apply(*Config)
 }
 
-type clientOptionFunc func(*KafkaConfig)
+type clientOptionFunc func(*Config)
 
-func (fn clientOptionFunc) apply(cfg *KafkaConfig) {
+func (fn clientOptionFunc) apply(cfg *Config) {
 	fn(cfg)
 }
 
 func WithSecurityProtocol(securityProtocol string) ClientOption {
-	return clientOptionFunc(func(cfg *KafkaConfig) {
+	return clientOptionFunc(func(cfg *Config) {
 		cfg.SecurityProtocol = securityProtocol
 	})
 }
 
 func WithSaslMechanism(mechanism string) ClientOption {
-	return clientOptionFunc(func(cfg *KafkaConfig) {
+	return clientOptionFunc(func(cfg *Config) {
 		cfg.Sasl.Mechanism = mechanism
 	})
 }
 
 func WithSaslUsername(username string) ClientOption {
-	return clientOptionFunc(func(cfg *KafkaConfig) {
+	return clientOptionFunc(func(cfg *Config) {
 		cfg.Sasl.Username = username
 	})
 }
 
 func WithSaslPassword(password string) ClientOption {
-	return clientOptionFunc(func(cfg *KafkaConfig) {
+	return clientOptionFunc(func(cfg *Config) {
 		cfg.Sasl.Password = password
 	})
 }
 
 func WithSslCaFile(path string) ClientOption {
-	return clientOptionFunc(func(cfg *KafkaConfig) {
+	return clientOptionFunc(func(cfg *Config) {
 		cfg.Ssl.CaFile = path
 	})
 }
 
 func WithSslCertFile(path string) ClientOption {
-	return clientOptionFunc(func(cfg *KafkaConfig) {
+	return clientOptionFunc(func(cfg *Config) {
 		cfg.Ssl.CertFile = path
 	})
 }
 
 func WithSslKeyFile(path string) ClientOption {
-	return clientOptionFunc(func(cfg *KafkaConfig) {
+	return clientOptionFunc(func(cfg *Config) {
 		cfg.Ssl.KeyFile = path
 	})
 }
 
 func WithSslPassword(password string) ClientOption {
-	return clientOptionFunc(func(cfg *KafkaConfig) {
+	return clientOptionFunc(func(cfg *Config) {
 		cfg.Ssl.Password = password
 	})
 }
 
-// KafkaClient holds a base client configuration.
-type KafkaClient struct {
-	Config KafkaConfig
+// Client holds a base client configuration.
+type Client struct {
+	Config Config
 }
 
-// NewKafkaClient creates a new KafkaClient using options.
-func NewKafkaClient(bootstrapServers string, opts ...ClientOption) (*KafkaClient, error) {
-	cfg := KafkaConfig{
+// NewKafkaClient creates a new Client using options.
+func NewKafkaClient(bootstrapServers string, opts ...ClientOption) (*Client, error) {
+	cfg := Config{
 		BootstrapServers: bootstrapServers,
 	}
 	for _, opt := range opts {
@@ -108,10 +108,10 @@ func NewKafkaClient(bootstrapServers string, opts ...ClientOption) (*KafkaClient
 	if err := mq.RequireNonEmpty("bootstrapServers", cfg.BootstrapServers); err != nil {
 		return nil, err
 	}
-	return &KafkaClient{Config: cfg}, nil
+	return &Client{Config: cfg}, nil
 }
 
-func buildBaseConfig(cfg KafkaConfig) (*kafka.ConfigMap, error) {
+func buildBaseConfig(cfg Config) (*kafka.ConfigMap, error) {
 	if err := mq.RequireNonEmpty("bootstrapServers", cfg.BootstrapServers); err != nil {
 		return nil, err
 	}

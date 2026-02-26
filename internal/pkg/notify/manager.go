@@ -24,8 +24,8 @@ import (
 	"github.com/arcentrix/arcentra/pkg/log"
 )
 
-// NotifyManager manages multiple notification channels
-type NotifyManager struct {
+// Manager manages multiple notification channels
+type Manager struct {
 	channels    map[string]*channel.NotifyChannel
 	mu          sync.RWMutex
 	factory     *ChannelFactory
@@ -39,22 +39,22 @@ type ChannelRepository interface {
 }
 
 // NewNotifyManager creates a new notification manager
-func NewNotifyManager() *NotifyManager {
-	return &NotifyManager{
+func NewNotifyManager() *Manager {
+	return &Manager{
 		channels: make(map[string]*channel.NotifyChannel),
 		factory:  &ChannelFactory{},
 	}
 }
 
 // SetChannelRepository 设置通知配置仓库
-func (nm *NotifyManager) SetChannelRepository(repo ChannelRepository) {
+func (nm *Manager) SetChannelRepository(repo ChannelRepository) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
 	nm.channelRepo = repo
 }
 
 // LoadChannelsFromDatabase 从数据库加载所有活跃的通知配置
-func (nm *NotifyManager) LoadChannelsFromDatabase(ctx context.Context) error {
+func (nm *Manager) LoadChannelsFromDatabase(ctx context.Context) error {
 	if nm.channelRepo == nil {
 		return fmt.Errorf("channel repository is not set")
 	}
@@ -78,7 +78,7 @@ func (nm *NotifyManager) LoadChannelsFromDatabase(ctx context.Context) error {
 		if len(cfg.AuthConfig) > 0 {
 			authType, _ := cfg.AuthConfig["type"].(string)
 			if authType != "" {
-				authProvider, err := nm.factory.CreateAuthProvider(auth.AuthType(authType), cfg.AuthConfig)
+				authProvider, err := nm.factory.CreateAuthProvider(auth.Type(authType), cfg.AuthConfig)
 				if err == nil {
 					_ = ch.SetAuth(authProvider)
 				} else {
@@ -106,7 +106,7 @@ func (nm *NotifyManager) LoadChannelsFromDatabase(ctx context.Context) error {
 }
 
 // RegisterChannel registers a notification channel
-func (nm *NotifyManager) RegisterChannel(name string, ch *channel.NotifyChannel) error {
+func (nm *Manager) RegisterChannel(name string, ch *channel.NotifyChannel) error {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
 
@@ -127,7 +127,7 @@ func (nm *NotifyManager) RegisterChannel(name string, ch *channel.NotifyChannel)
 }
 
 // GetChannel gets a notification channel by name
-func (nm *NotifyManager) GetChannel(name string) (*channel.NotifyChannel, error) {
+func (nm *Manager) GetChannel(name string) (*channel.NotifyChannel, error) {
 	nm.mu.RLock()
 	defer nm.mu.RUnlock()
 
@@ -140,7 +140,7 @@ func (nm *NotifyManager) GetChannel(name string) (*channel.NotifyChannel, error)
 }
 
 // Send sends a message to a specific channel
-func (nm *NotifyManager) Send(ctx context.Context, channelName, message string) error {
+func (nm *Manager) Send(ctx context.Context, channelName, message string) error {
 	ch, err := nm.GetChannel(channelName)
 	if err != nil {
 		return err
@@ -150,7 +150,7 @@ func (nm *NotifyManager) Send(ctx context.Context, channelName, message string) 
 }
 
 // SendToMultiple sends a message to multiple channels
-func (nm *NotifyManager) SendToMultiple(ctx context.Context, channelNames []string, message string) error {
+func (nm *Manager) SendToMultiple(ctx context.Context, channelNames []string, message string) error {
 	var errs []error
 	for _, name := range channelNames {
 		if err := nm.Send(ctx, name, message); err != nil {
@@ -166,7 +166,7 @@ func (nm *NotifyManager) SendToMultiple(ctx context.Context, channelNames []stri
 }
 
 // SendWithTemplate sends a message using template
-func (nm *NotifyManager) SendWithTemplate(ctx context.Context, channelName, template string, data map[string]any) error {
+func (nm *Manager) SendWithTemplate(ctx context.Context, channelName, template string, data map[string]any) error {
 	ch, err := nm.GetChannel(channelName)
 	if err != nil {
 		return err
@@ -176,7 +176,7 @@ func (nm *NotifyManager) SendWithTemplate(ctx context.Context, channelName, temp
 }
 
 // UnregisterChannel unregisters a notification channel
-func (nm *NotifyManager) UnregisterChannel(name string) error {
+func (nm *Manager) UnregisterChannel(name string) error {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
 
@@ -195,7 +195,7 @@ func (nm *NotifyManager) UnregisterChannel(name string) error {
 }
 
 // ListChannels lists all registered channels
-func (nm *NotifyManager) ListChannels() []string {
+func (nm *Manager) ListChannels() []string {
 	nm.mu.RLock()
 	defer nm.mu.RUnlock()
 
@@ -360,23 +360,23 @@ func createDiscordChannel(config map[string]any) (channel.INotifyChannel, error)
 }
 
 // CreateAuthProvider creates an authentication provider based on type and configuration
-func (cf *ChannelFactory) CreateAuthProvider(authType auth.AuthType, config map[string]any) (auth.IAuthProvider, error) {
+func (cf *ChannelFactory) CreateAuthProvider(authType auth.Type, config map[string]any) (auth.IAuthProvider, error) {
 	switch authType {
-	case auth.AuthTypeToken:
+	case auth.Token:
 		token, _ := config["token"].(string)
 		if token == "" {
 			return nil, fmt.Errorf("token is required")
 		}
 		return auth.NewTokenAuth(token), nil
 
-	case auth.AuthTypeBearer:
+	case auth.Bearer:
 		token, _ := config["token"].(string)
 		if token == "" {
 			return nil, fmt.Errorf("token is required")
 		}
 		return auth.NewBearerAuth(token), nil
 
-	case auth.AuthTypeAPIKey:
+	case auth.ApiKey:
 		apiKey, _ := config["api_key"].(string)
 		headerName, _ := config["header_name"].(string)
 		if apiKey == "" {
@@ -384,7 +384,7 @@ func (cf *ChannelFactory) CreateAuthProvider(authType auth.AuthType, config map[
 		}
 		return auth.NewAPIKeyAuth(apiKey, headerName), nil
 
-	case auth.AuthTypeBasic:
+	case auth.Basic:
 		username, _ := config["username"].(string)
 		password, _ := config["password"].(string)
 		if username == "" || password == "" {
@@ -392,7 +392,7 @@ func (cf *ChannelFactory) CreateAuthProvider(authType auth.AuthType, config map[
 		}
 		return auth.NewBasicAuth(username, password), nil
 
-	case auth.AuthTypeOAuth2:
+	case auth.OAuth2:
 		clientID, _ := config["client_id"].(string)
 		clientSecret, _ := config["client_secret"].(string)
 		tokenURL, _ := config["token_url"].(string)

@@ -73,14 +73,14 @@ func (r *RingBuffer[T]) minConsumerSequence() int64 {
 		return atomic.LoadInt64(&r.published)
 	}
 
-	min := int64(math.MaxInt64)
+	m := int64(math.MaxInt64)
 	for _, c := range r.consumers {
 		seq := atomic.LoadInt64(&c)
-		if seq < min {
-			min = seq
+		if seq < m {
+			m = seq
 		}
 	}
-	return min
+	return m
 }
 
 // waitForFreeSlot blocks (spins) until the ring has space for nextSeq.

@@ -85,7 +85,7 @@ func (p *GormPlugin) beforeCallback(db *gorm.DB) {
 	}
 
 	// Ensure trace context is propagated (from goroutine context if needed)
-	ctx = tracecontext.ContextWithSpan(ctx)
+	ctx = tracecontext.WithSpan(ctx)
 
 	operation := getOperationName(db)
 	spanName := fmt.Sprintf("gorm.%s", operation)

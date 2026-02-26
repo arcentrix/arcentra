@@ -46,7 +46,7 @@ type App struct {
 	GrpcServer    *grpc.ServerWrapper
 	MetricsServer *metrics.Server
 	Logger        *log.Logger
-	Storage       storage.StorageProvider
+	Storage       storage.IStorage
 	AppConf       *config.AppConfig
 	Repos         *repo.Repositories
 	Services      *service.Services
@@ -62,7 +62,7 @@ func NewApp(
 	pluginMgr *plugin.Manager,
 	grpcServer *grpc.ServerWrapper,
 	metricsServer *metrics.Server,
-	storage storage.StorageProvider,
+	storage storage.IStorage,
 	appConf *config.AppConfig,
 	db database.IDatabase,
 	repos *repo.Repositories,

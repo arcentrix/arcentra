@@ -144,24 +144,28 @@ func (c *Consumer) Subscribe(ctx context.Context, topics []string, handler Messa
 	}
 
 	for _, topic := range topics {
-		if err := c.consumer.Subscribe(topic, consumer.MessageSelector{}, func(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
-			for _, msg := range msgs {
-				headers := make(map[string]string, len(msg.GetProperties()))
-				for k, v := range msg.GetProperties() {
-					headers[k] = v
-				}
+		if err := c.consumer.Subscribe(
+			topic, consumer.MessageSelector{},
+			func(ctx context.Context,
+				msgs ...*primitive.MessageExt,
+			) (consumer.ConsumeResult, error) {
+				for _, msg := range msgs {
+					headers := make(map[string]string, len(msg.GetProperties()))
+					for k, v := range msg.GetProperties() {
+						headers[k] = v
+					}
 
-				message := &Message{
-					Key:     msg.GetKeys(),
-					Value:   msg.Body,
-					Headers: headers,
+					message := &Message{
+						Key:     msg.GetKeys(),
+						Value:   msg.Body,
+						Headers: headers,
+					}
+					if err := handler(ctx, message); err != nil {
+						return consumer.ConsumeRetryLater, err
+					}
 				}
-				if err := handler(ctx, message); err != nil {
-					return consumer.ConsumeRetryLater, err
-				}
-			}
-			return consumer.ConsumeSuccess, nil
-		}); err != nil {
+				return consumer.ConsumeSuccess, nil
+			}); err != nil {
 			return fmt.Errorf("subscribe topic %s: %w", topic, err)
 		}
 	}

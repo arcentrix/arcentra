@@ -18,7 +18,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 
 	"go.uber.org/zap/zapcore"
@@ -186,7 +185,6 @@ func TestGlobalLogFunctions(t *testing.T) {
 	sugar = nil
 	logger = nil
 	mu.Unlock()
-	once = *new(sync.Once)
 
 	// 测试在未初始化的情况下调用（应该自动初始化）
 	Info("test info message")

@@ -25,12 +25,12 @@ import (
 
 // NotificationService provides high-level notification functionality with template support
 type NotificationService struct {
-	manager         *notify.NotifyManager
-	templateService *template.TemplateService
+	manager         *notify.Manager
+	templateService *template.Service
 }
 
 // NewNotificationService creates a new notification service
-func NewNotificationService(manager *notify.NotifyManager, templateService *template.TemplateService) *NotificationService {
+func NewNotificationService(manager *notify.Manager, templateService *template.Service) *NotificationService {
 	return &NotificationService{
 		manager:         manager,
 		templateService: templateService,
@@ -50,7 +50,7 @@ func (s *NotificationService) SendWithTemplate(ctx context.Context, channelName,
 }
 
 // SendWithTemplateByName sends a notification using a template name and type
-func (s *NotificationService) SendWithTemplateByName(ctx context.Context, channelName, templateName string, templateType template.TemplateType, data map[string]interface{}) error {
+func (s *NotificationService) SendWithTemplateByName(ctx context.Context, channelName, templateName string, templateType template.Type, data map[string]interface{}) error {
 	// Render template
 	content, err := s.templateService.RenderTemplateByName(ctx, templateName, templateType, data)
 	if err != nil {
@@ -75,18 +75,18 @@ func (s *NotificationService) SendToMultipleWithTemplate(ctx context.Context, ch
 
 // SendBuildNotification sends a build-related notification
 func (s *NotificationService) SendBuildNotification(ctx context.Context, channelName, templateName string, data map[string]interface{}) error {
-	return s.SendWithTemplateByName(ctx, channelName, templateName, template.TemplateTypeBuild, data)
+	return s.SendWithTemplateByName(ctx, channelName, templateName, template.Build, data)
 }
 
 // SendApprovalNotification sends an approval-related notification
 func (s *NotificationService) SendApprovalNotification(ctx context.Context, channelName, templateName string, data map[string]interface{}) error {
-	return s.SendWithTemplateByName(ctx, channelName, templateName, template.TemplateTypeApproval, data)
+	return s.SendWithTemplateByName(ctx, channelName, templateName, template.Approval, data)
 }
 
 // BroadcastBuildNotification broadcasts a build notification to multiple channels
 func (s *NotificationService) BroadcastBuildNotification(ctx context.Context, channelNames []string, templateName string, data map[string]interface{}) error {
 	// Get template
-	tmpl, err := s.templateService.GetTemplateByNameAndType(ctx, templateName, template.TemplateTypeBuild)
+	tmpl, err := s.templateService.GetTemplateByNameAndType(ctx, templateName, template.Build)
 	if err != nil {
 		return fmt.Errorf("failed to get template: %w", err)
 	}
@@ -104,7 +104,7 @@ func (s *NotificationService) BroadcastBuildNotification(ctx context.Context, ch
 // BroadcastApprovalNotification broadcasts an approval notification to multiple channels
 func (s *NotificationService) BroadcastApprovalNotification(ctx context.Context, channelNames []string, templateName string, data map[string]interface{}) error {
 	// Get template
-	tmpl, err := s.templateService.GetTemplateByNameAndType(ctx, templateName, template.TemplateTypeApproval)
+	tmpl, err := s.templateService.GetTemplateByNameAndType(ctx, templateName, template.Approval)
 	if err != nil {
 		return fmt.Errorf("failed to get template: %w", err)
 	}

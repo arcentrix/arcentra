@@ -29,7 +29,7 @@ var ProviderSet = wire.NewSet(
 
 // ProvideNotifyManager provides notification manager instance
 // Loads channels from database on initialization
-func ProvideNotifyManager(repos *repo.Repositories) (*NotifyManager, error) {
+func ProvideNotifyManager(repos *repo.Repositories) (*Manager, error) {
 	manager := NewNotifyManager()
 
 	channelRepoAdapter := NewChannelRepositoryAdapter(repos.NotificationChannel)

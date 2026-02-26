@@ -33,19 +33,19 @@ import (
 
 // AgentConfig holds all configuration settings
 type AgentConfig struct {
-	Grpc         GrpcConfig            `mapstructure:"grpc"`
-	Agent        AgentInfo             `mapstructure:"agent"`
-	Log          log.Conf              `mapstructure:"log"`
-	Http         http.Http             `mapstructure:"http"`
-	Redis        cache.Redis           `mapstructure:"redis"`
-	TaskQueue    nova.TaskQueueConfig  `mapstructure:"taskQueue"`
-	MessageQueue MqConfig              `mapstructure:"messageQueue"`
-	Metrics      metrics.MetricsConfig `mapstructure:"metrics"`
-	Pprof        pprof.PprofConfig     `mapstructure:"pprof"`
+	Grpc         GrpcConfig           `mapstructure:"grpc"`
+	Agent        AgentInfo            `mapstructure:"agent"`
+	Log          log.Conf             `mapstructure:"log"`
+	Http         http.Http            `mapstructure:"http"`
+	Redis        cache.Redis          `mapstructure:"redis"`
+	TaskQueue    nova.TaskQueueConfig `mapstructure:"taskQueue"`
+	MessageQueue MqConfig             `mapstructure:"messageQueue"`
+	Metrics      metrics.Config       `mapstructure:"metrics"`
+	Pprof        pprof.Config         `mapstructure:"pprof"`
 }
 
 type MqConfig struct {
-	Kafka kafka.KafkaConfig `mapstructure:"kafka"`
+	Kafka kafka.Config `mapstructure:"kafka"`
 }
 
 // GrpcConfig gRPC client configuration

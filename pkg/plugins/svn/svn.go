@@ -31,8 +31,8 @@ import (
 	"github.com/bytedance/sonic"
 )
 
-// SVNConfig is the plugin's configuration structure
-type SVNConfig struct {
+// Config is the plugin's configuration structure
+type Config struct {
 	// SVN executable path (default: svn)
 	SVNPath string `json:"svnPath"`
 	// Default timeout in seconds (0 means no timeout)
@@ -105,11 +105,11 @@ type ListArgs struct {
 
 // SVN implements the svn plugin
 type SVN struct {
-	*plugin.PluginBase
+	*plugin.Base
 	name        string
 	description string
-	version     string
-	cfg         SVNConfig
+	version string
+	cfg     Config
 }
 
 // Action definitions
@@ -127,11 +127,11 @@ var (
 // NewSVN creates a new svn plugin instance
 func NewSVN() *SVN {
 	p := &SVN{
-		PluginBase:  plugin.NewPluginBase(),
+		Base:        plugin.NewPluginBase(),
 		name:        "svn",
 		description: "SVN version control plugin for repository operations",
 		version:     "1.0.0",
-		cfg: SVNConfig{
+		cfg: Config{
 			SVNPath:         "svn",
 			Timeout:         300, // 5 minutes default
 			TrustServerCert: false,
@@ -205,7 +205,7 @@ func (p *SVN) Version() string {
 }
 
 // Type returns the plugin type
-func (p *SVN) Type() plugin.PluginType {
+func (p *SVN) Type() plugin.Type {
 	return plugin.TypeSource
 }
 
@@ -249,7 +249,7 @@ func (p *SVN) Cleanup() error {
 
 // Execute executes svn operations using Action Registry
 func (p *SVN) Execute(action string, params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-	return p.PluginBase.Execute(action, params, opts)
+	return p.Base.Execute(action, params, opts)
 }
 
 // ===== Action Handlers =====

@@ -15,6 +15,7 @@
 package repo
 
 import (
+	"context"
 	"errors"
 
 	"github.com/arcentrix/arcentra/internal/engine/model"
@@ -22,8 +23,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// IStepRunRepository defines step run persistence with context support.
 type IStepRunRepository interface {
-	GetStepRun(pipelineId, jobId, stepRunId string) (*model.StepRun, error)
+	Get(ctx context.Context, pipelineId, jobId, stepRunId string) (*model.StepRun, error)
 }
 
 type StepRunRepo struct {
@@ -34,9 +36,10 @@ func NewStepRunRepo(db database.IDatabase) IStepRunRepository {
 	return &StepRunRepo{IDatabase: db}
 }
 
-func (r *StepRunRepo) GetStepRun(pipelineId, jobId, stepRunId string) (*model.StepRun, error) {
+// Get returns step run by pipelineId, jobId and stepRunId.
+func (r *StepRunRepo) Get(ctx context.Context, pipelineId, jobId, stepRunId string) (*model.StepRun, error) {
 	var stepRun model.StepRun
-	err := r.Database().
+	err := r.Database().WithContext(ctx).
 		Table(stepRun.TableName()).
 		Where("pipeline_id = ? AND job_id = ? AND step_run_id = ?", pipelineId, jobId, stepRunId).
 		First(&stepRun).Error

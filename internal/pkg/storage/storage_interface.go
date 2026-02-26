@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-type StorageProvider interface {
+type IStorage interface {
 	PutObject(ctx context.Context, objectName string, file *multipart.FileHeader, contentType string) (string, error)
 	GetObject(ctx context.Context, objectName string) ([]byte, error)
 	Upload(ctx context.Context, objectName string, file *multipart.FileHeader, contentType string) (string, error)

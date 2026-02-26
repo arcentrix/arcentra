@@ -39,7 +39,7 @@ type EventsConfig struct {
 }
 
 type MessageQueueConfig struct {
-	Kafka kafka.KafkaConfig `mapstructure:"kafka"`
+	Kafka kafka.Config `mapstructure:"kafka"`
 }
 
 type TaskQueueConfig struct {
@@ -54,17 +54,17 @@ type TaskQueueConfig struct {
 }
 
 type AppConfig struct {
-	Log          log.Conf              `mapstructure:"log"`
-	Grpc         grpc.Conf             `mapstructure:"grpc"`
-	Http         http.Http             `mapstructure:"http"`
-	Database     database.Database     `mapstructure:"database"`
-	Redis        cache.Redis           `mapstructure:"redis"`
-	Events       EventsConfig          `mapstructure:"events"`
-	MessageQueue MessageQueueConfig    `mapstructure:"messageQueue"`
-	Metrics      metrics.MetricsConfig `mapstructure:"metrics"`
-	Pprof        pprof.PprofConfig     `mapstructure:"pprof"`
-	Trace        trace.TraceConfig     `mapstructure:"trace"`
-	TaskQueue    nova.TaskQueueConfig  `mapstructure:"taskQueue"`
+	Log          log.Conf             `mapstructure:"log" json:"Log"`
+	Grpc         grpc.Conf            `mapstructure:"grpc" json:"Grpc"`
+	Http         http.Http            `mapstructure:"http" json:"Http"`
+	Database     database.Database    `mapstructure:"database" json:"Database"`
+	Redis        cache.Redis          `mapstructure:"redis" json:"Redis"`
+	Events       EventsConfig         `mapstructure:"events" json:"Events"`
+	MessageQueue MessageQueueConfig   `mapstructure:"messageQueue" json:"MessageQueue"`
+	Metrics      metrics.Config       `mapstructure:"metrics" json:"Metrics"`
+	Pprof        pprof.Config         `mapstructure:"pprof" json:"Pprof"`
+	Trace        trace.Config         `mapstructure:"trace" json:"Trace"`
+	TaskQueue    nova.TaskQueueConfig `mapstructure:"taskQueue" json:"TaskQueue"`
 }
 
 var (

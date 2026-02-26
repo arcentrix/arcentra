@@ -25,8 +25,8 @@ import (
 	"github.com/arcentrix/arcentra/pkg/safe"
 )
 
-// PprofConfig holds pprof server configuration
-type PprofConfig struct {
+// Config PprofConfig holds pprof server configuration
+type Config struct {
 	Host   string
 	Port   int
 	Enable bool
@@ -34,7 +34,7 @@ type PprofConfig struct {
 }
 
 // SetDefaults sets default values for PprofConfig
-func (p *PprofConfig) SetDefaults() {
+func (p *Config) SetDefaults() {
 	if p.Host == "" {
 		p.Host = "0.0.0.0"
 	}
@@ -48,12 +48,12 @@ func (p *PprofConfig) SetDefaults() {
 
 // Server represents a pprof server
 type Server struct {
-	config PprofConfig
+	config Config
 	server *http.Server
 }
 
 // NewServer creates a new pprof server
-func NewServer(config PprofConfig) *Server {
+func NewServer(config Config) *Server {
 	config.SetDefaults()
 
 	return &Server{

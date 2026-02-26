@@ -24,12 +24,12 @@ import (
 
 // PipelineAdapter 将 pipeline 的 step 和 job 适配为执行器格式
 type PipelineAdapter struct {
-	executorManager *ExecutorManager
+	executorManager *Manager
 	logger          log.Logger
 }
 
 // NewPipelineAdapter 创建 pipeline 适配器
-func NewPipelineAdapter(executorManager *ExecutorManager, logger log.Logger) *PipelineAdapter {
+func NewPipelineAdapter(executorManager *Manager, logger log.Logger) *PipelineAdapter {
 	return &PipelineAdapter{
 		executorManager: executorManager,
 		logger:          logger,
@@ -125,7 +125,7 @@ func NewExecutorManagerWithDefaults(
 	pluginManager *plugin.Manager,
 	remoteExecutor RemoteExecutor,
 	logger log.Logger,
-) *ExecutorManager {
+) *Manager {
 	manager := NewExecutorManager()
 
 	// 注册统一执行器（根据 RunRemotely 自动选择本地或远程执行）
@@ -149,7 +149,7 @@ func NewExecutorManagerWithDefaultsAndEvents(
 	remoteExecutor RemoteExecutor,
 	logger log.Logger,
 	appConf *config.AppConfig,
-) *ExecutorManager {
+) *Manager {
 	manager := NewExecutorManagerWithDefaults(pluginManager, remoteExecutor, logger)
 	publisher := NewEventPublisherFromConfig(appConf)
 	if publisher != nil {

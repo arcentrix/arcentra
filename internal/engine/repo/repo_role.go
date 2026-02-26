@@ -15,36 +15,42 @@
 package repo
 
 import (
+	"context"
+
 	"github.com/arcentrix/arcentra/internal/engine/model"
 	"github.com/arcentrix/arcentra/pkg/database"
 )
 
+// IRoleRepository defines role persistence with context support for timeout, tracing and cancellation.
 type IRoleRepository interface {
-	CreateRole(role *model.Role) error
-	GetRole(roleId string) (*model.Role, error)
-	GetRoleById(id uint64) (*model.Role, error)
-	GetRolesByRoleIds(roleIds []string) ([]model.Role, error)
-	ListRoles(pageNum, pageSize int) ([]model.Role, int64, error)
-	UpdateRoleById(id uint64, updates map[string]any) error
-	UpdateRoleByRoleId(roleId string, updates map[string]any) error
-	DeleteRole(id uint64) error
-	DeleteRoleByRoleId(roleId string) error
+	Create(ctx context.Context, role *model.Role) error
+	Get(ctx context.Context, roleId string) (*model.Role, error)
+	BatchGet(ctx context.Context, roleIds []string) ([]model.Role, error)
+	List(ctx context.Context, pageNum, pageSize int) ([]model.Role, int64, error)
+	Update(ctx context.Context, roleId string, updates map[string]any) error
+	Delete(ctx context.Context, roleId string) error
 }
 
 type RoleRepo struct {
 	database.IDatabase
 }
 
+// NewRoleRepo creates a role repository.
 func NewRoleRepo(db database.IDatabase) IRoleRepository {
-	return &RoleRepo{
-		IDatabase: db,
-	}
+	return &RoleRepo{IDatabase: db}
 }
 
-// GetRole 获取角色
-func (r *RoleRepo) GetRole(roleId string) (*model.Role, error) {
+var roleSelectFields = []string{"id", "role_id", "name", "display_name", "description", "is_enabled", "created_at", "updated_at"}
+
+// Create creates a new role.
+func (r *RoleRepo) Create(ctx context.Context, role *model.Role) error {
+	return r.Database().WithContext(ctx).Table(role.TableName()).Create(role).Error
+}
+
+// Get returns role by roleId.
+func (r *RoleRepo) Get(ctx context.Context, roleId string) (*model.Role, error) {
 	var role model.Role
-	err := r.Database().Select("id", "role_id", "name", "display_name", "description", "is_enabled", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select(roleSelectFields).
 		Where("role_id = ? AND is_enabled = ?", roleId, 1).First(&role).Error
 	if err != nil {
 		return nil, err
@@ -52,48 +58,29 @@ func (r *RoleRepo) GetRole(roleId string) (*model.Role, error) {
 	return &role, nil
 }
 
-// GetRolesByRoleIds 根据角色ID列表获取角色
-func (r *RoleRepo) GetRolesByRoleIds(roleIds []string) ([]model.Role, error) {
+// BatchGet returns roles by roleIds.
+func (r *RoleRepo) BatchGet(ctx context.Context, roleIds []string) ([]model.Role, error) {
 	if len(roleIds) == 0 {
 		return []model.Role{}, nil
 	}
 	var roles []model.Role
-	err := r.Database().Select("id", "role_id", "name", "display_name", "description", "is_enabled", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select(roleSelectFields).
 		Where("role_id IN ? AND is_enabled = ?", roleIds, 1).Find(&roles).Error
 	return roles, err
 }
 
-// CreateRole 创建角色
-func (r *RoleRepo) CreateRole(role *model.Role) error {
-	if err := r.Database().Table(role.TableName()).Create(role).Error; err != nil {
-		return err
-	}
-	return nil
-}
-
-// GetRoleById 根据ID获取角色
-func (r *RoleRepo) GetRoleById(id uint64) (*model.Role, error) {
-	var role model.Role
-	err := r.Database().Select("id", "role_id", "name", "display_name", "description", "is_enabled", "created_at", "updated_at").
-		Where("id = ?", id).First(&role).Error
-	if err != nil {
-		return nil, err
-	}
-	return &role, nil
-}
-
-// ListRoles 列出角色（支持分页）
-func (r *RoleRepo) ListRoles(pageNum, pageSize int) ([]model.Role, int64, error) {
+// List lists roles with pagination.
+func (r *RoleRepo) List(ctx context.Context, pageNum, pageSize int) ([]model.Role, int64, error) {
 	var roles []model.Role
 	var role model.Role
 	var count int64
 	offset := (pageNum - 1) * pageSize
 
-	if err := r.Database().Table(role.TableName()).Count(&count).Error; err != nil {
+	if err := r.Database().WithContext(ctx).Table(role.TableName()).Count(&count).Error; err != nil {
 		return nil, 0, err
 	}
 
-	if err := r.Database().Select("id", "role_id", "name", "display_name", "description", "is_enabled", "created_at", "updated_at").
+	if err := r.Database().WithContext(ctx).Select(roleSelectFields).
 		Table(role.TableName()).
 		Offset(offset).Limit(pageSize).
 		Order("created_at DESC").
@@ -103,44 +90,14 @@ func (r *RoleRepo) ListRoles(pageNum, pageSize int) ([]model.Role, int64, error)
 	return roles, count, nil
 }
 
-// UpdateRoleById 根据ID更新角色
-func (r *RoleRepo) UpdateRoleById(id uint64, updates map[string]any) error {
-	var role model.Role
-	if err := r.Database().Table(role.TableName()).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return err
-	}
-	return nil
+// Update updates role by roleId.
+func (r *RoleRepo) Update(ctx context.Context, roleId string, updates map[string]any) error {
+	return r.Database().WithContext(ctx).Table((&model.Role{}).TableName()).
+		Where("role_id = ?", roleId).Updates(updates).Error
 }
 
-// UpdateRoleByRoleId 根据RoleId更新角色
-func (r *RoleRepo) UpdateRoleByRoleId(roleId string, updates map[string]any) error {
-	var role model.Role
-	if err := r.Database().Table(role.TableName()).Where("role_id = ?", roleId).Updates(updates).Error; err != nil {
-		return err
-	}
-	return nil
-}
-
-// DeleteRole 根据ID删除角色（软删除，设置is_enabled=0）
-func (r *RoleRepo) DeleteRole(id uint64) error {
-	var role model.Role
-	updates := map[string]any{
-		"is_enabled": 0,
-	}
-	if err := r.Database().Table(role.TableName()).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return err
-	}
-	return nil
-}
-
-// DeleteRoleByRoleId 根据RoleId删除角色（软删除，设置is_enabled=0）
-func (r *RoleRepo) DeleteRoleByRoleId(roleId string) error {
-	var role model.Role
-	updates := map[string]any{
-		"is_enabled": 0,
-	}
-	if err := r.Database().Table(role.TableName()).Where("role_id = ?", roleId).Updates(updates).Error; err != nil {
-		return err
-	}
-	return nil
+// Delete soft-deletes role by roleId (sets is_enabled=0).
+func (r *RoleRepo) Delete(ctx context.Context, roleId string) error {
+	return r.Database().WithContext(ctx).Table((&model.Role{}).TableName()).
+		Where("role_id = ?", roleId).Updates(map[string]any{"is_enabled": 0}).Error
 }

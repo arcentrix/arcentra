@@ -23,7 +23,7 @@ import (
 
 // ProducerConfig represents Kafka producer configuration.
 type ProducerConfig struct {
-	KafkaConfig `json:",inline" mapstructure:",squash"`
+	Config      `json:",inline" mapstructure:",squash"`
 	Acks        string `json:"acks" mapstructure:"acks"`
 	Retries     int    `json:"retries" mapstructure:"retries"`
 	Compression string `json:"compression" mapstructure:"compression"`
@@ -43,7 +43,7 @@ func (fn producerOptionFunc) apply(cfg *ProducerConfig) {
 func WithProducerClientOptions(opts ...ClientOption) ProducerOption {
 	return producerOptionFunc(func(cfg *ProducerConfig) {
 		for _, opt := range opts {
-			opt.apply(&cfg.KafkaConfig)
+			opt.apply(&cfg.Config)
 		}
 	})
 }
@@ -74,7 +74,7 @@ type Producer struct {
 // NewProducer creates a new Kafka producer.
 func NewProducer(bootstrapServers string, clientId string, opts ...ProducerOption) (*Producer, error) {
 	cfg := ProducerConfig{
-		KafkaConfig: KafkaConfig{
+		Config: Config{
 			BootstrapServers: bootstrapServers,
 		},
 		Acks:        "all",
@@ -86,7 +86,7 @@ func NewProducer(bootstrapServers string, clientId string, opts ...ProducerOptio
 	}
 	normalizeProducerConfig(&cfg)
 
-	config, err := buildBaseConfig(cfg.KafkaConfig)
+	config, err := buildBaseConfig(cfg.Config)
 	if err != nil {
 		return nil, err
 	}

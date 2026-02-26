@@ -29,19 +29,19 @@ type UserInfo struct {
 	AvatarURL string
 }
 
-type OIDCProvider struct {
+type Provider struct {
 	Provider *oidc.Provider
 	Verifier *oidc.IDTokenVerifier
 	Config   *oauth2.Config
 }
 
-func NewOIDCProvider(issuer, clientID, clientSecret, redirectURL string, scopes []string, skipVerify bool) (*OIDCProvider, error) {
+func NewOIDCProvider(issuer, clientID, clientSecret, redirectURL string, scopes []string, skipVerify bool) (*Provider, error) {
 	provider, err := oidc.NewProvider(context.Background(), issuer)
 	if err != nil {
 		return nil, err
 	}
 
-	return &OIDCProvider{
+	return &Provider{
 		Provider: provider,
 		Verifier: provider.Verifier(&oidc.Config{ClientID: clientID, SkipClientIDCheck: skipVerify}),
 		Config: &oauth2.Config{
@@ -54,15 +54,15 @@ func NewOIDCProvider(issuer, clientID, clientSecret, redirectURL string, scopes 
 	}, nil
 }
 
-func (p *OIDCProvider) GetAuthURL(state string) string {
+func (p *Provider) GetAuthURL(state string) string {
 	return p.Config.AuthCodeURL(state)
 }
 
-func (p *OIDCProvider) ExchangeToken(ctx context.Context, code string) (*oauth2.Token, error) {
+func (p *Provider) ExchangeToken(ctx context.Context, code string) (*oauth2.Token, error) {
 	return p.Config.Exchange(ctx, code)
 }
 
-func (p *OIDCProvider) GetUserInfo(ctx context.Context, token *oauth2.Token) (*UserInfo, error) {
+func (p *Provider) GetUserInfo(ctx context.Context, token *oauth2.Token) (*UserInfo, error) {
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok {
 		return nil, fmt.Errorf("missing id_token")
@@ -98,7 +98,7 @@ func (p *OIDCProvider) GetUserInfo(ctx context.Context, token *oauth2.Token) (*U
 }
 
 // GetRawClaims returns raw claims map for field mapping
-func (p *OIDCProvider) GetRawClaims(ctx context.Context, token *oauth2.Token) (map[string]interface{}, error) {
+func (p *Provider) GetRawClaims(ctx context.Context, token *oauth2.Token) (map[string]interface{}, error) {
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok {
 		return nil, fmt.Errorf("missing id_token")

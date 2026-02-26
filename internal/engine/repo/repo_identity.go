@@ -15,20 +15,23 @@
 package repo
 
 import (
+	"context"
+
 	"github.com/arcentrix/arcentra/internal/engine/model"
 	"github.com/arcentrix/arcentra/pkg/database"
 )
 
+// IIdentityRepository defines identity provider persistence with context support.
 type IIdentityRepository interface {
-	GetProvider(name string) (*model.Identity, error)
-	GetProviderByType(providerType string) ([]model.Identity, error)
-	GetProviderList() ([]model.Identity, error)
-	GetProviderTypeList() ([]string, error)
-	CreateProvider(provider *model.Identity) error
-	UpdateProvider(name string, provider *model.Identity) error
-	DeleteProvider(name string) error
-	ProviderExists(name string) (bool, error)
-	ToggleProvider(name string) error
+	GetProvider(ctx context.Context, name string) (*model.Identity, error)
+	GetProviderByType(ctx context.Context, providerType string) ([]model.Identity, error)
+	GetProviderList(ctx context.Context) ([]model.Identity, error)
+	GetProviderTypeList(ctx context.Context) ([]string, error)
+	CreateProvider(ctx context.Context, provider *model.Identity) error
+	UpdateProvider(ctx context.Context, name string, provider *model.Identity) error
+	DeleteProvider(ctx context.Context, name string) error
+	ProviderExists(ctx context.Context, name string) (bool, error)
+	ToggleProvider(ctx context.Context, name string) error
 }
 
 type IdentityRepo struct {
@@ -41,9 +44,10 @@ func NewIdentityRepo(db database.IDatabase) IIdentityRepository {
 	}
 }
 
-func (ii *IdentityRepo) GetProvider(name string) (*model.Identity, error) {
+// GetProvider returns identity provider by name.
+func (ii *IdentityRepo) GetProvider(ctx context.Context, name string) (*model.Identity, error) {
 	var identity model.Identity
-	if err := ii.Database().Table(identity.TableName()).
+	if err := ii.Database().WithContext(ctx).Table(identity.TableName()).
 		Where("name = ?", name).
 		Select("provider_id, provider_type, name, description, config, priority, is_enabled").
 		First(&identity).Error; err != nil {
@@ -52,10 +56,11 @@ func (ii *IdentityRepo) GetProvider(name string) (*model.Identity, error) {
 	return &identity, nil
 }
 
-func (ii *IdentityRepo) GetProviderByType(providerType string) ([]model.Identity, error) {
+// GetProviderByType returns identity providers by type.
+func (ii *IdentityRepo) GetProviderByType(ctx context.Context, providerType string) ([]model.Identity, error) {
 	var identitys []model.Identity
 	var identity model.Identity
-	if err := ii.Database().Table(identity.TableName()).
+	if err := ii.Database().WithContext(ctx).Table(identity.TableName()).
 		Where("provider_type = ?", providerType).
 		Order("priority ASC").
 		Select("provider_id, provider_type, name, description, priority, is_enabled").
@@ -65,10 +70,11 @@ func (ii *IdentityRepo) GetProviderByType(providerType string) ([]model.Identity
 	return identitys, nil
 }
 
-func (ii *IdentityRepo) GetProviderList() ([]model.Identity, error) {
+// GetProviderList returns all identity providers.
+func (ii *IdentityRepo) GetProviderList(ctx context.Context) ([]model.Identity, error) {
 	var identitys []model.Identity
 	var identity model.Identity
-	if err := ii.Database().Table(identity.TableName()).
+	if err := ii.Database().WithContext(ctx).Table(identity.TableName()).
 		Order("priority ASC").
 		Select("provider_id, provider_type, name, description, priority, is_enabled").
 		Find(&identitys).Error; err != nil {
@@ -77,10 +83,11 @@ func (ii *IdentityRepo) GetProviderList() ([]model.Identity, error) {
 	return identitys, nil
 }
 
-func (ii *IdentityRepo) GetProviderTypeList() ([]string, error) {
+// GetProviderTypeList returns distinct provider types.
+func (ii *IdentityRepo) GetProviderTypeList(ctx context.Context) ([]string, error) {
 	var providerTypes []string
 	var identity model.Identity
-	if err := ii.Database().Table(identity.TableName()).
+	if err := ii.Database().WithContext(ctx).Table(identity.TableName()).
 		Distinct("provider_type").
 		Select("provider_type").
 		Pluck("provider_type", &providerTypes).Error; err != nil {
@@ -89,53 +96,50 @@ func (ii *IdentityRepo) GetProviderTypeList() ([]string, error) {
 	return providerTypes, nil
 }
 
-// CreateProvider creates an identity provider
-func (ii *IdentityRepo) CreateProvider(provider *model.Identity) error {
-	return ii.Database().Table(provider.TableName()).Create(provider).Error
+// CreateProvider creates an identity provider.
+func (ii *IdentityRepo) CreateProvider(ctx context.Context, provider *model.Identity) error {
+	return ii.Database().WithContext(ctx).Table(provider.TableName()).Create(provider).Error
 }
 
-// UpdateProvider updates an identity provider (name and provider_type fields cannot be updated)
-func (ii *IdentityRepo) UpdateProvider(name string, identity *model.Identity) error {
-	return ii.Database().Table(identity.TableName()).
+// UpdateProvider updates an identity provider.
+func (ii *IdentityRepo) UpdateProvider(ctx context.Context, name string, identity *model.Identity) error {
+	return ii.Database().WithContext(ctx).Table(identity.TableName()).
 		Where("name = ?", name).
 		Omit("name", "provider_id", "provider_type", "created_at").
 		Updates(identity).Error
 }
 
-// DeleteProvider deletes an identity provider
-func (ii *IdentityRepo) DeleteProvider(name string) error {
+// DeleteProvider deletes an identity provider.
+func (ii *IdentityRepo) DeleteProvider(ctx context.Context, name string) error {
 	var identity model.Identity
-	return ii.Database().Table(identity.TableName()).
+	return ii.Database().WithContext(ctx).Table(identity.TableName()).
 		Where("name = ?", name).
 		Delete(&model.Identity{}).Error
 }
 
-// ProviderExists checks if a provider exists
-func (ii *IdentityRepo) ProviderExists(name string) (bool, error) {
+// ProviderExists checks if a provider exists.
+func (ii *IdentityRepo) ProviderExists(ctx context.Context, name string) (bool, error) {
 	var count int64
 	var identity model.Identity
-	err := ii.Database().Table(identity.TableName()).
+	err := ii.Database().WithContext(ctx).Table(identity.TableName()).
 		Where("name = ?", name).
 		Count(&count).Error
 	return count > 0, err
 }
 
-// ToggleProvider toggles the enabled status of an identity provider (enable/disable)
-func (ii *IdentityRepo) ToggleProvider(name string) error {
-	// query current status
+// ToggleProvider toggles the enabled status of an identity provider.
+func (ii *IdentityRepo) ToggleProvider(ctx context.Context, name string) error {
 	var identity model.Identity
-	if err := ii.Database().Table(identity.TableName()).
+	if err := ii.Database().WithContext(ctx).Table(identity.TableName()).
 		Where("name = ?", name).
 		Select("is_enabled").
 		First(&identity).Error; err != nil {
 		return err
 	}
 
-	// toggle status: 0 -> 1, 1 -> 0
 	newStatus := 1 - identity.IsEnabled
 
-	// update status
-	return ii.Database().Table(identity.TableName()).
+	return ii.Database().WithContext(ctx).Table(identity.TableName()).
 		Where("name = ?", name).
 		Update("is_enabled", newStatus).Error
 }

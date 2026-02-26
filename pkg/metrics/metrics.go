@@ -29,16 +29,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// MetricsConfig holds metrics server configuration
-type MetricsConfig struct {
+// Config holds metrics server configuration
+type Config struct {
 	Host   string
 	Port   int
 	Enable bool
 	Path   string
 }
 
-// SetDefaults sets default values for MetricsConfig
-func (m *MetricsConfig) SetDefaults() {
+// SetDefaults sets default values for Config
+func (m *Config) SetDefaults() {
 	if m.Host == "" {
 		m.Host = "0.0.0.0"
 	}
@@ -52,8 +52,8 @@ func (m *MetricsConfig) SetDefaults() {
 
 // Server represents a metrics server using hashicorp/go-metrics
 type Server struct {
-	config     MetricsConfig
-	server     *http.Server
+	config Config
+	server *http.Server
 	registry   *prometheus.Registry
 	sink       *PrometheusSink
 	metrics    *metrics.Metrics
@@ -175,7 +175,7 @@ func (s *PrometheusSink) AddSampleWithLabels(key []string, val float32, labels [
 }
 
 // NewServer creates a new metrics server
-func NewServer(config MetricsConfig) *Server {
+func NewServer(config Config) *Server {
 	config.SetDefaults()
 
 	registry := prometheus.NewRegistry()

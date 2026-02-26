@@ -1038,7 +1038,7 @@ func (m *mockPlugin) Version() string {
 	return "1.0.0"
 }
 
-func (m *mockPlugin) Type() plugin.PluginType {
+func (m *mockPlugin) Type() plugin.Type {
 	return plugin.TypeCustom
 }
 

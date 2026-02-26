@@ -21,15 +21,15 @@ import (
 	"github.com/arcentrix/arcentra/pkg/database"
 )
 
-// INotificationChannelRepository 通知配置仓库接口
+// INotificationChannelRepository defines notification channel persistence with context support.
 type INotificationChannelRepository interface {
-	CreateChannel(ctx context.Context, channel *model.NotificationChannel) error
-	GetChannelByID(ctx context.Context, channelID string) (*model.NotificationChannel, error)
-	GetChannelByName(ctx context.Context, name string) (*model.NotificationChannel, error)
-	ListChannels(ctx context.Context) ([]*model.NotificationChannel, error)
-	ListActiveChannels(ctx context.Context) ([]*model.NotificationChannel, error)
-	UpdateChannel(ctx context.Context, channel *model.NotificationChannel) error
-	DeleteChannel(ctx context.Context, channelID string) error
+	Create(ctx context.Context, channel *model.NotificationChannel) error
+	Get(ctx context.Context, channelId string) (*model.NotificationChannel, error)
+	GetByName(ctx context.Context, name string) (*model.NotificationChannel, error)
+	List(ctx context.Context) ([]*model.NotificationChannel, error)
+	ListActive(ctx context.Context) ([]*model.NotificationChannel, error)
+	Update(ctx context.Context, channel *model.NotificationChannel) error
+	Delete(ctx context.Context, channelId string) error
 }
 
 type NotificationChannelRepo struct {
@@ -42,17 +42,17 @@ func NewNotificationChannelRepo(db database.IDatabase) INotificationChannelRepos
 	}
 }
 
-// CreateChannel creates a new notification channel
-func (r *NotificationChannelRepo) CreateChannel(ctx context.Context, channel *model.NotificationChannel) error {
+// Create creates a new notification channel.
+func (r *NotificationChannelRepo) Create(ctx context.Context, channel *model.NotificationChannel) error {
 	return r.Database().WithContext(ctx).Table(channel.TableName()).Create(channel).Error
 }
 
-// GetChannelByID retrieves a channel by channel_id
-func (r *NotificationChannelRepo) GetChannelByID(ctx context.Context, channelID string) (*model.NotificationChannel, error) {
+// Get returns channel by channelId.
+func (r *NotificationChannelRepo) Get(ctx context.Context, channelId string) (*model.NotificationChannel, error) {
 	var channel model.NotificationChannel
 	err := r.Database().WithContext(ctx).
 		Table(channel.TableName()).
-		Where("channel_id = ?", channelID).
+		Where("channel_id = ?", channelId).
 		First(&channel).Error
 	if err != nil {
 		return nil, err
@@ -60,8 +60,8 @@ func (r *NotificationChannelRepo) GetChannelByID(ctx context.Context, channelID 
 	return &channel, nil
 }
 
-// GetChannelByName retrieves a channel by name
-func (r *NotificationChannelRepo) GetChannelByName(ctx context.Context, name string) (*model.NotificationChannel, error) {
+// GetByName returns channel by name.
+func (r *NotificationChannelRepo) GetByName(ctx context.Context, name string) (*model.NotificationChannel, error) {
 	var channel model.NotificationChannel
 	err := r.Database().WithContext(ctx).
 		Table(channel.TableName()).
@@ -73,8 +73,8 @@ func (r *NotificationChannelRepo) GetChannelByName(ctx context.Context, name str
 	return &channel, nil
 }
 
-// ListChannels lists all channels
-func (r *NotificationChannelRepo) ListChannels(ctx context.Context) ([]*model.NotificationChannel, error) {
+// List lists all channels.
+func (r *NotificationChannelRepo) List(ctx context.Context) ([]*model.NotificationChannel, error) {
 	var channels []*model.NotificationChannel
 	err := r.Database().WithContext(ctx).
 		Table((&model.NotificationChannel{}).TableName()).
@@ -82,8 +82,8 @@ func (r *NotificationChannelRepo) ListChannels(ctx context.Context) ([]*model.No
 	return channels, err
 }
 
-// ListActiveChannels lists all active channels
-func (r *NotificationChannelRepo) ListActiveChannels(ctx context.Context) ([]*model.NotificationChannel, error) {
+// ListActive lists all active channels.
+func (r *NotificationChannelRepo) ListActive(ctx context.Context) ([]*model.NotificationChannel, error) {
 	var channels []*model.NotificationChannel
 	err := r.Database().WithContext(ctx).
 		Table((&model.NotificationChannel{}).TableName()).
@@ -92,8 +92,8 @@ func (r *NotificationChannelRepo) ListActiveChannels(ctx context.Context) ([]*mo
 	return channels, err
 }
 
-// UpdateChannel updates an existing channel
-func (r *NotificationChannelRepo) UpdateChannel(ctx context.Context, channel *model.NotificationChannel) error {
+// Update updates an existing channel.
+func (r *NotificationChannelRepo) Update(ctx context.Context, channel *model.NotificationChannel) error {
 	return r.Database().WithContext(ctx).
 		Table(channel.TableName()).
 		Where("channel_id = ?", channel.ChannelId).
@@ -101,10 +101,10 @@ func (r *NotificationChannelRepo) UpdateChannel(ctx context.Context, channel *mo
 		Updates(channel).Error
 }
 
-// DeleteChannel deletes a channel by channel_id (soft delete by setting is_active = false)
-func (r *NotificationChannelRepo) DeleteChannel(ctx context.Context, channelID string) error {
+// Delete soft-deletes channel by channelId (sets is_active = false).
+func (r *NotificationChannelRepo) Delete(ctx context.Context, channelId string) error {
 	return r.Database().WithContext(ctx).
 		Table((&model.NotificationChannel{}).TableName()).
-		Where("channel_id = ?", channelID).
+		Where("channel_id = ?", channelId).
 		Update("is_active", false).Error
 }

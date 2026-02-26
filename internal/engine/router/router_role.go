@@ -42,7 +42,7 @@ func (rt *Router) createRole(c *fiber.Ctx) error {
 		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request body", c.Path())
 	}
 
-	role, err := roleLogic.CreateRole(createRoleReq)
+	role, err := roleLogic.CreateRole(c.Context(), createRoleReq)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
@@ -64,7 +64,7 @@ func (rt *Router) listRole(c *fiber.Ctx) error {
 		pageSize = 10
 	}
 
-	roles, count, err := roleLogic.ListRoles(pageNum, pageSize)
+	roles, count, err := roleLogic.ListRoles(c.Context(), pageNum, pageSize)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
@@ -86,7 +86,7 @@ func (rt *Router) getRole(c *fiber.Ctx) error {
 	}
 
 	roleLogic := rt.Services.Role
-	role, err := roleLogic.GetRoleByRoleId(roleId)
+	role, err := roleLogic.GetRoleByRoleId(c.Context(), roleId)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.NotFound.Code, "role not found", c.Path())
 	}
@@ -108,12 +108,12 @@ func (rt *Router) updateRole(c *fiber.Ctx) error {
 	}
 
 	roleLogic := rt.Services.Role
-	if err := roleLogic.UpdateRoleByRoleId(roleId, updateReq); err != nil {
+	if err := roleLogic.UpdateRoleByRoleId(c.Context(), roleId, updateReq); err != nil {
 		return http.WithRepErrMsg(c, http.NotFound.Code, "role not found", c.Path())
 	}
 
 	// Get updated role
-	updatedRole, err := roleLogic.GetRoleByRoleId(roleId)
+	updatedRole, err := roleLogic.GetRoleByRoleId(c.Context(), roleId)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
@@ -130,7 +130,7 @@ func (rt *Router) deleteRole(c *fiber.Ctx) error {
 	}
 
 	roleLogic := rt.Services.Role
-	if err := roleLogic.DeleteRoleByRoleId(roleId); err != nil {
+	if err := roleLogic.DeleteRoleByRoleId(c.Context(), roleId); err != nil {
 		return http.WithRepErrMsg(c, http.NotFound.Code, "role not found", c.Path())
 	}
 

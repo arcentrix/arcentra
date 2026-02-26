@@ -30,7 +30,10 @@ func main() {
 	// Bootstrap initialize application
 	app, cleanup, _, err := bootstrap.Bootstrap(*configFile, initAgent)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		_, err = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		if err != nil {
+			return
+		}
 		os.Exit(1)
 	}
 

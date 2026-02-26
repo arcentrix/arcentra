@@ -137,39 +137,57 @@ func (s *StreamServiceImpl) GetLogAggregator() *LogAggregator {
 	return s.logAggregator
 }
 
-// UploadStepRunLog Agent端流式上报日志给Server
+// StreamStepRunStatus Agent端流式上报日志给Server
 // StreamStepRunStatus 实时获取步骤执行状态流
-func (s *StreamServiceImpl) StreamStepRunStatus(req *streamv1.StreamStepRunStatusRequest, stream grpc.ServerStreamingServer[streamv1.StreamStepRunStatusResponse]) error {
+func (s *StreamServiceImpl) StreamStepRunStatus(
+	req *streamv1.StreamStepRunStatusRequest,
+	stream grpc.ServerStreamingServer[streamv1.StreamStepRunStatusResponse],
+) error {
 	// TODO: 实现步骤执行状态流
 	return fmt.Errorf("not implemented")
 }
 
 // StreamJobStatus 实时获取作业状态流
-func (s *StreamServiceImpl) StreamJobStatus(req *streamv1.StreamJobStatusRequest, stream grpc.ServerStreamingServer[streamv1.StreamJobStatusResponse]) error {
+func (s *StreamServiceImpl) StreamJobStatus(
+	req *streamv1.StreamJobStatusRequest,
+	stream grpc.ServerStreamingServer[streamv1.StreamJobStatusResponse],
+	) error {
 	// TODO: 实现作业状态流
 	return fmt.Errorf("not implemented")
 }
 
 // StreamPipelineStatus 实时获取流水线状态流
-func (s *StreamServiceImpl) StreamPipelineStatus(req *streamv1.StreamPipelineStatusRequest, stream grpc.ServerStreamingServer[streamv1.StreamPipelineStatusResponse]) error {
+func (s *StreamServiceImpl) StreamPipelineStatus(
+	req *streamv1.StreamPipelineStatusRequest,
+	stream grpc.ServerStreamingServer[streamv1.StreamPipelineStatusResponse],
+	) error {
 	// TODO: 实现流水线状态流
 	return fmt.Errorf("not implemented")
 }
 
 // AgentChannel Agent与Server双向通信流
-func (s *StreamServiceImpl) AgentChannel(stream grpc.BidiStreamingServer[streamv1.AgentChannelRequest, streamv1.AgentChannelResponse]) error {
+func (s *StreamServiceImpl) AgentChannel(
+	stream grpc.BidiStreamingServer[streamv1.AgentChannelRequest,
+	streamv1.AgentChannelResponse],
+	) error {
 	// TODO: 实现Agent通道
 	return fmt.Errorf("not implemented")
 }
 
 // StreamAgentStatus 实时监控Agent状态流
-func (s *StreamServiceImpl) StreamAgentStatus(req *streamv1.StreamAgentStatusRequest, stream grpc.ServerStreamingServer[streamv1.StreamAgentStatusResponse]) error {
+func (s *StreamServiceImpl) StreamAgentStatus(
+	req *streamv1.StreamAgentStatusRequest,
+	stream grpc.ServerStreamingServer[streamv1.StreamAgentStatusResponse],
+	) error {
 	// TODO: 实现Agent状态流
 	return fmt.Errorf("not implemented")
 }
 
 // StreamEvents 实时事件流
-func (s *StreamServiceImpl) StreamEvents(req *streamv1.StreamEventsRequest, stream grpc.ServerStreamingServer[streamv1.StreamEventsResponse]) error {
+func (s *StreamServiceImpl) StreamEvents(
+	req *streamv1.StreamEventsRequest,
+	stream grpc.ServerStreamingServer[streamv1.StreamEventsResponse],
+	) error {
 	// TODO: 实现事件流
 	return fmt.Errorf("not implemented")
 }

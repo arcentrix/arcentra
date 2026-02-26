@@ -15,6 +15,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -32,9 +33,8 @@ func NewStorageService(storageRepo storagerepo.IStorageRepository) *StorageServi
 	}
 }
 
-// CreateStorageConfig 创建存储配置
-func (ss *StorageService) CreateStorageConfig(req *CreateStorageConfigRequest) (*model.StorageConfig, error) {
-	// 验证配置
+// CreateStorageConfig creates storage config.
+func (ss *StorageService) CreateStorageConfig(ctx context.Context, req *CreateStorageConfigRequest) (*model.StorageConfig, error) {
 	if err := ss.validateStorageConfig(req.StorageType, req.Config); err != nil {
 		return nil, fmt.Errorf("invalid storage config: %w", err)
 	}
@@ -49,13 +49,12 @@ func (ss *StorageService) CreateStorageConfig(req *CreateStorageConfigRequest) (
 		IsEnabled:   1,
 	}
 
-	if err := ss.storageRepo.CreateStorageConfig(storageConfig); err != nil {
+	if err := ss.storageRepo.Create(ctx, storageConfig); err != nil {
 		return nil, fmt.Errorf("failed to create storage config: %w", err)
 	}
 
-	// 如果设置为默认配置，需要先取消其他默认配置
 	if req.IsDefault == 1 {
-		if err := ss.storageRepo.SetDefaultStorageConfig(req.StorageId); err != nil {
+		if err := ss.storageRepo.SetDefault(ctx, req.StorageId); err != nil {
 			return nil, fmt.Errorf("failed to set as default storage config: %w", err)
 		}
 	}
@@ -63,9 +62,8 @@ func (ss *StorageService) CreateStorageConfig(req *CreateStorageConfigRequest) (
 	return storageConfig, nil
 }
 
-// UpdateStorageConfig 更新存储配置
-func (ss *StorageService) UpdateStorageConfig(req *UpdateStorageConfigRequest) (*model.StorageConfig, error) {
-	// 验证配置
+// UpdateStorageConfig updates storage config.
+func (ss *StorageService) UpdateStorageConfig(ctx context.Context, req *UpdateStorageConfigRequest) (*model.StorageConfig, error) {
 	if err := ss.validateStorageConfig(req.StorageType, req.Config); err != nil {
 		return nil, fmt.Errorf("invalid storage config: %w", err)
 	}
@@ -80,13 +78,12 @@ func (ss *StorageService) UpdateStorageConfig(req *UpdateStorageConfigRequest) (
 		IsEnabled:   req.IsEnabled,
 	}
 
-	if err := ss.storageRepo.UpdateStorageConfig(storageConfig); err != nil {
+	if err := ss.storageRepo.Update(ctx, storageConfig); err != nil {
 		return nil, fmt.Errorf("failed to update storage config: %w", err)
 	}
 
-	// 如果设置为默认配置，需要先取消其他默认配置
 	if req.IsDefault == 1 {
-		if err := ss.storageRepo.SetDefaultStorageConfig(req.StorageId); err != nil {
+		if err := ss.storageRepo.SetDefault(ctx, req.StorageId); err != nil {
 			return nil, fmt.Errorf("failed to set as default storage config: %w", err)
 		}
 	}
@@ -94,29 +91,29 @@ func (ss *StorageService) UpdateStorageConfig(req *UpdateStorageConfigRequest) (
 	return storageConfig, nil
 }
 
-// GetStorageConfig 获取存储配置
-func (ss *StorageService) GetStorageConfig(storageID string) (*model.StorageConfig, error) {
-	return ss.storageRepo.GetStorageConfigByID(storageID)
+// GetStorageConfig returns storage config by storageId.
+func (ss *StorageService) GetStorageConfig(ctx context.Context, storageId string) (*model.StorageConfig, error) {
+	return ss.storageRepo.Get(ctx, storageId)
 }
 
-// GetDefaultStorageConfig 获取默认存储配置
-func (ss *StorageService) GetDefaultStorageConfig() (*model.StorageConfig, error) {
-	return ss.storageRepo.GetDefaultStorageConfig()
+// GetDefaultStorageConfig returns default storage config.
+func (ss *StorageService) GetDefaultStorageConfig(ctx context.Context) (*model.StorageConfig, error) {
+	return ss.storageRepo.GetDefault(ctx)
 }
 
-// ListStorageConfigs 获取存储配置列表
-func (ss *StorageService) ListStorageConfigs() ([]model.StorageConfig, error) {
-	return ss.storageRepo.GetEnabledStorageConfigs()
+// ListStorageConfigs returns enabled storage configs.
+func (ss *StorageService) ListStorageConfigs(ctx context.Context) ([]model.StorageConfig, error) {
+	return ss.storageRepo.ListEnabled(ctx)
 }
 
-// DeleteStorageConfig 删除存储配置
-func (ss *StorageService) DeleteStorageConfig(storageID string) error {
-	return ss.storageRepo.DeleteStorageConfig(storageID)
+// DeleteStorageConfig deletes storage config.
+func (ss *StorageService) DeleteStorageConfig(ctx context.Context, storageId string) error {
+	return ss.storageRepo.Delete(ctx, storageId)
 }
 
-// SetDefaultStorageConfig 设置默认存储配置
-func (ss *StorageService) SetDefaultStorageConfig(storageID string) error {
-	return ss.storageRepo.SetDefaultStorageConfig(storageID)
+// SetDefaultStorageConfig sets default storage config.
+func (ss *StorageService) SetDefaultStorageConfig(ctx context.Context, storageId string) error {
+	return ss.storageRepo.SetDefault(ctx, storageId)
 }
 
 // validateStorageConfig 验证存储配置

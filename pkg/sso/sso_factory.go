@@ -76,7 +76,7 @@ func NewSSOProvider(conf *ProviderConfig) (ISSOProvider, error) {
 
 // oauthAdapter is a adapter for oauth provider
 type oauthAdapter struct {
-	provider *oauth.OAuthProvider
+	provider *oauth.Provider
 	fieldMap map[string]string
 }
 
@@ -104,7 +104,7 @@ func (a *oauthAdapter) GetUserInfo(ctx context.Context, token *oauth2.Token) (*U
 
 // oidcAdapter is a adapter for oidc provider
 type oidcAdapter struct {
-	provider *oidc.OIDCProvider
+	provider *oidc.Provider
 	fieldMap map[string]string
 }
 

@@ -49,27 +49,27 @@ type ActionRegistry struct {
 	metadata map[string]json.RawMessage // Additional metadata per action
 }
 
-// PluginBase provides a base implementation for plugins using ActionRegistry
+// Base provides a base implementation for plugins using ActionRegistry
 // Plugins can embed this struct and register their actions during Init
-type PluginBase struct {
+type Base struct {
 	registry *ActionRegistry
 }
 
 // NewPluginBase creates a new plugin base with action registry
-func NewPluginBase() *PluginBase {
-	return &PluginBase{
+func NewPluginBase() *Base {
+	return &Base{
 		registry: NewActionRegistry(),
 	}
 }
 
 // Registry returns the action registry
-func (p *PluginBase) Registry() *ActionRegistry {
+func (p *Base) Registry() *ActionRegistry {
 	return p.registry
 }
 
 // Execute executes an action using the registry
 // This is the unified entry point for all plugin operations
-func (p *PluginBase) Execute(action string, params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+func (p *Base) Execute(action string, params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
 	return p.registry.Execute(action, params, opts)
 }
 

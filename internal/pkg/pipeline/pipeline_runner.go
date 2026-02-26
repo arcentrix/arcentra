@@ -22,19 +22,19 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// PipelineRunner runs pipeline jobs
-type PipelineRunner struct {
+// Runner runs pipeline jobs
+type Runner struct {
 	execCtx *ExecutionContext
 }
 
 // NewPipelineRunner creates a new pipeline runner
-func NewPipelineRunner(ctx *ExecutionContext) *PipelineRunner {
-	return &PipelineRunner{execCtx: ctx}
+func NewPipelineRunner(ctx *ExecutionContext) *Runner {
+	return &Runner{execCtx: ctx}
 }
 
 // Run executes all jobs in the pipeline
 // Jobs can run in parallel unless concurrency is specified
-func (r *PipelineRunner) Run(ctx context.Context, p *spec.Pipeline) error {
+func (r *Runner) Run(ctx context.Context, p *spec.Pipeline) error {
 	// Update execution context with pipeline
 	r.execCtx.Pipeline = p
 
@@ -81,7 +81,7 @@ func (r *PipelineRunner) Run(ctx context.Context, p *spec.Pipeline) error {
 }
 
 // RunWithTimeout runs pipeline with timeout
-func (r *PipelineRunner) RunWithTimeout(ctx context.Context, p *spec.Pipeline, timeout time.Duration) error {
+func (r *Runner) RunWithTimeout(ctx context.Context, p *spec.Pipeline, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

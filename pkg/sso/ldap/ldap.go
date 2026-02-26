@@ -32,8 +32,8 @@ type UserInfo struct {
 	Attributes  map[string][]string `json:"attributes"`
 }
 
-// LDAPClient LDAP 客户端
-type LDAPClient struct {
+// Client LDAP 客户端
+type Client struct {
 	Host         string
 	Port         int
 	UseTLS       bool
@@ -49,8 +49,8 @@ type LDAPClient struct {
 }
 
 // NewLDAPClient 创建 LDAP 客户端
-func NewLDAPClient(host string, port int, useTLS, skipVerify bool, baseDN, bindDN, bindPassword string) *LDAPClient {
-	return &LDAPClient{
+func NewLDAPClient(host string, port int, useTLS, skipVerify bool, baseDN, bindDN, bindPassword string) *Client {
+	return &Client{
 		Host:         host,
 		Port:         port,
 		UseTLS:       useTLS,
@@ -62,7 +62,7 @@ func NewLDAPClient(host string, port int, useTLS, skipVerify bool, baseDN, bindD
 }
 
 // Connect 连接到 LDAP 服务器
-func (c *LDAPClient) Connect() (*ldap.Conn, error) {
+func (c *Client) Connect() (*ldap.Conn, error) {
 	address := fmt.Sprintf("%s:%d", c.Host, c.Port)
 
 	var conn *ldap.Conn
@@ -85,7 +85,7 @@ func (c *LDAPClient) Connect() (*ldap.Conn, error) {
 }
 
 // Authenticate 认证用户
-func (c *LDAPClient) Authenticate(username, password string) (*UserInfo, error) {
+func (c *Client) Authenticate(username, password string) (*UserInfo, error) {
 	conn, err := c.Connect()
 	if err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func (c *LDAPClient) Authenticate(username, password string) (*UserInfo, error) 
 }
 
 // searchUser 搜索用户
-func (c *LDAPClient) searchUser(conn *ldap.Conn, username string) (*UserInfo, error) {
+func (c *Client) searchUser(conn *ldap.Conn, username string) (*UserInfo, error) {
 	// 构建搜索过滤器
 	filter := c.UserFilter
 	if filter == "" {
@@ -230,7 +230,7 @@ func (c *LDAPClient) searchUser(conn *ldap.Conn, username string) (*UserInfo, er
 }
 
 // searchUserGroups 搜索用户组
-func (c *LDAPClient) searchUserGroups(conn *ldap.Conn, username, userDN string) ([]string, error) {
+func (c *Client) searchUserGroups(conn *ldap.Conn, username, userDN string) ([]string, error) {
 	if c.GroupDN == "" {
 		return nil, nil
 	}

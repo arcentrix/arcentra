@@ -32,7 +32,7 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(version.VersionCmd)
+	rootCmd.AddCommand(version.Cmd)
 }
 
 func main() {

@@ -24,19 +24,19 @@ import (
 	"golang.org/x/text/language"
 )
 
-// TemplateType represents the type of notification template
-type TemplateType string
+// Type represents the type of notification template
+type Type string
 
 const (
-	TemplateTypeBuild    TemplateType = "build"    // Build-related notifications
-	TemplateTypeApproval TemplateType = "approval" // Approval-related notifications
+	Build    Type = "build"    // Build-related notifications
+	Approval Type = "approval" // Approval-related notifications
 )
 
 // Template represents a notification template
 type Template struct {
 	ID          string                 // Template unique ID
 	Name        string                 // Template name
-	Type        TemplateType           // Template type (build/approval)
+	Type        Type                   // Template type (build/approval)
 	Channel     string                 // Target channel (dingtalk/feishu/slack/etc)
 	Title       string                 // Template title
 	Content     string                 // Template content with variables
@@ -46,13 +46,13 @@ type Template struct {
 	Description string                 // Template description
 }
 
-// TemplateEngine handles template rendering
-type TemplateEngine struct {
+// Engine handles template rendering
+type Engine struct {
 	funcMap template.FuncMap
 }
 
 // NewTemplateEngine creates a new template engine
-func NewTemplateEngine() *TemplateEngine {
+func NewTemplateEngine() *Engine {
 	titleCaser := cases.Title(language.English)
 	funcMap := template.FuncMap{
 		"upper": strings.ToUpper,
@@ -61,13 +61,13 @@ func NewTemplateEngine() *TemplateEngine {
 		"trim":  strings.TrimSpace,
 	}
 
-	return &TemplateEngine{
+	return &Engine{
 		funcMap: funcMap,
 	}
 }
 
 // Render renders a template with the given data
-func (e *TemplateEngine) Render(tmplContent string, data map[string]interface{}) (string, error) {
+func (e *Engine) Render(tmplContent string, data map[string]interface{}) (string, error) {
 	tmpl, err := template.New("notification").Funcs(e.funcMap).Parse(tmplContent)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template: %w", err)
@@ -83,7 +83,7 @@ func (e *TemplateEngine) Render(tmplContent string, data map[string]interface{})
 
 // RenderSimple renders a template using simple variable replacement
 // Supports {{variable}} syntax
-func (e *TemplateEngine) RenderSimple(tmplContent string, data map[string]interface{}) string {
+func (e *Engine) RenderSimple(tmplContent string, data map[string]interface{}) string {
 	result := tmplContent
 	for key, value := range data {
 		placeholder := fmt.Sprintf("{{%s}}", key)
@@ -93,14 +93,14 @@ func (e *TemplateEngine) RenderSimple(tmplContent string, data map[string]interf
 }
 
 // ValidateTemplate validates if a template is valid
-func (e *TemplateEngine) ValidateTemplate(tmplContent string) error {
+func (e *Engine) ValidateTemplate(tmplContent string) error {
 	_, err := template.New("validation").Funcs(e.funcMap).Parse(tmplContent)
 	return err
 }
 
 // ExtractVariables extracts variable names from template content
 // Supports {{.variable}} and {{variable}} syntax
-func (e *TemplateEngine) ExtractVariables(tmplContent string) []string {
+func (e *Engine) ExtractVariables(tmplContent string) []string {
 	variables := make(map[string]bool)
 
 	// Extract {{.variable}} pattern

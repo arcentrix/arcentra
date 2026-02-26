@@ -59,13 +59,13 @@ func WithCredentials(credentials *primitive.Credentials) ClientOption {
 	})
 }
 
-// RocketMQClient holds a base client configuration.
-type RocketMQClient struct {
+// Client RocketMQClient holds a base client configuration.
+type Client struct {
 	Config ClientConfig
 }
 
 // NewRocketMQClient creates a new RocketMQClient using options.
-func NewRocketMQClient(nameServers []string, opts ...ClientOption) (*RocketMQClient, error) {
+func NewRocketMQClient(nameServers []string, opts ...ClientOption) (*Client, error) {
 	cfg := ClientConfig{
 		NameServers: nameServers,
 	}
@@ -75,7 +75,7 @@ func NewRocketMQClient(nameServers []string, opts ...ClientOption) (*RocketMQCli
 	if err := mq.RequireNonEmptySlice("nameServers", cfg.NameServers); err != nil {
 		return nil, err
 	}
-	return &RocketMQClient{Config: cfg}, nil
+	return &Client{Config: cfg}, nil
 }
 
 func resolveCredentials(cfg ClientConfig) (*primitive.Credentials, error) {

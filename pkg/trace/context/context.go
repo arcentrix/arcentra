@@ -83,8 +83,8 @@ func RunWithContext(ctx context.Context, fn func(ctx context.Context)) {
 	fn(ctx)
 }
 
-// ContextWithSpan context with span
-func ContextWithSpan(ctx context.Context) context.Context {
+// WithSpan context with span
+func WithSpan(ctx context.Context) context.Context {
 	if span := trace.SpanFromContext(ctx); !span.SpanContext().IsValid() {
 		pct := GetContext()
 		if pct != nil {

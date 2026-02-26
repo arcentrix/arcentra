@@ -15,6 +15,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -173,7 +174,7 @@ func (h *WSHandle) getStepRun(params WSParams) (*model.StepRun, error) {
 	if h.stepRunRepo == nil {
 		return nil, fmt.Errorf("step run repository is not available")
 	}
-	return h.stepRunRepo.GetStepRun(params.PipelineId, params.JobId, params.StepRunId)
+	return h.stepRunRepo.Get(context.Background(), params.PipelineId, params.JobId, params.StepRunId)
 }
 
 func isRunningStatus(status int) bool {

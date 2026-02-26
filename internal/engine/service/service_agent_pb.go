@@ -21,7 +21,6 @@ import (
 	"time"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
-	agentmodel "github.com/arcentrix/arcentra/internal/engine/model"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/bytedance/sonic"
 	"google.golang.org/grpc/codes"
@@ -58,7 +57,6 @@ func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 
 	agentRepo := a.agentService.agentRepo
 	var agentId string
-	var existingAgent *agentmodel.Agent
 	var err error
 
 	// Extract agentId from token (token format: agentId:signature)
@@ -82,7 +80,7 @@ func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 	}
 
 	// Verify token by regenerating it and comparing
-	expectedToken, err := a.agentService.GenerateAgentToken(agentId)
+	expectedToken, err := a.agentService.GenerateAgentToken(ctx, agentId)
 	if err != nil {
 		log.Errorw("failed to generate token for verification", "agentId", agentId, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to verify token")
@@ -94,7 +92,7 @@ func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 	}
 
 	// Check if agent exists
-	existingAgent, err = agentRepo.GetAgentByAgentId(agentId)
+	_, err = agentRepo.Get(ctx, agentId)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, status.Errorf(codes.NotFound, "agent not found: %s", agentId)
@@ -125,14 +123,14 @@ func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 	updates["last_heartbeat"] = time.Now()
 
 	if len(updates) > 0 {
-		if err = agentRepo.UpdateAgentById(existingAgent.ID, updates); err != nil {
+		if err = agentRepo.Patch(ctx, agentId, updates); err != nil {
 			log.Errorw("failed to update agent during registration", "agentId", agentId, "error", err)
 			return nil, status.Errorf(codes.Internal, "failed to update agent")
 		}
 	}
 
 	// Get agent detail to return heartbeat interval
-	detail, err := agentRepo.GetAgentDetailById(existingAgent.ID)
+	detail, err := agentRepo.GetDetail(ctx, agentId)
 	if err != nil {
 		log.Errorw("failed to get agent detail", "agentId", agentId, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to get agent detail")

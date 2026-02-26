@@ -19,6 +19,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -62,11 +63,8 @@ func NewAgentTokenVerifier(agentService *service.AgentService, agentRepo repo.IA
 	}
 }
 
-// getSecretConfig gets agent secret key configuration with caching
-// Priority: Redis cache -> Memory cache -> Database
-func (v *agentTokenVerifier) getSecretConfig() (*agentSecretConfig, error) {
-	ctx := context.Background()
-
+// getSecretConfig gets agent secret key configuration with caching.
+func (v *agentTokenVerifier) getSecretConfig(ctx context.Context) (*agentSecretConfig, error) {
 	if v.cache != nil {
 		cached, err := v.cache.Get(ctx, redisCacheKey).Result()
 		if err == nil && cached != "" {
@@ -81,7 +79,7 @@ func (v *agentTokenVerifier) getSecretConfig() (*agentSecretConfig, error) {
 		}
 	}
 
-	settings, err := v.generalSettingsService.GetGeneralSettingsByName("system", "agent_secret_key")
+	settings, err := v.generalSettingsService.GetGeneralSettingsByName(ctx, "system", "agent_secret_key")
 	if err != nil {
 		log.Errorw("failed to get agent secret key configuration", "error", err)
 		return nil, err
@@ -109,13 +107,12 @@ func (v *agentTokenVerifier) getSecretConfig() (*agentSecretConfig, error) {
 }
 
 func isCacheMiss(err error) bool {
-	return err == redis.Nil || strings.Contains(err.Error(), "not found")
+	return errors.Is(err, redis.Nil) || strings.Contains(err.Error(), "not found")
 }
 
-// generateToken generates a token for the given agentId using cached secret config
-// Format: agentId:base64(signature)
-func (v *agentTokenVerifier) generateToken(agentId string) (string, error) {
-	config, err := v.getSecretConfig()
+// generateToken generates a token for the given agentId using cached secret config.
+func (v *agentTokenVerifier) generateToken(ctx context.Context, agentId string) (string, error) {
+	config, err := v.getSecretConfig(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -145,7 +142,7 @@ func (v *agentTokenVerifier) parseToken(token string) (agentId string, signature
 // Supports two token formats:
 //  1. New format: agentId:base64(signature) - preferred, O(1) verification
 //  2. Legacy format: base64(signature) - backward compatibility, requires agentIDHint or list all agents
-func (v *agentTokenVerifier) VerifyAgentToken(token string, agentIDHint string) (string, error) {
+func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string, agentIDHint string) (string, error) {
 	if token == "" {
 		return "", fmt.Errorf("token is empty")
 	}
@@ -163,14 +160,14 @@ func (v *agentTokenVerifier) VerifyAgentToken(token string, agentIDHint string) 
 		}
 
 		// Verify agent exists
-		_, err = v.agentRepo.GetAgentByAgentId(agentId)
+		_, err = v.agentRepo.Get(ctx, agentId)
 		if err != nil {
 			log.Debugw("agent not found", "agentId", agentId, "error", err)
 			return "", fmt.Errorf("agent not found: %s", agentId)
 		}
 
 		// Regenerate expected token for this agentId and compare
-		expectedToken, err := v.generateToken(agentId)
+		expectedToken, err := v.generateToken(ctx, agentId)
 		if err != nil {
 			return "", fmt.Errorf("failed to generate expected token: %w", err)
 		}
@@ -186,13 +183,13 @@ func (v *agentTokenVerifier) VerifyAgentToken(token string, agentIDHint string) 
 	// Legacy format: only signature (base64 encoded), need to find agent by verifying against all agents
 	// Optimization: if agentIDHint is provided, verify that agent first
 	if agentIDHint != "" {
-		expectedToken, err := v.generateToken(agentIDHint)
+		expectedToken, err := v.generateToken(ctx, agentIDHint)
 		if err == nil {
 			// Extract signature from expected token (new format) for comparison
 			_, expectedSignature, _ := v.parseToken(expectedToken)
 			if token == expectedSignature {
 				// Verify agent exists
-				_, err := v.agentRepo.GetAgentByAgentId(agentIDHint)
+				_, err := v.agentRepo.Get(ctx, agentIDHint)
 				if err == nil {
 					return agentIDHint, nil
 				}
@@ -201,7 +198,7 @@ func (v *agentTokenVerifier) VerifyAgentToken(token string, agentIDHint string) 
 	}
 
 	// Fallback: list all agents and verify token (legacy format)
-	agents, _, err := v.agentRepo.ListAgent(1, 1000)
+	agents, _, err := v.agentRepo.List(ctx, 1, 1000)
 	if err != nil {
 		log.Errorw("failed to list agents for token verification", "error", err)
 		return "", fmt.Errorf("failed to list agents: %w", err)
@@ -214,7 +211,7 @@ func (v *agentTokenVerifier) VerifyAgentToken(token string, agentIDHint string) 
 			continue
 		}
 
-		expectedToken, err := v.generateToken(agent.AgentId)
+		expectedToken, err := v.generateToken(ctx, agent.AgentId)
 		if err != nil {
 			log.Debugw("failed to generate token for agent", "agentId", agent.AgentId, "error", err)
 			continue

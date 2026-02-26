@@ -15,6 +15,7 @@
 package repo
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -24,53 +25,55 @@ import (
 	"gorm.io/datatypes"
 )
 
+// IProjectRepository defines project persistence with context support for timeout, tracing and cancellation.
 type IProjectRepository interface {
-	CreateProject(p *model.Project) error
-	UpdateProject(projectId string, updates map[string]interface{}) error
-	DeleteProject(projectId string) error
-	GetProjectById(projectId string) (*model.Project, error)
-	GetProjectByName(orgId, name string) (*model.Project, error)
-	ListProjects(query *model.ProjectQueryReq) ([]*model.Project, int64, error)
-	GetProjectsByOrgId(orgId string, pageNum, pageSize int, status *int) ([]*model.Project, int64, error)
-	GetProjectsByUserId(userId string, pageNum, pageSize int, orgId, role string) ([]*model.Project, int64, error)
-	CheckProjectExists(projectId string) (bool, error)
-	CheckProjectNameExists(orgId, name string, excludeProjectId ...string) (bool, error)
-	UpdateProjectStatistics(projectId string, stats *model.ProjectStatisticsReq) error
-	EnableProject(projectId string) error
-	DisableProject(projectId string) error
+	Create(ctx context.Context, p *model.Project) error
+	Get(ctx context.Context, projectId string) (*model.Project, error)
+	GetByName(ctx context.Context, orgId, name string) (*model.Project, error)
+	Update(ctx context.Context, projectId string, updates map[string]interface{}) error
+	Delete(ctx context.Context, projectId string) error
+	List(ctx context.Context, query *model.ProjectQueryReq) ([]*model.Project, int64, error)
+	ListByOrg(ctx context.Context, orgId string, pageNum, pageSize int, status *int) ([]*model.Project, int64, error)
+	ListByUser(ctx context.Context, userId string, pageNum, pageSize int, orgId, role string) ([]*model.Project, int64, error)
+	Exists(ctx context.Context, projectId string) (bool, error)
+	NameExists(ctx context.Context, orgId, name string, excludeProjectId ...string) (bool, error)
+	UpdateStatistics(ctx context.Context, projectId string, stats *model.ProjectStatisticsReq) error
+	Enable(ctx context.Context, projectId string) error
+	Disable(ctx context.Context, projectId string) error
 }
 
 type ProjectRepo struct {
 	database.IDatabase
 }
 
+// NewProjectRepo creates a project repository.
 func NewProjectRepo(db database.IDatabase) IProjectRepository {
 	return &ProjectRepo{IDatabase: db}
 }
 
-// CreateProject 创建项目
-func (r *ProjectRepo) CreateProject(p *model.Project) error {
-	return r.Database().Create(p).Error
+// Create creates a new project.
+func (r *ProjectRepo) Create(ctx context.Context, p *model.Project) error {
+	return r.Database().WithContext(ctx).Create(p).Error
 }
 
-// UpdateProject 更新项目
-func (r *ProjectRepo) UpdateProject(projectId string, updates map[string]interface{}) error {
-	return r.Database().Model(&model.Project{}).
+// Update updates project by projectId.
+func (r *ProjectRepo) Update(ctx context.Context, projectId string, updates map[string]interface{}) error {
+	return r.Database().WithContext(ctx).Model(&model.Project{}).
 		Where("project_id = ?", projectId).
 		Updates(updates).Error
 }
 
-// DeleteProject 删除项目（软删除，将状态设置为禁用）
-func (r *ProjectRepo) DeleteProject(projectId string) error {
-	return r.Database().Model(&model.Project{}).
+// Delete soft-deletes project by projectId (sets status to disabled).
+func (r *ProjectRepo) Delete(ctx context.Context, projectId string) error {
+	return r.Database().WithContext(ctx).Model(&model.Project{}).
 		Where("project_id = ?", projectId).
 		Update("status", model.ProjectStatusDisabled).Error
 }
 
-// GetProjectById 根据项目ID获取项目信息
-func (r *ProjectRepo) GetProjectById(projectId string) (*model.Project, error) {
+// Get returns project by projectId.
+func (r *ProjectRepo) Get(ctx context.Context, projectId string) (*model.Project, error) {
 	var p model.Project
-	err := r.Database().
+	err := r.Database().WithContext(ctx).
 		Where("project_id = ?", projectId).
 		First(&p).Error
 	if err != nil {
@@ -79,10 +82,10 @@ func (r *ProjectRepo) GetProjectById(projectId string) (*model.Project, error) {
 	return &p, nil
 }
 
-// GetProjectByName 根据组织ID和项目名称获取项目
-func (r *ProjectRepo) GetProjectByName(orgId, name string) (*model.Project, error) {
+// GetByName returns project by orgId and name.
+func (r *ProjectRepo) GetByName(ctx context.Context, orgId, name string) (*model.Project, error) {
 	var p model.Project
-	err := r.Database().
+	err := r.Database().WithContext(ctx).
 		Where("org_id = ? AND name = ?", orgId, name).
 		First(&p).Error
 	if err != nil {
@@ -91,15 +94,13 @@ func (r *ProjectRepo) GetProjectByName(orgId, name string) (*model.Project, erro
 	return &p, nil
 }
 
-// ListProjects 查询项目列表
-func (r *ProjectRepo) ListProjects(query *model.ProjectQueryReq) ([]*model.Project, int64, error) {
+// List lists projects with query filters.
+func (r *ProjectRepo) List(ctx context.Context, query *model.ProjectQueryReq) ([]*model.Project, int64, error) {
 	var projects []*model.Project
 	var total int64
 
-	// 构建查询
-	db := r.Database().Model(&model.Project{})
+	db := r.Database().WithContext(ctx).Model(&model.Project{})
 
-	// 应用筛选条件
 	if query.OrgId != "" {
 		db = db.Where("org_id = ?", query.OrgId)
 	}
@@ -125,12 +126,10 @@ func (r *ProjectRepo) ListProjects(query *model.ProjectQueryReq) ([]*model.Proje
 		}
 	}
 
-	// 获取总数
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// 分页
 	pageNum := query.PageNum
 	if pageNum <= 0 {
 		pageNum = 1
@@ -144,7 +143,6 @@ func (r *ProjectRepo) ListProjects(query *model.ProjectQueryReq) ([]*model.Proje
 	}
 	offset := (pageNum - 1) * pageSize
 
-	// 查询列表
 	err := db.Order("created_at DESC").
 		Offset(offset).
 		Limit(pageSize).
@@ -153,24 +151,22 @@ func (r *ProjectRepo) ListProjects(query *model.ProjectQueryReq) ([]*model.Proje
 	return projects, total, err
 }
 
-// GetProjectsByOrgId 根据组织ID获取项目列表
-func (r *ProjectRepo) GetProjectsByOrgId(orgId string, pageNum, pageSize int, status *int) ([]*model.Project, int64, error) {
+// ListByOrg lists projects by orgId with pagination.
+func (r *ProjectRepo) ListByOrg(ctx context.Context, orgId string, pageNum, pageSize int, status *int) ([]*model.Project, int64, error) {
 	var projects []*model.Project
 	var total int64
 
-	db := r.Database().Model(&model.Project{}).
+	db := r.Database().WithContext(ctx).Model(&model.Project{}).
 		Where("org_id = ?", orgId)
 
 	if status != nil {
 		db = db.Where("status = ?", *status)
 	}
 
-	// 获取总数
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// 分页
 	if pageNum <= 0 {
 		pageNum = 1
 	}
@@ -182,7 +178,6 @@ func (r *ProjectRepo) GetProjectsByOrgId(orgId string, pageNum, pageSize int, st
 	}
 	offset := (pageNum - 1) * pageSize
 
-	// 查询列表
 	err := db.Order("created_at DESC").
 		Offset(offset).
 		Limit(pageSize).
@@ -191,13 +186,12 @@ func (r *ProjectRepo) GetProjectsByOrgId(orgId string, pageNum, pageSize int, st
 	return projects, total, err
 }
 
-// GetProjectsByUserId 获取用户的项目列表
-func (r *ProjectRepo) GetProjectsByUserId(userId string, pageNum, pageSize int, orgId, role string) ([]*model.Project, int64, error) {
+// ListByUser lists projects for user by userId with pagination.
+func (r *ProjectRepo) ListByUser(ctx context.Context, userId string, pageNum, pageSize int, orgId, role string) ([]*model.Project, int64, error) {
 	var projects []*model.Project
 	var total int64
 
-	// 通过项目成员表关联查询
-	db := r.Database().Table("t_project").
+	db := r.Database().WithContext(ctx).Table("t_project").
 		Joins("INNER JOIN t_project_member ON t_project.project_id = t_project_member.project_id").
 		Where("t_project_member.user_id = ?", userId)
 
@@ -208,12 +202,10 @@ func (r *ProjectRepo) GetProjectsByUserId(userId string, pageNum, pageSize int, 
 		db = db.Where("t_project_member.role_id = ?", role)
 	}
 
-	// 获取总数
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// 分页
 	if pageNum <= 0 {
 		pageNum = 1
 	}
@@ -225,7 +217,6 @@ func (r *ProjectRepo) GetProjectsByUserId(userId string, pageNum, pageSize int, 
 	}
 	offset := (pageNum - 1) * pageSize
 
-	// 查询列表
 	err := db.Select("t_project.*").
 		Order("t_project.created_at DESC").
 		Offset(offset).
@@ -235,19 +226,19 @@ func (r *ProjectRepo) GetProjectsByUserId(userId string, pageNum, pageSize int, 
 	return projects, total, err
 }
 
-// CheckProjectExists 检查项目是否存在
-func (r *ProjectRepo) CheckProjectExists(projectId string) (bool, error) {
+// Exists checks if project exists by projectId.
+func (r *ProjectRepo) Exists(ctx context.Context, projectId string) (bool, error) {
 	var count int64
-	err := r.Database().Model(&model.Project{}).
+	err := r.Database().WithContext(ctx).Model(&model.Project{}).
 		Where("project_id = ?", projectId).
 		Count(&count).Error
 	return count > 0, err
 }
 
-// CheckProjectNameExists 检查项目名称是否已存在
-func (r *ProjectRepo) CheckProjectNameExists(orgId, name string, excludeProjectId ...string) (bool, error) {
+// NameExists checks if project name exists in org.
+func (r *ProjectRepo) NameExists(ctx context.Context, orgId, name string, excludeProjectId ...string) (bool, error) {
 	var count int64
-	db := r.Database().Model(&model.Project{}).
+	db := r.Database().WithContext(ctx).Model(&model.Project{}).
 		Where("org_id = ? AND name = ?", orgId, name)
 	if len(excludeProjectId) > 0 && excludeProjectId[0] != "" {
 		db = db.Where("project_id != ?", excludeProjectId[0])
@@ -256,8 +247,8 @@ func (r *ProjectRepo) CheckProjectNameExists(orgId, name string, excludeProjectI
 	return count > 0, err
 }
 
-// UpdateProjectStatistics 更新项目统计信息
-func (r *ProjectRepo) UpdateProjectStatistics(projectId string, stats *model.ProjectStatisticsReq) error {
+// UpdateStatistics updates project statistics.
+func (r *ProjectRepo) UpdateStatistics(ctx context.Context, projectId string, stats *model.ProjectStatisticsReq) error {
 	updates := make(map[string]interface{})
 	if stats.TotalPipelines != nil {
 		updates["total_pipelines"] = *stats.TotalPipelines
@@ -274,21 +265,21 @@ func (r *ProjectRepo) UpdateProjectStatistics(projectId string, stats *model.Pro
 	if len(updates) == 0 {
 		return nil
 	}
-	return r.Database().Model(&model.Project{}).
+	return r.Database().WithContext(ctx).Model(&model.Project{}).
 		Where("project_id = ?", projectId).
 		Updates(updates).Error
 }
 
-// EnableProject 启用项目
-func (r *ProjectRepo) EnableProject(projectId string) error {
-	return r.Database().Model(&model.Project{}).
+// Enable enables project by projectId.
+func (r *ProjectRepo) Enable(ctx context.Context, projectId string) error {
+	return r.Database().WithContext(ctx).Model(&model.Project{}).
 		Where("project_id = ?", projectId).
 		Update("is_enabled", 1).Error
 }
 
-// DisableProject 禁用项目
-func (r *ProjectRepo) DisableProject(projectId string) error {
-	return r.Database().Model(&model.Project{}).
+// Disable disables project by projectId.
+func (r *ProjectRepo) Disable(ctx context.Context, projectId string) error {
+	return r.Database().WithContext(ctx).Model(&model.Project{}).
 		Where("project_id = ?", projectId).
 		Update("is_enabled", 0).Error
 }
@@ -302,5 +293,5 @@ func ConvertJSONToDatatypes(data map[string]interface{}) (datatypes.JSON, error)
 	if err != nil {
 		return nil, fmt.Errorf("marshal json failed: %w", err)
 	}
-	return datatypes.JSON(jsonBytes), nil
+	return jsonBytes, nil
 }

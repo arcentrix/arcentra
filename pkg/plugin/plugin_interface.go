@@ -18,34 +18,34 @@ import (
 	"encoding/json"
 )
 
-// PluginType 插件类型枚举
-type PluginType int32
+// Type 插件类型枚举
+type Type int32
 
 const (
 	// TypeUnspecified 未指定的插件类型
-	TypeUnspecified PluginType = 0
+	TypeUnspecified Type = 0
 	// TypeSource Source插件类型
-	TypeSource PluginType = 1
+	TypeSource Type = 1
 	// TypeBuild Build插件类型
-	TypeBuild PluginType = 2
+	TypeBuild Type = 2
 	// TypeTest Test插件类型
-	TypeTest PluginType = 3
+	TypeTest Type = 3
 	// TypeDeploy Deploy插件类型
-	TypeDeploy PluginType = 4
+	TypeDeploy Type = 4
 	// TypeSecurity Security插件类型
-	TypeSecurity PluginType = 5
+	TypeSecurity Type = 5
 	// TypeNotify Notify插件类型
-	TypeNotify PluginType = 6
+	TypeNotify Type = 6
 	// TypeApproval Approval插件类型
-	TypeApproval PluginType = 7
+	TypeApproval Type = 7
 	// TypeStorage Storage插件类型
-	TypeStorage PluginType = 8
+	TypeStorage Type = 8
 	// TypeAnalytics Analytics插件类型
-	TypeAnalytics PluginType = 9
+	TypeAnalytics Type = 9
 	// TypeIntegration Integration插件类型
-	TypeIntegration PluginType = 10
+	TypeIntegration Type = 10
 	// TypeCustom Custom插件类型
-	TypeCustom PluginType = 11
+	TypeCustom Type = 11
 )
 
 // Plugin 是插件必须实现的接口
@@ -61,7 +61,7 @@ type Plugin interface {
 	Version() string
 
 	// Type 返回插件类型
-	Type() PluginType
+	Type() Type
 
 	// Author 返回插件作者
 	Author() string
@@ -83,14 +83,14 @@ type Plugin interface {
 	Cleanup() error
 }
 
-// PluginInfo 包含插件的元信息
-type PluginInfo struct {
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	Version     string     `json:"version"`
-	Type        PluginType `json:"type"`
-	Author      string     `json:"author,omitempty"`
-	Homepage    string     `json:"homepage,omitempty"`
+// Info 包含插件的元信息
+type Info struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Version     string `json:"version"`
+	Type        Type   `json:"type"`
+	Author      string `json:"author,omitempty"`
+	Homepage    string `json:"homepage,omitempty"`
 }
 
 // RuntimePluginConfig 表示插件的运行时配置

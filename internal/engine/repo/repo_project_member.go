@@ -15,17 +15,20 @@
 package repo
 
 import (
+	"context"
+
 	"github.com/arcentrix/arcentra/internal/engine/model"
 	"github.com/arcentrix/arcentra/pkg/database"
 )
 
+// IProjectMemberRepository defines project member persistence with context support.
 type IProjectMemberRepository interface {
-	GetProjectMember(projectId, userId string) (*model.ProjectMember, error)
-	ListProjectMembers(projectId string) ([]model.ProjectMember, error)
-	AddProjectMember(member *model.ProjectMember) error
-	UpdateProjectMemberRole(projectId, userId, role string) error
-	RemoveProjectMember(projectId, userId string) error
-	GetUserProjects(userId string) ([]model.ProjectMember, error)
+	Get(ctx context.Context, projectId, userId string) (*model.ProjectMember, error)
+	ListProjectMembers(ctx context.Context, projectId string) ([]model.ProjectMember, error)
+	AddProjectMember(ctx context.Context, member *model.ProjectMember) error
+	UpdateProjectMemberRole(ctx context.Context, projectId, userId, role string) error
+	RemoveProjectMember(ctx context.Context, projectId, userId string) error
+	GetUserProjects(ctx context.Context, userId string) ([]model.ProjectMember, error)
 }
 
 type ProjectMemberRepo struct {
@@ -36,44 +39,44 @@ func NewProjectMemberRepo(db database.IDatabase) IProjectMemberRepository {
 	return &ProjectMemberRepo{IDatabase: db}
 }
 
-// GetProjectMember 获取项目成员
-func (r *ProjectMemberRepo) GetProjectMember(projectId, userId string) (*model.ProjectMember, error) {
+// Get returns project member by projectId and userId.
+func (r *ProjectMemberRepo) Get(ctx context.Context, projectId, userId string) (*model.ProjectMember, error) {
 	var member model.ProjectMember
-	err := r.Database().Select("id", "project_id", "user_id", "role_id", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "project_id", "user_id", "role_id", "created_at", "updated_at").
 		Where("project_id = ? AND user_id = ?", projectId, userId).First(&member).Error
 	return &member, err
 }
 
-// ListProjectMembers 列出项目成员
-func (r *ProjectMemberRepo) ListProjectMembers(projectId string) ([]model.ProjectMember, error) {
+// ListProjectMembers lists project members.
+func (r *ProjectMemberRepo) ListProjectMembers(ctx context.Context, projectId string) ([]model.ProjectMember, error) {
 	var members []model.ProjectMember
-	err := r.Database().Select("id", "project_id", "user_id", "role_id", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "project_id", "user_id", "role_id", "created_at", "updated_at").
 		Where("project_id = ?", projectId).Find(&members).Error
 	return members, err
 }
 
-// AddProjectMember 添加项目成员
-func (r *ProjectMemberRepo) AddProjectMember(member *model.ProjectMember) error {
-	return r.Database().Create(member).Error
+// AddProjectMember adds a project member.
+func (r *ProjectMemberRepo) AddProjectMember(ctx context.Context, member *model.ProjectMember) error {
+	return r.Database().WithContext(ctx).Create(member).Error
 }
 
-// UpdateProjectMemberRole 更新项目成员角色
-func (r *ProjectMemberRepo) UpdateProjectMemberRole(projectId, userId, role string) error {
-	return r.Database().Model(&model.ProjectMember{}).
+// UpdateProjectMemberRole updates project member role.
+func (r *ProjectMemberRepo) UpdateProjectMemberRole(ctx context.Context, projectId, userId, role string) error {
+	return r.Database().WithContext(ctx).Model(&model.ProjectMember{}).
 		Where("project_id = ? AND user_id = ?", projectId, userId).
 		Update("role", role).Error
 }
 
-// RemoveProjectMember 移除项目成员
-func (r *ProjectMemberRepo) RemoveProjectMember(projectId, userId string) error {
-	return r.Database().Where("project_id = ? AND user_id = ?", projectId, userId).
+// RemoveProjectMember removes a project member.
+func (r *ProjectMemberRepo) RemoveProjectMember(ctx context.Context, projectId, userId string) error {
+	return r.Database().WithContext(ctx).Where("project_id = ? AND user_id = ?", projectId, userId).
 		Delete(&model.ProjectMember{}).Error
 }
 
-// GetUserProjects 获取用户的所有项目
-func (r *ProjectMemberRepo) GetUserProjects(userId string) ([]model.ProjectMember, error) {
+// GetUserProjects returns user's projects.
+func (r *ProjectMemberRepo) GetUserProjects(ctx context.Context, userId string) ([]model.ProjectMember, error) {
 	var members []model.ProjectMember
-	err := r.Database().Select("id", "project_id", "user_id", "role_id", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "project_id", "user_id", "role_id", "created_at", "updated_at").
 		Where("user_id = ?", userId).Find(&members).Error
 	return members, err
 }

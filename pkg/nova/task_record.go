@@ -122,7 +122,7 @@ type MySQLTaskRecorder struct {
 	tableName string
 }
 
-// NewMySQLTaskRecorder creates a new MySQL task recorder
+// NewTaskRecorder NewMySQLTaskRecorder creates a new MySQL task recorder
 // mysqlDB: MySQL database connection (*gorm.DB)
 // tableName: table name, if empty, uses default TaskRecordTableName
 func NewTaskRecorder(mysqlDB *gorm.DB, tableName string) (*MySQLTaskRecorder, error) {
@@ -322,7 +322,7 @@ func (r *MySQLTaskRecorder) taskRecordToModel(record *TaskRecord) TaskRecordMode
 	if len(record.Metadata) > 0 {
 		metadataJSON, err := json.Marshal(record.Metadata)
 		if err == nil {
-			model.Metadata = datatypes.JSON(metadataJSON)
+			model.Metadata = metadataJSON
 		}
 	}
 

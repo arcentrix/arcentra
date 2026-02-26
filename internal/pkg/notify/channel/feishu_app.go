@@ -60,8 +60,8 @@ func (c *FeishuAppChannel) SetAuth(provider auth.IAuthProvider) error {
 	}
 
 	// Validate authentication type
-	if provider.GetAuthType() != auth.AuthTypeToken &&
-		provider.GetAuthType() != auth.AuthTypeAPIKey {
+	if provider.GetAuthType() != auth.Token &&
+		provider.GetAuthType() != auth.ApiKey {
 		return fmt.Errorf("feishu app channel only supports token or apikey auth")
 	}
 

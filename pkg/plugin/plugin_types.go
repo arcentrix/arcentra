@@ -20,8 +20,8 @@ import (
 )
 
 // AllPluginTypes returns all supported plugin types
-func AllPluginTypes() []PluginType {
-	return []PluginType{
+func AllPluginTypes() []Type {
+	return []Type{
 		TypeSource,
 		TypeBuild,
 		TypeTest,
@@ -39,15 +39,15 @@ func AllPluginTypes() []PluginType {
 // IsValidPluginType checks if a plugin type is valid
 func IsValidPluginType(t string) bool {
 	for _, validType := range AllPluginTypes() {
-		if PluginTypeToString(validType) == t {
+		if ToString(validType) == t {
 			return true
 		}
 	}
 	return false
 }
 
-// PluginTypeToString converts PluginType enum to string
-func PluginTypeToString(pt PluginType) string {
+// ToString converts Type enum to string
+func ToString(pt Type) string {
 	switch pt {
 	case TypeSource:
 		return "source"
@@ -76,8 +76,8 @@ func PluginTypeToString(pt PluginType) string {
 	}
 }
 
-// StringToPluginType converts string to PluginType enum
-func StringToPluginType(s string) PluginType {
+// StringToPluginType converts string to Type enum
+func StringToPluginType(s string) Type {
 	switch s {
 	case "source":
 		return TypeSource
@@ -107,8 +107,8 @@ func StringToPluginType(s string) PluginType {
 }
 
 // GetPluginTypeDescription returns a description for a plugin type
-func GetPluginTypeDescription(t PluginType) string {
-	descriptions := map[PluginType]string{
+func GetPluginTypeDescription(t Type) string {
+	descriptions := map[Type]string{
 		TypeSource:      "Source code management plugin for repository operations (clone, pull, checkout, etc.)",
 		TypeBuild:       "Build plugin for compiling and building projects (compile, package, generate artifacts, etc.)",
 		TypeTest:        "Test plugin for running tests and generating reports (unit tests, integration tests, coverage, etc.)",
@@ -124,15 +124,10 @@ func GetPluginTypeDescription(t PluginType) string {
 	return descriptions[t]
 }
 
-// PluginTypeString returns the string representation of PluginType
-func PluginTypeString(pt PluginType) string {
-	return PluginTypeToString(pt)
-}
-
-// ValidatePluginType validates the PluginType
-func ValidatePluginType(pt PluginType) error {
+// ValidatePluginType validates the Type
+func ValidatePluginType(pt Type) error {
 	if pt == TypeUnspecified {
-		return fmt.Errorf("invalid plugin type: %s", PluginTypeToString(pt))
+		return fmt.Errorf("invalid plugin type: %s", ToString(pt))
 	}
 	return nil
 }

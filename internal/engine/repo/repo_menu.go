@@ -15,15 +15,18 @@
 package repo
 
 import (
+	"context"
+
 	"github.com/arcentrix/arcentra/internal/engine/model"
 	"github.com/arcentrix/arcentra/pkg/database"
 )
 
+// IMenuRepository defines menu persistence with context support.
 type IMenuRepository interface {
-	GetMenu(menuId string) (*model.Menu, error)
-	GetMenusByMenuIds(menuIds []string) ([]model.Menu, error)
-	GetAllMenus() ([]model.Menu, error)
-	GetMenusByParentId(parentId string) ([]model.Menu, error)
+	Get(ctx context.Context, menuId string) (*model.Menu, error)
+	BatchGet(ctx context.Context, menuIds []string) ([]model.Menu, error)
+	List(ctx context.Context) ([]model.Menu, error)
+	ListByParent(ctx context.Context, parentId string) ([]model.Menu, error)
 }
 
 type MenuRepo struct {
@@ -36,10 +39,10 @@ func NewMenuRepo(db database.IDatabase) IMenuRepository {
 	}
 }
 
-// GetMenu 获取菜单
-func (r *MenuRepo) GetMenu(menuId string) (*model.Menu, error) {
+// Get returns menu by menuId.
+func (r *MenuRepo) Get(ctx context.Context, menuId string) (*model.Menu, error) {
 	var menu model.Menu
-	err := r.Database().Select("id", "menu_id", "parent_id", "name", "path", "component", "icon", "order", "is_visible", "is_enabled", "description", "meta", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "menu_id", "parent_id", "name", "path", "component", "icon", "order", "is_visible", "is_enabled", "description", "meta", "created_at", "updated_at").
 		Where("menu_id = ? AND is_enabled = ?", menuId, model.MenuEnabled).First(&menu).Error
 	if err != nil {
 		return nil, err
@@ -47,31 +50,31 @@ func (r *MenuRepo) GetMenu(menuId string) (*model.Menu, error) {
 	return &menu, nil
 }
 
-// GetMenusByMenuIds 根据菜单ID列表获取菜单
-func (r *MenuRepo) GetMenusByMenuIds(menuIds []string) ([]model.Menu, error) {
+// BatchGet returns menus by menuIds.
+func (r *MenuRepo) BatchGet(ctx context.Context, menuIds []string) ([]model.Menu, error) {
 	if len(menuIds) == 0 {
 		return []model.Menu{}, nil
 	}
 	var menus []model.Menu
-	err := r.Database().Select("id", "menu_id", "parent_id", "name", "path", "component", "icon", "order", "is_visible", "is_enabled", "description", "meta", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "menu_id", "parent_id", "name", "path", "component", "icon", "order", "is_visible", "is_enabled", "description", "meta", "created_at", "updated_at").
 		Where("menu_id IN ? AND is_enabled = ?", menuIds, model.MenuEnabled).
 		Order("`order` ASC").Find(&menus).Error
 	return menus, err
 }
 
-// GetAllMenus 获取所有启用的菜单
-func (r *MenuRepo) GetAllMenus() ([]model.Menu, error) {
+// List returns all enabled menus.
+func (r *MenuRepo) List(ctx context.Context) ([]model.Menu, error) {
 	var menus []model.Menu
-	err := r.Database().Select("id", "menu_id", "parent_id", "name", "path", "component", "icon", "order", "is_visible", "is_enabled", "description", "meta", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "menu_id", "parent_id", "name", "path", "component", "icon", "order", "is_visible", "is_enabled", "description", "meta", "created_at", "updated_at").
 		Where("is_enabled = ?", model.MenuEnabled).
 		Order("`order` ASC").Find(&menus).Error
 	return menus, err
 }
 
-// GetMenusByParentId 根据父菜单ID获取子菜单
-func (r *MenuRepo) GetMenusByParentId(parentId string) ([]model.Menu, error) {
+// ListByParent returns child menus by parentId.
+func (r *MenuRepo) ListByParent(ctx context.Context, parentId string) ([]model.Menu, error) {
 	var menus []model.Menu
-	err := r.Database().Select("id", "menu_id", "parent_id", "name", "path", "component", "icon", "order", "is_visible", "is_enabled", "description", "meta", "created_at", "updated_at").
+	err := r.Database().WithContext(ctx).Select("id", "menu_id", "parent_id", "name", "path", "component", "icon", "order", "is_visible", "is_enabled", "description", "meta", "created_at", "updated_at").
 		Where("parent_id = ? AND is_enabled = ?", parentId, model.MenuEnabled).
 		Order("`order` ASC").Find(&menus).Error
 	return menus, err

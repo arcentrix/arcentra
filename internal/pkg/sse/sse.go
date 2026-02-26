@@ -21,20 +21,20 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-type SSEHub struct {
+type Hub struct {
 	mu      sync.RWMutex
 	subs    map[string]map[chan []byte]struct{} // task_id -> set(ch)
 	closing chan struct{}
 }
 
-func NewSSEHub() *SSEHub {
-	return &SSEHub{
+func NewSSEHub() *Hub {
+	return &Hub{
 		subs:    make(map[string]map[chan []byte]struct{}),
 		closing: make(chan struct{}),
 	}
 }
 
-func (h *SSEHub) Broadcast(taskID string, payload any) {
+func (h *Hub) Broadcast(taskID string, payload any) {
 	data, _ := sonic.Marshal(payload)
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -47,7 +47,7 @@ func (h *SSEHub) Broadcast(taskID string, payload any) {
 	}
 }
 
-func (h *SSEHub) Subscribe(taskID string) (ch chan []byte, cancel func()) {
+func (h *Hub) Subscribe(taskID string) (ch chan []byte, cancel func()) {
 	ch = make(chan []byte, 128)
 	h.mu.Lock()
 	if _, ok := h.subs[taskID]; !ok {
@@ -68,7 +68,7 @@ func (h *SSEHub) Subscribe(taskID string) (ch chan []byte, cancel func()) {
 	}
 }
 
-func (h *SSEHub) HTTPHandler() fiber.Handler {
+func (h *Hub) HTTPHandler() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		taskID := c.Query("task_id")
 		if taskID == "" {

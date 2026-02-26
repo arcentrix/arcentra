@@ -24,6 +24,6 @@ var ProviderSet = wire.NewSet(
 )
 
 // NewPprofServer creates a new pprof server from config
-func NewPprofServer(config PprofConfig) *Server {
+func NewPprofServer(config Config) *Server {
 	return NewServer(config)
 }

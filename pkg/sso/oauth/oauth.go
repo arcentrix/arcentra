@@ -32,13 +32,13 @@ type UserInfo struct {
 	AvatarURL string
 }
 
-type OAuthProvider struct {
+type Provider struct {
 	Config      *oauth2.Config
 	UserInfoURL string
 }
 
-func NewOAuthProvider(clientID, clientSecret, redirectURL string, scopes []string, endpoint oauth2.Endpoint, userInfoURL string) *OAuthProvider {
-	return &OAuthProvider{
+func NewOAuthProvider(clientID, clientSecret, redirectURL string, scopes []string, endpoint oauth2.Endpoint, userInfoURL string) *Provider {
+	return &Provider{
 		Config: &oauth2.Config{
 			ClientID:     clientID,
 			ClientSecret: clientSecret,
@@ -50,15 +50,15 @@ func NewOAuthProvider(clientID, clientSecret, redirectURL string, scopes []strin
 	}
 }
 
-func (p *OAuthProvider) GetAuthURL(state string) string {
+func (p *Provider) GetAuthURL(state string) string {
 	return p.Config.AuthCodeURL(state)
 }
 
-func (p *OAuthProvider) ExchangeToken(ctx context.Context, code string) (*oauth2.Token, error) {
+func (p *Provider) ExchangeToken(ctx context.Context, code string) (*oauth2.Token, error) {
 	return p.Config.Exchange(ctx, code)
 }
 
-func (p *OAuthProvider) GetUserInfo(ctx context.Context, token *oauth2.Token) (*UserInfo, error) {
+func (p *Provider) GetUserInfo(ctx context.Context, token *oauth2.Token) (*UserInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.UserInfoURL, nil)
 	if err != nil {
 		return nil, err
@@ -100,7 +100,7 @@ func (p *OAuthProvider) GetUserInfo(ctx context.Context, token *oauth2.Token) (*
 }
 
 // GetRawUserInfo returns raw user info map for field mapping
-func (p *OAuthProvider) GetRawUserInfo(ctx context.Context, token *oauth2.Token) (map[string]interface{}, error) {
+func (p *Provider) GetRawUserInfo(ctx context.Context, token *oauth2.Token) (map[string]interface{}, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.UserInfoURL, nil)
 	if err != nil {
 		return nil, err

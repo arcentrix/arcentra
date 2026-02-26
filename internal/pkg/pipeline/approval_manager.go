@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	executor "github.com/arcentrix/arcentra/internal/pkg/executor"
+	"github.com/arcentrix/arcentra/internal/pkg/executor"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/bytedance/sonic"
@@ -96,7 +96,11 @@ func (am *ApprovalManager) SetPollInterval(interval time.Duration) {
 }
 
 // CreateApproval creates a new approval request
-func (am *ApprovalManager) CreateApproval(ctx context.Context, jobName, stepName, pluginName string, params map[string]any) (*ApprovalRequest, error) {
+func (am *ApprovalManager) CreateApproval(
+	ctx context.Context,
+	jobName, stepName, pluginName string,
+	params map[string]any,
+) (*ApprovalRequest, error) {
 	requestID := fmt.Sprintf("%s-%s-%d", jobName, stepName, time.Now().UnixNano())
 
 	expiresAt := time.Now().Add(am.timeout)

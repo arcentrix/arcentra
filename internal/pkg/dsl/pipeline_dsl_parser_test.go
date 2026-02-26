@@ -23,7 +23,7 @@ import (
 )
 
 func TestDSLParser_Parse(t *testing.T) {
-	logger := log.Logger{log.GetLogger()}
+	logger := log.Logger{SugaredLogger: log.GetLogger()}
 	parser := NewDSLParser(logger)
 
 	tests := []struct {
@@ -111,7 +111,7 @@ func TestDSLParser_Parse(t *testing.T) {
 }
 
 func TestDSLParser_ToJSON(t *testing.T) {
-	logger := log.Logger{log.GetLogger()}
+	logger := log.Logger{SugaredLogger: log.GetLogger()}
 	parser := NewDSLParser(logger)
 
 	pipeline := &spec.Pipeline{

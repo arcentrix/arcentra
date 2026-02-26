@@ -81,7 +81,7 @@ func (rt *Router) createProject(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.CreateProject(&req, claims.UserId)
+	result, err := projectService.CreateProject(c.Context(), &req, claims.UserId)
 	if err != nil {
 		log.Errorw("create project failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
@@ -106,7 +106,7 @@ func (rt *Router) updateProject(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.UpdateProject(projectId, &req)
+	result, err := projectService.UpdateProject(c.Context(), projectId, &req)
 	if err != nil {
 		log.Errorw("update project failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
@@ -125,7 +125,7 @@ func (rt *Router) deleteProject(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	if err := projectService.DeleteProject(projectId); err != nil {
+	if err := projectService.DeleteProject(c.Context(), projectId); err != nil {
 		log.Errorw("delete project failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
@@ -143,7 +143,7 @@ func (rt *Router) getProjectById(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.GetProjectById(projectId)
+	result, err := projectService.GetProjectById(c.Context(), projectId)
 	if err != nil {
 		log.Errorw("get project by id failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
@@ -189,7 +189,7 @@ func (rt *Router) listProjects(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	projects, total, err := projectService.ListProjects(&query)
+	projects, total, err := projectService.ListProjects(c.Context(), &query)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
@@ -225,7 +225,7 @@ func (rt *Router) getProjectsByOrgId(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	projects, total, err := projectService.GetProjectsByOrgId(orgId, pageNum, pageSize, status)
+	projects, total, err := projectService.GetProjectsByOrgId(c.Context(), orgId, pageNum, pageSize, status)
 	if err != nil {
 		log.Errorw("get projects by org id failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
@@ -258,7 +258,7 @@ func (rt *Router) getUserProjects(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	projects, total, err := projectService.GetProjectsByUserId(claims.UserId, pageNum, pageSize, orgId, role)
+	projects, total, err := projectService.GetProjectsByUserId(c.Context(), claims.UserId, pageNum, pageSize, orgId, role)
 	if err != nil {
 		log.Errorw("get projects by user id failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
@@ -284,7 +284,7 @@ func (rt *Router) enableProject(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.EnableProject(projectId)
+	result, err := projectService.EnableProject(c.Context(), projectId)
 	if err != nil {
 		log.Errorw("enable project failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
@@ -303,7 +303,7 @@ func (rt *Router) disableProject(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.DisableProject(projectId)
+	result, err := projectService.DisableProject(c.Context(), projectId)
 	if err != nil {
 		log.Errorw("disable project failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
@@ -328,7 +328,7 @@ func (rt *Router) updateProjectStatistics(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.UpdateProjectStatistics(projectId, &req)
+	result, err := projectService.UpdateProjectStatistics(c.Context(), projectId, &req)
 	if err != nil {
 		log.Errorw("update project statistics failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
@@ -348,7 +348,7 @@ func (rt *Router) getProjectMembers(c *fiber.Ctx) error {
 	// 通过 repository 访问项目成员
 	// 注意：这里需要通过 Services 获取 repository，或者创建一个 ProjectMemberService
 	// 暂时直接使用 repository，后续可以优化
-	members, err := rt.Services.ProjectMemberRepo.ListProjectMembers(projectId)
+	members, err := rt.Services.ProjectMemberRepo.ListProjectMembers(c.Context(), projectId)
 	if err != nil {
 		log.Errorw("get project members failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
@@ -385,7 +385,7 @@ func (rt *Router) addProjectMember(c *fiber.Ctx) error {
 		RoleId:    req.RoleId,
 	}
 
-	if err := rt.Services.ProjectMemberRepo.AddProjectMember(member); err != nil {
+	if err := rt.Services.ProjectMemberRepo.AddProjectMember(c.Context(), member); err != nil {
 		log.Errorw("add project member failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
@@ -410,7 +410,7 @@ func (rt *Router) updateProjectMemberRole(c *fiber.Ctx) error {
 		return http.WithRepErrMsg(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg, c.Path())
 	}
 
-	if err := rt.Services.ProjectMemberRepo.UpdateProjectMemberRole(projectId, userId, req.RoleId); err != nil {
+	if err := rt.Services.ProjectMemberRepo.UpdateProjectMemberRole(c.Context(), projectId, userId, req.RoleId); err != nil {
 		log.Errorw("update project member role failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
@@ -427,7 +427,7 @@ func (rt *Router) removeProjectMember(c *fiber.Ctx) error {
 		return http.WithRepErrMsg(c, http.BadRequest.Code, "project id and user id are required", c.Path())
 	}
 
-	if err := rt.Services.ProjectMemberRepo.RemoveProjectMember(projectId, userId); err != nil {
+	if err := rt.Services.ProjectMemberRepo.RemoveProjectMember(c.Context(), projectId, userId); err != nil {
 		log.Errorw("remove project member failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}

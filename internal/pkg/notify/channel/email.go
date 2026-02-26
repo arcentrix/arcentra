@@ -49,7 +49,7 @@ func (c *EmailChannel) SetAuth(provider auth.IAuthProvider) error {
 	}
 
 	// Email typically uses Basic Auth
-	if provider.GetAuthType() != auth.AuthTypeBasic {
+	if provider.GetAuthType() != auth.Basic {
 		return fmt.Errorf("email channel only supports basic auth")
 	}
 

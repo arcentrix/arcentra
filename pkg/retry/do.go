@@ -13,9 +13,9 @@ import (
 // The function must respect the provided context.
 type Func func(ctx context.Context) error
 
-// RetryIf determines whether an error should trigger a retry.
+// If determines whether an error should trigger a retry.
 // Return true to retry, false to stop immediately.
-type RetryIf func(error) bool
+type If func(error) bool
 
 // Backoff defines how long to wait before the next retry.
 // attempt starts from 0 (first retry after the first failure).
@@ -105,8 +105,8 @@ type Config struct {
 	maxAttempts    int
 	maxElapsedTime time.Duration
 	backoff        Backoff
-	jitter         Jitter
-	retryIf        RetryIf
+	jitter  Jitter
+	retryIf If
 }
 
 func defaultConfig() *Config {
@@ -156,7 +156,7 @@ func WithJitter(j Jitter) Option {
 }
 
 // WithRetryIf sets the retry condition function.
-func WithRetryIf(fn RetryIf) Option {
+func WithRetryIf(fn If) Option {
 	return func(c *Config) {
 		if fn != nil {
 			c.retryIf = fn

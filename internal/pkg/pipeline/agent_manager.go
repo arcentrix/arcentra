@@ -17,6 +17,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -41,7 +42,11 @@ type AgentManager struct {
 }
 
 // NewAgentManager creates a new agent manager
-func NewAgentManager(agentClient agentv1.AgentServiceClient, stepRunClient steprunv1.StepRunServiceClient, logger log.Logger) *AgentManager {
+func NewAgentManager(
+	agentClient agentv1.AgentServiceClient,
+	stepRunClient steprunv1.StepRunServiceClient,
+	logger log.Logger,
+	) *AgentManager {
 	return &AgentManager{
 		agentClient:      agentClient,
 		stepRunClient:    stepRunClient,
@@ -463,7 +468,7 @@ func (am *AgentManager) buildCommands(step *spec.Step, ctx *ExecutionContext) ([
 
 // buildShellCommands builds shell commands from step params
 func (am *AgentManager) buildShellCommands(step *spec.Step, params map[string]any, _ *ExecutionContext) ([]string, error) {
-	commands := []string{}
+	var commands []string
 
 	// Determine shell action
 	action := step.Action
@@ -596,7 +601,11 @@ func (am *AgentManager) createStepRun(ctx context.Context, req *StepExecutionReq
 
 // WaitForStepRunCompletion waits for a step run to complete on an agent
 // It polls the step run status from step run service and waits for completion
-func (am *AgentManager) WaitForStepRunCompletion(ctx context.Context, stepRunID string, timeout time.Duration) (*StepExecutionResult, error) {
+func (am *AgentManager) WaitForStepRunCompletion(
+	ctx context.Context,
+	stepRunID string,
+	timeout time.Duration,
+	) (*StepExecutionResult, error) {
 	if am.stepRunClient == nil {
 		return nil, fmt.Errorf("step run client is not initialized")
 	}
@@ -620,7 +629,7 @@ func (am *AgentManager) WaitForStepRunCompletion(ctx context.Context, stepRunID 
 		select {
 		case <-ctx.Done():
 			// Timeout or context cancelled
-			if ctx.Err() == context.DeadlineExceeded {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				// Mark step run as timeout
 				if err := am.cancelStepRun(ctx, stepRunID, "step run execution timeout"); err != nil {
 					am.logger.Warnw("failed to cancel timeout step run", "stepRun", stepRunID, "error", err)

@@ -43,7 +43,7 @@ func (rt *Router) createAgent(c *fiber.Ctx) error {
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
 
-	agent, err := agentLogic.CreateAgent(createAgentReq)
+	agent, err := agentLogic.CreateAgent(c.Context(), createAgentReq)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
@@ -65,7 +65,7 @@ func (rt *Router) listAgent(c *fiber.Ctx) error {
 		pageSize = 10
 	}
 
-	agents, count, err := agentLogic.ListAgent(pageNum, pageSize)
+	agents, count, err := agentLogic.ListAgent(c.Context(), pageNum, pageSize)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
@@ -83,7 +83,7 @@ func (rt *Router) listAgent(c *fiber.Ctx) error {
 func (rt *Router) getAgentStatistics(c *fiber.Ctx) error {
 	agentLogic := rt.Services.Agent
 
-	total, online, offline, err := agentLogic.GetAgentStatistics()
+	total, online, offline, err := agentLogic.GetAgentStatistics(c.Context())
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
@@ -105,7 +105,7 @@ func (rt *Router) getAgent(c *fiber.Ctx) error {
 	}
 
 	agentLogic := rt.Services.Agent
-	agent, err := agentLogic.GetAgentByAgentId(agentId)
+	agent, err := agentLogic.GetAgentByAgentId(c.Context(), agentId)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.NotFound.Code, "agent not found", c.Path())
 	}
@@ -127,12 +127,12 @@ func (rt *Router) updateAgent(c *fiber.Ctx) error {
 	}
 
 	agentLogic := rt.Services.Agent
-	if err := agentLogic.UpdateAgentByAgentId(agentId, updateReq); err != nil {
+	if err := agentLogic.UpdateAgentByAgentId(c.Context(), agentId, updateReq); err != nil {
 		return http.WithRepErrMsg(c, http.NotFound.Code, "agent not found", c.Path())
 	}
 
 	// Get updated agent
-	updatedAgent, err := agentLogic.GetAgentByAgentId(agentId)
+	updatedAgent, err := agentLogic.GetAgentByAgentId(c.Context(), agentId)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
@@ -149,7 +149,7 @@ func (rt *Router) deleteAgent(c *fiber.Ctx) error {
 	}
 
 	agentLogic := rt.Services.Agent
-	if err := agentLogic.DeleteAgentByAgentId(agentId); err != nil {
+	if err := agentLogic.DeleteAgentByAgentId(c.Context(), agentId); err != nil {
 		return http.WithRepErrMsg(c, http.NotFound.Code, "agent not found", c.Path())
 	}
 

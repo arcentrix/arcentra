@@ -19,22 +19,22 @@ import (
 	"fmt"
 )
 
-// TemplateService provides template management functionality
-type TemplateService struct {
+// Service provides template management functionality
+type Service struct {
 	repository ITemplateRepository
-	engine     *TemplateEngine
+	engine     *Engine
 }
 
 // NewTemplateService creates a new template service
-func NewTemplateService(repository ITemplateRepository) *TemplateService {
-	return &TemplateService{
+func NewTemplateService(repository ITemplateRepository) *Service {
+	return &Service{
 		repository: repository,
 		engine:     NewTemplateEngine(),
 	}
 }
 
 // CreateTemplate creates a new template
-func (s *TemplateService) CreateTemplate(ctx context.Context, template *Template) error {
+func (s *Service) CreateTemplate(ctx context.Context, template *Template) error {
 	// Validate template content
 	if err := s.engine.ValidateTemplate(template.Content); err != nil {
 		return fmt.Errorf("invalid template content: %w", err)
@@ -47,17 +47,17 @@ func (s *TemplateService) CreateTemplate(ctx context.Context, template *Template
 }
 
 // GetTemplate retrieves a template by ID
-func (s *TemplateService) GetTemplate(ctx context.Context, id string) (*Template, error) {
+func (s *Service) GetTemplate(ctx context.Context, id string) (*Template, error) {
 	return s.repository.Get(ctx, id)
 }
 
 // GetTemplateByNameAndType retrieves a template by name and type
-func (s *TemplateService) GetTemplateByNameAndType(ctx context.Context, name string, templateType TemplateType) (*Template, error) {
+func (s *Service) GetTemplateByNameAndType(ctx context.Context, name string, templateType Type) (*Template, error) {
 	return s.repository.GetByNameAndType(ctx, name, templateType)
 }
 
 // RenderTemplate renders a template with the given data
-func (s *TemplateService) RenderTemplate(ctx context.Context, templateID string, data map[string]interface{}) (string, error) {
+func (s *Service) RenderTemplate(ctx context.Context, templateID string, data map[string]interface{}) (string, error) {
 	template, err := s.repository.Get(ctx, templateID)
 	if err != nil {
 		return "", err
@@ -67,7 +67,7 @@ func (s *TemplateService) RenderTemplate(ctx context.Context, templateID string,
 }
 
 // RenderTemplateByName renders a template by name and type
-func (s *TemplateService) RenderTemplateByName(ctx context.Context, name string, templateType TemplateType, data map[string]interface{}) (string, error) {
+func (s *Service) RenderTemplateByName(ctx context.Context, name string, templateType Type, data map[string]interface{}) (string, error) {
 	template, err := s.repository.GetByNameAndType(ctx, name, templateType)
 	if err != nil {
 		return "", err
@@ -77,7 +77,7 @@ func (s *TemplateService) RenderTemplateByName(ctx context.Context, name string,
 }
 
 // RenderTemplateSimple renders a template using simple variable replacement
-func (s *TemplateService) RenderTemplateSimple(ctx context.Context, templateID string, data map[string]interface{}) (string, error) {
+func (s *Service) RenderTemplateSimple(ctx context.Context, templateID string, data map[string]interface{}) (string, error) {
 	template, err := s.repository.Get(ctx, templateID)
 	if err != nil {
 		return "", err
@@ -87,7 +87,7 @@ func (s *TemplateService) RenderTemplateSimple(ctx context.Context, templateID s
 }
 
 // UpdateTemplate updates an existing template
-func (s *TemplateService) UpdateTemplate(ctx context.Context, template *Template) error {
+func (s *Service) UpdateTemplate(ctx context.Context, template *Template) error {
 	// Validate template content
 	if err := s.engine.ValidateTemplate(template.Content); err != nil {
 		return fmt.Errorf("invalid template content: %w", err)
@@ -100,26 +100,26 @@ func (s *TemplateService) UpdateTemplate(ctx context.Context, template *Template
 }
 
 // DeleteTemplate deletes a template by ID
-func (s *TemplateService) DeleteTemplate(ctx context.Context, id string) error {
+func (s *Service) DeleteTemplate(ctx context.Context, id string) error {
 	return s.repository.Delete(ctx, id)
 }
 
 // ListTemplates lists all templates with optional filtering
-func (s *TemplateService) ListTemplates(ctx context.Context, filter *TemplateFilter) ([]*Template, error) {
+func (s *Service) ListTemplates(ctx context.Context, filter *Filter) ([]*Template, error) {
 	return s.repository.List(ctx, filter)
 }
 
 // ListBuildTemplates lists all build-related templates
-func (s *TemplateService) ListBuildTemplates(ctx context.Context) ([]*Template, error) {
-	return s.repository.ListByType(ctx, TemplateTypeBuild)
+func (s *Service) ListBuildTemplates(ctx context.Context) ([]*Template, error) {
+	return s.repository.ListByType(ctx, Build)
 }
 
 // ListApprovalTemplates lists all approval-related templates
-func (s *TemplateService) ListApprovalTemplates(ctx context.Context) ([]*Template, error) {
-	return s.repository.ListByType(ctx, TemplateTypeApproval)
+func (s *Service) ListApprovalTemplates(ctx context.Context) ([]*Template, error) {
+	return s.repository.ListByType(ctx, Approval)
 }
 
 // ListTemplatesByChannel lists templates by channel
-func (s *TemplateService) ListTemplatesByChannel(ctx context.Context, channel string) ([]*Template, error) {
+func (s *Service) ListTemplatesByChannel(ctx context.Context, channel string) ([]*Template, error) {
 	return s.repository.ListByChannel(ctx, channel)
 }

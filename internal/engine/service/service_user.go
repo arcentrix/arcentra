@@ -151,10 +151,10 @@ func (ul *UserService) Login(login *usermodel.Login, auth http.Auth) (*usermodel
 		return nil, err
 	}
 
-	// update last login time in userInfo ext (non-critical)
+	// update last login time in userInfo ext (non-critical, async)
 	safe.Go(func() {
 		if ul.userExtRepo != nil {
-			if err := ul.userExtRepo.UpdateLastLogin(userInfo.UserId); err != nil {
+			if err := ul.userExtRepo.UpdateLastLogin(context.Background(), userInfo.UserId); err != nil {
 				log.Warnw("failed to update last login time", "userId", userInfo.UserId, "error", err)
 			}
 		}
@@ -206,7 +206,7 @@ func (ul *UserService) Register(register *usermodel.Register) error {
 	}
 
 	// 创建 UserExt 记录（替代数据库触发器）
-	err = ul.createUserExtIfNotExists(register.UserId)
+	err = ul.createUserExtIfNotExists(context.Background(), register.UserId)
 	if err != nil {
 		log.Errorw("failed to create user ext after registration", "username", register.Username, "userId", register.UserId, "error", err)
 		// 不返回错误，因为用户已经创建成功，UserExt 可以在后续操作中创建
@@ -239,17 +239,15 @@ func (ul *UserService) Logout(userId string) error {
 }
 
 // createUserExtIfNotExists creates UserExt record if it doesn't exist
-// This replaces the database trigger that was inserting into t_user_extension
-func (ul *UserService) createUserExtIfNotExists(userId string) error {
-	exists, err := ul.userExtRepo.Exists(userId)
+func (ul *UserService) createUserExtIfNotExists(ctx context.Context, userId string) error {
+	exists, err := ul.userExtRepo.Exists(ctx, userId)
 	if err != nil {
 		return fmt.Errorf("failed to check user ext exists: %w", err)
 	}
 	if exists {
-		return nil // already exists, no need to create
+		return nil
 	}
 
-	// Create UserExt record with default values (matching the database trigger)
 	now := time.Now()
 	userExt := &usermodel.UserExt{
 		UserId:           userId,
@@ -259,14 +257,14 @@ func (ul *UserService) createUserExtIfNotExists(userId string) error {
 	userExt.CreatedAt = now
 	userExt.UpdatedAt = now
 
-	if err := ul.userExtRepo.Create(userExt); err != nil {
+	if err := ul.userExtRepo.Create(ctx, userExt); err != nil {
 		return fmt.Errorf("failed to create user ext: %w", err)
 	}
 
 	return nil
 }
 
-func (ul *UserService) AddUser(addUserReq usermodel.AddUserReq) error {
+func (ul *UserService) AddUser(ctx context.Context, addUserReq usermodel.AddUserReq) error {
 	var err error
 	addUserReq.UserId = id.GetUUIDWithoutDashes()
 	addUserReq.IsEnabled = 1
@@ -275,8 +273,7 @@ func (ul *UserService) AddUser(addUserReq usermodel.AddUserReq) error {
 		return err
 	}
 
-	// 创建 UserExt 记录（替代数据库触发器）
-	err = ul.createUserExtIfNotExists(addUserReq.UserId)
+	err = ul.createUserExtIfNotExists(ctx, addUserReq.UserId)
 	if err != nil {
 		log.Errorw("failed to create user ext after adding user", "username", addUserReq.Username, "userId", addUserReq.UserId, "error", err)
 		// 不返回错误，因为用户已经创建成功，UserExt 可以在后续操作中创建
@@ -443,9 +440,8 @@ func (ul *UserService) UpdateAvatar(userId, avatarUrl string) error {
 }
 
 // GetUserRoles 获取用户的角色信息
-func (ul *UserService) GetUserRoles(userId string) ([]usermodel.RoleDTO, error) {
-	// 获取用户的所有角色绑定
-	roleBindings, err := ul.userRoleBindingRepo.GetUserRoleBindings(userId)
+func (ul *UserService) GetUserRoles(ctx context.Context, userId string) ([]usermodel.RoleDTO, error) {
+	roleBindings, err := ul.userRoleBindingRepo.List(ctx, userId)
 	if err != nil {
 		log.Errorw("failed to get user role bindings", "userId", userId, "error", err)
 		return nil, err
@@ -462,7 +458,7 @@ func (ul *UserService) GetUserRoles(userId string) ([]usermodel.RoleDTO, error) 
 	}
 
 	// 获取角色详情
-	roles, err := ul.roleRepo.GetRolesByRoleIds(roleIds)
+	roles, err := ul.roleRepo.BatchGet(context.Background(), roleIds)
 	if err != nil {
 		log.Errorw("failed to get roles", "roleIds", roleIds, "error", err)
 		return nil, err
@@ -483,9 +479,8 @@ func (ul *UserService) GetUserRoles(userId string) ([]usermodel.RoleDTO, error) 
 }
 
 // GetUserRoutes 获取用户可访问的路由列表
-func (ul *UserService) GetUserRoutes(userId string, resourceId string) ([]string, error) {
-	// 获取用户的所有角色绑定
-	roleBindings, err := ul.userRoleBindingRepo.GetUserRoleBindings(userId)
+func (ul *UserService) GetUserRoutes(ctx context.Context, userId string, resourceId string) ([]string, error) {
+	roleBindings, err := ul.userRoleBindingRepo.List(ctx, userId)
 	if err != nil {
 		log.Errorw("failed to get user role bindings", "userId", userId, "error", err)
 		return nil, err
@@ -495,14 +490,12 @@ func (ul *UserService) GetUserRoutes(userId string, resourceId string) ([]string
 		return []string{}, nil
 	}
 
-	// 提取角色ID列表
 	roleIds := make([]string, 0, len(roleBindings))
 	for _, binding := range roleBindings {
 		roleIds = append(roleIds, binding.RoleId)
 	}
 
-	// 获取这些角色在指定资源下的菜单绑定
-	menuBindings, err := ul.roleMenuBindingRepo.GetMenuBindingsByRoles(roleIds, resourceId)
+	menuBindings, err := ul.roleMenuBindingRepo.ListByRoles(ctx, roleIds, resourceId)
 	if err != nil {
 		log.Errorw("failed to get menu bindings", "userId", userId, "roleIds", roleIds, "error", err)
 		return nil, err
@@ -512,7 +505,6 @@ func (ul *UserService) GetUserRoutes(userId string, resourceId string) ([]string
 		return []string{}, nil
 	}
 
-	// 提取菜单ID列表（去重）
 	menuIdSet := make(map[string]bool)
 	for _, binding := range menuBindings {
 		if binding.IsVisible == usermodel.MenuVisible && binding.IsAccessible == usermodel.RoleMenuAccessible {
@@ -525,8 +517,7 @@ func (ul *UserService) GetUserRoutes(userId string, resourceId string) ([]string
 		menuIds = append(menuIds, menuId)
 	}
 
-	// 获取菜单详情（只需要path字段）
-	menus, err := ul.menuRepo.GetMenusByMenuIds(menuIds)
+	menus, err := ul.menuRepo.BatchGet(ctx, menuIds)
 	if err != nil {
 		log.Errorw("failed to get menus", "menuIds", menuIds, "error", err)
 		return nil, err
@@ -544,8 +535,8 @@ func (ul *UserService) GetUserRoutes(userId string, resourceId string) ([]string
 }
 
 // GetUserMenus 获取用户可访问的菜单列表（树形结构）
-func (ul *UserService) GetUserMenus(userId string, resourceId string) ([]usermodel.MenuDTO, []string, error) {
-	roleBindings, err := ul.userRoleBindingRepo.GetUserRoleBindings(userId)
+func (ul *UserService) GetUserMenus(ctx context.Context, userId string, resourceId string) ([]usermodel.MenuDTO, []string, error) {
+	roleBindings, err := ul.userRoleBindingRepo.List(ctx, userId)
 	if err != nil {
 		log.Errorw("failed to get user role bindings", "userId", userId, "error", err)
 		return nil, nil, err
@@ -560,7 +551,7 @@ func (ul *UserService) GetUserMenus(userId string, resourceId string) ([]usermod
 		roleIds = append(roleIds, binding.RoleId)
 	}
 
-	menuBindings, err := ul.roleMenuBindingRepo.GetMenuBindingsByRoles(roleIds, resourceId)
+	menuBindings, err := ul.roleMenuBindingRepo.ListByRoles(ctx, roleIds, resourceId)
 	if err != nil {
 		log.Errorw("failed to get menu bindings", "userId", userId, "roleIds", roleIds, "error", err)
 		return nil, nil, err
@@ -582,7 +573,7 @@ func (ul *UserService) GetUserMenus(userId string, resourceId string) ([]usermod
 		menuIds = append(menuIds, menuId)
 	}
 
-	menus, err := ul.menuRepo.GetMenusByMenuIds(menuIds)
+	menus, err := ul.menuRepo.BatchGet(ctx, menuIds)
 	if err != nil {
 		log.Errorw("failed to get menus", "menuIds", menuIds, "error", err)
 		return nil, nil, err
@@ -613,7 +604,7 @@ func (ul *UserService) GetUserRolesAndRoutes(userId string, resourceId string) (
 	}
 
 	queryFunc := func(ctx context.Context) (userRolesRoutesCache, error) {
-		roleBindings, err := ul.userRoleBindingRepo.GetUserRoleBindings(userId)
+		roleBindings, err := ul.userRoleBindingRepo.List(ctx, userId)
 		if err != nil {
 			log.Errorw("failed to get user role bindings", "userId", userId, "error", err)
 			return userRolesRoutesCache{}, err
@@ -623,7 +614,6 @@ func (ul *UserService) GetUserRolesAndRoutes(userId string, resourceId string) (
 			return userRolesRoutesCache{Roles: []usermodel.RoleDTO{}, Routes: []string{}}, nil
 		}
 
-		// 提取角色ID列表
 		roleIds := make([]string, 0, len(roleBindings))
 		for _, binding := range roleBindings {
 			roleIds = append(roleIds, binding.RoleId)
@@ -633,13 +623,13 @@ func (ul *UserService) GetUserRolesAndRoutes(userId string, resourceId string) (
 		var menuBindings []usermodel.RoleMenuBinding
 		var roleErr, menuErr error
 
-		roles, roleErr = ul.roleRepo.GetRolesByRoleIds(roleIds)
+		roles, roleErr = ul.roleRepo.BatchGet(ctx, roleIds)
 		if roleErr != nil {
 			log.Errorw("failed to get roles", "roleIds", roleIds, "error", roleErr)
 			return userRolesRoutesCache{}, roleErr
 		}
 
-		menuBindings, menuErr = ul.roleMenuBindingRepo.GetMenuBindingsByRoles(roleIds, resourceId)
+		menuBindings, menuErr = ul.roleMenuBindingRepo.ListByRoles(ctx, roleIds, resourceId)
 		if menuErr != nil {
 			log.Errorw("failed to get menu bindings", "userId", userId, "roleIds", roleIds, "error", menuErr)
 			return userRolesRoutesCache{}, menuErr
@@ -671,7 +661,7 @@ func (ul *UserService) GetUserRolesAndRoutes(userId string, resourceId string) (
 			menuIds = append(menuIds, menuId)
 		}
 
-		menus, err := ul.menuRepo.GetMenusByMenuIds(menuIds)
+		menus, err := ul.menuRepo.BatchGet(ctx, menuIds)
 		if err != nil {
 			log.Errorw("failed to get menus", "menuIds", menuIds, "error", err)
 			return userRolesRoutesCache{}, err

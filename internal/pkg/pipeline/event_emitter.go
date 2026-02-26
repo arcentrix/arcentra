@@ -73,11 +73,14 @@ func buildPipelineEventData(execCtx *ExecutionContext, status string) map[string
 	}
 }
 
-func (pe *PipelineExecutor) emitPipelineEvent(eventType, status string) {
+func (pe *Executor) emitPipelineEvent(eventType, status string) {
 	emitter := pe.execCtx.EventEmitter
 	if emitter == nil {
 		return
 	}
 	subject := fmt.Sprintf("pipeline:%s", pe.execCtx.Pipeline.Namespace)
-	emitter.Emit(context.Background(), eventType, emitter.BuildSource("pipeline"), subject, buildPipelineEventData(pe.execCtx, status), buildPipelineExtensions(pe.execCtx))
+	emitter.Emit(context.Background(), eventType,
+		emitter.BuildSource("pipeline"),
+		subject, buildPipelineEventData(pe.execCtx, status),
+		buildPipelineExtensions(pe.execCtx))
 }

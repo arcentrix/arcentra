@@ -78,7 +78,7 @@ func (rt *Router) createTeam(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.CreateTeam(&req, claims.UserId)
+	result, err := teamService.CreateTeam(c.Context(), &req, claims.UserId)
 	if err != nil {
 		log.Errorw("create team failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
@@ -103,7 +103,7 @@ func (rt *Router) updateTeam(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.UpdateTeam(teamId, &req)
+	result, err := teamService.UpdateTeam(c.Context(), teamId, &req)
 	if err != nil {
 		log.Errorw("update team failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
@@ -122,7 +122,7 @@ func (rt *Router) deleteTeam(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	if err := teamService.DeleteTeam(teamId); err != nil {
+	if err := teamService.DeleteTeam(c.Context(), teamId); err != nil {
 		log.Errorw("delete team failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
@@ -140,7 +140,7 @@ func (rt *Router) getTeamById(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.GetTeamById(teamId)
+	result, err := teamService.GetTeamById(c.Context(), teamId)
 	if err != nil {
 		log.Errorw("get team by id failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
@@ -185,7 +185,7 @@ func (rt *Router) listTeams(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.ListTeams(&query)
+	result, err := teamService.ListTeams(c.Context(), &query)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
@@ -203,7 +203,7 @@ func (rt *Router) getTeamsByOrgId(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.GetTeamsByOrgId(orgId)
+	result, err := teamService.GetTeamsByOrgId(c.Context(), orgId)
 	if err != nil {
 		log.Errorw("get teams by org id failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
@@ -222,7 +222,7 @@ func (rt *Router) getSubTeams(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.GetSubTeams(teamId)
+	result, err := teamService.GetSubTeams(c.Context(), teamId)
 	if err != nil {
 		log.Errorw("get sub teams failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
@@ -243,7 +243,7 @@ func (rt *Router) getUserTeams(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.GetTeamsByUserId(claims.UserId)
+	result, err := teamService.GetTeamsByUserId(c.Context(), claims.UserId)
 	if err != nil {
 		log.Errorw("get teams by user id failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
@@ -262,7 +262,7 @@ func (rt *Router) enableTeam(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	if err := teamService.EnableTeam(teamId); err != nil {
+	if err := teamService.EnableTeam(c.Context(), teamId); err != nil {
 		log.Errorw("enable team failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
@@ -280,7 +280,7 @@ func (rt *Router) disableTeam(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	if err := teamService.DisableTeam(teamId); err != nil {
+	if err := teamService.DisableTeam(c.Context(), teamId); err != nil {
 		log.Errorw("disable team failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}
@@ -298,7 +298,7 @@ func (rt *Router) updateTeamStatistics(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	if err := teamService.UpdateTeamStatistics(teamId); err != nil {
+	if err := teamService.UpdateTeamStatistics(c.Context(), teamId); err != nil {
 		log.Errorw("update team statistics failed", "error", err)
 		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
 	}

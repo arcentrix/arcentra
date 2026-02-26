@@ -34,7 +34,7 @@ func ProvideServices(
 	cache cache.ICache,
 	repos *repo.Repositories,
 	pluginManager *pluginpkg.Manager,
-	storageProvider storage.StorageProvider,
+	storageProvider storage.IStorage,
 ) *Services {
 	return NewServices(db, cache, repos, pluginManager, storageProvider)
 }

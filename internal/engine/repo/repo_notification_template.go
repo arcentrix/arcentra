@@ -30,15 +30,16 @@ type NotificationTemplateFilter struct {
 	Offset  int    // 分页偏移
 }
 
+// INotificationTemplateRepository defines notification template persistence with context support.
 type INotificationTemplateRepository interface {
-	CreateTemplate(ctx context.Context, tmpl *model.NotificationTemplate) error
-	GetTemplateByID(ctx context.Context, templateID string) (*model.NotificationTemplate, error)
-	GetTemplateByNameAndType(ctx context.Context, name string, templateType string) (*model.NotificationTemplate, error)
-	ListTemplates(ctx context.Context, filter *NotificationTemplateFilter) ([]*model.NotificationTemplate, error)
-	UpdateTemplate(ctx context.Context, tmpl *model.NotificationTemplate) error
-	DeleteTemplate(ctx context.Context, templateID string) error
-	ListTemplatesByType(ctx context.Context, templateType string) ([]*model.NotificationTemplate, error)
-	ListTemplatesByChannel(ctx context.Context, channel string) ([]*model.NotificationTemplate, error)
+	Create(ctx context.Context, tmpl *model.NotificationTemplate) error
+	Get(ctx context.Context, templateId string) (*model.NotificationTemplate, error)
+	GetByNameAndType(ctx context.Context, name string, templateType string) (*model.NotificationTemplate, error)
+	List(ctx context.Context, filter *NotificationTemplateFilter) ([]*model.NotificationTemplate, error)
+	Update(ctx context.Context, tmpl *model.NotificationTemplate) error
+	Delete(ctx context.Context, templateId string) error
+	ListByType(ctx context.Context, templateType string) ([]*model.NotificationTemplate, error)
+	ListByChannel(ctx context.Context, channel string) ([]*model.NotificationTemplate, error)
 }
 
 type NotificationTemplateRepo struct {
@@ -51,17 +52,17 @@ func NewNotificationTemplateRepo(db database.IDatabase) INotificationTemplateRep
 	}
 }
 
-// CreateTemplate creates a new notification template
-func (r *NotificationTemplateRepo) CreateTemplate(ctx context.Context, tmpl *model.NotificationTemplate) error {
+// Create creates a new notification template.
+func (r *NotificationTemplateRepo) Create(ctx context.Context, tmpl *model.NotificationTemplate) error {
 	return r.Database().WithContext(ctx).Table(tmpl.TableName()).Create(tmpl).Error
 }
 
-// GetTemplateByID retrieves a template by template_id
-func (r *NotificationTemplateRepo) GetTemplateByID(ctx context.Context, templateID string) (*model.NotificationTemplate, error) {
+// Get returns template by templateId.
+func (r *NotificationTemplateRepo) Get(ctx context.Context, templateId string) (*model.NotificationTemplate, error) {
 	var tmpl model.NotificationTemplate
 	err := r.Database().WithContext(ctx).
 		Table(tmpl.TableName()).
-		Where("template_id = ? AND is_active = ?", templateID, true).
+		Where("template_id = ? AND is_active = ?", templateId, true).
 		First(&tmpl).Error
 	if err != nil {
 		return nil, err
@@ -69,8 +70,8 @@ func (r *NotificationTemplateRepo) GetTemplateByID(ctx context.Context, template
 	return &tmpl, nil
 }
 
-// GetTemplateByNameAndType retrieves a template by name and type
-func (r *NotificationTemplateRepo) GetTemplateByNameAndType(ctx context.Context, name string, templateType string) (*model.NotificationTemplate, error) {
+// GetByNameAndType returns template by name and type.
+func (r *NotificationTemplateRepo) GetByNameAndType(ctx context.Context, name string, templateType string) (*model.NotificationTemplate, error) {
 	var tmpl model.NotificationTemplate
 	err := r.Database().WithContext(ctx).
 		Table(tmpl.TableName()).
@@ -82,8 +83,8 @@ func (r *NotificationTemplateRepo) GetTemplateByNameAndType(ctx context.Context,
 	return &tmpl, nil
 }
 
-// ListTemplates lists templates with optional filtering
-func (r *NotificationTemplateRepo) ListTemplates(ctx context.Context, filter *NotificationTemplateFilter) ([]*model.NotificationTemplate, error) {
+// List lists templates with optional filtering.
+func (r *NotificationTemplateRepo) List(ctx context.Context, filter *NotificationTemplateFilter) ([]*model.NotificationTemplate, error) {
 	var templates []*model.NotificationTemplate
 	query := r.Database().WithContext(ctx).Table((&model.NotificationTemplate{}).TableName()).
 		Where("is_active = ?", true)
@@ -110,8 +111,8 @@ func (r *NotificationTemplateRepo) ListTemplates(ctx context.Context, filter *No
 	return templates, err
 }
 
-// UpdateTemplate updates an existing template
-func (r *NotificationTemplateRepo) UpdateTemplate(ctx context.Context, tmpl *model.NotificationTemplate) error {
+// Update updates an existing template.
+func (r *NotificationTemplateRepo) Update(ctx context.Context, tmpl *model.NotificationTemplate) error {
 	return r.Database().WithContext(ctx).
 		Table(tmpl.TableName()).
 		Where("template_id = ?", tmpl.TemplateID).
@@ -119,20 +120,20 @@ func (r *NotificationTemplateRepo) UpdateTemplate(ctx context.Context, tmpl *mod
 		Updates(tmpl).Error
 }
 
-// DeleteTemplate deletes a template by template_id (soft delete by setting is_active = false)
-func (r *NotificationTemplateRepo) DeleteTemplate(ctx context.Context, templateID string) error {
+// Delete soft-deletes template by templateId (sets is_active = false).
+func (r *NotificationTemplateRepo) Delete(ctx context.Context, templateId string) error {
 	return r.Database().WithContext(ctx).
 		Table((&model.NotificationTemplate{}).TableName()).
-		Where("template_id = ?", templateID).
+		Where("template_id = ?", templateId).
 		Update("is_active", false).Error
 }
 
-// ListTemplatesByType lists templates by type
-func (r *NotificationTemplateRepo) ListTemplatesByType(ctx context.Context, templateType string) ([]*model.NotificationTemplate, error) {
-	return r.ListTemplates(ctx, &NotificationTemplateFilter{Type: templateType})
+// ListByType lists templates by type.
+func (r *NotificationTemplateRepo) ListByType(ctx context.Context, templateType string) ([]*model.NotificationTemplate, error) {
+	return r.List(ctx, &NotificationTemplateFilter{Type: templateType})
 }
 
-// ListTemplatesByChannel lists templates by channel
-func (r *NotificationTemplateRepo) ListTemplatesByChannel(ctx context.Context, channel string) ([]*model.NotificationTemplate, error) {
-	return r.ListTemplates(ctx, &NotificationTemplateFilter{Channel: channel})
+// ListByChannel lists templates by channel.
+func (r *NotificationTemplateRepo) ListByChannel(ctx context.Context, channel string) ([]*model.NotificationTemplate, error) {
+	return r.List(ctx, &NotificationTemplateFilter{Channel: channel})
 }

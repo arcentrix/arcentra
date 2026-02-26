@@ -16,6 +16,7 @@ package inject
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -52,7 +53,7 @@ func (h *RedisHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context
 	}
 
 	// Ensure trace context is propagated (from goroutine context if needed)
-	ctx = tracecontext.ContextWithSpan(ctx)
+	ctx = tracecontext.WithSpan(ctx)
 
 	cmdName := cmd.Name()
 	spanName := "redis." + cmdName
@@ -109,7 +110,7 @@ func (h *RedisHook) AfterProcess(ctx context.Context, cmd redis.Cmder) error {
 	}
 
 	if err := cmd.Err(); err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			span.SetStatus(codes.Ok, "")
 			span.SetAttributes(attribute.Bool("db.redis.nil", true))
 		} else {
@@ -135,7 +136,7 @@ func (h *RedisHook) BeforeProcessPipeline(ctx context.Context, cmds []redis.Cmde
 	}
 
 	// Ensure trace context is propagated (from goroutine context if needed)
-	ctx = tracecontext.ContextWithSpan(ctx)
+	ctx = tracecontext.WithSpan(ctx)
 
 	ctx, span := redisTracer.Start(ctx, "redis.pipeline", trace.WithSpanKind(trace.SpanKindClient))
 	ctx = context.WithValue(ctx, "redis.pipeline.span", span)
@@ -188,7 +189,7 @@ func (h *RedisHook) AfterProcessPipeline(ctx context.Context, cmds []redis.Cmder
 
 	var errCount int
 	for _, cmd := range cmds {
-		if err := cmd.Err(); err != nil && err != redis.Nil {
+		if err := cmd.Err(); err != nil && !errors.Is(err, redis.Nil) {
 			errCount++
 		}
 	}

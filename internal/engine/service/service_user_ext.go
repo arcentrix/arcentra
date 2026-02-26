@@ -15,6 +15,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"time"
@@ -35,8 +36,8 @@ func NewUserExt(userExtRepo userrepo.IUserExtRepository) *UserExt {
 }
 
 // GetUserExt gets user Ext information
-func (ues *UserExt) GetUserExt(userId string) (*model.UserExt, error) {
-	Ext, err := ues.userExtRepo.GetByUserId(userId)
+func (ues *UserExt) GetUserExt(ctx context.Context, userId string) (*model.UserExt, error) {
+	Ext, err := ues.userExtRepo.Get(ctx, userId)
 	if err != nil {
 		log.Errorw("failed to get user Ext", "userId", userId, "error", err)
 		return nil, err
@@ -45,9 +46,8 @@ func (ues *UserExt) GetUserExt(userId string) (*model.UserExt, error) {
 }
 
 // CreateUserExt creates user Ext record
-func (ues *UserExt) CreateUserExt(Ext *model.UserExt) error {
-	// check if already exists
-	exists, err := ues.userExtRepo.Exists(Ext.UserId)
+func (ues *UserExt) CreateUserExt(ctx context.Context, Ext *model.UserExt) error {
+	exists, err := ues.userExtRepo.Exists(ctx, Ext.UserId)
 	if err != nil {
 		log.Errorw("failed to check user Ext exists", "userId", Ext.UserId, "error", err)
 		return err
@@ -56,7 +56,7 @@ func (ues *UserExt) CreateUserExt(Ext *model.UserExt) error {
 		return fmt.Errorf("user Ext already exists for user: %s", Ext.UserId)
 	}
 
-	if err := ues.userExtRepo.Create(Ext); err != nil {
+	if err := ues.userExtRepo.Create(ctx, Ext); err != nil {
 		log.Errorw("failed to create user Ext", "userId", Ext.UserId, "error", err)
 		return err
 	}
@@ -65,9 +65,8 @@ func (ues *UserExt) CreateUserExt(Ext *model.UserExt) error {
 }
 
 // UpdateUserExt updates user Ext information
-func (ues *UserExt) UpdateUserExt(userId string, Ext *model.UserExt) error {
-	// check if exists
-	exists, err := ues.userExtRepo.Exists(userId)
+func (ues *UserExt) UpdateUserExt(ctx context.Context, userId string, Ext *model.UserExt) error {
+	exists, err := ues.userExtRepo.Exists(ctx, userId)
 	if err != nil {
 		log.Errorw("failed to check user Ext exists", "userId", userId, "error", err)
 		return err
@@ -76,7 +75,7 @@ func (ues *UserExt) UpdateUserExt(userId string, Ext *model.UserExt) error {
 		return fmt.Errorf("user Ext not found for user: %s", userId)
 	}
 
-	if err := ues.userExtRepo.Update(userId, Ext); err != nil {
+	if err := ues.userExtRepo.Update(ctx, userId, Ext); err != nil {
 		log.Errorw("failed to update user Ext", "userId", userId, "error", err)
 		return err
 	}
@@ -85,16 +84,14 @@ func (ues *UserExt) UpdateUserExt(userId string, Ext *model.UserExt) error {
 }
 
 // UpdateLastLogin updates user's last login timestamp
-func (ues *UserExt) UpdateLastLogin(userId string) error {
-	// create Ext record if not exists
-	exists, err := ues.userExtRepo.Exists(userId)
+func (ues *UserExt) UpdateLastLogin(ctx context.Context, userId string) error {
+	exists, err := ues.userExtRepo.Exists(ctx, userId)
 	if err != nil {
 		log.Errorw("failed to check user Ext exists", "userId", userId, "error", err)
 		return err
 	}
 
 	if !exists {
-		// auto-create Ext record with default values
 		now := time.Now()
 		Ext := &model.UserExt{
 			UserId:           userId,
@@ -102,14 +99,14 @@ func (ues *UserExt) UpdateLastLogin(userId string) error {
 			LastLoginAt:      &now,
 			InvitationStatus: model.UserInvitationStatusAccepted,
 		}
-		if err := ues.userExtRepo.Create(Ext); err != nil {
+		if err := ues.userExtRepo.Create(ctx, Ext); err != nil {
 			log.Errorw("failed to create user Ext", "userId", userId, "error", err)
 			return err
 		}
 		return nil
 	}
 
-	if err := ues.userExtRepo.UpdateLastLogin(userId); err != nil {
+	if err := ues.userExtRepo.UpdateLastLogin(ctx, userId); err != nil {
 		log.Errorw("failed to update last login", "userId", userId, "error", err)
 		return err
 	}
@@ -118,8 +115,8 @@ func (ues *UserExt) UpdateLastLogin(userId string) error {
 }
 
 // UpdateTimezone updates user timezone
-func (ues *UserExt) UpdateTimezone(userId, timezone string) error {
-	if err := ues.userExtRepo.UpdateTimezone(userId, timezone); err != nil {
+func (ues *UserExt) UpdateTimezone(ctx context.Context, userId, timezone string) error {
+	if err := ues.userExtRepo.UpdateTimezone(ctx, userId, timezone); err != nil {
 		log.Errorw("failed to update timezone", "userId", userId, "timezone", timezone, "error", err)
 		return err
 	}
@@ -127,7 +124,7 @@ func (ues *UserExt) UpdateTimezone(userId, timezone string) error {
 }
 
 // UpdateInvitationStatus updates invitation status
-func (ues *UserExt) UpdateInvitationStatus(userId, status string) error {
+func (ues *UserExt) UpdateInvitationStatus(ctx context.Context, userId, status string) error {
 	// validate status
 	validStatuses := []string{
 		model.UserInvitationStatusPending,
@@ -141,7 +138,7 @@ func (ues *UserExt) UpdateInvitationStatus(userId, status string) error {
 		return fmt.Errorf("invalid invitation status: %s", status)
 	}
 
-	if err := ues.userExtRepo.UpdateInvitationStatus(userId, status); err != nil {
+	if err := ues.userExtRepo.UpdateInvitationStatus(ctx, userId, status); err != nil {
 		log.Errorw("failed to update invitation status", "userId", userId, "status", status, "error", err)
 		return err
 	}

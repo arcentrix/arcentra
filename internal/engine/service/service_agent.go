@@ -15,14 +15,15 @@
 package service
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"time"
 
-	agentmodel "github.com/arcentrix/arcentra/internal/engine/model"
-	agentrepo "github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/internal/engine/model"
+	"github.com/arcentrix/arcentra/internal/engine/repo"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/util"
@@ -30,20 +31,20 @@ import (
 )
 
 type AgentService struct {
-	agentRepo              agentrepo.IAgentRepository
+	agentRepo              repo.IAgentRepository
 	generalSettingsService *GeneralSettingsService
 }
 
-func NewAgentService(agentRepo agentrepo.IAgentRepository, generalSettingsService *GeneralSettingsService) *AgentService {
+func NewAgentService(agentRepo repo.IAgentRepository, generalSettingsService *GeneralSettingsService) *AgentService {
 	return &AgentService{
 		agentRepo:              agentRepo,
 		generalSettingsService: generalSettingsService,
 	}
 }
 
-func (al *AgentService) CreateAgent(createAgentReq *agentmodel.CreateAgentReq) (*agentmodel.CreateAgentResp, error) {
+func (al *AgentService) CreateAgent(ctx context.Context, createAgentReq *model.CreateAgentReq) (*model.CreateAgentResp, error) {
 	agentId := id.ShortId()
-	agent := &agentmodel.Agent{
+	agent := &model.Agent{
 		AgentId:   agentId,
 		AgentName: createAgentReq.AgentName,
 		Address:   "0.0.0.0",
@@ -58,20 +59,20 @@ func (al *AgentService) CreateAgent(createAgentReq *agentmodel.CreateAgentReq) (
 	}
 
 	// Create Agent
-	if err := al.agentRepo.CreateAgent(agent); err != nil {
+	if err := al.agentRepo.Create(ctx, agent); err != nil {
 		log.Errorw("create agent failed", "error", err)
 		return nil, err
 	}
 
 	// Generate token for agent communication based on agentId
-	token, err := al.GenerateAgentToken(agentId)
+	token, err := al.GenerateAgentToken(ctx, agentId)
 	if err != nil {
 		log.Errorw("generate agent token failed", "error", err)
 		return nil, err
 	}
 
 	// Return created agent with token
-	resp := &agentmodel.CreateAgentResp{
+	resp := &model.CreateAgentResp{
 		Agent: *agent,
 		Token: token,
 	}
@@ -84,11 +85,9 @@ type agentSecretConfig struct {
 	SecretKey string `json:"secret_key"`
 }
 
-// GenerateAgentToken generates a token based on agentId for agent communication
-// The token is generated using HMAC-SHA256 with secret key and salt from database
-func (al *AgentService) GenerateAgentToken(agentId string) (string, error) {
-	// Get agent secret key configuration from database
-	settings, err := al.generalSettingsService.GetGeneralSettingsByName("system", "agent_secret_key")
+// GenerateAgentToken generates a token based on agentId for agent communication.
+func (al *AgentService) GenerateAgentToken(ctx context.Context, agentId string) (string, error) {
+	settings, err := al.generalSettingsService.GetGeneralSettingsByName(ctx, "system", "agent_secret_key")
 	if err != nil {
 		log.Errorw("failed to get agent secret key configuration", "error", err)
 		return "", err
@@ -123,17 +122,8 @@ func (al *AgentService) GenerateAgentToken(agentId string) (string, error) {
 	return token, nil
 }
 
-func (al *AgentService) GetAgentById(id uint64) (*agentmodel.AgentDetail, error) {
-	detail, err := al.agentRepo.GetAgentDetailById(id)
-	if err != nil {
-		log.Errorw("get agent detail by id failed", "id", id, "error", err)
-		return nil, err
-	}
-	return detail, nil
-}
-
-func (al *AgentService) GetAgentByAgentId(agentId string) (*agentmodel.AgentDetail, error) {
-	detail, err := al.agentRepo.GetAgentDetailByAgentId(agentId)
+func (al *AgentService) GetAgentByAgentId(ctx context.Context, agentId string) (*model.AgentDetail, error) {
+	detail, err := al.agentRepo.GetDetail(ctx, agentId)
 	if err != nil {
 		log.Errorw("get agent detail by agentId failed", "agentId", agentId, "error", err)
 		return nil, err
@@ -141,30 +131,9 @@ func (al *AgentService) GetAgentByAgentId(agentId string) (*agentmodel.AgentDeta
 	return detail, nil
 }
 
-func (al *AgentService) UpdateAgent(id uint64, updateReq *agentmodel.UpdateAgentReq) error {
+func (al *AgentService) UpdateAgentByAgentId(ctx context.Context, agentId string, updateReq *model.UpdateAgentReq) error {
 	// Check if agent exists
-	_, err := al.agentRepo.GetAgentById(id)
-	if err != nil {
-		log.Errorw("get agent by id failed", "id", id, "error", err)
-		return err
-	}
-
-	// Build and update Agent fields
-	updates := buildAgentUpdateMap(updateReq)
-	if len(updates) > 0 {
-		updates["updated_at"] = time.Now()
-		if err := al.agentRepo.UpdateAgentById(id, updates); err != nil {
-			log.Errorw("update agent failed", "id", id, "error", err)
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (al *AgentService) UpdateAgentByAgentId(agentId string, updateReq *agentmodel.UpdateAgentReq) error {
-	// Check if agent exists
-	_, err := al.agentRepo.GetAgentByAgentId(agentId)
+	_, err := al.agentRepo.Get(ctx, agentId)
 	if err != nil {
 		log.Errorw("get agent by agentId failed", "agentId", agentId, "error", err)
 		return err
@@ -174,7 +143,7 @@ func (al *AgentService) UpdateAgentByAgentId(agentId string, updateReq *agentmod
 	updates := buildAgentUpdateMap(updateReq)
 	if len(updates) > 0 {
 		updates["updated_at"] = time.Now()
-		if err := al.agentRepo.UpdateAgentByAgentId(agentId, updates); err != nil {
+		if err := al.agentRepo.Patch(ctx, agentId, updates); err != nil {
 			log.Errorw("update agent failed", "agentId", agentId, "error", err)
 			return err
 		}
@@ -185,7 +154,7 @@ func (al *AgentService) UpdateAgentByAgentId(agentId string, updateReq *agentmod
 
 // buildAgentUpdateMap builds update map for Agent fields
 // Only allows updating agent_name and labels
-func buildAgentUpdateMap(req *agentmodel.UpdateAgentReq) map[string]any {
+func buildAgentUpdateMap(req *model.UpdateAgentReq) map[string]any {
 	updates := make(map[string]any)
 	util.SetIfNotNil(updates, "agent_name", req.AgentName)
 	if req.Labels != nil {
@@ -194,24 +163,16 @@ func buildAgentUpdateMap(req *agentmodel.UpdateAgentReq) map[string]any {
 	return updates
 }
 
-func (al *AgentService) DeleteAgent(id uint64) error {
-	if err := al.agentRepo.DeleteAgent(id); err != nil {
-		log.Errorw("delete agent failed", "id", id, "error", err)
-		return err
-	}
-	return nil
-}
-
-func (al *AgentService) DeleteAgentByAgentId(agentId string) error {
-	if err := al.agentRepo.DeleteAgentByAgentId(agentId); err != nil {
+func (al *AgentService) DeleteAgentByAgentId(ctx context.Context, agentId string) error {
+	if err := al.agentRepo.Delete(ctx, agentId); err != nil {
 		log.Errorw("delete agent failed", "agentId", agentId, "error", err)
 		return err
 	}
 	return nil
 }
 
-func (al *AgentService) ListAgent(pageNum, pageSize int) ([]agentmodel.Agent, int64, error) {
-	agents, count, err := al.agentRepo.ListAgent(pageNum, pageSize)
+func (al *AgentService) ListAgent(ctx context.Context, pageNum, pageSize int) ([]model.Agent, int64, error) {
+		agents, count, err := al.agentRepo.List(ctx, pageNum, pageSize)
 	if err != nil {
 		log.Errorw("list agent failed", "error", err)
 		return nil, 0, err
@@ -219,8 +180,8 @@ func (al *AgentService) ListAgent(pageNum, pageSize int) ([]agentmodel.Agent, in
 	return agents, count, err
 }
 
-func (al *AgentService) GetAgentStatistics() (int64, int64, int64, error) {
-	total, online, offline, err := al.agentRepo.GetAgentStatistics()
+func (al *AgentService) GetAgentStatistics(ctx context.Context) (int64, int64, int64, error) {
+	total, online, offline, err := al.agentRepo.Statistics(ctx)
 	if err != nil {
 		log.Errorw("get agent statistics failed", "error", err)
 		return 0, 0, 0, err

@@ -24,8 +24,8 @@ import (
 	"github.com/arcentrix/arcentra/pkg/id"
 )
 
-// AgentIDInfo Agent ID信息
-type AgentIDInfo struct {
+// Info Agent ID信息
+type Info struct {
 	AgentID       string    `json:"agent_id"`
 	RegisteredAt  time.Time `json:"registered_at"`
 	ServerAddress string    `json:"server_address"`
@@ -36,7 +36,7 @@ type AgentIDInfo struct {
 // AgentIDManager Agent ID管理器
 type AgentIDManager struct {
 	idFilePath string
-	info       *AgentIDInfo
+	info       *Info
 }
 
 // NewAgentIDManager 创建Agent ID管理器
@@ -62,7 +62,7 @@ func (m *AgentIDManager) LoadOrGenerate(hostname, serverAddr string) (string, bo
 
 	// 2. 生成新的Agent ID（使用ULID）
 	agentID := id.GetUild()
-	m.info = &AgentIDInfo{
+	m.info = &Info{
 		AgentID:       agentID,
 		RegisteredAt:  time.Now(),
 		ServerAddress: serverAddr,
@@ -77,7 +77,7 @@ func (m *AgentIDManager) LoadOrGenerate(hostname, serverAddr string) (string, bo
 // Server可能会返回不同的ID（如果发生ID冲突或重新分配）
 func (m *AgentIDManager) UpdateAfterRegister(agentID, serverAddr string) error {
 	if m.info == nil {
-		m.info = &AgentIDInfo{}
+		m.info = &Info{}
 	}
 
 	// 如果Server返回的ID与本地不同，使用Server的ID
@@ -102,18 +102,18 @@ func (m *AgentIDManager) GetAgentID() string {
 }
 
 // GetInfo 获取Agent ID完整信息
-func (m *AgentIDManager) GetInfo() *AgentIDInfo {
+func (m *AgentIDManager) GetInfo() *Info {
 	return m.info
 }
 
 // loadFromFile 从文件加载Agent ID信息
-func (m *AgentIDManager) loadFromFile() (*AgentIDInfo, error) {
+func (m *AgentIDManager) loadFromFile() (*Info, error) {
 	data, err := os.ReadFile(m.idFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("读取agent id文件失败: %w", err)
 	}
 
-	var info AgentIDInfo
+	var info Info
 	if err := json.Unmarshal(data, &info); err != nil {
 		return nil, fmt.Errorf("解析agent id文件失败: %w", err)
 	}

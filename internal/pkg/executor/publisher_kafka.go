@@ -75,7 +75,11 @@ type KafkaTopicPublisher struct {
 }
 
 // NewKafkaTopicPublisher creates a new KafkaTopicPublisher.
-func NewKafkaTopicPublisher(bootstrapServers string, programName string, resolver func(event map[string]any) string, opts ...kafka.ProducerOption) (*KafkaTopicPublisher, error) {
+func NewKafkaTopicPublisher(bootstrapServers string,
+	programName string,
+	resolver func(event map[string]any) string,
+	opts ...kafka.ProducerOption,
+) (*KafkaTopicPublisher, error) {
 	if resolver == nil {
 		return nil, fmt.Errorf("topic resolver is required")
 	}

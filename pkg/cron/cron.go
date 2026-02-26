@@ -466,7 +466,7 @@ func (c *Cron) Close() {
 
 // entrySnapshot returns a copy of the current cron entry list.
 func (c *Cron) entrySnapshot() []*Entry {
-	var entries []*Entry
+	entries := make([]*Entry, len(c.entries))
 	for _, e := range c.entries {
 		entries = append(entries, &Entry{
 			Schedule: e.Schedule,

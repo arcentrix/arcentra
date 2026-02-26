@@ -3,13 +3,13 @@ package kafka
 import "testing"
 
 func TestBuildBaseConfig_Required(t *testing.T) {
-	if _, err := buildBaseConfig(KafkaConfig{}); err == nil {
+	if _, err := buildBaseConfig(Config{}); err == nil {
 		t.Fatal("expected error when bootstrapServers is empty")
 	}
 }
 
 func TestBuildBaseConfig_WithAuth(t *testing.T) {
-	cfg := KafkaConfig{
+	cfg := Config{
 		BootstrapServers: "localhost:9092",
 		SecurityProtocol: "SASL_SSL",
 		Sasl: SaslConfig{
