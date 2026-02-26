@@ -22,6 +22,13 @@ message Meta {
   string pipeline_id = 2;                   // Pipeline ID
   string step_id = 3;                       // Step ID
   google.protobuf.Timestamp timestamp = 4;  // Event timestamp
+
+  uint64 seq = 5;                           // Strictly increasing per agent
+}
+
+message AgentHandshake {
+  string agent_id = 1;
+  uint64 last_known_seq = 2;   // Agent last known sequence number from last handshake
 }
 
 // Log batch payload
@@ -44,7 +51,10 @@ message LogBatch {
 
 // Push logs request
 message PushLogsRequest {
-  LogBatch batch = 1;
+  oneof payload {
+    AgentHandshake handshake = 1;
+    LogBatch batch = 2;
+  }
 }
 
 // Event record
@@ -63,7 +73,10 @@ message EventBatch {
 
 // Push events request
 message PushEventsRequest {
-  EventBatch batch = 1;
+  oneof payload {
+    AgentHandshake handshake = 1;
+    EventBatch batch = 2;
+  }
 }
 
 // Ingestion acknowledgment
@@ -73,12 +86,16 @@ message IngestAck {
     STATUS_ACCEPTED = 1;
     STATUS_PARTIAL_ACCEPTED = 2;
     STATUS_REJECTED = 3;
+    STATUS_OUT_OF_ORDER = 4; // The sequence number is out of order
   }
 
   Status status = 1;
   string message = 2;
-  repeated string rejected_event_ids = 3;   // Rejected event IDs
-  string last_event_id = 4;                 // Last accepted event ID
+
+  uint64 last_accepted_seq = 3;             // Last accepted sequence number
+  uint64 expected_seq = 4;                  // Expected sequence number
+  
+  repeated uint64 rejected_seqs = 5;   // Rejected sequence numbers
 }
 
 // Push logs response
