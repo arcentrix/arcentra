@@ -24,18 +24,18 @@ import (
 	"strings"
 	"time"
 
-	storagemodel "github.com/arcentrix/arcentra/internal/engine/model"
-	storagerepo "github.com/arcentrix/arcentra/internal/engine/repo"
-	storagepkg "github.com/arcentrix/arcentra/internal/pkg/storage"
+	"github.com/arcentrix/arcentra/internal/engine/model"
+	"github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/internal/pkg/storage"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 )
 
 type UploadService struct {
-	storageRepo storagerepo.IStorageRepository
+	storageRepo repo.IStorageRepository
 }
 
-func NewUploadService(storageRepo storagerepo.IStorageRepository) *UploadService {
+func NewUploadService(storageRepo repo.IStorageRepository) *UploadService {
 	return &UploadService{
 		storageRepo: storageRepo,
 	}
@@ -43,13 +43,13 @@ func NewUploadService(storageRepo storagerepo.IStorageRepository) *UploadService
 
 // buildCompleteURL builds complete URL from object path and storage config
 // Format: {protocol}://{bucket}.{endpoint}{basePath}/{ObjectName}
-func (us *UploadService) buildCompleteURL(objectPath string, storageConfig *storagemodel.StorageConfig) string {
+func (us *UploadService) buildCompleteURL(objectPath string, storageConfig *model.StorageConfig) string {
 	if objectPath == "" {
 		return ""
 	}
 
 	// parse storage config
-	var configDetail storagemodel.StorageConfigDetail
+	var configDetail model.StorageConfigDetail
 	if err := json.Unmarshal(storageConfig.Config, &configDetail); err != nil {
 		log.Warnw("failed to unmarshal storage config", "error", err)
 		return objectPath
@@ -87,8 +87,8 @@ const (
 var maxFileSize = int64(100 * 1024 * 1024) // 100MB for general files
 
 // getStorageProvider gets storage configuration and provider
-func (us *UploadService) getStorageProvider(ctx context.Context, storageId string) (*storagemodel.StorageConfig, storagepkg.IStorage, error) {
-	var storageConfig *storagemodel.StorageConfig
+func (us *UploadService) getStorageProvider(ctx context.Context, storageId string) (*model.StorageConfig, storage.IStorage, error) {
+	var storageConfig *model.StorageConfig
 	var err error
 	if storageId != "" {
 		storageConfig, err = us.storageRepo.Get(ctx, storageId)
@@ -103,7 +103,7 @@ func (us *UploadService) getStorageProvider(ctx context.Context, storageId strin
 		return nil, nil, fmt.Errorf("storage config is disabled")
 	}
 
-	storageProvider, err := storagepkg.NewStorageDBProvider(ctx, us.storageRepo)
+	storageProvider, err := storage.NewStorageDBProvider(ctx, us.storageRepo)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create storage provider: %w", err)
 	}

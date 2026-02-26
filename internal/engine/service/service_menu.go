@@ -16,16 +16,16 @@ package service
 
 import (
 	"github.com/arcentrix/arcentra/internal/engine/model"
-	userrepo "github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/internal/engine/repo"
 	"github.com/arcentrix/arcentra/pkg/log"
 )
 
 // MenuService 菜单服务
 type MenuService struct {
-	menuRepo userrepo.IMenuRepository
+	menuRepo repo.IMenuRepository
 }
 
-func NewMenuService(menuRepo userrepo.IMenuRepository) *MenuService {
+func NewMenuService(menuRepo repo.IMenuRepository) *MenuService {
 	return &MenuService{
 		menuRepo: menuRepo,
 	}

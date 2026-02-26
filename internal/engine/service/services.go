@@ -16,10 +16,11 @@ package service
 
 import (
 	"github.com/arcentrix/arcentra/internal/engine/repo"
-	storagepkg "github.com/arcentrix/arcentra/internal/pkg/storage"
+	"github.com/arcentrix/arcentra/internal/pkg/storage"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
-	pluginpkg "github.com/arcentrix/arcentra/pkg/plugin"
+	"github.com/arcentrix/arcentra/pkg/plugin"
+	ssoutil "github.com/arcentrix/arcentra/pkg/sso/util"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -48,15 +49,16 @@ func NewServices(
 	db database.IDatabase,
 	cache cache.ICache,
 	repos *repo.Repositories,
-	pluginManager *pluginpkg.Manager,
-	storageProvider storagepkg.IStorage,
+	pluginManager *plugin.Manager,
+	storageProvider storage.IStorage,
 ) *Services {
 	// 基础服务
 	menuService := NewMenuService(repos.Menu)
 	userService := NewUserService(cache, repos.User, repos.UserExt, repos.UserRoleBinding, repos.RoleMenuBinding, repos.Menu, repos.Role, menuService)
 	generalSettingsService := NewGeneralSettingsService(repos.GeneralSettings)
 	agentService := NewAgentService(repos.Agent, generalSettingsService)
-	identityService := NewIdentityService(repos.Identity, repos.User, repos.UserExt)
+	stateStore := ssoutil.NewRedisStateStore(cache)
+	identityService := NewIdentityService(repos.Identity, repos.User, repos.UserExt, stateStore)
 	teamService := NewTeamService(repos.Team)
 	storageService := NewStorageService(repos.Storage)
 	uploadService := NewUploadService(repos.Storage)

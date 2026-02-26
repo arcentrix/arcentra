@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/engine/consts"
-	usermodel "github.com/arcentrix/arcentra/internal/engine/model"
-	userrepo "github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/internal/engine/model"
+	"github.com/arcentrix/arcentra/internal/engine/repo"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/http/jwt"
@@ -35,28 +35,28 @@ import (
 )
 
 type LoginService interface {
-	Login(login *usermodel.Login, auth http.Auth) (*usermodel.LoginResp, error)
+	Login(login *model.Login, auth http.Auth) (*model.LoginResp, error)
 }
 
 type UserService struct {
 	cache               cache.ICache
-	userRepo            userrepo.IUserRepository
-	userExtRepo         userrepo.IUserExtRepository
-	userRoleBindingRepo userrepo.IUserRoleBindingRepository
-	roleMenuBindingRepo userrepo.IRoleMenuBindingRepository
-	menuRepo            userrepo.IMenuRepository
-	roleRepo            userrepo.IRoleRepository
+	userRepo            repo.IUserRepository
+	userExtRepo         repo.IUserExtRepository
+	userRoleBindingRepo repo.IUserRoleBindingRepository
+	roleMenuBindingRepo repo.IRoleMenuBindingRepository
+	menuRepo            repo.IMenuRepository
+	roleRepo            repo.IRoleRepository
 	menuService         *MenuService
 }
 
 func NewUserService(
 	cache cache.ICache,
-	userRepo userrepo.IUserRepository,
-	userExtRepo userrepo.IUserExtRepository,
-	userRoleBindingRepo userrepo.IUserRoleBindingRepository,
-	roleMenuBindingRepo userrepo.IRoleMenuBindingRepository,
-	menuRepo userrepo.IMenuRepository,
-	roleRepo userrepo.IRoleRepository,
+	userRepo repo.IUserRepository,
+	userExtRepo repo.IUserExtRepository,
+	userRoleBindingRepo repo.IUserRoleBindingRepository,
+	roleMenuBindingRepo repo.IRoleMenuBindingRepository,
+	menuRepo repo.IMenuRepository,
+	roleRepo repo.IRoleRepository,
 	menuService *MenuService,
 ) *UserService {
 	return &UserService{
@@ -71,7 +71,7 @@ func NewUserService(
 	}
 }
 
-func (ul *UserService) Login(login *usermodel.Login, auth http.Auth) (*usermodel.LoginResp, error) {
+func (ul *UserService) Login(login *model.Login, auth http.Auth) (*model.LoginResp, error) {
 	userInfo, err := ul.userRepo.Login(login)
 	if err != nil {
 		log.Errorw("login failed", "username", login.Username, "email", login.Email, "error", err)
@@ -118,12 +118,12 @@ func (ul *UserService) Login(login *usermodel.Login, auth http.Auth) (*usermodel
 	if err != nil {
 		log.Warnw("failed to get user roles and routes", "userId", userInfo.UserId, "error", err)
 		// 如果获取失败，返回空数组，不影响登录流程
-		roles = []usermodel.RoleDTO{}
+		roles = []model.RoleDTO{}
 		routes = []string{}
 	}
 
-	resp := &usermodel.LoginResp{
-		UserInfo: usermodel.UserInfo{
+	resp := &model.LoginResp{
+		UserInfo: model.UserInfo{
 			UserId:   userInfo.UserId,
 			Username: userInfo.Username,
 			FullName: userInfo.FullName,
@@ -188,7 +188,7 @@ func (ul *UserService) Refresh(userId, rToken string, auth *http.Auth) (map[stri
 	return token, nil
 }
 
-func (ul *UserService) Register(register *usermodel.Register) error {
+func (ul *UserService) Register(register *model.Register) error {
 	var err error
 	register.UserId = id.GetUUIDWithoutDashes()
 	// set default values if not provided
@@ -249,10 +249,10 @@ func (ul *UserService) createUserExtIfNotExists(ctx context.Context, userId stri
 	}
 
 	now := time.Now()
-	userExt := &usermodel.UserExt{
+	userExt := &model.UserExt{
 		UserId:           userId,
 		Timezone:         "UTC",
-		InvitationStatus: usermodel.UserInvitationStatusAccepted,
+		InvitationStatus: model.UserInvitationStatusAccepted,
 	}
 	userExt.CreatedAt = now
 	userExt.UpdatedAt = now
@@ -264,7 +264,7 @@ func (ul *UserService) createUserExtIfNotExists(ctx context.Context, userId stri
 	return nil
 }
 
-func (ul *UserService) AddUser(ctx context.Context, addUserReq usermodel.AddUserReq) error {
+func (ul *UserService) AddUser(ctx context.Context, addUserReq model.AddUserReq) error {
 	var err error
 	addUserReq.UserId = id.GetUUIDWithoutDashes()
 	addUserReq.IsEnabled = 1
@@ -282,7 +282,7 @@ func (ul *UserService) AddUser(ctx context.Context, addUserReq usermodel.AddUser
 	return nil
 }
 
-func (ul *UserService) UpdateUser(userId string, updateReq *usermodel.UpdateUserReq) error {
+func (ul *UserService) UpdateUser(userId string, updateReq *model.UpdateUserReq) error {
 	// Check if user exists
 	_, err := ul.userRepo.GetUserByUserId(userId)
 	if err != nil {
@@ -310,7 +310,7 @@ func (ul *UserService) UpdateUser(userId string, updateReq *usermodel.UpdateUser
 }
 
 // buildUserUpdateMap builds update map for User fields
-func buildUserUpdateMap(req *usermodel.UpdateUserReq) map[string]any {
+func buildUserUpdateMap(req *model.UpdateUserReq) map[string]any {
 	updates := make(map[string]any)
 	util.SetIfNotNil(updates, "full_name", req.FullName)
 	util.SetIfNotNil(updates, "avatar", req.Avatar)
@@ -320,7 +320,7 @@ func buildUserUpdateMap(req *usermodel.UpdateUserReq) map[string]any {
 	return updates
 }
 
-func (ul *UserService) FetchUserInfo(userId string) (*usermodel.UserInfo, error) {
+func (ul *UserService) FetchUserInfo(userId string) (*model.UserInfo, error) {
 	userInfo, err := ul.userRepo.FetchUserInfo(userId)
 	if err != nil {
 		return nil, err
@@ -329,7 +329,7 @@ func (ul *UserService) FetchUserInfo(userId string) (*usermodel.UserInfo, error)
 	return userInfo, err
 }
 
-func (ul *UserService) GetUserList(pageNum, pageSize int) ([]userrepo.UserWithExt, int64, error) {
+func (ul *UserService) GetUserList(pageNum, pageSize int) ([]repo.UserWithExt, int64, error) {
 	// set default values
 	if pageNum <= 0 {
 		pageNum = 1
@@ -347,7 +347,7 @@ func (ul *UserService) GetUserList(pageNum, pageSize int) ([]userrepo.UserWithEx
 	return users, count, err
 }
 
-func (ul *UserService) GetUsersByRole(roleId, roleName string, pageNum, pageSize int) ([]userrepo.UserWithExt, int64, error) {
+func (ul *UserService) GetUsersByRole(roleId, roleName string, pageNum, pageSize int) ([]repo.UserWithExt, int64, error) {
 	// set default values
 	if pageNum <= 0 {
 		pageNum = 1
@@ -376,7 +376,7 @@ func comparePassword(oldPassword, newPassword string) bool {
 }
 
 // ResetPassword resets user password (for forgot password scenario, no old password required)
-func (ul *UserService) ResetPassword(userId string, req *usermodel.ResetPasswordReq) error {
+func (ul *UserService) ResetPassword(userId string, req *model.ResetPasswordReq) error {
 	// decode new password from base64
 	newPwd, err := base64.StdEncoding.DecodeString(req.NewPassword)
 	if err != nil {
@@ -440,7 +440,7 @@ func (ul *UserService) UpdateAvatar(userId, avatarUrl string) error {
 }
 
 // GetUserRoles 获取用户的角色信息
-func (ul *UserService) GetUserRoles(ctx context.Context, userId string) ([]usermodel.RoleDTO, error) {
+func (ul *UserService) GetUserRoles(ctx context.Context, userId string) ([]model.RoleDTO, error) {
 	roleBindings, err := ul.userRoleBindingRepo.List(ctx, userId)
 	if err != nil {
 		log.Errorw("failed to get user role bindings", "userId", userId, "error", err)
@@ -448,7 +448,7 @@ func (ul *UserService) GetUserRoles(ctx context.Context, userId string) ([]userm
 	}
 
 	if len(roleBindings) == 0 {
-		return []usermodel.RoleDTO{}, nil
+		return []model.RoleDTO{}, nil
 	}
 
 	// 提取角色ID列表
@@ -465,9 +465,9 @@ func (ul *UserService) GetUserRoles(ctx context.Context, userId string) ([]userm
 	}
 
 	// 构建角色列表
-	roleList := make([]usermodel.RoleDTO, 0, len(roles))
+	roleList := make([]model.RoleDTO, 0, len(roles))
 	for _, role := range roles {
-		roleList = append(roleList, usermodel.RoleDTO{
+		roleList = append(roleList, model.RoleDTO{
 			RoleId:      role.RoleId,
 			Name:        role.Name,
 			DisplayName: role.DisplayName,
@@ -507,7 +507,7 @@ func (ul *UserService) GetUserRoutes(ctx context.Context, userId string, resourc
 
 	menuIdSet := make(map[string]bool)
 	for _, binding := range menuBindings {
-		if binding.IsVisible == usermodel.MenuVisible && binding.IsAccessible == usermodel.RoleMenuAccessible {
+		if binding.IsVisible == model.MenuVisible && binding.IsAccessible == model.RoleMenuAccessible {
 			menuIdSet[binding.MenuId] = true
 		}
 	}
@@ -535,7 +535,7 @@ func (ul *UserService) GetUserRoutes(ctx context.Context, userId string, resourc
 }
 
 // GetUserMenus 获取用户可访问的菜单列表（树形结构）
-func (ul *UserService) GetUserMenus(ctx context.Context, userId string, resourceId string) ([]usermodel.MenuDTO, []string, error) {
+func (ul *UserService) GetUserMenus(ctx context.Context, userId string, resourceId string) ([]model.MenuDTO, []string, error) {
 	roleBindings, err := ul.userRoleBindingRepo.List(ctx, userId)
 	if err != nil {
 		log.Errorw("failed to get user role bindings", "userId", userId, "error", err)
@@ -543,7 +543,7 @@ func (ul *UserService) GetUserMenus(ctx context.Context, userId string, resource
 	}
 
 	if len(roleBindings) == 0 {
-		return []usermodel.MenuDTO{}, []string{}, nil
+		return []model.MenuDTO{}, []string{}, nil
 	}
 
 	roleIds := make([]string, 0, len(roleBindings))
@@ -558,12 +558,12 @@ func (ul *UserService) GetUserMenus(ctx context.Context, userId string, resource
 	}
 
 	if len(menuBindings) == 0 {
-		return []usermodel.MenuDTO{}, []string{}, nil
+		return []model.MenuDTO{}, []string{}, nil
 	}
 
 	menuIdSet := make(map[string]bool)
 	for _, binding := range menuBindings {
-		if binding.IsVisible == usermodel.MenuVisible && binding.IsAccessible == usermodel.RoleMenuAccessible {
+		if binding.IsVisible == model.MenuVisible && binding.IsAccessible == model.RoleMenuAccessible {
 			menuIdSet[binding.MenuId] = true
 		}
 	}
@@ -586,12 +586,12 @@ func (ul *UserService) GetUserMenus(ctx context.Context, userId string, resource
 }
 
 type userRolesRoutesCache struct {
-	Roles  []usermodel.RoleDTO `json:"roles"`
+	Roles  []model.RoleDTO `json:"roles"`
 	Routes []string            `json:"routes"`
 }
 
 // GetUserRolesAndRoutes 获取用户的角色信息和路由信息
-func (ul *UserService) GetUserRolesAndRoutes(userId string, resourceId string) ([]usermodel.RoleDTO, []string, error) {
+func (ul *UserService) GetUserRolesAndRoutes(userId string, resourceId string) ([]model.RoleDTO, []string, error) {
 	ctx := context.Background()
 
 	keyFunc := func(params ...any) string {
@@ -611,7 +611,7 @@ func (ul *UserService) GetUserRolesAndRoutes(userId string, resourceId string) (
 		}
 
 		if len(roleBindings) == 0 {
-			return userRolesRoutesCache{Roles: []usermodel.RoleDTO{}, Routes: []string{}}, nil
+			return userRolesRoutesCache{Roles: []model.RoleDTO{}, Routes: []string{}}, nil
 		}
 
 		roleIds := make([]string, 0, len(roleBindings))
@@ -619,8 +619,8 @@ func (ul *UserService) GetUserRolesAndRoutes(userId string, resourceId string) (
 			roleIds = append(roleIds, binding.RoleId)
 		}
 
-		var roles []usermodel.Role
-		var menuBindings []usermodel.RoleMenuBinding
+		var roles []model.Role
+		var menuBindings []model.RoleMenuBinding
 		var roleErr, menuErr error
 
 		roles, roleErr = ul.roleRepo.BatchGet(ctx, roleIds)
@@ -635,9 +635,9 @@ func (ul *UserService) GetUserRolesAndRoutes(userId string, resourceId string) (
 			return userRolesRoutesCache{}, menuErr
 		}
 
-		roleList := make([]usermodel.RoleDTO, 0, len(roles))
+		roleList := make([]model.RoleDTO, 0, len(roles))
 		for _, role := range roles {
-			roleList = append(roleList, usermodel.RoleDTO{
+			roleList = append(roleList, model.RoleDTO{
 				RoleId:      role.RoleId,
 				Name:        role.Name,
 				DisplayName: role.DisplayName,
@@ -651,7 +651,7 @@ func (ul *UserService) GetUserRolesAndRoutes(userId string, resourceId string) (
 
 		menuIdSet := make(map[string]bool)
 		for _, binding := range menuBindings {
-			if binding.IsVisible == usermodel.MenuVisible && binding.IsAccessible == usermodel.RoleMenuAccessible {
+			if binding.IsVisible == model.MenuVisible && binding.IsAccessible == model.RoleMenuAccessible {
 				menuIdSet[binding.MenuId] = true
 			}
 		}

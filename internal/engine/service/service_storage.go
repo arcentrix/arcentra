@@ -20,14 +20,14 @@ import (
 	"fmt"
 
 	"github.com/arcentrix/arcentra/internal/engine/model"
-	storagerepo "github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/internal/engine/repo"
 )
 
 type StorageService struct {
-	storageRepo storagerepo.IStorageRepository
+	storageRepo repo.IStorageRepository
 }
 
-func NewStorageService(storageRepo storagerepo.IStorageRepository) *StorageService {
+func NewStorageService(storageRepo repo.IStorageRepository) *StorageService {
 	return &StorageService{
 		storageRepo: storageRepo,
 	}

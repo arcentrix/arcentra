@@ -21,17 +21,17 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/engine/model"
-	teamrepo "github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/internal/engine/repo"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"gorm.io/gorm"
 )
 
 type TeamService struct {
-	teamRepo teamrepo.ITeamRepository
+	teamRepo repo.ITeamRepository
 }
 
-func NewTeamService(teamRepo teamrepo.ITeamRepository) *TeamService {
+func NewTeamService(teamRepo repo.ITeamRepository) *TeamService {
 	return &TeamService{
 		teamRepo: teamRepo,
 	}
@@ -62,7 +62,7 @@ func (s *TeamService) CreateTeam(ctx context.Context, req *model.CreateTeamReq, 
 	}
 
 	// 4. 处理 settings
-	settingsJSON, err := teamrepo.ConvertSettingsToJSON(req.Settings)
+	settingsJSON, err := repo.ConvertSettingsToJSON(req.Settings)
 	if err != nil {
 		log.Errorw("convert settings failed", "error", err)
 		return nil, fmt.Errorf("convert settings failed: %w", err)
@@ -147,7 +147,7 @@ func (s *TeamService) UpdateTeam(ctx context.Context, teamId string, req *model.
 	}
 
 	if req.Settings != nil {
-		settingsJSON, convertErr := teamrepo.ConvertSettingsToJSON(req.Settings)
+		settingsJSON, convertErr := repo.ConvertSettingsToJSON(req.Settings)
 		if convertErr != nil {
 			return nil, fmt.Errorf("convert settings failed: %w", convertErr)
 		}

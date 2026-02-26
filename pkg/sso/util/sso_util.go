@@ -15,12 +15,20 @@
 package util
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"sync"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/arcentrix/arcentra/pkg/cache"
 )
 
-var StateStore = &sync.Map{}
+const (
+	ssoStateKeyPrefix = "sso:state:"
+	ssoStateTTL       = 15 * time.Minute
+)
 
 // StateData contains data stored in state
 type StateData struct {
@@ -28,7 +36,74 @@ type StateData struct {
 	RedirectURI  string `json:"redirectURI,omitempty"`
 }
 
-// GenState generate a random state string
+// IStateStore defines OAuth state storage (Redis-backed for multi-instance support).
+type IStateStore interface {
+	Store(ctx context.Context, state string, providerName string) error
+	LoadAndDelete(ctx context.Context, state string) (StateData, bool)
+	Check(ctx context.Context, state string) (StateData, bool)
+}
+
+// RedisStateStore stores OAuth state in Redis.
+type RedisStateStore struct {
+	cache cache.ICache
+}
+
+// NewRedisStateStore creates a Redis-backed state store.
+func NewRedisStateStore(c cache.ICache) *RedisStateStore {
+	return &RedisStateStore{cache: c}
+}
+
+// Store stores state data in Redis with TTL.
+func (s *RedisStateStore) Store(ctx context.Context, state string, providerName string) error {
+	if s.cache == nil {
+		return fmt.Errorf("cache is not configured")
+	}
+	data := StateData{ProviderName: providerName}
+	b, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("marshal state data: %w", err)
+	}
+	key := ssoStateKeyPrefix + state
+	return s.cache.Set(ctx, key, b, ssoStateTTL).Err()
+}
+
+// LoadAndDelete loads state from Redis and deletes it (one-time use).
+func (s *RedisStateStore) LoadAndDelete(ctx context.Context, state string) (StateData, bool) {
+	if s.cache == nil {
+		return StateData{}, false
+	}
+	key := ssoStateKeyPrefix + state
+	val, err := s.cache.Get(ctx, key).Result()
+	if err != nil {
+		return StateData{}, false
+	}
+	_ = s.cache.Del(ctx, key)
+	var data StateData
+	if err := json.Unmarshal([]byte(val), &data); err != nil {
+		// Backward compatibility: plain string as providerName
+		return StateData{ProviderName: val}, true
+	}
+	return data, true
+}
+
+// Check checks if state exists without deleting (for debugging).
+func (s *RedisStateStore) Check(ctx context.Context, state string) (StateData, bool) {
+	if s.cache == nil {
+		return StateData{}, false
+	}
+	key := ssoStateKeyPrefix + state
+	val, err := s.cache.Get(ctx, key).Result()
+	if err != nil {
+		return StateData{}, false
+	}
+	var data StateData
+	if err := json.Unmarshal([]byte(val), &data); err != nil {
+		return StateData{ProviderName: val}, true
+	}
+	return data, true
+}
+
+// GenState generates a random state string.
 func GenState() string {
 	b := make([]byte, 16)
 	_, err := rand.Read(b)
@@ -36,44 +111,4 @@ func GenState() string {
 		return ""
 	}
 	return base64.URLEncoding.EncodeToString(b)
-}
-
-// StoreState stores state data
-func StoreState(state string, providerName string) {
-	data := StateData{
-		ProviderName: providerName,
-	}
-	StateStore.Store(state, data)
-}
-
-// LoadAndDeleteState load and delete the state from the state store
-func LoadAndDeleteState(state string) (StateData, bool) {
-	value, ok := StateStore.LoadAndDelete(state)
-	if ok {
-		if data, ok := value.(StateData); ok {
-			return data, true
-		}
-		// Backward compatibility: if stored as string (old format), treat as providerName only
-		if str, ok := value.(string); ok {
-			return StateData{ProviderName: str}, true
-		}
-		return StateData{}, false
-	}
-	return StateData{}, false
-}
-
-// CheckState checks if a state exists in the store without deleting it (for debugging)
-func CheckState(state string) (StateData, bool) {
-	value, ok := StateStore.Load(state)
-	if ok {
-		if data, ok := value.(StateData); ok {
-			return data, true
-		}
-		// Backward compatibility
-		if str, ok := value.(string); ok {
-			return StateData{ProviderName: str}, true
-		}
-		return StateData{}, false
-	}
-	return StateData{}, false
 }

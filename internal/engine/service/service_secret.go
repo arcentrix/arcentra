@@ -26,18 +26,18 @@ import (
 	"slices"
 
 	"github.com/arcentrix/arcentra/internal/engine/model"
-	secretrepo "github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/internal/engine/repo"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"gorm.io/gorm"
 )
 
 type SecretService struct {
-	secretRepo secretrepo.ISecretRepository
+	secretRepo repo.ISecretRepository
 	encryptKey []byte // 32 bytes for AES-256
 }
 
-func NewSecretService(secretRepo secretrepo.ISecretRepository) *SecretService {
+func NewSecretService(secretRepo repo.ISecretRepository) *SecretService {
 	// TODO: load encryption key from config or environment variable
 	// For now, using a default key (should be replaced in production)
 	encryptKey := []byte("arcentra-secret-encryption-key-32b") // 32 bytes for AES-256

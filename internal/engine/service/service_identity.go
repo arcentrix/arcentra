@@ -36,13 +36,15 @@ type IdentityService struct {
 	identityRepo repo.IIdentityRepository
 	userRepo     repo.IUserRepository
 	userExtRepo  repo.IUserExtRepository
+	stateStore   util.IStateStore
 }
 
-func NewIdentityService(identityRepo repo.IIdentityRepository, userRepo repo.IUserRepository, userExtRepo repo.IUserExtRepository) *IdentityService {
+func NewIdentityService(identityRepo repo.IIdentityRepository, userRepo repo.IUserRepository, userExtRepo repo.IUserExtRepository, stateStore util.IStateStore) *IdentityService {
 	return &IdentityService{
 		identityRepo: identityRepo,
 		userRepo:     userRepo,
 		userExtRepo:  userExtRepo,
+		stateStore:   stateStore,
 	}
 }
 
@@ -67,8 +69,10 @@ func (iis *IdentityService) Authorize(ctx context.Context, providerName string) 
 	}
 
 	state := util.GenState()
-	// Store provider name and redirectURI in state
-	util.StoreState(state, integration.Name)
+	if err := iis.stateStore.Store(ctx, state, integration.Name); err != nil {
+		log.Errorw("failed to store OAuth state", "provider", providerName, "error", err)
+		return "", fmt.Errorf("store state failed: %w", err)
+	}
 	log.Debugw("State stored", "state", state, "storedProviderName", integration.Name, "urlProvider", providerName)
 
 	switch integration.ProviderType {
@@ -83,19 +87,13 @@ func (iis *IdentityService) Authorize(ctx context.Context, providerName string) 
 
 // Callback 统一的 OAuth/OIDC 回调处理（根据 provider 类型自动识别）
 func (iis *IdentityService) Callback(ctx context.Context, providerName, state, code string) (*model.Register, string, error) {
-	// Check state before loading (for debugging)
-	if stateData, exists := util.CheckState(state); exists {
+	if stateData, exists := iis.stateStore.Check(ctx, state); exists {
 		log.Debugw("state found in store", "provider", providerName, "storedProviderName", stateData.ProviderName, "state", state)
 	}
 
-	stateData, ok := util.LoadAndDeleteState(state)
+	stateData, ok := iis.stateStore.LoadAndDelete(ctx, state)
 	if !ok {
 		log.Warnw("state not found in store", "provider", providerName, "state", state, "stateLength", len(state))
-		// Log all states in store for debugging (be careful in production)
-		util.StateStore.Range(func(key, value interface{}) bool {
-			log.Debugw("state in store", "key", key, "value", value)
-			return true
-		})
 		return nil, "", fmt.Errorf("invalid state parameter: state not found or expired")
 	}
 
@@ -307,7 +305,10 @@ func (iis *IdentityService) OIDCLogin(ctx context.Context, providerName string) 
 	}
 
 	state := util.GenState()
-	util.StateStore.Store(state, providerName)
+	if err := iis.stateStore.Store(ctx, state, providerName); err != nil {
+		log.Errorw("failed to store OIDC state", "provider", providerName, "error", err)
+		return "", fmt.Errorf("store state failed: %w", err)
+	}
 
 	return provider.GetAuthURL(state), nil
 }

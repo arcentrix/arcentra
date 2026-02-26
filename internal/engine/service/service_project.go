@@ -20,17 +20,17 @@ import (
 	"fmt"
 
 	"github.com/arcentrix/arcentra/internal/engine/model"
-	projectrepo "github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/internal/engine/repo"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"gorm.io/gorm"
 )
 
 type ProjectService struct {
-	projectRepo projectrepo.IProjectRepository
+	projectRepo repo.IProjectRepository
 }
 
-func NewProjectService(projectRepo projectrepo.IProjectRepository) *ProjectService {
+func NewProjectService(projectRepo repo.IProjectRepository) *ProjectService {
 	return &ProjectService{
 		projectRepo: projectRepo,
 	}
@@ -52,19 +52,19 @@ func (s *ProjectService) CreateProject(ctx context.Context, req *model.CreatePro
 	}
 
 	// 3. 转换 JSON 字段
-	buildConfigJSON, err := projectrepo.ConvertJSONToDatatypes(req.BuildConfig)
+	buildConfigJSON, err := repo.ConvertJSONToDatatypes(req.BuildConfig)
 	if err != nil {
 		log.Errorw("convert build config failed", "error", err)
 		return nil, fmt.Errorf("convert build config failed: %w", err)
 	}
 
-	envVarsJSON, err := projectrepo.ConvertJSONToDatatypes(req.EnvVars)
+	envVarsJSON, err := repo.ConvertJSONToDatatypes(req.EnvVars)
 	if err != nil {
 		log.Errorw("convert env vars failed", "error", err)
 		return nil, fmt.Errorf("convert env vars failed: %w", err)
 	}
 
-	settingsJSON, err := projectrepo.ConvertJSONToDatatypes(req.Settings)
+	settingsJSON, err := repo.ConvertJSONToDatatypes(req.Settings)
 	if err != nil {
 		log.Errorw("convert settings failed", "error", err)
 		return nil, fmt.Errorf("convert settings failed: %w", err)
@@ -178,21 +178,21 @@ func (s *ProjectService) UpdateProject(ctx context.Context, projectId string, re
 		updates["cron_expr"] = *req.CronExpr
 	}
 	if req.BuildConfig != nil {
-		buildConfigJSON, convertErr := projectrepo.ConvertJSONToDatatypes(req.BuildConfig)
+		buildConfigJSON, convertErr := repo.ConvertJSONToDatatypes(req.BuildConfig)
 		if convertErr != nil {
 			return nil, fmt.Errorf("convert build config failed: %w", convertErr)
 		}
 		updates["build_config"] = buildConfigJSON
 	}
 	if req.EnvVars != nil {
-		envVarsJSON, convertErr := projectrepo.ConvertJSONToDatatypes(req.EnvVars)
+		envVarsJSON, convertErr := repo.ConvertJSONToDatatypes(req.EnvVars)
 		if convertErr != nil {
 			return nil, fmt.Errorf("convert env vars failed: %w", convertErr)
 		}
 		updates["env_vars"] = envVarsJSON
 	}
 	if req.Settings != nil {
-		settingsJSON, convertErr := projectrepo.ConvertJSONToDatatypes(req.Settings)
+		settingsJSON, convertErr := repo.ConvertJSONToDatatypes(req.Settings)
 		if convertErr != nil {
 			return nil, fmt.Errorf("convert settings failed: %w", convertErr)
 		}

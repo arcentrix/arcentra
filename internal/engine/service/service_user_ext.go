@@ -21,15 +21,15 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/engine/model"
-	userrepo "github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/internal/engine/repo"
 	"github.com/arcentrix/arcentra/pkg/log"
 )
 
 type UserExt struct {
-	userExtRepo userrepo.IUserExtRepository
+	userExtRepo repo.IUserExtRepository
 }
 
-func NewUserExt(userExtRepo userrepo.IUserExtRepository) *UserExt {
+func NewUserExt(userExtRepo repo.IUserExtRepository) *UserExt {
 	return &UserExt{
 		userExtRepo: userExtRepo,
 	}

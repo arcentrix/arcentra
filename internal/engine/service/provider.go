@@ -19,7 +19,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/pkg/storage"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
-	pluginpkg "github.com/arcentrix/arcentra/pkg/plugin"
+	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/google/wire"
 )
 
@@ -33,7 +33,7 @@ func ProvideServices(
 	db database.IDatabase,
 	cache cache.ICache,
 	repos *repo.Repositories,
-	pluginManager *pluginpkg.Manager,
+	pluginManager *plugin.Manager,
 	storageProvider storage.IStorage,
 ) *Services {
 	return NewServices(db, cache, repos, pluginManager, storageProvider)
