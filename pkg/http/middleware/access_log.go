@@ -34,7 +34,7 @@ func AccessLogMiddleware() fiber.Handler {
 			return err
 		}
 
-		log.Warnw("http access", "ip", c.IP(), "method", c.Method(), "path", c.Path(), "status", status, "latency", latency, "error", err)
+		log.Debugw("http access", "ip", c.IP(), "method", c.Method(), "path", c.Path(), "status", status, "latency", latency, "error", err)
 
 		return err
 	}

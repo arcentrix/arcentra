@@ -26,8 +26,8 @@ import (
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	"github.com/arcentrix/arcentra/internal/agent/router"
 	"github.com/arcentrix/arcentra/internal/agent/service"
-	agentqueue "github.com/arcentrix/arcentra/internal/agent/taskqueue"
-	grpcclient "github.com/arcentrix/arcentra/internal/pkg/grpc"
+	"github.com/arcentrix/arcentra/internal/agent/taskqueue"
+	"github.com/arcentrix/arcentra/internal/pkg/grpc"
 	"github.com/arcentrix/arcentra/pkg/cron"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/metrics"
@@ -40,7 +40,7 @@ import (
 
 type Agent struct {
 	HttpApp       *fiber.App
-	GrpcClient    *grpcclient.ClientWrapper
+	GrpcClient    *grpc.ClientWrapper
 	MetricsServer *metrics.Server
 	Logger        *log.Logger
 	AgentConf     *config.AgentConfig
@@ -54,7 +54,7 @@ type InitAppFunc func(configPath string) (*Agent, func(), error)
 
 func NewAgent(
 	rt *router.Router,
-	grpcClient *grpcclient.ClientWrapper,
+	grpcClient *grpc.ClientWrapper,
 	metricsServer *metrics.Server,
 	logger *log.Logger,
 	agentConf *config.AgentConfig,
@@ -64,7 +64,7 @@ func NewAgent(
 
 	// Create agent service
 	agentService := service.NewAgentServiceImpl(agentConf, grpcClient)
-	taskQueue, err := agentqueue.StartWorker(context.Background(), agentConf)
+	taskQueue, err := taskqueue.StartWorker(context.Background(), agentConf)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -145,7 +145,7 @@ func Run(app *Agent, cleanup func()) {
 	// start gRPC client
 	if app.GrpcClient != nil {
 		safe.Go(func() {
-			if err := app.GrpcClient.Start(grpcclient.ClientConf{
+			if err := app.GrpcClient.Start(grpc.ClientConf{
 				ServerAddr:           appConf.Grpc.ServerAddr,
 				Token:                appConf.Grpc.Token,
 				ReadWriteTimeout:     appConf.Grpc.ReadWriteTimeout,

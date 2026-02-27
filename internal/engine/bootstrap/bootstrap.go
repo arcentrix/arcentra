@@ -70,9 +70,6 @@ func NewApp(
 ) (*App, func(), error) {
 	httpApp := rt.Router()
 
-	// 主程序作为 queue server，只发布任务，不执行任务
-	// 不需要注册任务处理器
-
 	// 设置 AppConf
 	app := &App{
 		HttpApp:       httpApp,
