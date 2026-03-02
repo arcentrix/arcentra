@@ -577,13 +577,13 @@ func (p *ContextPool) createNewContext(ctx context.Context, pipeline *spec.Pipel
 			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
 				pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
 				pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
-				pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED,
-				pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED).
-			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
-				pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING).
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
 			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED,
 				pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
-				pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED)
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
+			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING)
 		pc.stateMachine = sm
 		p.registerStateMachineHooks(pc, sm)
 	} else {
@@ -598,14 +598,14 @@ func (p *ContextPool) registerStateMachineHooks(pc *Context, sm *statemachine.St
 	sm.OnEnter(
 		pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
 		func(state pipelinev1.PipelineStatus) error {
-		pc.mu.Lock()
-		if pc.endTime == nil {
-			now := time.Now()
-			pc.endTime = &now
-		}
-		pc.mu.Unlock()
-		return nil
-	})
+			pc.mu.Lock()
+			if pc.endTime == nil {
+				now := time.Now()
+				pc.endTime = &now
+			}
+			pc.mu.Unlock()
+			return nil
+		})
 	sm.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, func(state pipelinev1.PipelineStatus) error {
 		pc.mu.Lock()
 		if pc.endTime == nil {
@@ -739,13 +739,13 @@ func (c *Context) ResetForReuse(ctx context.Context, pipeline *spec.Pipeline, ex
 			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
 				pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
 				pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
-				pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED,
-				pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED).
-			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
-				pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING).
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
 			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED,
 				pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
-				pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED)
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
+			Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+				pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING)
 		c.stateMachine = sm
 	}
 

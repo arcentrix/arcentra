@@ -31,7 +31,7 @@ type testContextKey string
 func TestNewContextContext(t *testing.T) {
 	pipeline := &spec.Pipeline{
 		Namespace: "test-pipeline",
-		Jobs:      []spec.Job{},
+		Jobs:      []*spec.Job{},
 	}
 	execCtx := &ExecutionContext{
 		Pipeline:      pipeline,
@@ -320,7 +320,7 @@ func TestDuration(t *testing.T) {
 func TestToMap(t *testing.T) {
 	pipeline := &spec.Pipeline{
 		Namespace: "test-pipeline",
-		Jobs:      []spec.Job{},
+		Jobs:      []*spec.Job{},
 	}
 	ctx := NewContext(context.Background(), pipeline, nil)
 	ctx.SetBuildId("build-123")

@@ -285,7 +285,7 @@ func (c *ExecutionContext) SendNotification(ctx context.Context, item *spec.Noti
 	}
 
 	// Resolve params with variables
-	resolvedParams := c.ResolveVariables(item.Params)
+	resolvedParams := c.ResolveVariables(spec.StructAsMap(item.Params))
 
 	// Add success/failure context
 	resolvedParams["success"] = success

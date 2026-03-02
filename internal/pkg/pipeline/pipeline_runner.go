@@ -43,7 +43,10 @@ func (r *Runner) Run(ctx context.Context, p *spec.Pipeline) error {
 	var noConcurrencyJobs []*spec.Job
 
 	for i := range p.Jobs {
-		job := &p.Jobs[i]
+		job := p.Jobs[i]
+		if job == nil {
+			continue
+		}
 		if job.Concurrency != "" {
 			concurrencyGroups[job.Concurrency] = append(concurrencyGroups[job.Concurrency], job)
 		} else {

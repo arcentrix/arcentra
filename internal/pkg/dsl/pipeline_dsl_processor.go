@@ -99,7 +99,10 @@ func (p *Processor) resolvePipelineVariables(pl *spec.Pipeline, ctx *pipeline.Ex
 
 	// Resolve variables in each job
 	for i := range pl.Jobs {
-		job := &pl.Jobs[i]
+		job := pl.Jobs[i]
+		if job == nil {
+			continue
+		}
 
 		// Resolve job-level variables
 		if job.Env != nil {
@@ -128,20 +131,20 @@ func (p *Processor) resolvePipelineVariables(pl *spec.Pipeline, ctx *pipeline.Ex
 
 		// Resolve approval configuration
 		if job.Approval != nil && job.Approval.Params != nil {
-			resolvedParams, err := interpreter.ResolveMap(job.Approval.Params)
+			resolvedParams, err := interpreter.ResolveMap(spec.StructAsMap(job.Approval.Params))
 			if err != nil {
 				return fmt.Errorf("job '%s' resolve approval params: %w", job.Name, err)
 			}
-			job.Approval.Params = resolvedParams
+			job.Approval.Params = spec.MapAsStruct(resolvedParams)
 		}
 
 		// Resolve target configuration
 		if job.Target != nil && job.Target.Config != nil {
-			resolvedConfig, err := interpreter.ResolveMap(job.Target.Config)
+			resolvedConfig, err := interpreter.ResolveMap(spec.StructAsMap(job.Target.Config))
 			if err != nil {
 				return fmt.Errorf("job '%s' resolve target config: %w", job.Name, err)
 			}
-			job.Target.Config = resolvedConfig
+			job.Target.Config = spec.MapAsStruct(resolvedConfig)
 		}
 
 		// Resolve notify configuration
@@ -153,7 +156,10 @@ func (p *Processor) resolvePipelineVariables(pl *spec.Pipeline, ctx *pipeline.Ex
 
 		// Resolve variables in each step
 		for j := range job.Steps {
-			step := &job.Steps[j]
+			step := job.Steps[j]
+			if step == nil {
+				continue
+			}
 
 			// Resolve step-level variables
 			if step.Env != nil {
@@ -193,11 +199,11 @@ func (p *Processor) resolvePipelineVariables(pl *spec.Pipeline, ctx *pipeline.Ex
 
 			// Resolve args
 			if step.Args != nil {
-				resolvedArgs, err := interpreter.ResolveMap(step.Args)
+				resolvedArgs, err := interpreter.ResolveMap(spec.StructAsMap(step.Args))
 				if err != nil {
 					return fmt.Errorf("job '%s' step '%s' resolve args: %w", job.Name, step.Name, err)
 				}
-				step.Args = resolvedArgs
+				step.Args = spec.MapAsStruct(resolvedArgs)
 			}
 		}
 	}
@@ -255,19 +261,19 @@ func (p *Processor) resolveSource(source *spec.Source, interpreter *interceptor.
 // resolveNotify resolves variables in notify configuration
 func (p *Processor) resolveNotify(notify *spec.Notify, interpreter *interceptor.VariableInterpreter) error {
 	if notify.OnSuccess != nil && notify.OnSuccess.Params != nil {
-		resolvedParams, err := interpreter.ResolveMap(notify.OnSuccess.Params)
+		resolvedParams, err := interpreter.ResolveMap(spec.StructAsMap(notify.OnSuccess.Params))
 		if err != nil {
 			return fmt.Errorf("resolve on_success params: %w", err)
 		}
-		notify.OnSuccess.Params = resolvedParams
+		notify.OnSuccess.Params = spec.MapAsStruct(resolvedParams)
 	}
 
 	if notify.OnFailure != nil && notify.OnFailure.Params != nil {
-		resolvedParams, err := interpreter.ResolveMap(notify.OnFailure.Params)
+		resolvedParams, err := interpreter.ResolveMap(spec.StructAsMap(notify.OnFailure.Params))
 		if err != nil {
 			return fmt.Errorf("resolve on_failure params: %w", err)
 		}
-		notify.OnFailure.Params = resolvedParams
+		notify.OnFailure.Params = spec.MapAsStruct(resolvedParams)
 	}
 
 	return nil

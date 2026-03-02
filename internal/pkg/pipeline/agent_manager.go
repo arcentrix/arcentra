@@ -46,7 +46,7 @@ func NewAgentManager(
 	agentClient agentv1.AgentServiceClient,
 	stepRunClient steprunv1.StepRunServiceClient,
 	logger log.Logger,
-	) *AgentManager {
+) *AgentManager {
 	return &AgentManager{
 		agentClient:      agentClient,
 		stepRunClient:    stepRunClient,
@@ -209,7 +209,10 @@ func (am *AgentManager) matchAgentLabels(agent *AgentStatus, selector *spec.Agen
 }
 
 // matchExpression checks if agent labels match a single expression
-func (am *AgentManager) matchExpression(agentLabels map[string]string, expr spec.LabelExpression) bool {
+func (am *AgentManager) matchExpression(agentLabels map[string]string, expr *spec.LabelExpression) bool {
+	if expr == nil {
+		return false
+	}
 	agentValue, exists := agentLabels[expr.Key]
 
 	switch expr.Operator {
@@ -264,10 +267,11 @@ func (am *AgentManager) matchExpression(agentLabels map[string]string, expr spec
 func (am *AgentManager) convertStepToStepRun(req *StepExecutionRequest) (*agentv1.StepRun, error) {
 	// Resolve variables in step args if context is provided
 	var resolvedArgs map[string]any
-	if req.Context != nil && len(req.Step.Args) > 0 {
-		resolvedArgs = req.Context.ResolveVariables(req.Step.Args)
+	stepArgs := spec.StructAsMap(req.Step.Args)
+	if req.Context != nil && len(stepArgs) > 0 {
+		resolvedArgs = req.Context.ResolveVariables(stepArgs)
 	} else {
-		resolvedArgs = req.Step.Args
+		resolvedArgs = stepArgs
 	}
 
 	// Serialize args to JSON for passing via environment variable
@@ -421,7 +425,7 @@ func (am *AgentManager) buildCommands(step *spec.Step, ctx *ExecutionContext) ([
 	}
 
 	// Resolve params with variable substitution
-	resolvedParams := ctx.ResolveVariables(step.Args)
+	resolvedParams := ctx.ResolveVariables(spec.StructAsMap(step.Args))
 
 	// Prepare params JSON
 	paramsJSON, err := json.Marshal(resolvedParams)
@@ -605,7 +609,7 @@ func (am *AgentManager) WaitForStepRunCompletion(
 	ctx context.Context,
 	stepRunID string,
 	timeout time.Duration,
-	) (*StepExecutionResult, error) {
+) (*StepExecutionResult, error) {
 	if am.stepRunClient == nil {
 		return nil, fmt.Errorf("step run client is not initialized")
 	}

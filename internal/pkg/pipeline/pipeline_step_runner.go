@@ -73,7 +73,7 @@ func (r *StepRunner) Run(ctx context.Context) error {
 	// Determine retry attempts
 	retries := 1
 	if r.job.Retry != nil && r.job.Retry.MaxAttempts > 0 {
-		retries = r.job.Retry.MaxAttempts
+		retries = int(r.job.Retry.MaxAttempts)
 	}
 
 	var lastErr error
@@ -126,7 +126,7 @@ func (r *StepRunner) executeOnAgent(ctx context.Context) error {
 	// Find step index in job
 	stepIndex := -1
 	for i := range r.job.Steps {
-		if r.job.Steps[i].Name == r.step.Name {
+		if r.job.Steps[i] != nil && r.job.Steps[i].Name == r.step.Name {
 			stepIndex = i
 			break
 		}
@@ -200,7 +200,7 @@ func (r *StepRunner) executeBuiltin(ctx context.Context, builtinName string) err
 	env := r.ctx.ResolveStepEnv(r.job, r.step)
 
 	// Resolve params with variable substitution
-	resolvedParams := r.ctx.ResolveVariables(r.step.Args)
+	resolvedParams := r.ctx.ResolveVariables(spec.StructAsMap(r.step.Args))
 
 	// Apply builtin default config (from conf.d/plugins.toml -> [builtins.<name>])
 	// Merge strategy: defaults < step args.config
@@ -305,7 +305,7 @@ func (r *StepRunner) executePlugin(ctx context.Context) error {
 	env := r.ctx.ResolveStepEnv(r.job, r.step)
 
 	// Resolve params with variable substitution
-	resolvedParams := r.ctx.ResolveVariables(r.step.Args)
+	resolvedParams := r.ctx.ResolveVariables(spec.StructAsMap(r.step.Args))
 
 	// Prepare params JSON
 	paramsJSON, err := json.Marshal(resolvedParams)

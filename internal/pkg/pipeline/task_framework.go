@@ -176,7 +176,10 @@ func (tf *TaskFramework) queue(_ context.Context, task *Task) error {
 	tf.logger.Infow("task queued", "task", task.Name)
 	if tf.execCtx.TaskQueue != nil {
 		for i := range task.Job.Steps {
-			step := &task.Job.Steps[i]
+			step := task.Job.Steps[i]
+			if step == nil {
+				continue
+			}
 			if !step.RunOnAgent {
 				continue
 			}
@@ -190,7 +193,7 @@ func (tf *TaskFramework) queue(_ context.Context, task *Task) error {
 				StepRunId:  stepRunId,
 				Uses:       step.Uses,
 				Action:     step.Action,
-				Args:       step.Args,
+				Args:       spec.StructAsMap(step.Args),
 				Env:        tf.execCtx.ResolveStepEnv(task.Job, step),
 				Workspace:  tf.execCtx.StepWorkspace(task.Job.Name, step.Name),
 				Timeout:    step.Timeout,
@@ -217,7 +220,10 @@ func (tf *TaskFramework) wait(ctx context.Context, task *Task) error {
 
 	// Execute steps sequentially
 	for i := range task.Job.Steps {
-		step := &task.Job.Steps[i]
+		step := task.Job.Steps[i]
+		if step == nil {
+			continue
+		}
 		if err := tf.executeStep(ctx, task, step); err != nil {
 			// Handle failure notification
 			if task.Job.Notify != nil && task.Job.Notify.OnFailure != nil {
@@ -260,7 +266,7 @@ func (tf *TaskFramework) executeStep(ctx context.Context, task *Task, step *spec
 			task.RetryCount++
 			lastErr = tf.executeStepOnce(ctx, task, step)
 			return lastErr
-		}, retry.WithMaxAttempts(task.Job.Retry.MaxAttempts), retry.WithBackoff(retry.Fixed(delay)))
+		}, retry.WithMaxAttempts(int(task.Job.Retry.MaxAttempts)), retry.WithBackoff(retry.Fixed(delay)))
 		if err != nil {
 			return fmt.Errorf("step execution failed after retries: %w", lastErr)
 		}

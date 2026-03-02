@@ -401,6 +401,7 @@ CREATE TABLE IF NOT EXISTS `t_agent_config` (
 -- ================================================================
 
 -- 流水线定义表
+DROP TABLE IF EXISTS `t_pipeline`;
 CREATE TABLE IF NOT EXISTS `t_pipeline` (
   `id` INT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `pipeline_id` VARCHAR(64) NOT NULL COMMENT '流水线唯一标识',
@@ -408,36 +409,48 @@ CREATE TABLE IF NOT EXISTS `t_pipeline` (
   `name` VARCHAR(255) NOT NULL COMMENT '流水线名称',
   `description` TEXT DEFAULT NULL COMMENT '流水线描述',
   `repo_url` VARCHAR(512) DEFAULT NULL COMMENT '代码仓库URL',
-  `branch` VARCHAR(128) DEFAULT 'main' COMMENT '分支',
-  `status` TINYINT NOT NULL DEFAULT 1 COMMENT '流水线状态: 0-未知, 1-等待, 2-运行中, 3-成功, 4-失败, 5-已取消, 6-部分成功',
-  `trigger_type` TINYINT NOT NULL DEFAULT 1 COMMENT '触发类型: 0-未知, 1-手动, 2-Webhook, 3-定时, 4-API',
-  `cron` VARCHAR(128) DEFAULT NULL COMMENT 'Cron表达式(定时触发)',
-  `env` JSON DEFAULT NULL COMMENT '全局环境变量(JSON格式)',
+  `default_branch` VARCHAR(128) DEFAULT 'main' COMMENT '默认分支',
+  `pipeline_file_path` VARCHAR(512) NOT NULL COMMENT '流水线定义文件路径',
+  `status` TINYINT NOT NULL DEFAULT 1 COMMENT '流水线状态: 0-未知, 1-等待, 2-运行中, 3-成功, 4-失败, 5-已取消, 6-暂停',
+  `save_mode` TINYINT NOT NULL DEFAULT 1 COMMENT '保存模式: 1-直推, 2-PR/MR',
+  `pr_target_branch` VARCHAR(128) DEFAULT NULL COMMENT 'PR/MR 目标分支',
+  `metadata` JSON DEFAULT NULL COMMENT '扩展元数据(JSON格式)',
+  `last_sync_status` TINYINT NOT NULL DEFAULT 0 COMMENT '最近同步状态: 0-未知, 1-成功, 2-失败',
+  `last_sync_message` TEXT DEFAULT NULL COMMENT '最近同步消息',
+  `last_synced_at` DATETIME DEFAULT NULL COMMENT '最近同步时间',
+  `last_editor` VARCHAR(128) DEFAULT NULL COMMENT '最近编辑者',
+  `last_commit_sha` VARCHAR(64) DEFAULT NULL COMMENT '最近提交 SHA',
+  `last_save_request_id` VARCHAR(128) DEFAULT NULL COMMENT '最近保存请求幂等 ID',
   `total_runs` INT NOT NULL DEFAULT 0 COMMENT '总执行次数',
   `success_runs` INT NOT NULL DEFAULT 0 COMMENT '成功次数',
   `failed_runs` INT NOT NULL DEFAULT 0 COMMENT '失败次数',
   `created_by` VARCHAR(64) NOT NULL COMMENT '创建者用户ID',
   `is_enabled` TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用: 0-禁用, 1-启用',
-  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_pipeline_id` (`pipeline_id`),
   KEY `idx_project_id` (`project_id`),
   KEY `idx_name` (`name`(191)),
   KEY `idx_status` (`status`),
   KEY `idx_created_by` (`created_by`),
-  KEY `idx_is_enabled` (`is_enabled`)
+  KEY `idx_is_enabled` (`is_enabled`),
+  KEY `idx_last_save_request_id` (`last_save_request_id`(64))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='流水线定义表';
 
 -- 流水线执行记录表
+DROP TABLE IF EXISTS `t_pipeline_run`;
 CREATE TABLE IF NOT EXISTS `t_pipeline_run` (
   `id` INT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `run_id` VARCHAR(64) NOT NULL COMMENT '流水线执行唯一标识',
   `pipeline_id` VARCHAR(64) NOT NULL COMMENT '流水线ID',
+  `request_id` VARCHAR(128) DEFAULT NULL COMMENT '触发请求幂等 ID',
   `pipeline_name` VARCHAR(255) NOT NULL COMMENT '流水线名称(冗余)',
   `branch` VARCHAR(128) DEFAULT NULL COMMENT '分支',
   `commit_sha` VARCHAR(64) DEFAULT NULL COMMENT 'Commit SHA',
-  `status` TINYINT NOT NULL DEFAULT 1 COMMENT '执行状态: 0-未知, 1-等待, 2-运行中, 3-成功, 4-失败, 5-已取消, 6-部分成功',
+  `definition_commit_sha` VARCHAR(64) DEFAULT NULL COMMENT '定义文件对应 Commit SHA',
+  `definition_path` VARCHAR(512) DEFAULT NULL COMMENT '定义文件路径',
+  `status` TINYINT NOT NULL DEFAULT 1 COMMENT '执行状态: 0-未知, 1-等待, 2-运行中, 3-成功, 4-失败, 5-已取消, 6-暂停',
   `trigger_type` TINYINT NOT NULL DEFAULT 1 COMMENT '触发类型: 0-未知, 1-手动, 2-Webhook, 3-定时, 4-API',
   `triggered_by` VARCHAR(64) DEFAULT NULL COMMENT '触发者用户ID',
   `env` JSON DEFAULT NULL COMMENT '环境变量(JSON格式)',
@@ -450,11 +463,13 @@ CREATE TABLE IF NOT EXISTS `t_pipeline_run` (
   `start_time` DATETIME DEFAULT NULL COMMENT '开始时间',
   `end_time` DATETIME DEFAULT NULL COMMENT '结束时间',
   `duration` BIGINT DEFAULT NULL COMMENT '执行时长(毫秒)',
-  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_run_id` (`run_id`),
+  UNIQUE KEY `uk_pipeline_request_id` (`pipeline_id`, `request_id`),
   KEY `idx_pipeline_id` (`pipeline_id`),
+  KEY `idx_request_id` (`request_id`),
   KEY `idx_status` (`status`),
   KEY `idx_triggered_by` (`triggered_by`),
   KEY `idx_start_time` (`start_time`)

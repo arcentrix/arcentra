@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package pipeline.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/arcentrix/arcentra/api/pipeline/v1;pipelinev1";
+
+// Error defines a unified pipeline API error structure.
+message Error {
+  int32 code = 1;
+  string message = 2;
+  string type = 3;
+  google.protobuf.Struct details = 4;
+}

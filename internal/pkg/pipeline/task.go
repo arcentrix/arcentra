@@ -86,12 +86,15 @@ func (n *TaskNode) Task() *Task {
 
 // BuildDAG builds a DAG from pipeline jobs
 // Jobs with DependsOn field will create dependencies in the DAG
-func BuildDAG(jobs []spec.Job) (*dag.DAG, map[string]*Task, error) {
+func BuildDAG(jobs []*spec.Job) (*dag.DAG, map[string]*Task, error) {
 	tasks := make(map[string]*Task)
 
 	// Create tasks from jobs
 	for i := range jobs {
-		job := &jobs[i]
+		job := jobs[i]
+		if job == nil {
+			continue
+		}
 		task := &Task{
 			Name:         job.Name,
 			Job:          job,

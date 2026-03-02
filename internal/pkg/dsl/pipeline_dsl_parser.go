@@ -111,7 +111,7 @@ func (p *Parser) validate(pipeline *spec.Pipeline) error {
 
 	// Validate each job
 	for i, job := range pipeline.Jobs {
-		if err := p.validateJob(&job, i); err != nil {
+		if err := p.validateJob(job, i); err != nil {
 			return fmt.Errorf("job[%d]: %w", i, err)
 		}
 	}
@@ -133,7 +133,7 @@ func (p *Parser) validateJob(job *spec.Job, index int) error {
 
 	// Validate each step
 	for i, step := range job.Steps {
-		if err := p.validateStep(&step, i); err != nil {
+		if err := p.validateStep(step, i); err != nil {
 			return fmt.Errorf("step[%d]: %w", i, err)
 		}
 	}

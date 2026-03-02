@@ -41,6 +41,8 @@ type Services struct {
 	Role              *RoleService
 	ProjectMemberRepo repo.IProjectMemberRepository
 	StepRunRepo       repo.IStepRunRepository
+	ProjectRepo       repo.IProjectRepository
+	PipelineRepo      repo.IPipelineRepository
 	LogAggregator     *LogAggregator
 }
 
@@ -85,6 +87,8 @@ func NewServices(
 		Role:              roleService,
 		ProjectMemberRepo: repos.ProjectMember,
 		StepRunRepo:       repos.StepRun,
+		ProjectRepo:       repos.Project,
+		PipelineRepo:      repos.Pipeline,
 		LogAggregator:     logAggregator,
 	}
 }

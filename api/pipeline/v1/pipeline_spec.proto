@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package pipeline.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/arcentrix/arcentra/api/pipeline/v1;pipelinev1";
+
+// Spec is the pipeline specification.
+message Spec {
+  string namespace = 1;
+  string version = 2;
+  map<string, string> variables = 3;
+  Runtime runtime = 4;
+  google.protobuf.Struct meta = 5;
+  repeated Job jobs = 6;
+}
+
+// Runtime is the runtime specification.
+message Runtime {
+  string type = 1;
+  string image = 2;
+  map<string, string> env = 3;
+  Resources resources = 4;
+  google.protobuf.Struct config = 5;
+}
+
+// Resources is the resources specification.
+message Resources {
+  string cpu_request = 1;
+  string cpu_limit = 2;
+  string memory_request = 3;
+  string memory_limit = 4;
+}
+
+// Job is the job specification.
+message Job {
+  string name = 1;
+  string description = 2;
+  map<string, string> env = 3;
+  string concurrency = 4;
+  string timeout = 5;
+  Retry retry = 6;
+  string when = 7;
+  Source source = 8;
+  Approval approval = 9;
+  repeated Step steps = 10;
+  Target target = 11;
+  Notify notify = 12;
+  repeated Trigger triggers = 13;
+  repeated string dependsOn = 14;
+}
+
+// Retry is the retry specification.
+message Retry {
+  int32 max_attempts = 1;
+  string delay = 2;
+}
+
+// Step is the step specification.
+message Step {
+  string name = 1;
+  string uses = 2;
+  string action = 3;
+  google.protobuf.Struct args = 4;
+  map<string, string> env = 5;
+  bool continue_on_error = 6;
+  string timeout = 7;
+  string when = 8;
+  AgentSelector agent_selector = 9;
+  bool run_on_agent = 10;
+}
+
+// Source is the source specification.
+message Source {
+  string type = 1;
+  string repo = 2;
+  string branch = 3;
+  SourceAuth auth = 4;
+}
+
+// SourceAuth is the source authentication specification.
+message SourceAuth {
+  string username = 1;
+  string password = 2;
+  string token = 3;
+}
+
+// Approval is the approval specification.
+message Approval {
+  bool required = 1;
+  string type = 2;
+  string plugin = 3;
+  google.protobuf.Struct params = 4;
+}
+
+// Target is the target specification.
+message Target {
+  string type = 1;
+  google.protobuf.Struct config = 2;
+}
+
+// Notify is the notify specification.
+message Notify {
+  NotifyItem on_success = 1;
+  NotifyItem on_failure = 2;
+}
+
+// NotifyItem is the notify item specification.
+message NotifyItem {
+  string plugin = 1;
+  string action = 2;
+  google.protobuf.Struct params = 3;
+}
+
+// Trigger is the trigger specification.
+message Trigger {
+  string type = 1;
+  google.protobuf.Struct options = 2;
+}
+
+// AgentSelector is the agent selector specification.
+message AgentSelector {
+  map<string, string> match_labels = 1;
+  repeated LabelExpression match_expressions = 2;
+}
+
+// LabelExpression is the label expression specification.
+message LabelExpression {
+  string key = 1;
+  string operator = 2;
+  repeated string values = 3;
+}

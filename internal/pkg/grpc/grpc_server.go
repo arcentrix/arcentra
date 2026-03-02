@@ -91,7 +91,7 @@ func (s *ServerWrapper) Register(services *service.Services,
 	gatewayv1.RegisterGatewayServiceServer(s.svr, service.NewGatewayServiceImpl())
 	steprunv1.RegisterStepRunServiceServer(s.svr, &service.StepRunServiceImpl{})
 	streamv1.RegisterStreamServiceServer(s.svr, service.NewStreamService(redisClient, db, kafkaSettings))
-	pipelinev1.RegisterPipelineServiceServer(s.svr, &service.PipelineServiceImpl{})
+	pipelinev1.RegisterPipelineServiceServer(s.svr, service.NewPipelineServiceImpl(services))
 	// reflection（调试）
 	reflection.Register(s.svr)
 }

@@ -117,10 +117,10 @@ func TestDSLParser_ToJSON(t *testing.T) {
 	pipeline := &spec.Pipeline{
 		Namespace: "test",
 		Version:   "1.0.0",
-		Jobs: []spec.Job{
+		Jobs: []*spec.Job{
 			{
 				Name: "build",
-				Steps: []spec.Step{
+				Steps: []*spec.Step{
 					{
 						Name: "checkout",
 						Uses: "git@1.0.0",
@@ -166,10 +166,10 @@ func TestValidator_Validate(t *testing.T) {
 			pipeline: &spec.Pipeline{
 				Namespace: "test",
 				Version:   "1.0.0",
-				Jobs: []spec.Job{
+				Jobs: []*spec.Job{
 					{
 						Name: "build-job",
-						Steps: []spec.Step{
+						Steps: []*spec.Step{
 							{
 								Name: "checkout",
 								Uses: "git@1.0.0",
@@ -184,10 +184,10 @@ func TestValidator_Validate(t *testing.T) {
 			name: "invalid namespace",
 			pipeline: &spec.Pipeline{
 				Namespace: "test@invalid",
-				Jobs: []spec.Job{
+				Jobs: []*spec.Job{
 					{
 						Name: "build",
-						Steps: []spec.Step{
+						Steps: []*spec.Step{
 							{
 								Name: "checkout",
 								Uses: "git",
@@ -202,10 +202,10 @@ func TestValidator_Validate(t *testing.T) {
 			name: "duplicate job names",
 			pipeline: &spec.Pipeline{
 				Namespace: "test",
-				Jobs: []spec.Job{
+				Jobs: []*spec.Job{
 					{
 						Name: "build",
-						Steps: []spec.Step{
+						Steps: []*spec.Step{
 							{
 								Name: "checkout",
 								Uses: "git",
@@ -214,7 +214,7 @@ func TestValidator_Validate(t *testing.T) {
 					},
 					{
 						Name: "build",
-						Steps: []spec.Step{
+						Steps: []*spec.Step{
 							{
 								Name: "checkout",
 								Uses: "git",
@@ -229,11 +229,11 @@ func TestValidator_Validate(t *testing.T) {
 			name: "invalid timeout format",
 			pipeline: &spec.Pipeline{
 				Namespace: "test",
-				Jobs: []spec.Job{
+				Jobs: []*spec.Job{
 					{
 						Name:    "build",
 						Timeout: "invalid",
-						Steps: []spec.Step{
+						Steps: []*spec.Step{
 							{
 								Name: "checkout",
 								Uses: "git",

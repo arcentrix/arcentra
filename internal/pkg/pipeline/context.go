@@ -98,13 +98,13 @@ func NewContext(ctx context.Context, pipeline *spec.Pipeline, execCtx *Execution
 		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
 			pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
 			pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
-			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED,
-			pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED).
-		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
-			pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING). // Support retry
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
 		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED,
 			pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
-			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED) // Support pause and resume
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
+		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING) // Support retry
 
 	pc := &Context{
 		ctx:          ctx,
@@ -176,13 +176,13 @@ func (c *Context) WithContext(ctx context.Context) *Context {
 		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
 			pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
 			pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
-			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED,
-			pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED).
-		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
-			pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING).
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
 		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_PAUSED,
 			pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING,
-			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED)
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED).
+		Allow(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
+			pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING)
 
 	newCtx := &Context{
 		ctx:          ctx,

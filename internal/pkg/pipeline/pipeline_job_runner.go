@@ -78,7 +78,10 @@ func (r *JobRunner) Run(ctx context.Context) error {
 
 	// Execute steps sequentially
 	for i := range r.job.Steps {
-		step := &r.job.Steps[i]
+		step := r.job.Steps[i]
+		if step == nil {
+			continue
+		}
 		sr := NewStepRunner(r.ctx, r.job, step)
 		if err := sr.Run(ctx); err != nil {
 			// Handle failure notification
@@ -157,7 +160,7 @@ func (r *JobRunner) handleApproval(_ context.Context) error {
 
 	r.ctx.LogJob(r.job.Name, "waiting for approval...")
 
-	paramsJSON, err := r.ctx.MarshalParams(r.job.Approval.Params)
+	paramsJSON, err := r.ctx.MarshalParams(spec.StructAsMap(r.job.Approval.Params))
 	if err != nil {
 		return fmt.Errorf("marshal approval params: %w", err)
 	}
@@ -182,7 +185,7 @@ func (r *JobRunner) handleTarget(_ context.Context) error {
 		return fmt.Errorf("target plugin not found: %s: %w", r.job.Target.Type, err)
 	}
 
-	paramsJSON, err := r.ctx.MarshalParams(r.job.Target.Config)
+	paramsJSON, err := r.ctx.MarshalParams(spec.StructAsMap(r.job.Target.Config))
 	if err != nil {
 		return fmt.Errorf("marshal target params: %w", err)
 	}

@@ -195,6 +195,9 @@ func (rt *Router) routerGroup(r fiber.Router) {
 	// project
 	rt.projectRouter(r, auth)
 
+	// pipeline
+	rt.pipelineRouter(r, auth)
+
 	// secrets
 	rt.secretRouter(r, auth)
 
