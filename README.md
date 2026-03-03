@@ -1,134 +1,85 @@
+<div align="center">
+
 # Arcentra
 
-English | [简体中文](./README_zh_CN.md)
-> **A Cloud-native CI/CD architecture hub and automation platform**
+[![GitHub Repository](https://img.shields.io/badge/GitHub-Repository-black.svg?logo=github)](https://github.com/arcentrix/arcentra)
+[![Go Version](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg?logo=go)](https://go.dev/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-red.svg?logo=apache)](./LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/arcentrix/arcentra)](https://github.com/arcentrix/arcentra)
+[![GitHub Stars](https://img.shields.io/github/stars/arcentrix/arcentra?style=flat&logo=github&color=yellow&label=Star)](https://github.com/arcentrix/arcentra/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/arcentrix/arcentra?style=flat&logo=github&color=purple&label=Fork)](https://github.com/arcentrix/arcentra/network)
 
-Arcentra is an open-source, cloud-native **CI/CD control plane** designed to orchestrate pipelines, schedule agents, and unify automation workflows at scale.
+[[English](./README.md)] [[简体中文](./README_zh_CN.md)]
 
-Rather than being another pipeline runner, Arcentra focuses on providing a **stable architectural center** for modern engineering systems — enabling teams to build, evolve, and govern their CI/CD and automation practices over time.
+**A Cloud-native CI/CD Control Plane for modern engineering systems.**
 
----
+<p align="center"><em>Architecture Diagram: <a href="./docs/architecture.mermaid">docs/architecture.mermaid</a></em></p>
 
-## Project Vision
+</div>
 
-Modern engineering environments are increasingly complex: repositories multiply, pipelines fragment, and execution environments diversify. While tools are abundant, **a unifying control layer is often missing**.
+Arcentra is an open-source CI/CD control plane built for teams that need centralized orchestration with distributed execution.
+It provides a stable architectural center for pipeline governance, agent scheduling, and long-term automation evolution.
 
-Arcentra aims to fill this gap by acting as a **central coordination layer** for CI/CD and automation systems.
+## Why Arcentra
 
-Arcentra is designed for teams who:
-
-* Operate multiple repositories and pipelines
-* Require distributed agent / runner execution
-* Care about observability, auditability, and governance
-* Want a long-lived platform rather than a short-term tool
-
----
-
-## Name Origin
-
-**Arcentra** is derived from two roots:
-
-* **Arc** — Architecture, Flow, Lifecycle
-* **Centra** — Center, Control, Hub
-
-Together, the name represents:
-
-> **An architectural center for orchestrating engineering workflows**
-
----
+- **Control plane first**: model pipelines, runs, and state in one coherent system
+- **Distributed execution**: schedule work to heterogeneous agents and resource pools
+- **Cloud-native architecture**: designed for Kubernetes and scalable runtime topologies
+- **Governance-ready**: observability, auditability, and consistent workflow operations
+- **Extensible by design**: API-first and plugin-oriented integration model
 
 ## Core Capabilities
 
-Arcentra is built around a small set of durable abstractions:
+- **Pipeline orchestration**
+  - Multi-stage and DAG-based workflows
+  - Decoupled pipeline definition and execution
+- **Agent scheduling**
+  - Central control with distributed task execution
+  - Support for mixed runtime environments
+- **Observability and auditing**
+  - Unified logs, metrics, and trace-friendly integration
+  - End-to-end execution visibility
+- **Plugin and action model**
+  - Interface-driven extension points
+  - Evolvable execution model for platform growth
 
-* **Pipeline Orchestration**
+## Quick Start
 
-  * Multi-stage, conditional, and DAG-based workflows
-  * Decoupled pipeline definition and execution
+Prerequisites:
 
-* **Agent Scheduling**
+- Go (see `go.mod`)
+- Optional: Docker for containerized build and run workflows
 
-  * Centralized control with distributed execution
-  * Support for heterogeneous environments and resource pools
+Common commands:
 
-* **Control Plane Architecture**
+```bash
+make build
+make run
+make lint
+go test ./...
+```
 
-  * Unified modeling of pipelines, executions, and state
-  * Designed for platform-level governance
-
-* **Observability and Auditing**
-
-  * Native integration with logging, tracing, and metrics
-  * End-to-end visibility into workflow execution
-
-* **Extensibility**
-
-  * API-first and plugin-oriented design
-  * Easy integration with existing build, deploy, and ops tooling
-
----
-
-## Cloud-Native by Design
-
-Arcentra embraces cloud-native principles:
-
-* Kubernetes-native runtime model
-* Horizontally scalable agents
-* Deep integration with modern observability stacks
-* Suitable as a long-term engineering platform
-
----
-
-## Use Cases
-
-* Organization-wide CI/CD platforms
-* Multi-cluster or multi-cloud build and delivery systems
-* Teams evolving from tool-based pipelines to platform governance
-* Engineering organizations seeking consistency and visibility
-
----
+For full setup and contribution workflow, see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Project Status
 
-Arcentra is currently under **active development**. The project prioritizes:
-
-* Clear and stable core abstractions
-* Extensibility and long-term maintainability
-* Practical integration with real-world engineering systems
-
-Contributions, discussions, and design feedback are welcome.
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) (English) for development setup, checks, and the pull request process.
-
----
+Arcentra is under active development.
+Contributions, issue reports, feature proposals, and architecture discussions are welcome.
 
 ## Security
 
-For reporting security issues, see [SECURITY.md](./SECURITY.md) (English).
-
----
+To report security vulnerabilities, see [SECURITY.md](./SECURITY.md).
 
 ## Code of Conduct
 
-Please read and follow our [Code of Conduct](./CODE_OF_CONDUCT.md) to keep the community welcoming and respectful.
-
----
+Please read [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
 
 ## License
+
 Copyright 2025 The Arcentra Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+You may obtain a copy of the License at:
 
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+http://www.apache.org/licenses/LICENSE-2.0
