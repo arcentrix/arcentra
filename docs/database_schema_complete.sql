@@ -865,7 +865,7 @@ INSERT INTO `t_organization` (
 
 -- 插入组织成员
 INSERT INTO `t_organization_member` (`org_id`, `user_id`, `role`, `username`, `email`, `status`)
-VALUES 
+VALUES
   ('org_default', 'user_admin', 'owner', 'admin', 'admin@example.com', 1)
 ON DUPLICATE KEY UPDATE `role` = `role`;
 
@@ -919,7 +919,7 @@ ON DUPLICATE KEY UPDATE `name` = `name`;
 
 -- 插入团队成员
 INSERT INTO `t_team_member` (`team_id`, `user_id`, `role`, `username`)
-VALUES 
+VALUES
   ('team_dev', 'user_admin', 'owner', 'admin'),
   ('team_ops', 'user_admin', 'maintainer', 'admin')
 ON DUPLICATE KEY UPDATE `role` = `role`;
@@ -927,14 +927,14 @@ ON DUPLICATE KEY UPDATE `role` = `role`;
 -- 插入示例项目
 INSERT INTO `t_project` (
   `project_id`,
-  `org_id`, 
-  `name`, 
+  `org_id`,
+  `name`,
   `display_name`,
-  `namespace`, 
-  `description`, 
-  `repo_url`, 
-  `repo_type`, 
-  `default_branch`, 
+  `namespace`,
+  `description`,
+  `repo_url`,
+  `repo_type`,
+  `default_branch`,
   `auth_type`,
   `trigger_mode`,
   `build_config`,
@@ -995,19 +995,19 @@ INSERT INTO `t_project` (
 
 -- 插入项目成员
 INSERT INTO `t_project_member` (`project_id`, `user_id`, `role`, `username`, `source`)
-VALUES 
+VALUES
   ('proj_demo', 'user_admin', 'owner', 'admin', 'direct')
 ON DUPLICATE KEY UPDATE `role` = `role`;
 
 -- 插入项目团队关联
 INSERT INTO `t_project_team_relation` (`project_id`, `team_id`, `access`)
-VALUES 
+VALUES
   ('proj_demo', 'team_dev', 'admin')
 ON DUPLICATE KEY UPDATE `access` = `access`;
 
 -- 插入项目变量
 INSERT INTO `t_project_variable` (`variable_id`, `project_id`, `key`, `value`, `type`, `protected`, `masked`, `description`)
-VALUES 
+VALUES
   ('var_001', 'proj_demo', 'DATABASE_URL', 'mysql://user:pass@localhost:3306/db', 'secret', 1, 1, '数据库连接URL'),
   ('var_002', 'proj_demo', 'API_KEY', 'your-api-key-here', 'secret', 1, 1, 'API密钥'),
   ('var_003', 'proj_demo', 'BUILD_ENV', 'production', 'env', 0, 0, '构建环境')
@@ -1015,7 +1015,7 @@ ON DUPLICATE KEY UPDATE `key` = `key`;
 
 -- 插入团队变量
 INSERT INTO `t_team_variable` (`variable_id`, `team_id`, `key`, `value`, `type`, `protected`, `masked`, `description`)
-VALUES 
+VALUES
   ('team_var_001', 'team_dev', 'TEAM_API_KEY', 'dev-team-api-key-here', 'secret', 1, 1, '开发团队API密钥'),
   ('team_var_002', 'team_dev', 'DEPLOY_ENV', 'staging', 'env', 0, 0, '部署环境'),
   ('team_var_003', 'team_ops', 'OPS_NOTIFY_URL', 'https://notify.example.com/ops', 'env', 0, 0, '运维团队通知URL'),
@@ -1046,7 +1046,7 @@ VALUES (
 
 -- 插入官方插件来源
 INSERT INTO `t_plugin_source` (`source_id`, `name`, `source_type`, `repository`, `is_trusted`)
-VALUES 
+VALUES
   ('source_Arcentra_official', 'Arcentra Official', 'official', 'https://github.com/arcentrix/arcentra/plugins', 1),
   ('source_community', 'Community', 'community', 'https://plugins.arcentra.io', 0)
 ON DUPLICATE KEY UPDATE `name` = `name`;

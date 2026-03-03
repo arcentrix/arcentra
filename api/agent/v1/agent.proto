@@ -181,32 +181,32 @@ message StepRun {
   string job_name = 5;                    // Job name
   string step_name = 6;                  // Step name
   int32 step_index = 7;                  // Step index in job (0-based)
-  
+
   // Step execution configuration (plugin-based)
   string uses = 8;                       // Plugin identifier (required, from Step.uses)
   string action = 9;                     // Plugin action (optional, from Step.action)
   google.protobuf.Struct args = 10;      // Plugin parameters (from Step.args)
-  
+
   // Execution context
   map<string, string> env = 11;          // Environment variables
   string workspace = 12;                 // Working directory
   string timeout = 13;                   // Timeout (e.g., "30m", "1h")
-  
+
   // Runtime configuration
   string image = 14;                     // Docker image (optional, for containerized execution)
   map<string, string> secrets = 15;      // Secret information
-  
+
   // Artifact configuration
   repeated ArtifactConfig artifacts = 16; // Artifact configuration
-  
+
   // Execution control
   bool continue_on_error = 17;           // Continue execution even if step fails
   string when = 18;                      // Condition expression (evaluate before execution)
-  
+
   // Agent selection (for reference, already matched)
   AgentSelector agent_selector = 19;    // Agent selector that matched this agent
   bool run_on_agent = 20;               // Run on agent (if true, step runs on agent; if false, runs locally)
-  
+
   // Plugin requirements
   repeated PluginInfo plugins = 21;      // List of plugins required by step run
 }

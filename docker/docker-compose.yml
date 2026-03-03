@@ -33,7 +33,7 @@ services:
       - 8083:8083
     volumes:
       - ./conf.d:/conf.d
-  
+
   arcentra-agent:
     image: arcentrix/arcentra-agent:latest
     container_name: arcentra-agent

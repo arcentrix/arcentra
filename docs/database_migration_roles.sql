@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS `t_project_team_access` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目团队访问权限表';
 
 -- 7. 更新组织成员表，使用 role_id
-ALTER TABLE `t_organization_member` 
+ALTER TABLE `t_organization_member`
 CHANGE COLUMN `role` `role_id` VARCHAR(64) NOT NULL COMMENT '角色ID（引用 t_role）';
 
 -- 8. 插入内置项目角色

@@ -35,7 +35,7 @@ import (
     "context"
     "fmt"
     "time"
-    
+
     "github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 
@@ -95,7 +95,7 @@ defer queue.Stop()
 queue.Enqueue(&taskqueue.Task{
     Type:    "email",
     Payload: []byte("send email"),
-}, 
+},
     taskqueue.PriorityOpt(taskqueue.PriorityHigh),
     taskqueue.ProcessIn(5*time.Minute), // 5 分钟后执行
 )
@@ -345,16 +345,16 @@ queue.Enqueue(task,
 type TaskQueue interface {
     // 入队单个任务
     Enqueue(task *Task, opts ...Option) (*Result, error)
-    
+
     // 入队多个任务
     EnqueueBatch(tasks []*Task, opts ...Option) (*Result, error)
-    
+
     // 使用单任务处理器启动消费者
     Start(handler IHandler) error
-    
+
     // 使用批量处理器和聚合器启动消费者
     StartBatch(handler IBatchHandler, agg IAggregator) error
-    
+
     // 停止消费者
     Stop() error
 }

@@ -34,7 +34,7 @@ package main
 import (
     "context"
     "time"
-    
+
     "github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 
@@ -94,7 +94,7 @@ defer queue.Stop()
 queue.Enqueue(&taskqueue.Task{
     Type:    "email",
     Payload: []byte("send email"),
-}, 
+},
     taskqueue.PriorityOpt(taskqueue.PriorityHigh),
     taskqueue.ProcessIn(5*time.Minute), // Execute after 5 minutes
 )
@@ -344,16 +344,16 @@ queue.Enqueue(task,
 type TaskQueue interface {
     // Enqueue a single task
     Enqueue(task *Task, opts ...Option) (*Result, error)
-    
+
     // Enqueue multiple tasks
     EnqueueBatch(tasks []*Task, opts ...Option) (*Result, error)
-    
+
     // Start consumer with single task handler
     Start(handler IHandler) error
-    
+
     // Start consumer with batch handler and aggregator
     StartBatch(handler IBatchHandler, agg IAggregator) error
-    
+
     // Stop the consumer
     Stop() error
 }

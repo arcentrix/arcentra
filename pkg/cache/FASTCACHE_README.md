@@ -173,13 +173,13 @@ Get(params...)
 Check Local Cache (FastCache)
     ↓ (hit)
 Return ✓
-    
+
     ↓ (miss)
 Check Remote Cache (Redis)
     ↓ (hit)
 Update Local Cache (async)
 Return ✓
-    
+
     ↓ (miss)
 Query Database
     ↓
@@ -220,27 +220,27 @@ Return ✓
 
 ### 适合 FastCache 的场景
 
-✅ 单机应用  
-✅ 热点数据缓存  
-✅ 对性能要求极高  
-✅ 数据量较小  
-✅ 无需跨节点共享  
+✅ 单机应用
+✅ 热点数据缓存
+✅ 对性能要求极高
+✅ 数据量较小
+✅ 无需跨节点共享
 
 ### 适合 HybridCache 的场景
 
-✅ 分布式系统  
-✅ 高并发应用  
-✅ 需要缓存共享  
-✅ 性能和一致性要求平衡  
-✅ Redis 基础设施可用  
+✅ 分布式系统
+✅ 高并发应用
+✅ 需要缓存共享
+✅ 性能和一致性要求平衡
+✅ Redis 基础设施可用
 
 ### 适合 CachedQueryWithHybrid 的场景
 
-✅ 数据库查询优化  
-✅ API 响应缓存  
-✅ 用户信息缓存  
-✅ 配置数据缓存  
-✅ 计算结果缓存  
+✅ 数据库查询优化
+✅ API 响应缓存
+✅ 用户信息缓存
+✅ 配置数据缓存
+✅ 计算结果缓存
 
 ## 最佳实践
 
@@ -439,23 +439,23 @@ func GetUser(ctx context.Context, id int) (*User, error) {
         },
         1*time.Hour,
     )
-    
+
     return query.Get(ctx, id)
 }
 ```
 
 ## 常见问题 FAQ
 
-**Q: FastCache 和 Redis 应该如何选择？**  
+**Q: FastCache 和 Redis 应该如何选择？**
 A: 单机选 FastCache，分布式选 HybridCache 或 Redis。
 
-**Q: HybridCache 中本地和远程数据不一致怎么办？**  
+**Q: HybridCache 中本地和远程数据不一致怎么办？**
 A: 可以设置本地 TTL 比远程短，或增加同步频率。
 
-**Q: 如何监控缓存效果？**  
+**Q: 如何监控缓存效果？**
 A: 记录命中/未命中数，定期检查命中率。
 
-**Q: 大数据量场景下如何使用？**  
+**Q: 大数据量场景下如何使用？**
 A: 分层存储，热数据用缓存，冷数据用数据库。
 
 ## 参考资源

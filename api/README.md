@@ -239,7 +239,7 @@ package main
 import (
     "context"
     "log"
-    
+
     "google.golang.org/grpc"
     agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 )
@@ -251,10 +251,10 @@ func main() {
         log.Fatalf("Connection failed: %v", err)
     }
     defer conn.Close()
-    
+
     // Create client
     client := agentv1.NewAgentServiceClient(conn)
-    
+
     // Call Register RPC
     req := &agentv1.RegisterRequest{
         Ip:                "192.168.1.100",
@@ -267,12 +267,12 @@ func main() {
             "zone": "us-west-1",
         },
     }
-    
+
     resp, err := client.Register(context.Background(), req)
     if err != nil {
         log.Fatalf("Registration failed: %v", err)
     }
-    
+
     log.Printf("Registration successful, Agent ID: %s", resp.AgentId)
 }
 ```
@@ -286,7 +286,7 @@ import (
     "context"
     "log"
     "net"
-    
+
     "google.golang.org/grpc"
     agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 )
@@ -297,7 +297,7 @@ type agentService struct {
 
 func (s *agentService) Register(ctx context.Context, req *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
     log.Printf("Received registration request: %+v", req)
-    
+
     return &agentv1.RegisterResponse{
         Success:           true,
         Message:           "Registration successful",
@@ -311,10 +311,10 @@ func main() {
     if err != nil {
         log.Fatalf("Listen failed: %v", err)
     }
-    
+
     s := grpc.NewServer()
     agentv1.RegisterAgentServiceServer(s, &agentService{})
-    
+
     log.Println("gRPC service started on :50051")
     if err := s.Serve(lis); err != nil {
         log.Fatalf("Service failed to start: %v", err)
@@ -330,12 +330,12 @@ func streamStepRunStatus(client streamv1.StreamServiceClient, stepRunID string) 
     req := &streamv1.StreamStepRunStatusRequest{
         StepRunIds: []string{stepRunID},
     }
-    
+
     stream, err := client.StreamStepRunStatus(context.Background(), req)
     if err != nil {
         log.Fatalf("Failed to create stream: %v", err)
     }
-    
+
     for {
         resp, err := stream.Recv()
         if err == io.EOF {

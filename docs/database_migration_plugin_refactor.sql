@@ -7,7 +7,7 @@
 -- ==========================================
 
 -- 1. 添加新字段到 t_plugin 表
-ALTER TABLE t_plugin 
+ALTER TABLE t_plugin
 ADD COLUMN source VARCHAR(20) DEFAULT 'local' COMMENT '插件来源: local/market' AFTER checksum,
 ADD COLUMN s3_path VARCHAR(500) DEFAULT '' COMMENT 'S3存储路径' AFTER source,
 ADD COLUMN manifest JSON DEFAULT NULL COMMENT '插件清单' AFTER s3_path,

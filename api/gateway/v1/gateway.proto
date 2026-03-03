@@ -94,7 +94,7 @@ message IngestAck {
 
   uint64 last_accepted_seq = 3;             // Last accepted sequence number
   uint64 expected_seq = 4;                  // Expected sequence number
-  
+
   repeated uint64 rejected_seqs = 5;   // Rejected sequence numbers
 }
 

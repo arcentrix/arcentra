@@ -3,7 +3,7 @@
 # ================================================================
 # Plugin Management Script
 # Purpose: Build, package, checksum and test plugins
-# Usage: 
+# Usage:
 #   ./scripts/plugins.sh build      # Build plugins only
 #   ./scripts/plugins.sh package    # Package plugins only (requires build first)
 #   ./scripts/plugins.sh all        # Build and package (default)
@@ -97,10 +97,10 @@ package_plugins() {
         if [ -f "$plugin_path" ] && [ -x "$plugin_path" ] && [ "${plugin_path%.zip}" = "$plugin_path" ]; then
             plugin_name=$(basename "$plugin_path")
             plugin_base="$plugin_name"
-            
+
             # Find corresponding source directory
             src_dir=$(find "$PLUGINS_SRC_DIR" -type d -name "$plugin_base" | head -1)
-            
+
             # Check if manifest.json exists
             if [ -n "$src_dir" ] && [ -f "$src_dir/manifest.json" ]; then
                 zip_file="${PLUGINS_OUT_DIR}/${plugin_base}.zip"
@@ -123,7 +123,7 @@ package_plugins() {
 # Generate plugin checksum function
 generate_checksum() {
     local plugin_file="${2:-}"
-    
+
     if [ -z "$plugin_file" ]; then
         echo -e "${RED}Error: Please provide plugin file path${NC}"
         echo ""

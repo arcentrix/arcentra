@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS `t_team_variable` (
 
 -- 插入示例团队变量
 INSERT INTO `t_team_variable` (`variable_id`, `team_id`, `key`, `value`, `type`, `protected`, `masked`, `description`)
-VALUES 
+VALUES
   ('team_var_001', 'team_dev', 'TEAM_API_KEY', 'dev-team-api-key-here', 'secret', 1, 1, '开发团队API密钥'),
   ('team_var_002', 'team_dev', 'DEPLOY_ENV', 'staging', 'env', 0, 0, '部署环境'),
   ('team_var_003', 'team_ops', 'OPS_NOTIFY_URL', 'https://notify.example.com/ops', 'env', 0, 0, '运维团队通知URL'),

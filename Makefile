@@ -38,7 +38,7 @@ JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 
 PROTO_DIR ?= api
 ## Target name (also Dockerfile stage and binary name): arcentra / arcentra-agent
-TARGET ?= arcentra 
+TARGET ?= arcentra
 
 ## Container image name (override with IMG=repo/name:tag)
 IMG ?= arcentra:latest
