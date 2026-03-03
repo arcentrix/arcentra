@@ -24,8 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arcentrix/arcentra/internal/engine/repo"
-	"github.com/arcentrix/arcentra/internal/engine/service"
+	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/bytedance/sonic"

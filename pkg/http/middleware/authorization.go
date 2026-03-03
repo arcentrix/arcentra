@@ -19,7 +19,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/arcentrix/arcentra/internal/engine/consts"
+	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/http/jwt"

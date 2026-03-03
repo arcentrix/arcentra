@@ -15,8 +15,8 @@
 package grpc
 
 import (
-	"github.com/arcentrix/arcentra/internal/engine/repo"
-	"github.com/arcentrix/arcentra/internal/engine/service"
+	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc/interceptor"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/google/wire"

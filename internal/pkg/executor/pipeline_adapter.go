@@ -17,7 +17,7 @@ package executor
 import (
 	"context"
 
-	"github.com/arcentrix/arcentra/internal/engine/config"
+	"github.com/arcentrix/arcentra/internal/control/config"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/plugin"
 )

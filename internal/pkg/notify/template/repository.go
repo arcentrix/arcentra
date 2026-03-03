@@ -18,8 +18,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/arcentrix/arcentra/internal/engine/model"
-	"github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/bytedance/sonic"
 )
 

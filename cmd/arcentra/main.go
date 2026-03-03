@@ -17,7 +17,7 @@ package main
 import (
 	"flag"
 
-	"github.com/arcentrix/arcentra/internal/engine/bootstrap"
+	"github.com/arcentrix/arcentra/internal/control/bootstrap"
 	_ "github.com/arcentrix/arcentra/pkg/plugins/git"
 	_ "github.com/arcentrix/arcentra/pkg/plugins/svn"
 )

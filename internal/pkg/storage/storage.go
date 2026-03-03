@@ -22,8 +22,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	storagemodel "github.com/arcentrix/arcentra/internal/engine/model"
-	storagerepo "github.com/arcentrix/arcentra/internal/engine/repo"
+	storagemodel "github.com/arcentrix/arcentra/internal/control/model"
+	storagerepo "github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/pkg/log"
 )
 

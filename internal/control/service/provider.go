@@ -12,25 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package storage
+package service
 
 import (
-	"context"
-
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/internal/pkg/storage"
+	"github.com/arcentrix/arcentra/pkg/cache"
+	"github.com/arcentrix/arcentra/pkg/database"
+	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/google/wire"
 )
 
-// ProviderSet 提供存储层相关的依赖
+// ProviderSet 提供服务层相关的依赖
 var ProviderSet = wire.NewSet(
-	ProvideStorageFromDB,
+	ProvideServices,
 )
 
-// ProvideStorageFromDB 从数据库提供存储提供者
-func ProvideStorageFromDB(repos *repo.Repositories) (IStorage, error) {
-	dbProvider, err := NewStorageDBProvider(context.Background(), repos.Storage)
-	if err != nil {
-		return nil, err
-	}
-	return dbProvider.GetStorageProvider()
+// ProvideServices 提供统一的 Services 实例
+func ProvideServices(
+	db database.IDatabase,
+	cacheStore cache.ICache,
+	repos *repo.Repositories,
+	pluginManager *plugin.Manager,
+	storageProvider storage.IStorage,
+) *Services {
+	return NewServices(db, cacheStore, repos, pluginManager, storageProvider)
 }

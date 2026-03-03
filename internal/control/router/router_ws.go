@@ -12,25 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package storage
+package router
 
 import (
-	"context"
-
-	"github.com/arcentrix/arcentra/internal/control/repo"
-	"github.com/google/wire"
+	"github.com/arcentrix/arcentra/internal/control/service"
+	"github.com/arcentrix/arcentra/pkg/ws"
+	"github.com/gofiber/fiber/v2"
 )
 
-// ProviderSet 提供存储层相关的依赖
-var ProviderSet = wire.NewSet(
-	ProvideStorageFromDB,
-)
-
-// ProvideStorageFromDB 从数据库提供存储提供者
-func ProvideStorageFromDB(repos *repo.Repositories) (IStorage, error) {
-	dbProvider, err := NewStorageDBProvider(context.Background(), repos.Storage)
-	if err != nil {
-		return nil, err
-	}
-	return dbProvider.GetStorageProvider()
+// wsRouter WebSocket路由
+func (rt *Router) wsRouter(r fiber.Router, auth fiber.Handler) {
+	// WebSocket
+	wsHub := ws.NewHub()
+	kafkaCfg := rt.AppConf.MessageQueue.Kafka
+	wsHandle := service.NewWSHandle(wsHub, rt.Services.LogAggregator, rt.Services.StepRunRepo, kafkaCfg)
+	r.Get("/ws", auth, ws.Handle(wsHub, wsHandle))
 }

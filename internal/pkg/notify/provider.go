@@ -17,7 +17,7 @@ package notify
 import (
 	"context"
 
-	"github.com/arcentrix/arcentra/internal/engine/repo"
+	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/google/wire"
 )

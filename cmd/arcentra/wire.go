@@ -17,11 +17,11 @@
 package main
 
 import (
-	"github.com/arcentrix/arcentra/internal/engine/bootstrap"
-	"github.com/arcentrix/arcentra/internal/engine/config"
-	"github.com/arcentrix/arcentra/internal/engine/repo"
-	"github.com/arcentrix/arcentra/internal/engine/router"
-	"github.com/arcentrix/arcentra/internal/engine/service"
+	"github.com/arcentrix/arcentra/internal/control/bootstrap"
+	"github.com/arcentrix/arcentra/internal/control/config"
+	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/internal/control/router"
+	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
 	"github.com/arcentrix/arcentra/internal/pkg/storage"
 	"github.com/arcentrix/arcentra/pkg/cache"
