@@ -13,13 +13,18 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
+const (
+	defaultOutputStdout = "stdout"
+	defaultLogLevelInfo = "INFO"
+)
+
 // TestSetDefaults verifies default logger configuration.
 func TestSetDefaults(t *testing.T) {
 	conf := SetDefaults()
-	if conf.Output != "stdout" {
+	if conf.Output != defaultOutputStdout {
 		t.Fatalf("expected output stdout, got %s", conf.Output)
 	}
-	if conf.Level != "INFO" {
+	if conf.Level != defaultLogLevelInfo {
 		t.Fatalf("expected level INFO, got %s", conf.Level)
 	}
 	if conf.Filename == "" {

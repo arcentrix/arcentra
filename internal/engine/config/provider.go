@@ -45,8 +45,8 @@ func ProvideConf(configPath string) *AppConfig {
 }
 
 // ProvideHttpConfig 提供 HTTP 配置
-func ProvideHttpConfig(appConf *AppConfig) *http.Http {
-	httpConfig := &appConf.Http
+func ProvideHttpConfig(appConf *AppConfig) *http.HTTP {
+	httpConfig := &appConf.HTTP
 	httpConfig.SetDefaults()
 	return httpConfig
 }

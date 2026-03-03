@@ -35,13 +35,21 @@ func (rt *Router) identityRouter(r fiber.Router, auth fiber.Handler) {
 	identityGroup := r.Group("/identity")
 	{
 		// Provider resource management (authentication required)
-		identityGroup.Get("/providers", auth, rt.listProviders)               // GET /identity/providers - list all providers (supports ?type=xxx filter)
-		identityGroup.Post("/providers", auth, rt.createProvider)             // POST /identity/providers - create provider
-		identityGroup.Get("/providers/types", auth, rt.listProviderTypes)     // GET /identity/providers/types - list all provider types
-		identityGroup.Get("/providers/:name", auth, rt.getProvider)           // GET /identity/providers/:name - get specific provider
-		identityGroup.Put("/providers/:name", auth, rt.updateProvider)        // PUT /identity/providers/:name - update provider
-		identityGroup.Put("/providers/:name/toggle", auth, rt.toggleProvider) // PUT /identity/providers/:name/toggle - toggle enabled status
-		identityGroup.Delete("/providers/:name", auth, rt.deleteProvider)     // DELETE /identity/providers/:name - delete provider
+		identityGroup.Get(
+			"/providers",
+			auth,
+			rt.listProviders,
+		) // GET /identity/providers - list all providers (supports ?type=xxx filter)
+		identityGroup.Post("/providers", auth, rt.createProvider)         // POST /identity/providers - create provider
+		identityGroup.Get("/providers/types", auth, rt.listProviderTypes) // GET /identity/providers/types - list all provider types
+		identityGroup.Get("/providers/:name", auth, rt.getProvider)       // GET /identity/providers/:name - get specific provider
+		identityGroup.Put("/providers/:name", auth, rt.updateProvider)    // PUT /identity/providers/:name - update provider
+		identityGroup.Put(
+			"/providers/:name/toggle",
+			auth,
+			rt.toggleProvider,
+		) // PUT /identity/providers/:name/toggle - toggle enabled status
+		identityGroup.Delete("/providers/:name", auth, rt.deleteProvider) // DELETE /identity/providers/:name - delete provider
 
 		// Authentication flow (no authentication required)
 		identityGroup.Get("/authorize/:provider", rt.authorize)   // GET /identity/authorize/:provider - initiate authorization (OAuth/OIDC)
@@ -105,9 +113,9 @@ func (rt *Router) callback(c *fiber.Ctx) error {
 		Email:    userInfo.Email,
 		Password: "", // OAuth 登录不需要密码
 	}
-	loginResp, err := userService.Login(loginReq, rt.Http.Auth)
+	loginResp, err := userService.Login(loginReq, rt.HTTP.Auth)
 	if err != nil {
-		log.Errorw("OAuth auto login failed", "provider", providerName, "userId", userInfo.UserId, "error", err)
+		log.Errorw("OAuth auto login failed", "provider", providerName, "userId", userInfo.UserID, "error", err)
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, fmt.Sprintf("OAuth login failed: %v", err), c.Path())
 	}
 
@@ -117,7 +125,7 @@ func (rt *Router) callback(c *fiber.Ctx) error {
 		expireAt = time.Unix(expireAtUnix, 0)
 	} else {
 		// 如果解析失败，使用默认过期时间（AccessExpire 分钟）
-		expireAt = time.Now().Add(rt.Http.Auth.AccessExpire)
+		expireAt = time.Now().Add(rt.HTTP.Auth.AccessExpire)
 	}
 
 	// 从数据库获取 cookie path，如果获取失败则使用默认值 "/"
@@ -136,7 +144,7 @@ func (rt *Router) callback(c *fiber.Ctx) error {
 	})
 
 	// 设置 refreshToken cookie（HTTP-only）
-	refreshExpireAt := time.Now().Add(rt.Http.Auth.RefreshExpire)
+	refreshExpireAt := time.Now().Add(rt.HTTP.Auth.RefreshExpire)
 	c.Cookie(&fiber.Cookie{
 		Name:     "refreshToken",
 		Value:    loginResp.Token["refreshToken"],
@@ -188,7 +196,7 @@ func (rt *Router) listProviders(c *fiber.Ctx) error {
 	case []model.Identity:
 		for _, integration := range v {
 			response = append(response, ProviderResponse{
-				ProviderId:   integration.ProviderId,
+				ProviderId:   integration.ProviderID,
 				Name:         integration.Name,
 				ProviderType: integration.ProviderType,
 				Description:  integration.Description,
@@ -265,9 +273,9 @@ func (rt *Router) ldapLogin(c *fiber.Ctx) error {
 		Email:    userInfo.Email,
 		Password: "", // LDAP login: password already verified, use empty for token generation
 	}
-	loginResp, err := userService.Login(loginReq, rt.Http.Auth)
+	loginResp, err := userService.Login(loginReq, rt.HTTP.Auth)
 	if err != nil {
-		log.Errorw("LDAP auto login failed", "provider", providerName, "userId", userInfo.UserId, "error", err)
+		log.Errorw("LDAP auto login failed", "provider", providerName, "userId", userInfo.UserID, "error", err)
 		return httpx.WithRepErrMsg(c, httpx.Failed.Code, fmt.Sprintf("failed to generate token: %v", err), c.Path())
 	}
 

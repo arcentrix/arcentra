@@ -25,6 +25,12 @@ import (
 	"github.com/arcentrix/arcentra/pkg/plugin"
 )
 
+const (
+	testMetadataValue  = "value"
+	testExecutorHTTP   = "http"
+	testExecutorPlugin = "plugin"
+)
+
 func TestExecutorManager(t *testing.T) {
 	manager := NewExecutorManager()
 
@@ -369,7 +375,7 @@ func TestUnifiedExecutor_ExecuteRemotely(t *testing.T) {
 				ExitCode:  0,
 				StartTime: time.Now(),
 				EndTime:   time.Now().Add(time.Second),
-				Metrics:   map[string]string{"key": "value"},
+				Metrics:   map[string]string{"key": testMetadataValue},
 			}, nil
 		},
 	}
@@ -388,7 +394,7 @@ func TestUnifiedExecutor_ExecuteRemotely(t *testing.T) {
 		Job:       &JobInfo{Name: "test-job"},
 		Pipeline:  &PipelineInfo{Namespace: "test-ns"},
 		Workspace: "/tmp/workspace",
-		Env:       map[string]string{"KEY": "value"},
+		Env:       map[string]string{"KEY": testMetadataValue},
 	}
 
 	result, err := exec.Execute(context.Background(), req)
@@ -401,7 +407,7 @@ func TestUnifiedExecutor_ExecuteRemotely(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Errorf("expected exit code 0, got %d", result.ExitCode)
 	}
-	if result.Metadata["key"] != "value" {
+	if result.Metadata["key"] != testMetadataValue {
 		t.Error("expected metadata to be set")
 	}
 }
@@ -430,7 +436,7 @@ func TestUnifiedExecutor_ExecuteRemotely_NoRemoteExecutor(t *testing.T) {
 func TestUnifiedExecutor_ExecuteLocally(t *testing.T) {
 	mockPlugin := &mockPlugin{
 		name: "test-plugin",
-		executeFunc: func(action string, params, opts json.RawMessage) (json.RawMessage, error) {
+		executeFunc: func(_ string, params, opts json.RawMessage) (json.RawMessage, error) {
 			result := map[string]any{
 				"success":   true,
 				"exit_code": 0,
@@ -454,12 +460,12 @@ func TestUnifiedExecutor_ExecuteLocally(t *testing.T) {
 			Uses:        "test-plugin",
 			Action:      "Execute",
 			RunRemotely: false,
-			Args:        map[string]any{"key": "value"},
+			Args:        map[string]any{"key": testMetadataValue},
 		},
 		Job:       &JobInfo{Name: "test-job"},
 		Pipeline:  &PipelineInfo{Namespace: "test-ns"},
 		Workspace: "/tmp/workspace",
-		Env:       map[string]string{"KEY": "value"},
+		Env:       map[string]string{"KEY": testMetadataValue},
 	}
 
 	result, err := exec.Execute(context.Background(), req)
@@ -525,8 +531,8 @@ func TestUnifiedExecutor_ExecuteLocally_PluginNotFound(t *testing.T) {
 func TestPluginExecutor_Name(t *testing.T) {
 	mockPluginMgr := &mockPluginManager{}
 	exec := NewPluginExecutor(mockPluginMgr.toPluginManager(), log.Logger{})
-	if exec.Name() != "plugin" {
-		t.Errorf("expected name 'plugin', got '%s'", exec.Name())
+	if exec.Name() != testExecutorPlugin {
+		t.Errorf("expected name '%s', got '%s'", testExecutorPlugin, exec.Name())
 	}
 }
 
@@ -578,7 +584,7 @@ func TestPluginExecutor_CanExecute(t *testing.T) {
 func TestPluginExecutor_Execute(t *testing.T) {
 	mockPlugin := &mockPlugin{
 		name: "test-plugin",
-		executeFunc: func(action string, params, opts json.RawMessage) (json.RawMessage, error) {
+		executeFunc: func(_ string, params, opts json.RawMessage) (json.RawMessage, error) {
 			result := map[string]any{
 				"success":   true,
 				"exit_code": 0,
@@ -602,10 +608,10 @@ func TestPluginExecutor_Execute(t *testing.T) {
 			Uses:        "test-plugin",
 			Action:      "Execute",
 			RunRemotely: false,
-			Args:        map[string]any{"key": "value"},
+			Args:        map[string]any{"key": testMetadataValue},
 		},
 		Workspace: "/tmp/workspace",
-		Env:       map[string]string{"KEY": "value"},
+		Env:       map[string]string{"KEY": testMetadataValue},
 		Options: &ExecutionOptions{
 			Timeout: 30 * time.Second,
 		},
@@ -685,7 +691,7 @@ func TestPluginExecutor_Execute_HTTPExecution(t *testing.T) {
 			},
 		},
 		Workspace: "/tmp/workspace",
-		Env:       map[string]string{"KEY": "value"},
+		Env:       map[string]string{"KEY": testMetadataValue},
 	}
 
 	// HTTP 执行会失败（因为没有真实的 HTTP 服务器），但应该走 HTTP 执行路径
@@ -694,13 +700,13 @@ func TestPluginExecutor_Execute_HTTPExecution(t *testing.T) {
 	// 检查是否返回了 HTTP 相关的错误或结果
 	if err == nil && result != nil {
 		// 如果成功，应该是 HTTP 执行的结果
-		if result.ExecutorName != "http" {
-			t.Errorf("expected executor name 'http', got '%s'", result.ExecutorName)
+		if result.ExecutorName != testExecutorHTTP {
+			t.Errorf("expected executor name '%s', got '%s'", testExecutorHTTP, result.ExecutorName)
 		}
 	} else if err != nil {
 		// HTTP 执行失败是预期的（没有真实服务器），但错误应该来自 HTTP 执行器
-		if result != nil && result.ExecutorName != "http" {
-			t.Errorf("expected executor name 'http', got '%s'", result.ExecutorName)
+		if result != nil && result.ExecutorName != testExecutorHTTP {
+			t.Errorf("expected executor name '%s', got '%s'", testExecutorHTTP, result.ExecutorName)
 		}
 	}
 }
@@ -708,7 +714,7 @@ func TestPluginExecutor_Execute_HTTPExecution(t *testing.T) {
 func TestPluginExecutor_Execute_ShellExecution(t *testing.T) {
 	mockPlugin := &mockPlugin{
 		name: "shell-plugin",
-		executeFunc: func(action string, params, opts json.RawMessage) (json.RawMessage, error) {
+		executeFunc: func(_ string, params, opts json.RawMessage) (json.RawMessage, error) {
 			result := map[string]any{
 				"success":   true,
 				"exit_code": 0,
@@ -739,7 +745,7 @@ func TestPluginExecutor_Execute_ShellExecution(t *testing.T) {
 			},
 		},
 		Workspace: "/tmp/workspace",
-		Env:       map[string]string{"KEY": "value"},
+		Env:       map[string]string{"KEY": testMetadataValue},
 	}
 
 	result, err := exec.Execute(context.Background(), req)
@@ -749,8 +755,8 @@ func TestPluginExecutor_Execute_ShellExecution(t *testing.T) {
 	if !result.Success {
 		t.Error("expected success")
 	}
-	if result.ExecutorName != "plugin" {
-		t.Errorf("expected executor name 'plugin', got '%s'", result.ExecutorName)
+	if result.ExecutorName != testExecutorPlugin {
+		t.Errorf("expected executor name '%s', got '%s'", testExecutorPlugin, result.ExecutorName)
 	}
 	if result.Output != "shell output" {
 		t.Errorf("expected output 'shell output', got '%s'", result.Output)
@@ -760,7 +766,7 @@ func TestPluginExecutor_Execute_ShellExecution(t *testing.T) {
 func TestPluginExecutor_Execute_HTTPExecution_EmptyURL(t *testing.T) {
 	mockPlugin := &mockPlugin{
 		name: "test-plugin",
-		executeFunc: func(action string, params, opts json.RawMessage) (json.RawMessage, error) {
+		executeFunc: func(_ string, params, opts json.RawMessage) (json.RawMessage, error) {
 			result := map[string]any{
 				"success":   true,
 				"exit_code": 0,
@@ -794,8 +800,8 @@ func TestPluginExecutor_Execute_HTTPExecution_EmptyURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.ExecutorName != "plugin" {
-		t.Errorf("expected executor name 'plugin' (Shell execution), got '%s'", result.ExecutorName)
+	if result.ExecutorName != testExecutorPlugin {
+		t.Errorf("expected executor name '%s' (Shell execution), got '%s'", testExecutorPlugin, result.ExecutorName)
 	}
 }
 
@@ -803,7 +809,7 @@ func TestPipelineAdapter_ExecuteStep(t *testing.T) {
 	executed := false
 	mockExec := &mockExecutor{
 		name: "test",
-		canExecute: func(req *ExecutionRequest) bool {
+		canExecute: func(_ *ExecutionRequest) bool {
 			return true
 		},
 		executeFunc: func(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
@@ -829,7 +835,7 @@ func TestPipelineAdapter_ExecuteStep(t *testing.T) {
 		job,
 		step,
 		"/tmp/workspace",
-		map[string]string{"KEY": "value"},
+		map[string]string{"KEY": testMetadataValue},
 		nil,
 	)
 	if err != nil {
@@ -847,7 +853,7 @@ func TestPipelineAdapter_ExecuteStep_WithOptions(t *testing.T) {
 	manager := NewExecutorManager()
 	mockExec := &mockExecutor{
 		name: "test",
-		canExecute: func(req *ExecutionRequest) bool {
+		canExecute: func(_ *ExecutionRequest) bool {
 			return true
 		},
 		executeFunc: func(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
@@ -887,7 +893,7 @@ func TestPipelineAdapter_ExecuteStep_WithOptions(t *testing.T) {
 }
 
 func TestConvertPipelineInfo(t *testing.T) {
-	info := ConvertPipelineInfo("test-ns", "v1.0.0", map[string]string{"key": "value"})
+	info := ConvertPipelineInfo("test-ns", "v1.0.0", map[string]string{"key": testMetadataValue})
 
 	if info.Namespace != "test-ns" {
 		t.Errorf("expected namespace 'test-ns', got '%s'", info.Namespace)
@@ -895,13 +901,13 @@ func TestConvertPipelineInfo(t *testing.T) {
 	if info.Version != "v1.0.0" {
 		t.Errorf("expected version 'v1.0.0', got '%s'", info.Version)
 	}
-	if info.Variables["key"] != "value" {
+	if info.Variables["key"] != testMetadataValue {
 		t.Errorf("expected variable key='value', got '%s'", info.Variables["key"])
 	}
 }
 
 func TestConvertJobInfo(t *testing.T) {
-	job := ConvertJobInfo("test-job", "test description", map[string]string{"KEY": "value"}, 3, "5s")
+	job := ConvertJobInfo("test-job", "test description", map[string]string{"KEY": testMetadataValue}, 3, "5s")
 
 	if job.Name != "test-job" {
 		t.Errorf("expected name 'test-job', got '%s'", job.Name)
@@ -909,7 +915,7 @@ func TestConvertJobInfo(t *testing.T) {
 	if job.Description != "test description" {
 		t.Errorf("expected description 'test description', got '%s'", job.Description)
 	}
-	if job.Env["KEY"] != "value" {
+	if job.Env["KEY"] != testMetadataValue {
 		t.Errorf("expected env KEY='value', got '%s'", job.Env["KEY"])
 	}
 	if job.Retry == nil {
@@ -940,8 +946,8 @@ func TestConvertStepInfo(t *testing.T) {
 		"test-step",
 		"test-plugin",
 		"test-action",
-		map[string]any{"key": "value"},
-		map[string]string{"KEY": "value"},
+		map[string]any{"key": testMetadataValue},
+		map[string]string{"KEY": testMetadataValue},
 		"30s",
 		true,
 		selector,
@@ -956,10 +962,10 @@ func TestConvertStepInfo(t *testing.T) {
 	if step.Action != "test-action" {
 		t.Errorf("expected action 'test-action', got '%s'", step.Action)
 	}
-	if step.Args["key"] != "value" {
+	if step.Args["key"] != testMetadataValue {
 		t.Errorf("expected args key='value', got '%v'", step.Args["key"])
 	}
-	if step.Env["KEY"] != "value" {
+	if step.Env["KEY"] != testMetadataValue {
 		t.Errorf("expected env KEY='value', got '%s'", step.Env["KEY"])
 	}
 	if step.Timeout != "30s" {
@@ -1050,7 +1056,7 @@ func (m *mockPlugin) Repository() string {
 	return "https://github.com/test/mock-plugin"
 }
 
-func (m *mockPlugin) Init(config json.RawMessage) error {
+func (m *mockPlugin) Init(_ json.RawMessage) error {
 	return nil
 }
 

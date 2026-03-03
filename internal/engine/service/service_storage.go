@@ -40,7 +40,7 @@ func (ss *StorageService) CreateStorageConfig(ctx context.Context, req *CreateSt
 	}
 
 	storageConfig := &model.StorageConfig{
-		StorageId:   req.StorageId,
+		StorageId:   req.StorageID,
 		Name:        req.Name,
 		StorageType: req.StorageType,
 		Config:      req.Config,
@@ -54,7 +54,7 @@ func (ss *StorageService) CreateStorageConfig(ctx context.Context, req *CreateSt
 	}
 
 	if req.IsDefault == 1 {
-		if err := ss.storageRepo.SetDefault(ctx, req.StorageId); err != nil {
+		if err := ss.storageRepo.SetDefault(ctx, req.StorageID); err != nil {
 			return nil, fmt.Errorf("failed to set as default storage config: %w", err)
 		}
 	}
@@ -69,7 +69,7 @@ func (ss *StorageService) UpdateStorageConfig(ctx context.Context, req *UpdateSt
 	}
 
 	storageConfig := &model.StorageConfig{
-		StorageId:   req.StorageId,
+		StorageId:   req.StorageID,
 		Name:        req.Name,
 		StorageType: req.StorageType,
 		Config:      req.Config,
@@ -83,7 +83,7 @@ func (ss *StorageService) UpdateStorageConfig(ctx context.Context, req *UpdateSt
 	}
 
 	if req.IsDefault == 1 {
-		if err := ss.storageRepo.SetDefault(ctx, req.StorageId); err != nil {
+		if err := ss.storageRepo.SetDefault(ctx, req.StorageID); err != nil {
 			return nil, fmt.Errorf("failed to set as default storage config: %w", err)
 		}
 	}
@@ -92,8 +92,8 @@ func (ss *StorageService) UpdateStorageConfig(ctx context.Context, req *UpdateSt
 }
 
 // GetStorageConfig returns storage config by storageId.
-func (ss *StorageService) GetStorageConfig(ctx context.Context, storageId string) (*model.StorageConfig, error) {
-	return ss.storageRepo.Get(ctx, storageId)
+func (ss *StorageService) GetStorageConfig(ctx context.Context, storageID string) (*model.StorageConfig, error) {
+	return ss.storageRepo.Get(ctx, storageID)
 }
 
 // GetDefaultStorageConfig returns default storage config.
@@ -107,13 +107,13 @@ func (ss *StorageService) ListStorageConfigs(ctx context.Context) ([]model.Stora
 }
 
 // DeleteStorageConfig deletes storage config.
-func (ss *StorageService) DeleteStorageConfig(ctx context.Context, storageId string) error {
-	return ss.storageRepo.Delete(ctx, storageId)
+func (ss *StorageService) DeleteStorageConfig(ctx context.Context, storageID string) error {
+	return ss.storageRepo.Delete(ctx, storageID)
 }
 
 // SetDefaultStorageConfig sets default storage config.
-func (ss *StorageService) SetDefaultStorageConfig(ctx context.Context, storageId string) error {
-	return ss.storageRepo.SetDefault(ctx, storageId)
+func (ss *StorageService) SetDefaultStorageConfig(ctx context.Context, storageID string) error {
+	return ss.storageRepo.SetDefault(ctx, storageID)
 }
 
 // validateStorageConfig 验证存储配置
@@ -234,7 +234,7 @@ func (ss *StorageService) validateCOSConfig(config *model.COSConfig) error {
 }
 
 type CreateStorageConfigRequest struct {
-	StorageId   string `json:"storageId" binding:"required"`
+	StorageID   string `json:"storageId" binding:"required"`
 	Name        string `json:"name" binding:"required"`
 	StorageType string `json:"storageType" binding:"required"`
 	Config      []byte `json:"config" binding:"required"`
@@ -243,7 +243,7 @@ type CreateStorageConfigRequest struct {
 }
 
 type UpdateStorageConfigRequest struct {
-	StorageId   string `json:"storageId" binding:"required"`
+	StorageID   string `json:"storageId" binding:"required"`
 	Name        string `json:"name"`
 	StorageType string `json:"storageType"`
 	Config      []byte `json:"config"`

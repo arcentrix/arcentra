@@ -232,7 +232,11 @@ func (v *SchemaValidator) validateLabelExpression(expr *spec.LabelExpression, in
 	}
 	validOperators := map[string]bool{"In": true, "NotIn": true, "Exists": true, "NotExists": true, "Gt": true, "Lt": true}
 	if !validOperators[expr.Operator] {
-		return fmt.Errorf("matchExpressions[%d] label expression operator '%s' is invalid (valid: In, NotIn, Exists, NotExists, Gt, Lt)", index, expr.Operator)
+		return fmt.Errorf(
+			"matchExpressions[%d] label expression operator '%s' is invalid (valid: In, NotIn, Exists, NotExists, Gt, Lt)",
+			index,
+			expr.Operator,
+		)
 	}
 	needsValues := map[string]bool{"In": true, "NotIn": true, "Gt": true, "Lt": true}
 	if needsValues[expr.Operator] && len(expr.Values) == 0 {

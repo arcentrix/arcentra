@@ -31,14 +31,14 @@ import (
 
 // PermissionChecker 权限检查器接口
 type PermissionChecker interface {
-	GetUserRoutes(ctx context.Context, userId string, resourceId string) ([]string, error)
+	GetUserRoutes(ctx context.Context, userID string, resourceID string) ([]string, error)
 }
 
 // AuthorizationMiddleware 认证中间件
 // secretKey: 用于验证 JWT 的密钥
 // client: Redis 客户端
 // This function is used as the middleware of fiber.
-func AuthorizationMiddleware(secretKey string, cache cache.ICache) fiber.Handler {
+func AuthorizationMiddleware(secretKey string, store cache.ICache) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		var tokenString string
 
@@ -75,7 +75,7 @@ func AuthorizationMiddleware(secretKey string, cache cache.ICache) fiber.Handler
 
 		// 从 Redis 中获取 Token 信息
 		tokenKey := consts.UserTokenKey + claims.UserId
-		tokenInfoStr, err := cache.Get(context.Background(), tokenKey).Result()
+		tokenInfoStr, err := store.Get(context.Background(), tokenKey).Result()
 		if err != nil {
 			log.Errorw("cache get token failed: ", "error", err, "tokenKey", tokenKey)
 			return http.WithRepErrMsg(c, http.TokenExpired.Code, http.TokenExpired.Msg, c.Path())
@@ -126,34 +126,34 @@ func PermissionMiddleware(permissionChecker PermissionChecker, excludedPaths []s
 			return http.WithRepErrMsg(c, http.Unauthorized.Code, http.Unauthorized.Msg, currentPath)
 		}
 
-		userId := claims.UserId
-		if userId == "" {
+		userID := claims.UserId
+		if userID == "" {
 			log.Errorw("user id is empty", "path", currentPath)
 			return http.WithRepErrMsg(c, http.Unauthorized.Code, http.Unauthorized.Msg, currentPath)
 		}
 
 		// 获取资源ID（优先从 query 参数获取，其次从 header 获取）
-		resourceId := c.Query("orgId")
-		if resourceId == "" {
-			resourceId = c.Query("teamId")
+		resourceID := c.Query("orgId")
+		if resourceID == "" {
+			resourceID = c.Query("teamId")
 		}
-		if resourceId == "" {
-			resourceId = c.Query("projectId")
+		if resourceID == "" {
+			resourceID = c.Query("projectId")
 		}
-		if resourceId == "" {
-			resourceId = c.Get("X-Resource-Id")
+		if resourceID == "" {
+			resourceID = c.Get("X-Resource-Id")
 		}
 		// 如果都没有，则为空字符串，表示平台级权限
 
-		allowedRoutes, err := permissionChecker.GetUserRoutes(c.Context(), userId, resourceId)
+		allowedRoutes, err := permissionChecker.GetUserRoutes(c.Context(), userID, resourceID)
 		if err != nil {
-			log.Errorw("failed to get user routes", "userId", userId, "resourceId", resourceId, "error", err)
+			log.Errorw("failed to get user routes", "userId", userID, "resourceId", resourceID, "error", err)
 			return http.WithRepErrMsg(c, http.InternalError.Code, http.InternalError.Msg, currentPath)
 		}
 
 		// 检查当前路径是否在允许的路由列表中
 		if !isRouteAllowed(currentPath, allowedRoutes) {
-			log.Debugw("permission denied", "userId", userId, "resourceId", resourceId, "path", currentPath, "allowedRoutes", allowedRoutes)
+			log.Debugw("permission denied", "userId", userID, "resourceId", resourceID, "path", currentPath, "allowedRoutes", allowedRoutes)
 			return http.WithRepErrMsg(c, http.Forbidden.Code, http.Forbidden.Msg, currentPath)
 		}
 

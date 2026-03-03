@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// revive:disable:var-naming package name is intentional for domain
 package version
 
 import (
@@ -38,9 +39,9 @@ var (
 var Cmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the application version information",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(_ *cobra.Command, _ []string) {
 		v := GetVersion()
-		fmt.Println(string(v.Json()))
+		fmt.Println(string(v.JSON()))
 	},
 }
 
@@ -174,7 +175,7 @@ func GetParsedVersion() (*Number, error) {
 	return nil, fmt.Errorf("version is not set")
 }
 
-func (v *Info) Json() json.RawMessage {
+func (v *Info) JSON() json.RawMessage {
 	j, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		fmt.Println(err)

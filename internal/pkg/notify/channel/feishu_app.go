@@ -61,7 +61,7 @@ func (c *FeishuAppChannel) SetAuth(provider auth.IAuthProvider) error {
 
 	// Validate authentication type
 	if provider.GetAuthType() != auth.Token &&
-		provider.GetAuthType() != auth.ApiKey {
+		provider.GetAuthType() != auth.APIKey {
 		return fmt.Errorf("feishu app channel only supports token or apikey auth")
 	}
 
@@ -128,7 +128,7 @@ func (c *FeishuAppChannel) Send(ctx context.Context, message string) error {
 }
 
 // SendWithTemplate sends message using template
-func (c *FeishuAppChannel) SendWithTemplate(ctx context.Context, template string, data map[string]interface{}) error {
+func (c *FeishuAppChannel) SendWithTemplate(ctx context.Context, template string, _ map[string]interface{}) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func (c *FeishuAppChannel) sendRequest(ctx context.Context, payload map[string]i
 }
 
 // Receive receives messages (webhook callback)
-func (c *FeishuAppChannel) Receive(ctx context.Context, message string) error {
+func (c *FeishuAppChannel) Receive(_ context.Context, _ string) error {
 	// Implement webhook receive logic
 	return nil
 }

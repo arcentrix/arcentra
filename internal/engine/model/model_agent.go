@@ -20,7 +20,7 @@ import (
 
 type Agent struct {
 	BaseModel
-	AgentId   string         `gorm:"column:agent_id" json:"agentId"`
+	AgentID   string         `gorm:"column:agent_id" json:"agentId"`
 	AgentName string         `gorm:"column:agent_name" json:"agentName"`
 	Address   string         `gorm:"column:address" json:"address"`
 	Port      string         `gorm:"column:port" json:"port"`

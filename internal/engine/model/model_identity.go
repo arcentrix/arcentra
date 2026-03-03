@@ -22,7 +22,7 @@ import (
 // Identity 身份提供者表
 type Identity struct {
 	BaseModel
-	ProviderId   string         `gorm:"column:provider_id" json:"providerId"`
+	ProviderID   string         `gorm:"column:provider_id" json:"providerId"`
 	Name         string         `gorm:"column:name" json:"name"`
 	ProviderType string         `gorm:"column:provider_type" json:"providerType"` // oauth/ldap/oidc/saml
 	Config       datatypes.JSON `gorm:"column:config" json:"config"`

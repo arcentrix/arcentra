@@ -50,34 +50,34 @@ func skipIfDotGitNotWritable(t *testing.T) {
 }
 
 func TestNewGitPlugin(t *testing.T) {
-	plugin := NewGit()
+	gitPlugin := NewGit()
 
-	assert.NotNil(t, plugin)
-	assert.Equal(t, "git", plugin.name)
-	assert.Equal(t, "Git version control plugin for repository operations", plugin.description)
-	assert.Equal(t, "1.0.0", plugin.version)
-	assert.Equal(t, "git", plugin.cfg.GitPath)
-	assert.Equal(t, 300, plugin.cfg.Timeout)
-	assert.False(t, plugin.cfg.Shallow)
+	assert.NotNil(t, gitPlugin)
+	assert.Equal(t, "git", gitPlugin.name)
+	assert.Equal(t, "Git version control plugin for repository operations", gitPlugin.description)
+	assert.Equal(t, "1.0.0", gitPlugin.version)
+	assert.Equal(t, "git", gitPlugin.cfg.GitPath)
+	assert.Equal(t, 300, gitPlugin.cfg.Timeout)
+	assert.False(t, gitPlugin.cfg.Shallow)
 }
 
 func TestGitPlugin_Name(t *testing.T) {
-	plugin := NewGit()
-	name := plugin.Name()
+	gitPlugin := NewGit()
+	name := gitPlugin.Name()
 
 	assert.Equal(t, "git", name)
 }
 
 func TestGitPlugin_Description(t *testing.T) {
-	plugin := NewGit()
-	desc := plugin.Description()
+	gitPlugin := NewGit()
+	desc := gitPlugin.Description()
 
 	assert.Equal(t, "Git version control plugin for repository operations", desc)
 }
 
 func TestGitPlugin_Version(t *testing.T) {
-	plugin := NewGit()
-	version := plugin.Version()
+	gitPlugin := NewGit()
+	version := gitPlugin.Version()
 
 	assert.Equal(t, "1.0.0", version)
 }
@@ -193,7 +193,13 @@ func TestGitPlugin_Clone(t *testing.T) {
 
 	cmd = exec.Command("git", "commit", "-m", "Initial commit")
 	cmd.Dir = repoPath
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com", "GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com")
+	cmd.Env = append(
+		os.Environ(),
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
 	err = cmd.Run()
 	require.NoError(t, err)
 
@@ -270,7 +276,13 @@ func TestGitPlugin_Checkout(t *testing.T) {
 
 	cmd := exec.Command("git", "commit", "--allow-empty", "-m", "Initial commit")
 	cmd.Dir = repoPath
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com", "GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com")
+	cmd.Env = append(
+		os.Environ(),
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
 	err = cmd.Run()
 	require.NoError(t, err)
 
@@ -418,7 +430,13 @@ func TestGitPlugin_Log(t *testing.T) {
 
 	cmd := exec.Command("git", "commit", "--allow-empty", "-m", "Commit 1")
 	cmd.Dir = repoPath
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com", "GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com")
+	cmd.Env = append(
+		os.Environ(),
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
 	err = cmd.Run()
 	require.NoError(t, err)
 
@@ -461,7 +479,13 @@ func TestGitPlugin_Branch(t *testing.T) {
 
 	cmd := exec.Command("git", "commit", "--allow-empty", "-m", "Initial")
 	cmd.Dir = repoPath
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com", "GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com")
+	cmd.Env = append(
+		os.Environ(),
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
 	err = cmd.Run()
 	require.NoError(t, err)
 
@@ -502,7 +526,13 @@ func TestGitPlugin_Tag(t *testing.T) {
 
 	cmd := exec.Command("git", "commit", "--allow-empty", "-m", "Initial")
 	cmd.Dir = repoPath
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com", "GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com")
+	cmd.Env = append(
+		os.Environ(),
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
 	err = cmd.Run()
 	require.NoError(t, err)
 
@@ -549,7 +579,13 @@ func TestGitPlugin_Pull(t *testing.T) {
 
 	cmd := exec.Command("git", "commit", "--allow-empty", "-m", "Initial")
 	cmd.Dir = repoPath
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com", "GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com")
+	cmd.Env = append(
+		os.Environ(),
+		"GIT_AUTHOR_NAME=test",
+		"GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=test",
+		"GIT_COMMITTER_EMAIL=test@test.com",
+	)
 	err = cmd.Run()
 	require.NoError(t, err)
 

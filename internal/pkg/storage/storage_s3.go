@@ -180,7 +180,17 @@ func (s *S3Storage) Upload(ctx context.Context, objectName string, file *multipa
 		_ = os.WriteFile(checkpointPath, mustJSON(checkpoint), 0o644)
 
 		// 记录上传进度日志
-		log.Debugw("S3 upload progress", "fullPath", fullPath, "progress", checkpoint.UploadProgress, "uploadedBytes", uploadedBytes, "fileSize", fileSize)
+		log.Debugw(
+			"S3 upload progress",
+			"fullPath",
+			fullPath,
+			"progress",
+			checkpoint.UploadProgress,
+			"uploadedBytes",
+			uploadedBytes,
+			"fileSize",
+			fileSize,
+		)
 
 		partNumber++
 		if readErr == io.EOF {

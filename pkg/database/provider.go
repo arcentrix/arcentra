@@ -28,7 +28,7 @@ var ProviderSet = wire.NewSet(
 )
 
 // ProvideManager creates and returns a database Manager instance
-func ProvideManager(conf Database, logger *log.Logger) (Manager, error) {
+func ProvideManager(conf Database, _ *log.Logger) (Manager, error) {
 	return NewManager(conf)
 }
 

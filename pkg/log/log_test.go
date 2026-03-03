@@ -23,6 +23,8 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+const outputModeFile = "file"
+
 func TestDefaultConf(t *testing.T) {
 	conf := SetDefaults()
 
@@ -93,7 +95,7 @@ func TestConf_Validate(t *testing.T) {
 			}
 
 			// 验证自动修正
-			if !tt.wantErr && tt.conf.Output == "file" {
+			if !tt.wantErr && tt.conf.Output == outputModeFile {
 				if tt.conf.RotateSize <= 0 {
 					t.Error("RotateSize should be auto-corrected to positive value")
 				}

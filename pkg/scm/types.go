@@ -6,6 +6,7 @@ import (
 
 type ProviderKind string
 
+// Supported SCM providers.
 const (
 	ProviderKindGitHub    ProviderKind = "github"
 	ProviderKindGitLab    ProviderKind = "gitlab"
@@ -16,6 +17,7 @@ const (
 
 type EventType string
 
+// Normalized SCM event types.
 const (
 	EventTypePush               EventType = "push"
 	EventTypeTag                EventType = "tag"
@@ -31,7 +33,7 @@ type Repo struct {
 	Owner    string `json:"owner"`
 	Name     string `json:"name"`
 	FullName string `json:"fullName,omitempty"`
-	Url      string `json:"url,omitempty"`
+	URL      string `json:"url,omitempty"`
 }
 
 // Change describes a PR/MR change in a normalized form.
@@ -42,7 +44,7 @@ type Change struct {
 	TargetBranch  string `json:"targetBranch,omitempty"`
 	State         string `json:"state,omitempty"`
 	IsMerged      bool   `json:"isMerged,omitempty"`
-	MergeCommitId string `json:"mergeCommitId,omitempty"`
+	MergeCommitID string `json:"mergeCommitId,omitempty"`
 }
 
 // Event is a normalized SCM event.
@@ -51,7 +53,7 @@ type Event struct {
 	EventType    EventType      `json:"eventType"`
 	Repo         Repo           `json:"repo"`
 	ActorName    string         `json:"actorName,omitempty"`
-	CommitId     string         `json:"commitId,omitempty"`
+	CommitID     string         `json:"commitId,omitempty"`
 	Ref          string         `json:"ref,omitempty"`
 	OccurredAt   time.Time      `json:"occurredAt"`
 	Change       *Change        `json:"change,omitempty"`
@@ -60,6 +62,7 @@ type Event struct {
 
 type Capability string
 
+// Provider capabilities.
 const (
 	CapWebhookVerify Capability = "webhook.verify"
 	CapWebhookParse  Capability = "webhook.parse"
@@ -80,4 +83,61 @@ func (s CapSet) Has(c Capability) bool {
 type Cursor struct {
 	Since  time.Time `json:"since"`
 	Opaque string    `json:"opaque,omitempty"`
+}
+
+// Auth types.
+const (
+	AuthTypeToken = 2
+)
+
+type GitAuth struct {
+	Username string
+	Token    string
+	Password string
+	SSHKey   string
+}
+
+type GitCloneRequest struct {
+	Workdir string
+	RepoURL string
+	Branch  string
+	Auth    GitAuth
+}
+
+type GitHeadSHARequest struct {
+	Workdir string
+}
+
+type GitAddRequest struct {
+	Workdir  string
+	FilePath string
+}
+
+type GitCommitRequest struct {
+	Workdir string
+	Message string
+	Author  string
+}
+
+type GitCheckoutBranchRequest struct {
+	Workdir string
+	Branch  string
+}
+
+type GitPushRequest struct {
+	Workdir string
+	Remote  string
+	Branch  string
+	Auth    GitAuth
+}
+
+type ChangeRequestInput struct {
+	RepoType        string
+	AuthType        int
+	Credential      string
+	ProjectRepoURL  string
+	PipelineRepoURL string
+	TargetBranch    string
+	SourceBranch    string
+	Title           string
 }

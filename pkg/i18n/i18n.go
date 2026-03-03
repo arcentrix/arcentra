@@ -39,49 +39,49 @@ type Localizer interface {
 
 // GetLocalizedMessage retrieves a localized message and applies template data.
 // If i18n middleware is configured, it will get the translated message from the localizer.
-// If not configured, it returns the original messageId.
+// If not configured, it returns the original messageID.
 // templateData is used to replace template variables in the message,
 // e.g., {{.Name}} will be replaced with templateData["Name"].
-func GetLocalizedMessage(c *fiber.Ctx, messageId string, templateData map[string]string) string {
-	message := getLocalizedMessage(c, messageId)
+func GetLocalizedMessage(c *fiber.Ctx, messageID string, templateData map[string]string) string {
+	message := getLocalizedMessage(c, messageID)
 	return applyTemplate(message, templateData)
 }
 
 // GetLocalized retrieves a localized message without template data.
 // If i18n middleware is configured, it will get the translated message from the localizer.
-// If not configured, it returns the original messageId.
-func GetLocalized(c *fiber.Ctx, messageId string) string {
-	return GetLocalizedMessage(c, messageId, nil)
+// If not configured, it returns the original messageID.
+func GetLocalized(c *fiber.Ctx, messageID string) string {
+	return GetLocalizedMessage(c, messageID, nil)
 }
 
 // getLocalizedMessage retrieves a localized message from context.
 // Supports multiple i18n library implementation methods.
-func getLocalizedMessage(c *fiber.Ctx, messageId string) string {
+func getLocalizedMessage(c *fiber.Ctx, messageID string) string {
 	localizerValue := c.Locals(I18nLocalizerKey)
 	if localizerValue == nil {
-		return messageId
+		return messageID
 	}
 
 	// Try to get localized message through Localizer interface
 	if localizer, ok := localizerValue.(Localizer); ok {
-		if msg, err := localizer.Localize(messageId); err == nil && msg != "" {
+		if msg, err := localizer.Localize(messageID); err == nil && msg != "" {
 			return msg
 		}
 	}
 
 	// Try to call common i18n library methods using reflection
 	// Supports go-i18n's Localizer.Localize method
-	if msg := tryReflectLocalize(localizerValue, messageId); msg != "" {
+	if msg := tryReflectLocalize(localizerValue, messageID); msg != "" {
 		return msg
 	}
 
-	// If all attempts fail, return the original messageId
-	return messageId
+	// If all attempts fail, return the original messageID
+	return messageID
 }
 
 // tryReflectLocalize attempts to call localization methods using reflection.
 // Supports go-i18n and other libraries' Localize methods.
-func tryReflectLocalize(localizer any, messageId string) string {
+func tryReflectLocalize(localizer any, messageID string) string {
 	v := reflect.ValueOf(localizer)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
@@ -112,7 +112,7 @@ func tryReflectLocalize(localizer any, messageId string) string {
 			// Create struct and set MessageID field
 			config := reflect.New(elemType)
 			if msgIDField := config.Elem().FieldByName("MessageID"); msgIDField.IsValid() && msgIDField.CanSet() {
-				msgIDField.SetString(messageId)
+				msgIDField.SetString(messageID)
 				param = config
 			} else {
 				return ""

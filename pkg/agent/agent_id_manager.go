@@ -33,22 +33,22 @@ type Info struct {
 	LastUpdateAt  time.Time `json:"last_update_at"`
 }
 
-// AgentIDManager Agent ID管理器
-type AgentIDManager struct {
+// IDManager Agent ID管理器
+type IDManager struct {
 	idFilePath string
 	info       *Info
 }
 
 // NewAgentIDManager 创建Agent ID管理器
-func NewAgentIDManager(idFilePath string) *AgentIDManager {
-	return &AgentIDManager{
+func NewAgentIDManager(idFilePath string) *IDManager {
+	return &IDManager{
 		idFilePath: idFilePath,
 	}
 }
 
 // LoadOrGenerate 加载或生成Agent ID
 // 返回值：agentID, isNew, error
-func (m *AgentIDManager) LoadOrGenerate(hostname, serverAddr string) (string, bool, error) {
+func (m *IDManager) LoadOrGenerate(hostname, serverAddr string) (string, bool, error) {
 	// 1. 尝试从文件加载
 	if info, err := m.loadFromFile(); err == nil && info.AgentID != "" {
 		m.info = info
@@ -75,7 +75,7 @@ func (m *AgentIDManager) LoadOrGenerate(hostname, serverAddr string) (string, bo
 
 // UpdateAfterRegister 注册成功后更新Agent ID信息
 // Server可能会返回不同的ID（如果发生ID冲突或重新分配）
-func (m *AgentIDManager) UpdateAfterRegister(agentID, serverAddr string) error {
+func (m *IDManager) UpdateAfterRegister(agentID, serverAddr string) error {
 	if m.info == nil {
 		m.info = &Info{}
 	}
@@ -94,7 +94,7 @@ func (m *AgentIDManager) UpdateAfterRegister(agentID, serverAddr string) error {
 }
 
 // GetAgentID 获取当前的Agent ID
-func (m *AgentIDManager) GetAgentID() string {
+func (m *IDManager) GetAgentID() string {
 	if m.info == nil {
 		return ""
 	}
@@ -102,12 +102,12 @@ func (m *AgentIDManager) GetAgentID() string {
 }
 
 // GetInfo 获取Agent ID完整信息
-func (m *AgentIDManager) GetInfo() *Info {
+func (m *IDManager) GetInfo() *Info {
 	return m.info
 }
 
 // loadFromFile 从文件加载Agent ID信息
-func (m *AgentIDManager) loadFromFile() (*Info, error) {
+func (m *IDManager) loadFromFile() (*Info, error) {
 	data, err := os.ReadFile(m.idFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("读取agent id文件失败: %w", err)
@@ -122,7 +122,7 @@ func (m *AgentIDManager) loadFromFile() (*Info, error) {
 }
 
 // saveToFile 保存Agent ID信息到文件
-func (m *AgentIDManager) saveToFile() error {
+func (m *IDManager) saveToFile() error {
 	if m.info == nil {
 		return fmt.Errorf("agent id信息为空")
 	}
@@ -154,7 +154,7 @@ func (m *AgentIDManager) saveToFile() error {
 }
 
 // Reset 重置Agent ID（用于测试或重新注册）
-func (m *AgentIDManager) Reset() error {
+func (m *IDManager) Reset() error {
 	if err := os.Remove(m.idFilePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("删除agent id文件失败: %w", err)
 	}

@@ -71,7 +71,11 @@ func (r *NotificationTemplateRepo) Get(ctx context.Context, templateId string) (
 }
 
 // GetByNameAndType returns template by name and type.
-func (r *NotificationTemplateRepo) GetByNameAndType(ctx context.Context, name string, templateType string) (*model.NotificationTemplate, error) {
+func (r *NotificationTemplateRepo) GetByNameAndType(
+	ctx context.Context,
+	name string,
+	templateType string,
+) (*model.NotificationTemplate, error) {
 	var tmpl model.NotificationTemplate
 	err := r.Database().WithContext(ctx).
 		Table(tmpl.TableName()).

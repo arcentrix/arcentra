@@ -50,7 +50,7 @@ func (h *WSHandle) handleLog(conn ws.Conn, action string, params WSParams) error
 	sub := &logSubscription{
 		params: params,
 		cancel: cancel,
-		ch:     h.logAgg.Subscribe(ctx, params.StepRunId),
+		ch:     h.logAgg.Subscribe(ctx, params.StepRunID),
 	}
 	h.logMu.Lock()
 	h.logSubs[conn.ID()] = sub
@@ -69,7 +69,7 @@ func (h *WSHandle) handleLog(conn ws.Conn, action string, params WSParams) error
 func (h *WSHandle) sendLogHistory(conn ws.Conn, params WSParams) {
 	fromLine := int32(0)
 	for {
-		logs, err := h.logAgg.GetLogsByStepRunID(params.StepRunId, fromLine, logHistoryChunkSize)
+		logs, err := h.logAgg.GetLogsByStepRunID(params.StepRunID, fromLine, logHistoryChunkSize)
 		if err != nil {
 			_ = h.sendError(conn, channelLog, params, fmt.Sprintf("load history failed: %v", err))
 			return

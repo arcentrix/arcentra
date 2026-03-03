@@ -52,7 +52,7 @@ func FiberMiddleware() fiber.Handler {
 		ctx = fiberPropagator.Extract(ctx, &headerCarrier{headers: headers})
 
 		// Start span
-		spanName := string(c.Method()) + " " + c.Path()
+		spanName := c.Method() + " " + c.Path()
 		start := time.Now()
 		ctx, span := fiberTracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindServer))
 		defer span.End()

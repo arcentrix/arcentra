@@ -7,33 +7,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arcentrix/arcentra/pkg/request"
 	"github.com/arcentrix/arcentra/pkg/scm"
 	"github.com/bytedance/sonic"
-	"github.com/go-resty/resty/v2"
+	"github.com/valyala/fasthttp"
 )
 
 type Provider struct {
-	cfg    scm.ProviderConfig
-	client *resty.Client
+	cfg scm.ProviderConfig
 }
 
 func New(cfg scm.ProviderConfig) (scm.Provider, error) {
-	p := &Provider{cfg: cfg}
-	p.client = resty.New().SetTimeout(15 * time.Second)
-
-	apiBase := strings.TrimSpace(cfg.ApiBaseUrl)
+	apiBase := strings.TrimSpace(cfg.APIBaseURL)
 	if apiBase == "" {
-		base := strings.TrimRight(strings.TrimSpace(cfg.BaseUrl), "/")
+		base := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 		if base == "" {
 			return nil, fmt.Errorf("gitea baseUrl or apiBaseUrl is required")
 		}
-		apiBase = base + "/api/v1"
 	}
-	p.client.SetBaseURL(strings.TrimRight(apiBase, "/"))
-	if strings.TrimSpace(cfg.Token) != "" {
-		p.client.SetAuthToken(cfg.Token)
-	}
-	return p, nil
+	return &Provider{cfg: cfg}, nil
 }
 
 func (p *Provider) Kind() scm.ProviderKind { return scm.ProviderKindGitea }
@@ -95,21 +87,24 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 		} `json:"base"`
 	}
 	path := fmt.Sprintf("/repos/%s/%s/pulls", url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
-	r, err := p.client.R().
-		SetContext(ctx).
-		SetQueryParams(map[string]string{
-			"state": "all",
-			"page":  "1",
-			"limit": "50",
-			"sort":  "recentupdate",
-		}).
-		SetResult(&prs).
-		Get(path)
+	httpResp, err := request.NewRequest(
+		p.apiBaseURL()+path,
+		fasthttp.MethodGet,
+		map[string]string{
+			"Authorization": "Bearer " + strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).WithQueryParams(map[string]string{
+		"state": "all",
+		"page":  "1",
+		"limit": "50",
+		"sort":  "recentupdate",
+	}).WithResult(&prs).Do(ctx)
 	if err != nil {
 		return nil, cursor, err
 	}
-	if r.IsError() {
-		return nil, cursor, fmt.Errorf("gitea api error: %s", r.Status())
+	if httpResp == nil || httpResp.StatusCode() >= 400 {
+		return nil, cursor, fmt.Errorf("gitea api error: %d", httpResp.StatusCode())
 	}
 	for _, pr := range prs {
 		occurred := pr.UpdatedAt
@@ -129,7 +124,7 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 			EventType:    t,
 			Repo:         repo,
 			ActorName:    pr.User.Login,
-			CommitId:     pr.MergeSha,
+			CommitID:     pr.MergeSha,
 			OccurredAt:   occurred,
 			Change: &scm.Change{
 				Number:        pr.Number,
@@ -138,7 +133,7 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 				TargetBranch:  pr.Base.Ref,
 				State:         pr.State,
 				IsMerged:      t == scm.EventTypePullMerged,
-				MergeCommitId: pr.MergeSha,
+				MergeCommitID: pr.MergeSha,
 			},
 		})
 	}
@@ -149,22 +144,25 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 			Sha string `json:"sha"`
 		} `json:"commit"`
 	}
-	r, err = p.client.R().
-		SetContext(ctx).
-		SetQueryParams(map[string]string{
-			"page":  "1",
-			"limit": "50",
-		}).
-		SetResult(&tags).
-		Get(fmt.Sprintf("/repos/%s/%s/tags", url.PathEscape(repo.Owner), url.PathEscape(repo.Name)))
+	httpResp, err = request.NewRequest(
+		p.apiBaseURL()+fmt.Sprintf("/repos/%s/%s/tags", url.PathEscape(repo.Owner), url.PathEscape(repo.Name)),
+		fasthttp.MethodGet,
+		map[string]string{
+			"Authorization": "Bearer " + strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).WithQueryParams(map[string]string{
+		"page":  "1",
+		"limit": "50",
+	}).WithResult(&tags).Do(ctx)
 	if err != nil {
 		return nil, cursor, err
 	}
-	if r.IsError() {
-		return nil, cursor, fmt.Errorf("gitea api error: %s", r.Status())
+	if httpResp == nil || httpResp.StatusCode() >= 400 {
+		return nil, cursor, fmt.Errorf("gitea api error: %d", httpResp.StatusCode())
 	}
 	for _, tag := range tags {
-		commitDate, commitId := p.tagCommitTime(ctx, repo, tag.Commit.Sha)
+		commitDate, commitID := p.tagCommitTime(ctx, repo, tag.Commit.Sha)
 		if commitDate.IsZero() || !commitDate.After(since) {
 			continue
 		}
@@ -175,13 +173,63 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 			ProviderKind: scm.ProviderKindGitea,
 			EventType:    scm.EventTypeTag,
 			Repo:         repo,
-			CommitId:     commitId,
+			CommitID:     commitID,
 			Ref:          "refs/tags/" + tag.Name,
 			OccurredAt:   commitDate,
 		})
 	}
 
 	return events, scm.Cursor{Since: next}, nil
+}
+
+// CreateChangeRequest creates Gitea pull request and returns web URL.
+func (p *Provider) CreateChangeRequest(ctx context.Context, req scm.ChangeRequestInput) (string, error) {
+	repoInfo, ok := scm.ParseRepoFromURL(req.PipelineRepoURL)
+	if !ok {
+		return "", fmt.Errorf("invalid repository url: %s", req.PipelineRepoURL)
+	}
+	var out struct {
+		HTMLURL string `json:"html_url"`
+	}
+	apiBase := strings.TrimSpace(p.cfg.APIBaseURL)
+	if apiBase == "" {
+		base := strings.TrimRight(strings.TrimSpace(p.cfg.BaseURL), "/")
+		if base == "" {
+			return "", fmt.Errorf("gitea baseUrl or apiBaseUrl is required")
+		}
+		apiBase = base + "/api/v1"
+	}
+	endpoint := strings.TrimRight(
+		apiBase,
+		"/",
+	) + fmt.Sprintf(
+		"/repos/%s/%s/pulls",
+		url.PathEscape(repoInfo.Owner),
+		url.PathEscape(repoInfo.Name),
+	)
+	resp, err := request.NewRequest(
+		endpoint,
+		fasthttp.MethodPost,
+		map[string]string{
+			"Authorization": "Bearer " + strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).
+		WithBodyJSON(map[string]any{
+			"title": req.Title,
+			"head":  req.SourceBranch,
+			"base":  req.TargetBranch,
+			"body":  "created by arcentra pipeline editor",
+		}).
+		WithResult(&out).
+		Do(ctx)
+	if err != nil {
+		return "", err
+	}
+	if resp == nil || resp.StatusCode() >= 400 {
+		return "", fmt.Errorf("gitea create pr failed: %d", resp.StatusCode())
+	}
+	return out.HTMLURL, nil
 }
 
 func (p *Provider) tagCommitTime(ctx context.Context, repo scm.Repo, sha string) (time.Time, string) {
@@ -197,8 +245,15 @@ func (p *Provider) tagCommitTime(ctx context.Context, repo scm.Repo, sha string)
 		} `json:"commit"`
 	}
 	path := fmt.Sprintf("/repos/%s/%s/commits/%s", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(sha))
-	r, err := p.client.R().SetContext(ctx).SetResult(&out).Get(path)
-	if err == nil && r != nil && !r.IsError() {
+	httpResp, err := request.NewRequest(
+		p.apiBaseURL()+path,
+		fasthttp.MethodGet,
+		map[string]string{
+			"Authorization": "Bearer " + strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).WithResult(&out).Do(ctx)
+	if err == nil && httpResp != nil && httpResp.StatusCode() < 400 {
 		return out.Commit.Committer.Date, out.Sha
 	}
 
@@ -209,18 +264,37 @@ func (p *Provider) tagCommitTime(ctx context.Context, repo scm.Repo, sha string)
 		} `json:"committer"`
 	}
 	path = fmt.Sprintf("/repos/%s/%s/git/commits/%s", url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(sha))
-	r, err = p.client.R().SetContext(ctx).SetResult(&out2).Get(path)
-	if err != nil || r == nil || r.IsError() {
+	httpResp, err = request.NewRequest(
+		p.apiBaseURL()+path,
+		fasthttp.MethodGet,
+		map[string]string{
+			"Authorization": "Bearer " + strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).WithResult(&out2).Do(ctx)
+	if err != nil || httpResp == nil || httpResp.StatusCode() >= 400 {
 		return time.Time{}, sha
 	}
 	return out2.Committer.Date, out2.Sha
+}
+
+func (p *Provider) apiBaseURL() string {
+	apiBase := strings.TrimSpace(p.cfg.APIBaseURL)
+	if apiBase == "" {
+		base := strings.TrimRight(strings.TrimSpace(p.cfg.BaseURL), "/")
+		if base == "" {
+			return ""
+		}
+		apiBase = base + "/api/v1"
+	}
+	return strings.TrimRight(apiBase, "/")
 }
 
 func (p *Provider) parsePullRequest(body []byte) ([]scm.Event, error) {
 	var payload struct {
 		Action     string `json:"action"`
 		Repository struct {
-			HtmlUrl string `json:"html_url"`
+			HTMLURL string `json:"html_url"`
 			Name    string `json:"name"`
 			Owner   struct {
 				Login string `json:"login"`
@@ -252,7 +326,7 @@ func (p *Provider) parsePullRequest(body []byte) ([]scm.Event, error) {
 		Owner:    payload.Repository.Owner.Login,
 		Name:     payload.Repository.Name,
 		FullName: payload.Repository.Owner.Login + "/" + payload.Repository.Name,
-		Url:      payload.Repository.HtmlUrl,
+		URL:      payload.Repository.HTMLURL,
 	}
 	occurred := time.Now()
 	if payload.PullRequest.UpdatedAt != nil && !payload.PullRequest.UpdatedAt.IsZero() {
@@ -270,7 +344,7 @@ func (p *Provider) parsePullRequest(body []byte) ([]scm.Event, error) {
 		EventType:    t,
 		Repo:         repo,
 		ActorName:    payload.Sender.Login,
-		CommitId:     payload.PullRequest.MergeSha,
+		CommitID:     payload.PullRequest.MergeSha,
 		OccurredAt:   occurred,
 		Change: &scm.Change{
 			Number:        payload.PullRequest.Number,
@@ -279,7 +353,7 @@ func (p *Provider) parsePullRequest(body []byte) ([]scm.Event, error) {
 			TargetBranch:  payload.PullRequest.Base.Ref,
 			State:         payload.PullRequest.State,
 			IsMerged:      t == scm.EventTypePullMerged,
-			MergeCommitId: payload.PullRequest.MergeSha,
+			MergeCommitID: payload.PullRequest.MergeSha,
 		},
 	}}, nil
 }
@@ -289,7 +363,7 @@ func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
 		Ref        string `json:"ref"`
 		After      string `json:"after"`
 		Repository struct {
-			HtmlUrl string `json:"html_url"`
+			HTMLURL string `json:"html_url"`
 			Name    string `json:"name"`
 			Owner   struct {
 				Username string `json:"username"`
@@ -300,7 +374,7 @@ func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
 			UserName string `json:"username"`
 		} `json:"pusher"`
 		Commits []struct {
-			Id        string    `json:"id"`
+			ID        string    `json:"id"`
 			Timestamp time.Time `json:"timestamp"`
 		} `json:"commits"`
 	}
@@ -311,7 +385,7 @@ func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
 		Owner:    payload.Repository.Owner.Username,
 		Name:     payload.Repository.Name,
 		FullName: payload.Repository.Owner.Username + "/" + payload.Repository.Name,
-		Url:      payload.Repository.HtmlUrl,
+		URL:      payload.Repository.HTMLURL,
 	}
 	t := scm.EventTypePush
 	if strings.HasPrefix(payload.Ref, "refs/tags/") {
@@ -330,7 +404,7 @@ func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
 		EventType:    t,
 		Repo:         repo,
 		ActorName:    actor,
-		CommitId:     payload.After,
+		CommitID:     payload.After,
 		Ref:          payload.Ref,
 		OccurredAt:   occurred,
 	}}, nil

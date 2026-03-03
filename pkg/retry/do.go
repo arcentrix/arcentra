@@ -52,10 +52,10 @@ func (b linearBackoff) Next(attempt int) time.Duration {
 }
 
 // Linear returns a linear backoff strategy.
-func Linear(base time.Duration, max ...time.Duration) Backoff {
+func Linear(base time.Duration, maxDelay ...time.Duration) Backoff {
 	var m time.Duration
-	if len(max) > 0 {
-		m = max[0]
+	if len(maxDelay) > 0 {
+		m = maxDelay[0]
 	}
 	return linearBackoff{base: base, max: m}
 }
@@ -75,10 +75,10 @@ func (b exponentialBackoff) Next(attempt int) time.Duration {
 }
 
 // Exponential returns an exponential backoff strategy.
-func Exponential(base time.Duration, max ...time.Duration) Backoff {
+func Exponential(base time.Duration, maxDelay ...time.Duration) Backoff {
 	var m time.Duration
-	if len(max) > 0 {
-		m = max[0]
+	if len(maxDelay) > 0 {
+		m = maxDelay[0]
 	}
 	return exponentialBackoff{base: base, max: m}
 }
@@ -105,8 +105,8 @@ type Config struct {
 	maxAttempts    int
 	maxElapsedTime time.Duration
 	backoff        Backoff
-	jitter  Jitter
-	retryIf If
+	jitter         Jitter
+	retryIf        If
 }
 
 func defaultConfig() *Config {

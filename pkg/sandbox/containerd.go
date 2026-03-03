@@ -408,7 +408,7 @@ func (s *Containerd) Remove(ctx context.Context, containerID string) error {
 }
 
 // GetLogs retrieves logs from a sandbox container
-func (s *Containerd) GetLogs(ctx context.Context, containerID string, opts *LogOptions) (io.ReadCloser, error) {
+func (s *Containerd) GetLogs(ctx context.Context, containerID string, _ *LogOptions) (io.ReadCloser, error) {
 	container, err := s.getContainer(containerID)
 	if err != nil {
 		return nil, err

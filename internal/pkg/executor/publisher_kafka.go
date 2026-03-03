@@ -52,11 +52,11 @@ func (p *KafkaPublisher) Publish(ctx context.Context, event map[string]any) erro
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
-	eventId := ""
+	eventID := ""
 	if value, ok := event["id"].(string); ok {
-		eventId = value
+		eventID = value
 	}
-	return p.producer.Send(ctx, p.topic, eventId, payload, nil)
+	return p.producer.Send(ctx, p.topic, eventID, payload, nil)
 }
 
 // Close closes the publisher.

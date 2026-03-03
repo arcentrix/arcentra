@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -64,7 +65,7 @@ func NewAgent(
 
 	// Create agent service
 	agentService := service.NewAgentServiceImpl(agentConf, grpcClient)
-	taskQueue, err := taskqueue.StartWorker(context.Background(), agentConf)
+	taskQueue, err := taskqueue.StartWorker(context.Background(), agentConf, grpcClient)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -169,7 +170,7 @@ func Run(app *Agent, cleanup func()) {
 
 	// start HTTP server (async)
 	safe.Go(func() {
-		addr := appConf.Http.Host + ":" + fmt.Sprintf("%d", appConf.Http.Port)
+		addr := appConf.HTTP.Host + ":" + fmt.Sprintf("%d", appConf.HTTP.Port)
 		log.Infow("HTTP listener started",
 			"address", addr,
 		)
@@ -194,6 +195,8 @@ func Run(app *Agent, cleanup func()) {
 	}
 
 	// close components in order
+	app.tryUnregisterAgent()
+
 	// close HTTP server
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
@@ -240,8 +243,13 @@ func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 		if conn != nil {
 			state := conn.GetState()
 			if state == connectivity.Ready || state == connectivity.Idle {
-				// 连接成功，启动心跳
-				log.Info("gRPC client connected, starting heartbeat")
+				// 连接成功，先注册，再启动心跳
+				log.Info("gRPC client connected, registering agent")
+				if err := app.tryRegisterAgent(); err != nil {
+					log.Warnw("agent registration failed", "error", err)
+					return
+				}
+				log.Info("agent registration successful, starting heartbeat")
 				app.startPeriodicHeartbeat()
 				return
 			}
@@ -252,6 +260,59 @@ func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 	}
 
 	log.Warnw("wait gRPC client connection timeout, heartbeat not started", "timeout", maxWaitTime)
+}
+
+func (app *Agent) tryRegisterAgent() error {
+	if app == nil || app.AgentConf == nil || app.GrpcClient == nil || app.GrpcClient.AgentClient == nil {
+		return fmt.Errorf("agent grpc client is not ready")
+	}
+	req := &agentv1.RegisterRequest{
+		AgentId:               app.AgentConf.Agent.ID,
+		Token:                 app.AgentConf.Grpc.Token,
+		Ip:                    "",
+		Os:                    runtime.GOOS,
+		Arch:                  runtime.GOARCH,
+		Version:               "0.0.0",
+		MaxConcurrentStepRuns: int32(app.AgentConf.Agent.MaxConcurrentJobs),
+		Labels:                app.AgentConf.Agent.Labels,
+	}
+	ctx, cancel := app.GrpcClient.WithTimeoutAndAuth(context.Background())
+	defer cancel()
+	resp, err := app.GrpcClient.AgentClient.Register(ctx, req)
+	if err != nil {
+		return err
+	}
+	if !resp.Success {
+		return fmt.Errorf("register rejected: %s", resp.Message)
+	}
+	if resp.AgentId != "" {
+		app.AgentConf.Agent.ID = resp.AgentId
+	}
+	if resp.HeartbeatInterval > 0 {
+		app.AgentConf.Agent.Interval = int(resp.HeartbeatInterval)
+	}
+	if len(resp.Labels) > 0 {
+		app.AgentConf.Agent.Labels = resp.Labels
+	}
+	return nil
+}
+
+func (app *Agent) tryUnregisterAgent() {
+	if app == nil || app.AgentConf == nil || app.GrpcClient == nil || app.GrpcClient.AgentClient == nil {
+		return
+	}
+	if app.AgentConf.Agent.ID == "" {
+		return
+	}
+	ctx, cancel := app.GrpcClient.WithTimeoutAndAuth(context.Background())
+	defer cancel()
+	_, err := app.GrpcClient.AgentClient.Unregister(ctx, &agentv1.UnregisterRequest{
+		AgentId: app.AgentConf.Agent.ID,
+		Reason:  "agent shutdown",
+	})
+	if err != nil {
+		log.Warnw("agent unregister failed", "agentId", app.AgentConf.Agent.ID, "error", err)
+	}
 }
 
 // startPeriodicHeartbeat starts a cron job that periodically calls Heartbeat to keep connection alive

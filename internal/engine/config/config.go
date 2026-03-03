@@ -56,7 +56,7 @@ type TaskQueueConfig struct {
 type AppConfig struct {
 	Log          log.Conf             `mapstructure:"log" json:"Log"`
 	Grpc         grpc.Conf            `mapstructure:"grpc" json:"Grpc"`
-	Http         http.Http            `mapstructure:"http" json:"Http"`
+	HTTP         http.HTTP            `mapstructure:"http" json:"Http"`
 	Database     database.Database    `mapstructure:"database" json:"Database"`
 	Redis        cache.Redis          `mapstructure:"redis" json:"Redis"`
 	Events       EventsConfig         `mapstructure:"events" json:"Events"`
@@ -116,8 +116,8 @@ func LoadConfigFile(confDir string) (AppConfig, error) {
 			return
 		}
 		// Apply defaults/normalization after reload (e.g. auth token expiry units).
-		cfg.Http.SetDefaults()
-		if err := http.ApplyHTTPAuthExpiry(config, &cfg.Http); err != nil {
+		cfg.HTTP.SetDefaults()
+		if err := http.ApplyHTTPAuthExpiry(config, &cfg.HTTP); err != nil {
 			// Keep running with defaults/previous values if parsing fails.
 			log.Errorw("failed to parse http auth expiry from config", "error", err, "file", e.Name)
 		}
@@ -130,8 +130,8 @@ func LoadConfigFile(confDir string) (AppConfig, error) {
 		return cfg, fmt.Errorf("failed to unmarshal configuration file: %v", err)
 	}
 	// Apply defaults/normalization after initial load (e.g. auth token expiry units).
-	cfg.Http.SetDefaults()
-	if err := http.ApplyHTTPAuthExpiry(config, &cfg.Http); err != nil {
+	cfg.HTTP.SetDefaults()
+	if err := http.ApplyHTTPAuthExpiry(config, &cfg.HTTP); err != nil {
 		return cfg, err
 	}
 	cfg.Metrics.SetDefaults()

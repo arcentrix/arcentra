@@ -25,7 +25,7 @@ import (
 type IRoleRepository interface {
 	Create(ctx context.Context, role *model.Role) error
 	Get(ctx context.Context, roleId string) (*model.Role, error)
-	BatchGet(ctx context.Context, roleIds []string) ([]model.Role, error)
+	BatchGet(ctx context.Context, roleIDs []string) ([]model.Role, error)
 	List(ctx context.Context, pageNum, pageSize int) ([]model.Role, int64, error)
 	Update(ctx context.Context, roleId string, updates map[string]any) error
 	Delete(ctx context.Context, roleId string) error
@@ -59,13 +59,13 @@ func (r *RoleRepo) Get(ctx context.Context, roleId string) (*model.Role, error) 
 }
 
 // BatchGet returns roles by roleIds.
-func (r *RoleRepo) BatchGet(ctx context.Context, roleIds []string) ([]model.Role, error) {
-	if len(roleIds) == 0 {
+func (r *RoleRepo) BatchGet(ctx context.Context, roleIDs []string) ([]model.Role, error) {
+	if len(roleIDs) == 0 {
 		return []model.Role{}, nil
 	}
 	var roles []model.Role
 	err := r.Database().WithContext(ctx).Select(roleSelectFields).
-		Where("role_id IN ? AND is_enabled = ?", roleIds, 1).Find(&roles).Error
+		Where("role_id IN ? AND is_enabled = ?", roleIDs, 1).Find(&roles).Error
 	return roles, err
 }
 

@@ -25,7 +25,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-type Http struct {
+type HTTP struct {
 	Host            string
 	Port            int
 	AccessLog       bool
@@ -51,7 +51,7 @@ type TokenInfo struct {
 	CreateAt     int64  `json:"createAt"`
 }
 
-func (h *Http) SetDefaults() {
+func (h *HTTP) SetDefaults() {
 	if h.Host == "" {
 		h.Host = "127.0.0.1"
 	}
@@ -98,7 +98,7 @@ func (h *Http) SetDefaults() {
 }
 
 // QueryInt queries the int value from the query string
-func (h *Http) QueryInt(c *fiber.Ctx, key string) int {
+func (h *HTTP) QueryInt(c *fiber.Ctx, key string) int {
 	value := c.Query(key)
 	if value == "" {
 		return 0
@@ -137,7 +137,7 @@ func parseAuthExpire(config *viper.Viper, key string) (string, bool) {
 }
 
 // ApplyHTTPAuthExpiry applies the auth expiry to the http config
-func ApplyHTTPAuthExpiry(config *viper.Viper, httpCfg *Http) error {
+func ApplyHTTPAuthExpiry(config *viper.Viper, httpCfg *HTTP) error {
 	if httpCfg == nil {
 		return nil
 	}

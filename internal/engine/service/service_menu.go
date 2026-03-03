@@ -43,8 +43,8 @@ func (s *MenuService) BuildMenuTree(menus []model.Menu) []model.MenuDTO {
 			continue
 		}
 		menuDTO := &model.MenuDTO{
-			MenuId:      menu.MenuId,
-			ParentId:    menu.ParentId,
+			MenuID:      menu.MenuID,
+			ParentID:    menu.ParentID,
 			Name:        menu.Name,
 			Path:        menu.Path,
 			Component:   menu.Component,
@@ -55,21 +55,21 @@ func (s *MenuService) BuildMenuTree(menus []model.Menu) []model.MenuDTO {
 			Description: menu.Description,
 			Children:    []model.MenuDTO{},
 		}
-		menuMap[menu.MenuId] = menuDTO
+		menuMap[menu.MenuID] = menuDTO
 	}
 
 	// 第二遍：构建父子关系
-	for menuId, menuDTO := range menuMap {
-		if menuDTO.ParentId == "" {
+	for menuID, menuDTO := range menuMap {
+		if menuDTO.ParentID == "" {
 			// 根菜单
 			rootMenus = append(rootMenus, *menuDTO)
 		} else {
 			// 子菜单，添加到父菜单的children中
-			if parent, exists := menuMap[menuDTO.ParentId]; exists {
+			if parent, exists := menuMap[menuDTO.ParentID]; exists {
 				parent.Children = append(parent.Children, *menuDTO)
 			} else {
 				// 父菜单不存在，当作根菜单处理
-				log.Warnw("parent menu not found", "menuId", menuId, "parentId", menuDTO.ParentId)
+				log.Warnw("parent menu not found", "menuId", menuID, "parentId", menuDTO.ParentID)
 				rootMenus = append(rootMenus, *menuDTO)
 			}
 		}

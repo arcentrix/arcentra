@@ -22,7 +22,7 @@ import (
 	"time"
 
 	scmpkg "github.com/arcentrix/arcentra/pkg/scm"
-	_ "github.com/arcentrix/arcentra/pkg/scm/builtin"
+	_ "github.com/arcentrix/arcentra/pkg/scm/builtin" // register builtin SCM providers
 	"github.com/bytedance/sonic"
 )
 

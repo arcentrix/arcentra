@@ -19,6 +19,8 @@ import (
 	"time"
 )
 
+const testTaskID = "task-123"
+
 func TestKafkaDelayTopicFormat(t *testing.T) {
 	// Test delay topic format constant
 	if kafkaDelayTopicFormat != "%s_DELAY_%d" {
@@ -32,7 +34,7 @@ func TestDelayMessage_Fields(t *testing.T) {
 	executeAt := now.Add(1 * time.Hour)
 
 	msg := DelayMessage{
-		TaskID:      "task-123",
+		TaskID:      testTaskID,
 		Task:        task,
 		TargetTopic: "target-topic",
 		TargetQueue: "target-queue",
@@ -41,8 +43,8 @@ func TestDelayMessage_Fields(t *testing.T) {
 		CreatedAt:   now,
 	}
 
-	if msg.TaskID != "task-123" {
-		t.Errorf("expected TaskID to be 'task-123', got %s", msg.TaskID)
+	if msg.TaskID != testTaskID {
+		t.Errorf("expected TaskID to be '%s', got %s", testTaskID, msg.TaskID)
 	}
 	if msg.Task != task {
 		t.Error("expected Task to match")

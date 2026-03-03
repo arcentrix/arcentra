@@ -14,8 +14,8 @@ func TestParseCommitRecords(t *testing.T) {
 	if len(commits) != 2 {
 		t.Fatalf("expected 2 commits, got %d", len(commits))
 	}
-	if commits[0].CommitId != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
-		t.Fatalf("unexpected commit id: %s", commits[0].CommitId)
+	if commits[0].CommitID != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("unexpected commit id: %s", commits[0].CommitID)
 	}
 	if commits[0].AuthorName != "Alice" {
 		t.Fatalf("unexpected author: %s", commits[0].AuthorName)

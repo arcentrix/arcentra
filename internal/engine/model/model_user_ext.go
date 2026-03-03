@@ -22,7 +22,7 @@ import (
 type UserExt struct {
 	BaseModel
 
-	UserId string `gorm:"column:user_id;uniqueIndex" json:"userId"`
+	UserID string `gorm:"column:user_id;uniqueIndex" json:"userId"`
 	// user ID (foreign key)
 
 	Timezone string `gorm:"column:timezone;default:'UTC'" json:"timezone"`

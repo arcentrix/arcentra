@@ -73,7 +73,7 @@ func (rt *Router) createProject(c *fiber.Ctx) error {
 	}
 
 	// 获取当前用户ID
-	claims, err := auth.ParseAuthorizationToken(c, rt.Http.Auth.SecretKey)
+	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil {
 		log.Errorw("authentication failed", "error", err)
 		return http.WithRepErrMsg(c, http.AuthenticationFailed.Code, http.AuthenticationFailed.Msg, c.Path())
@@ -245,7 +245,7 @@ func (rt *Router) getProjectsByOrgId(c *fiber.Ctx) error {
 // getUserProjects 获取用户的项目列表
 func (rt *Router) getUserProjects(c *fiber.Ctx) error {
 	// 获取当前用户ID
-	claims, err := auth.ParseAuthorizationToken(c, rt.Http.Auth.SecretKey)
+	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil {
 		log.Errorw("authentication failed", "error", err)
 		return http.WithRepErrMsg(c, http.AuthenticationFailed.Code, http.AuthenticationFailed.Msg, c.Path())

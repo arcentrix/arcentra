@@ -103,7 +103,7 @@ const (
 // CloudEvent represents a CloudEvents 1.0 envelope.
 type CloudEvent struct {
 	SpecVersion     string         `json:"specversion"`
-	Id              string         `json:"id"`
+	ID              string         `json:"id"`
 	Source          string         `json:"source"`
 	Type            string         `json:"type"`
 	Time            time.Time      `json:"time"`
@@ -116,10 +116,10 @@ type CloudEvent struct {
 // CloudEventOption defines a functional option for CloudEvent.
 type CloudEventOption func(*CloudEvent)
 
-// WithCloudEventId sets the CloudEvent id.
-func WithCloudEventId(id string) CloudEventOption {
+// WithCloudEventID sets the CloudEvent id.
+func WithCloudEventID(id string) CloudEventOption {
 	return func(e *CloudEvent) {
-		e.Id = id
+		e.ID = id
 	}
 }
 
@@ -166,7 +166,7 @@ func WithCloudEventExtensions(extensions map[string]any) CloudEventOption {
 func NewCloudEvent(eventType, source string, data any, opts ...CloudEventOption) *CloudEvent {
 	event := &CloudEvent{
 		SpecVersion:     CloudEventSpecVersion,
-		Id:              uuid.NewString(),
+		ID:              uuid.NewString(),
 		Source:          source,
 		Type:            eventType,
 		Time:            time.Now(),
@@ -183,7 +183,7 @@ func NewCloudEvent(eventType, source string, data any, opts ...CloudEventOption)
 func (e *CloudEvent) ToMap() map[string]any {
 	result := map[string]any{
 		"specversion":     e.SpecVersion,
-		"id":              e.Id,
+		"id":              e.ID,
 		"source":          e.Source,
 		"type":            e.Type,
 		"time":            e.Time,

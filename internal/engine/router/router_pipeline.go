@@ -161,8 +161,8 @@ func (rt *Router) listPipelines(c *fiber.Ctx) error {
 	req := &pipelinev1.ListPipelinesRequest{
 		ProjectId: strings.TrimSpace(c.Query("projectId")),
 		Name:      strings.TrimSpace(c.Query("name")),
-		Page:      int32(maxInt(rt.Http.QueryInt(c, "page"), 1)),
-		PageSize:  int32(maxInt(rt.Http.QueryInt(c, "pageSize"), 1)),
+		Page:      int32(maxIntWithOne(rt.HTTP.QueryInt(c, "page"))),
+		PageSize:  int32(maxIntWithOne(rt.HTTP.QueryInt(c, "pageSize"))),
 		Status:    parsePipelineStatus(c.Query("status")),
 	}
 	resp, err := rt.pipelineService().ListPipelines(c.Context(), req)
@@ -338,8 +338,8 @@ func (rt *Router) listPipelineRuns(c *fiber.Ctx) error {
 	resp, err := rt.pipelineService().ListPipelineRuns(c.Context(), &pipelinev1.ListPipelineRunsRequest{
 		PipelineId: pipelineId,
 		Status:     parsePipelineStatus(c.Query("status")),
-		Page:       int32(maxInt(rt.Http.QueryInt(c, "page"), 1)),
-		PageSize:   int32(maxInt(rt.Http.QueryInt(c, "pageSize"), 1)),
+		Page:       int32(maxIntWithOne(rt.HTTP.QueryInt(c, "page"))),
+		PageSize:   int32(maxIntWithOne(rt.HTTP.QueryInt(c, "pageSize"))),
 	})
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
@@ -400,6 +400,14 @@ func (rt *Router) stopPipeline(c *fiber.Ctx) error {
 }
 
 func (rt *Router) pausePipeline(c *fiber.Ctx) error {
+	return rt.changePipelinePauseState(c, true)
+}
+
+func (rt *Router) resumePipeline(c *fiber.Ctx) error {
+	return rt.changePipelinePauseState(c, false)
+}
+
+func (rt *Router) changePipelinePauseState(c *fiber.Ctx, pause bool) error {
 	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
 	runId := strings.TrimSpace(c.Params("runId"))
 	if pipelineId == "" || runId == "" {
@@ -416,43 +424,38 @@ func (rt *Router) pausePipeline(c *fiber.Ctx) error {
 	if operator == "" {
 		operator = rt.currentUserId(c)
 	}
-	resp, err := rt.pipelineService().PausePipeline(c.Context(), &pipelinev1.PausePipelineRequest{
-		PipelineId: pipelineId,
-		RunId:      runId,
-		Reason:     req.Reason,
-		Operator:   operator,
-	})
-	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
-	}
-	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+	if err := rt.applyPauseState(c, pause, pipelineId, runId, req.Reason, operator); err != nil {
+		return err
 	}
 	c.Locals(middleware.OPERATION, runId)
 	return nil
 }
 
-func (rt *Router) resumePipeline(c *fiber.Ctx) error {
-	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
-	runId := strings.TrimSpace(c.Params("runId"))
-	if pipelineId == "" || runId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "pipeline id and run id are required", c.Path())
+func (rt *Router) applyPauseState(
+	c *fiber.Ctx,
+	pause bool,
+	pipelineID, runID, reason, operator string,
+) error {
+	if pause {
+		resp, err := rt.pipelineService().PausePipeline(c.Context(), &pipelinev1.PausePipelineRequest{
+			PipelineId: pipelineID,
+			RunId:      runID,
+			Reason:     reason,
+			Operator:   operator,
+		})
+		if err != nil {
+			return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		}
+		if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
+			return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+		}
+		return nil
 	}
-	var req struct {
-		Reason   string `json:"reason"`
-		Operator string `json:"operator"`
-	}
-	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg, c.Path())
-	}
-	operator := strings.TrimSpace(req.Operator)
-	if operator == "" {
-		operator = rt.currentUserId(c)
-	}
+
 	resp, err := rt.pipelineService().ResumePipeline(c.Context(), &pipelinev1.ResumePipelineRequest{
-		PipelineId: pipelineId,
-		RunId:      runId,
-		Reason:     req.Reason,
+		PipelineId: pipelineID,
+		RunId:      runID,
+		Reason:     reason,
 		Operator:   operator,
 	})
 	if err != nil {
@@ -461,7 +464,6 @@ func (rt *Router) resumePipeline(c *fiber.Ctx) error {
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
 		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
 	}
-	c.Locals(middleware.OPERATION, runId)
 	return nil
 }
 
@@ -470,7 +472,7 @@ func (rt *Router) pipelineService() *service.PipelineServiceImpl {
 }
 
 func (rt *Router) currentUserId(c *fiber.Ctx) string {
-	claims, err := auth.ParseAuthorizationToken(c, rt.Http.Auth.SecretKey)
+	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil || claims == nil {
 		return ""
 	}
@@ -544,9 +546,9 @@ func parsePipelineStatus(status string) pipelinev1.PipelineStatus {
 	}
 }
 
-func maxInt(a, b int) int {
-	if a > b {
+func maxIntWithOne(a int) int {
+	if a > 1 {
 		return a
 	}
-	return b
+	return 1
 }

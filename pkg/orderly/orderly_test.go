@@ -23,6 +23,11 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const (
+	orderlyValue1 = "value1"
+	orderlyValue2 = "value2"
+)
+
 func TestNew(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -68,7 +73,7 @@ func TestNew(t *testing.T) {
 func TestMap_Set(t *testing.T) {
 	t.Run("add new key-value pairs", func(t *testing.T) {
 		m := New(10)
-		m.Set("key1", "value1")
+		m.Set("key1", orderlyValue1)
 		m.Set("key2", 42)
 
 		if len(m.keys) != 2 {
@@ -76,8 +81,8 @@ func TestMap_Set(t *testing.T) {
 		}
 
 		val, ok := m.values["key1"]
-		if !ok || val != "value1" {
-			t.Errorf("Set() values[\"key1\"] = %v, want \"value1\"", val)
+		if !ok || val != orderlyValue1 {
+			t.Errorf("Set() values[\"key1\"] = %v, want %q", val, orderlyValue1)
 		}
 
 		val, ok = m.values["key2"]
@@ -88,23 +93,23 @@ func TestMap_Set(t *testing.T) {
 
 	t.Run("update existing key", func(t *testing.T) {
 		m := New(10)
-		m.Set("key1", "value1")
-		m.Set("key1", "value2")
+		m.Set("key1", orderlyValue1)
+		m.Set("key1", orderlyValue2)
 
 		if len(m.keys) != 1 {
 			t.Errorf("Set() keys length = %v, want 1", len(m.keys))
 		}
 
 		val, ok := m.values["key1"]
-		if !ok || val != "value2" {
-			t.Errorf("Set() values[\"key1\"] = %v, want \"value2\"", val)
+		if !ok || val != orderlyValue2 {
+			t.Errorf("Set() values[\"key1\"] = %v, want %q", val, orderlyValue2)
 		}
 	})
 
 	t.Run("reach maxSize limit", func(t *testing.T) {
 		m := New(2)
-		m.Set("key1", "value1")
-		m.Set("key2", "value2")
+		m.Set("key1", orderlyValue1)
+		m.Set("key2", orderlyValue2)
 		m.Set("key3", "value3") // should be ignored
 
 		if len(m.keys) != 2 {
@@ -118,7 +123,7 @@ func TestMap_Set(t *testing.T) {
 
 	t.Run("maintain insertion order", func(t *testing.T) {
 		m := New(10)
-		m.Set("key1", "value1")
+		m.Set("key1", orderlyValue1)
 		m.Set("key2", "value2")
 		m.Set("key3", "value3")
 
@@ -132,15 +137,15 @@ func TestMap_Set(t *testing.T) {
 func TestMap_Get(t *testing.T) {
 	t.Run("get existing key", func(t *testing.T) {
 		m := New(10)
-		m.Set("key1", "value1")
+		m.Set("key1", orderlyValue1)
 		m.Set("key2", 42)
 
 		val, ok := m.Get("key1")
 		if !ok {
 			t.Error("Get() ok = false, want true")
 		}
-		if val != "value1" {
-			t.Errorf("Get() value = %v, want \"value1\"", val)
+		if val != orderlyValue1 {
+			t.Errorf("Get() value = %v, want %q", val, orderlyValue1)
 		}
 
 		val, ok = m.Get("key2")
@@ -232,8 +237,8 @@ func TestMap_ForEach(t *testing.T) {
 			t.Errorf("ForEach() visited %d keys, want 3", len(visited))
 		}
 
-		if visited["key1"] != "value1" {
-			t.Errorf("ForEach() visited[\"key1\"] = %v, want \"value1\"", visited["key1"])
+		if visited["key1"] != orderlyValue1 {
+			t.Errorf("ForEach() visited[\"key1\"] = %v, want %q", visited["key1"], orderlyValue1)
 		}
 		if visited["key2"] != "value2" {
 			t.Errorf("ForEach() visited[\"key2\"] = %v, want \"value2\"", visited["key2"])
@@ -364,7 +369,9 @@ func TestMap_Concurrent(t *testing.T) {
 			return nil
 		})
 
-		eg.Wait()
+		if err := eg.Wait(); err != nil {
+			t.Fatalf("concurrent write failed: %v", err)
+		}
 
 		// concurrent reads
 		eg.Go(func() error {
@@ -380,7 +387,9 @@ func TestMap_Concurrent(t *testing.T) {
 			}
 			return nil
 		})
-		eg.Wait()
+		if err := eg.Wait(); err != nil {
+			t.Fatalf("concurrent read failed: %v", err)
+		}
 
 		// verify data consistency
 		keys := m.Keys()

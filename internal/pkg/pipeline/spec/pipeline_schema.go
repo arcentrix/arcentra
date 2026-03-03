@@ -21,21 +21,23 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-type Pipeline = pipelinev1.Spec
-type Runtime = pipelinev1.Runtime
-type Resources = pipelinev1.Resources
-type Job = pipelinev1.Job
-type Retry = pipelinev1.Retry
-type Step = pipelinev1.Step
-type Source = pipelinev1.Source
-type SourceAuth = pipelinev1.SourceAuth
-type Approval = pipelinev1.Approval
-type Target = pipelinev1.Target
-type Notify = pipelinev1.Notify
-type NotifyItem = pipelinev1.NotifyItem
-type Trigger = pipelinev1.Trigger
-type AgentSelector = pipelinev1.AgentSelector
-type LabelExpression = pipelinev1.LabelExpression
+type (
+	Pipeline        = pipelinev1.Spec
+	Runtime         = pipelinev1.Runtime
+	Resources       = pipelinev1.Resources
+	Job             = pipelinev1.Job
+	Retry           = pipelinev1.Retry
+	Step            = pipelinev1.Step
+	Source          = pipelinev1.Source
+	SourceAuth      = pipelinev1.SourceAuth
+	Approval        = pipelinev1.Approval
+	Target          = pipelinev1.Target
+	Notify          = pipelinev1.Notify
+	NotifyItem      = pipelinev1.NotifyItem
+	Trigger         = pipelinev1.Trigger
+	AgentSelector   = pipelinev1.AgentSelector
+	LabelExpression = pipelinev1.LabelExpression
+)
 
 func StructAsMap(s *structpb.Struct) map[string]any {
 	if s == nil {

@@ -451,7 +451,7 @@ func TestCachedQueryWithHybrid(t *testing.T) {
 		return User{ID: 1, Name: "Alice"}, nil
 	}
 
-	keyFunc := func(params ...any) string {
+	keyFunc := func(_ ...any) string {
 		return "user:1"
 	}
 
@@ -504,7 +504,7 @@ func TestCachedQueryWithHybrid_Invalidate(t *testing.T) {
 		return Product{ID: 1, Price: 200.0}, nil
 	}
 
-	keyFunc := func(params ...any) string {
+	keyFunc := func(_ ...any) string {
 		return "product:1"
 	}
 

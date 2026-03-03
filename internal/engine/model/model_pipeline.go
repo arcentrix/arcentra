@@ -21,11 +21,11 @@ import (
 // Pipeline 流水线定义表
 type Pipeline struct {
 	BaseModel
-	PipelineId        string     `gorm:"column:pipeline_id" json:"pipelineId"`
-	ProjectId         string     `gorm:"column:project_id" json:"projectId"`
+	PipelineID        string     `gorm:"column:pipeline_id" json:"pipelineId"`
+	ProjectID         string     `gorm:"column:project_id" json:"projectId"`
 	Name              string     `gorm:"column:name" json:"name"`
 	Description       string     `gorm:"column:description" json:"description"`
-	RepoUrl           string     `gorm:"column:repo_url" json:"repoUrl"`
+	RepoURL           string     `gorm:"column:repo_url" json:"repoUrl"`
 	DefaultBranch     string     `gorm:"column:default_branch" json:"defaultBranch"`
 	PipelineFilePath  string     `gorm:"column:pipeline_file_path" json:"pipelineFilePath"`
 	Status            int        `gorm:"column:status" json:"status"` // 0:unknown 1:pending 2:running 3:success 4:failed 5:cancelled 6:paused

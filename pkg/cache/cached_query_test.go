@@ -46,7 +46,7 @@ func (m *mockCache) Get(ctx context.Context, key string) *redis.StringCmd {
 	return cmd
 }
 
-func (m *mockCache) Set(ctx context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd {
+func (m *mockCache) Set(ctx context.Context, key string, value any, _ time.Duration) *redis.StatusCmd {
 	m.data[key] = value.(string)
 	cmd := redis.NewStatusCmd(ctx, "set", key, value)
 	cmd.SetVal("OK")

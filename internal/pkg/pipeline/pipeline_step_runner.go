@@ -33,6 +33,8 @@ type StepRunner struct {
 	step *spec.Step
 }
 
+const defaultBuiltinActionExecute = "Execute"
+
 // NewStepRunner creates a new step runner
 func NewStepRunner(ctx *ExecutionContext, job *spec.Job, step *spec.Step) *StepRunner {
 	return &StepRunner{ctx: ctx, job: job, step: step}
@@ -192,7 +194,7 @@ func (r *StepRunner) executeBuiltin(ctx context.Context, builtinName string) err
 		if err == nil && len(info.Actions) > 0 {
 			action = info.Actions[0]
 		} else {
-			action = "Execute"
+			action = defaultBuiltinActionExecute
 		}
 	}
 
@@ -298,7 +300,7 @@ func (r *StepRunner) executePlugin(ctx context.Context) error {
 	// Determine action (default to "Execute" if not specified)
 	action := r.step.Action
 	if action == "" {
-		action = "Execute"
+		action = defaultBuiltinActionExecute
 	}
 
 	// Resolve environment variables

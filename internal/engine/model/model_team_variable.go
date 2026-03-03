@@ -17,8 +17,8 @@ package model
 // TeamVariable 团队变量表
 type TeamVariable struct {
 	BaseModel
-	VariableId  string `gorm:"column:variable_id" json:"variableId"`  // 变量唯一标识
-	TeamId      string `gorm:"column:team_id" json:"teamId"`          // 团队ID
+	VariableID  string `gorm:"column:variable_id" json:"variableId"`  // 变量唯一标识
+	TeamID      string `gorm:"column:team_id" json:"teamId"`          // 团队ID
 	Key         string `gorm:"column:key" json:"key"`                 // 变量键
 	Value       string `gorm:"column:value" json:"value"`             // 变量值(敏感信息加密存储)
 	Type        string `gorm:"column:type" json:"type"`               // 类型(env/secret/file)

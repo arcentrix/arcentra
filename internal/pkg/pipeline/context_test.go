@@ -180,7 +180,7 @@ func TestAbort(t *testing.T) {
 	if !ctx2.IsAborted() {
 		t.Error("context should be aborted after AbortWithError()")
 	}
-	if !errors.Is(err, ctx2.AbortError()) {
+	if !errors.Is(ctx2.AbortError(), err) {
 		t.Error("abort error not set correctly")
 	}
 	// Test that AbortWithError transitions to CANCELED state
@@ -454,12 +454,14 @@ func TestStateMachineHistory(t *testing.T) {
 	}
 
 	// Verify first transition
-	if history[0].From != pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING || history[0].To != pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING {
+	if history[0].From != pipelinev1.PipelineStatus_PIPELINE_STATUS_PENDING ||
+		history[0].To != pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING {
 		t.Errorf("unexpected first transition: %v -> %v", history[0].From, history[0].To)
 	}
 
 	// Verify second transition
-	if history[1].From != pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING || history[1].To != pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS {
+	if history[1].From != pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING ||
+		history[1].To != pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS {
 		t.Errorf("unexpected second transition: %v -> %v", history[1].From, history[1].To)
 	}
 

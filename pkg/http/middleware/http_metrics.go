@@ -41,17 +41,14 @@ var (
 	)
 )
 
-func RegisterHttpMetrics(registry *prometheus.Registry) error {
+func RegisterHTTPMetrics(registry *prometheus.Registry) error {
 	if err := registry.Register(httpDuration); err != nil {
 		return err
 	}
-	if err := registry.Register(httpRequests); err != nil {
-		return err
-	}
-	return nil
+	return registry.Register(httpRequests)
 }
 
-func HttpMetricsMiddleware() fiber.Handler {
+func HTTPMetricsMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		start := time.Now()
 		err := c.Next()

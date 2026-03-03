@@ -16,14 +16,18 @@ package request
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/valyala/fasthttp"
 )
+
+const formURLEncodedContentType = "application/x-www-form-urlencoded"
 
 type testResp struct {
 	Message string `json:"message"`
@@ -41,7 +45,7 @@ func TestGETWithResult(t *testing.T) {
 	var out testResp
 	resp, err := NewRequest(srv.URL, fasthttp.MethodGet, nil, nil).
 		WithResult(&out).
-		Do()
+		Do(context.Background())
 	if err != nil {
 		t.Fatalf("GET error: %v", err)
 	}
@@ -75,7 +79,7 @@ func TestPOSTDoWithBodyAndResult(t *testing.T) {
 	req := NewRequest(srv.URL, fasthttp.MethodPost, nil, body).
 		WithResult(&out)
 
-	resp, err := req.Do()
+	resp, err := req.Do(context.Background())
 	if err != nil {
 		t.Fatalf("Do error: %v", err)
 	}
@@ -95,19 +99,19 @@ func TestProxyMissingScheme(t *testing.T) {
 
 	_, err := NewRequest(srv.URL, fasthttp.MethodGet, nil, nil).
 		WithProxy("127.0.0.1:8080").
-		Do()
+		Do(context.Background())
 	if err == nil {
 		t.Fatalf("expected proxy scheme error")
 	}
 }
 
 func TestMethodValidation(t *testing.T) {
-	_, err := NewRequest("http://example.com", "", nil, nil).Do()
+	_, err := NewRequest("http://example.com", "", nil, nil).Do(context.Background())
 	if err == nil {
 		t.Fatalf("expected method required error")
 	}
 
-	_, err = NewRequest("http://example.com", "BAD", nil, nil).Do()
+	_, err = NewRequest("http://example.com", "BAD", nil, nil).Do(context.Background())
 	if err == nil {
 		t.Fatalf("expected invalid method error")
 	}
@@ -126,7 +130,7 @@ func TestQueryParams(t *testing.T) {
 
 	resp, err := NewRequest(srv.URL+"?x=y", fasthttp.MethodGet, nil, nil).
 		WithQueryParams(map[string]string{"a": "1", "b": "2"}).
-		Do()
+		Do(context.Background())
 	if err != nil {
 		t.Fatalf("Do error: %v", err)
 	}
@@ -137,7 +141,7 @@ func TestQueryParams(t *testing.T) {
 
 func TestFormURLEncoded(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
+		if r.Header.Get("Content-Type") != formURLEncodedContentType {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -156,7 +160,7 @@ func TestFormURLEncoded(t *testing.T) {
 	resp, err := NewRequest(srv.URL, fasthttp.MethodPost, nil, nil).
 		WithForm(map[string]string{"k": "v"}).
 		WithFormField("a", "1").
-		Do()
+		Do(context.Background())
 	if err != nil {
 		t.Fatalf("Do error: %v", err)
 	}
@@ -198,7 +202,7 @@ func TestMultipartForm(t *testing.T) {
 	resp, err := NewRequest(srv.URL, fasthttp.MethodPost, nil, nil).
 		WithFormField("k", "v").
 		WithFormFileBytes("file", "a.txt", "text/plain", []byte("hello")).
-		Do()
+		Do(context.Background())
 	if err != nil {
 		t.Fatalf("Do error: %v", err)
 	}
@@ -228,7 +232,7 @@ func TestBodyJSONAndBytes(t *testing.T) {
 
 	resp, err := NewRequest(srv.URL, fasthttp.MethodPost, nil, nil).
 		WithBodyJSON(payload{Name: "test"}).
-		Do()
+		Do(context.Background())
 	if err != nil {
 		t.Fatalf("Do error: %v", err)
 	}
@@ -248,11 +252,27 @@ func TestBodyJSONAndBytes(t *testing.T) {
 
 	resp, err = NewRequest(srv2.URL, fasthttp.MethodPost, nil, nil).
 		WithBodyBytes([]byte("raw")).
-		Do()
+		Do(context.Background())
 	if err != nil {
 		t.Fatalf("Do error: %v", err)
 	}
 	if resp.StatusCode() != http.StatusOK {
 		t.Fatalf("unexpected status: %d", resp.StatusCode())
+	}
+}
+
+func TestContextDeadlineTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	_, err := NewRequest(srv.URL, fasthttp.MethodGet, nil, nil).Do(ctx)
+	if err == nil {
+		t.Fatalf("expected timeout error")
 	}
 }

@@ -41,7 +41,7 @@ func (rs *RoleService) CreateRole(ctx context.Context, createReq *model.CreateRo
 	}
 
 	role := &model.Role{
-		RoleId:      createReq.RoleId,
+		RoleID:      createReq.RoleID,
 		Name:        createReq.Name,
 		DisplayName: createReq.DisplayName,
 		Description: createReq.Description,
@@ -56,10 +56,10 @@ func (rs *RoleService) CreateRole(ctx context.Context, createReq *model.CreateRo
 	return role, nil
 }
 
-func (rs *RoleService) GetRoleByRoleId(ctx context.Context, roleId string) (*model.Role, error) {
-	role, err := rs.roleRepo.Get(ctx, roleId)
+func (rs *RoleService) GetRoleByRoleID(ctx context.Context, roleID string) (*model.Role, error) {
+	role, err := rs.roleRepo.Get(ctx, roleID)
 	if err != nil {
-		log.Errorw("get role by roleId failed", "roleId", roleId, "error", err)
+		log.Errorw("get role by roleId failed", "roleId", roleID, "error", err)
 		return nil, err
 	}
 	return role, nil
@@ -74,18 +74,18 @@ func (rs *RoleService) ListRoles(ctx context.Context, pageNum, pageSize int) ([]
 	return roles, count, err
 }
 
-func (rs *RoleService) UpdateRoleByRoleId(ctx context.Context, roleId string, updateReq *model.UpdateRoleReq) error {
-	_, err := rs.roleRepo.Get(ctx, roleId)
+func (rs *RoleService) UpdateRoleByRoleID(ctx context.Context, roleID string, updateReq *model.UpdateRoleReq) error {
+	_, err := rs.roleRepo.Get(ctx, roleID)
 	if err != nil {
-		log.Errorw("get role by roleId failed", "roleId", roleId, "error", err)
+		log.Errorw("get role by roleId failed", "roleId", roleID, "error", err)
 		return err
 	}
 
 	updates := buildRoleUpdateMap(updateReq)
 	if len(updates) > 0 {
 		updates["updated_at"] = time.Now()
-		if err := rs.roleRepo.Update(ctx, roleId, updates); err != nil {
-			log.Errorw("update role failed", "roleId", roleId, "error", err)
+		if err := rs.roleRepo.Update(ctx, roleID, updates); err != nil {
+			log.Errorw("update role failed", "roleId", roleID, "error", err)
 			return err
 		}
 	}
@@ -93,9 +93,9 @@ func (rs *RoleService) UpdateRoleByRoleId(ctx context.Context, roleId string, up
 	return nil
 }
 
-func (rs *RoleService) DeleteRoleByRoleId(ctx context.Context, roleId string) error {
-	if err := rs.roleRepo.Delete(ctx, roleId); err != nil {
-		log.Errorw("delete role failed", "roleId", roleId, "error", err)
+func (rs *RoleService) DeleteRoleByRoleID(ctx context.Context, roleID string) error {
+	if err := rs.roleRepo.Delete(ctx, roleID); err != nil {
+		log.Errorw("delete role failed", "roleId", roleID, "error", err)
 		return err
 	}
 	return nil

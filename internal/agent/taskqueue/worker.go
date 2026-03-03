@@ -17,17 +17,24 @@ package taskqueue
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
+	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
+	steprunv1 "github.com/arcentrix/arcentra/api/steprun/v1"
 	"github.com/arcentrix/arcentra/internal/agent/config"
+	"github.com/arcentrix/arcentra/internal/pkg/grpc"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
 )
 
-func StartWorker(ctx context.Context, agentConf *config.AgentConfig) (nova.TaskQueue, error) {
+var runningStepRunCancel sync.Map
+
+func StartWorker(ctx context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper) (nova.TaskQueue, error) {
 	if agentConf == nil {
 		return nil, nil
 	}
@@ -70,11 +77,11 @@ func StartWorker(ctx context.Context, agentConf *config.AgentConfig) (nova.TaskQ
 				return fmt.Errorf("unmarshal step run payload: %w", err)
 			}
 			log.Infow("received step run task",
-				"stepRunId", payload.StepRunId,
+				"stepRunId", payload.StepRunID,
 				"jobName", payload.JobName,
 				"stepName", payload.StepName,
 			)
-			return nil
+			return executeStepRun(ctx, agentConf, grpcClient, &payload)
 		default:
 			log.Debugw("unknown task type", "type", task.Type)
 			return nil
@@ -106,4 +113,175 @@ func withMessageCodec(value string) nova.QueueOption {
 		return nil
 	}
 	return nova.WithMessageCodec(codec)
+}
+
+func CancelStepRun(stepRunId string) bool {
+	value, ok := runningStepRunCancel.Load(stepRunId)
+	if !ok {
+		return false
+	}
+	cancel, ok := value.(context.CancelFunc)
+	if !ok {
+		return false
+	}
+	cancel()
+	return true
+}
+
+func executeStepRun(
+	ctx context.Context,
+	agentConf *config.AgentConfig,
+	grpcClient *grpc.ClientWrapper,
+	payload *taskqueue.StepRunTaskPayload,
+) error {
+	if payload == nil {
+		return nil
+	}
+	stepCtx, cancel := context.WithCancel(ctx)
+	runningStepRunCancel.Store(payload.StepRunID, cancel)
+	defer func() {
+		runningStepRunCancel.Delete(payload.StepRunID)
+		cancel()
+	}()
+
+	start := time.Now()
+	_ = reportStepRunStatus(grpcClient, agentConf, payload.StepRunID, steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING, 0, "", start, 0, nil)
+
+	timeout := parseTimeout(payload.Timeout, agentConf.Agent.JobTimeout)
+	runCtx := stepCtx
+	var timeoutCancel context.CancelFunc
+	if timeout > 0 {
+		runCtx, timeoutCancel = context.WithTimeout(stepCtx, timeout)
+		defer timeoutCancel()
+	}
+
+	cmdText := buildCommandFromPayload(payload)
+	if strings.TrimSpace(cmdText) == "" {
+		err := fmt.Errorf("empty command for step run %s", payload.StepRunID)
+		_ = reportStepRunStatus(
+			grpcClient,
+			agentConf,
+			payload.StepRunID,
+			steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED,
+			1,
+			err.Error(),
+			start,
+			time.Now().Unix(),
+			map[string]string{"executor": "agent-shell"},
+		)
+		return err
+	}
+
+	cmd := exec.CommandContext(runCtx, "sh", "-lc", cmdText)
+	if strings.TrimSpace(payload.Workspace) != "" {
+		cmd.Dir = payload.Workspace
+	}
+	for k, v := range payload.Env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	output, err := cmd.CombinedOutput()
+	end := time.Now().Unix()
+	metrics := map[string]string{
+		"executor":    "agent-shell",
+		"outputBytes": fmt.Sprintf("%d", len(output)),
+	}
+	if err != nil {
+		status := steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED
+		if runCtx.Err() == context.DeadlineExceeded {
+			status = steprunv1.StepRunStatus_STEP_RUN_STATUS_TIMEOUT
+		}
+		if runCtx.Err() == context.Canceled {
+			status = steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED
+		}
+		exitCode := int32(1)
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = int32(exitErr.ExitCode())
+		}
+		errMsg := strings.TrimSpace(string(output))
+		if errMsg == "" {
+			errMsg = err.Error()
+		}
+		_ = reportStepRunStatus(grpcClient, agentConf, payload.StepRunID, status, exitCode, errMsg, start, end, metrics)
+		return err
+	}
+
+	_ = reportStepRunStatus(
+		grpcClient,
+		agentConf,
+		payload.StepRunID,
+		steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS,
+		0,
+		"",
+		start,
+		end,
+		metrics,
+	)
+	return nil
+}
+
+func reportStepRunStatus(
+	grpcClient *grpc.ClientWrapper,
+	agentConf *config.AgentConfig,
+	stepRunId string,
+	status steprunv1.StepRunStatus,
+	exitCode int32,
+	errMsg string,
+	start time.Time,
+	endUnix int64,
+	metrics map[string]string,
+) error {
+	if grpcClient == nil || grpcClient.AgentClient == nil || agentConf == nil {
+		return nil
+	}
+	ctx, cancel := grpcClient.WithTimeoutAndAuth(context.Background())
+	defer cancel()
+	req := &agentv1.ReportStepRunStatusRequest{
+		AgentId:      agentConf.Agent.ID,
+		StepRunId:    stepRunId,
+		Status:       status,
+		ExitCode:     exitCode,
+		ErrorMessage: errMsg,
+		StartTime:    start.Unix(),
+		EndTime:      endUnix,
+		Metrics:      metrics,
+	}
+	_, err := grpcClient.AgentClient.ReportStepRunStatus(ctx, req)
+	return err
+}
+
+func buildCommandFromPayload(payload *taskqueue.StepRunTaskPayload) string {
+	if payload == nil {
+		return ""
+	}
+	for _, key := range []string{"run", "script", "command"} {
+		if value, ok := payload.Args[key]; ok {
+			if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
+				return text
+			}
+		}
+	}
+	if value, ok := payload.Args["commands"]; ok {
+		if list, ok := value.([]any); ok {
+			parts := make([]string, 0, len(list))
+			for i := range list {
+				if text, ok := list[i].(string); ok && strings.TrimSpace(text) != "" {
+					parts = append(parts, text)
+				}
+			}
+			return strings.Join(parts, "\n")
+		}
+	}
+	return ""
+}
+
+func parseTimeout(raw string, defaultSeconds int) time.Duration {
+	if strings.TrimSpace(raw) != "" {
+		if timeout, err := time.ParseDuration(raw); err == nil {
+			return timeout
+		}
+	}
+	if defaultSeconds > 0 {
+		return time.Duration(defaultSeconds) * time.Second
+	}
+	return 0
 }

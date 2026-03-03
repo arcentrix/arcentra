@@ -11,7 +11,7 @@ import (
 
 func TestDo_Success(t *testing.T) {
 	ctx := context.Background()
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		return nil
 	})
 	if err != nil {
@@ -22,7 +22,7 @@ func TestDo_Success(t *testing.T) {
 func TestDo_RetrySuccess(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		if attempts < 3 {
 			return errors.New("temporary error")
@@ -40,7 +40,7 @@ func TestDo_RetrySuccess(t *testing.T) {
 func TestDo_MaxAttempts(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		return errors.New("persistent error")
 	}, WithMaxAttempts(3))

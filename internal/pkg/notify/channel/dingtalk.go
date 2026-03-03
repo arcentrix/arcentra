@@ -105,7 +105,7 @@ func (c *DingTalkChannel) Send(ctx context.Context, message string) error {
 }
 
 // SendWithTemplate sends message using template
-func (c *DingTalkChannel) SendWithTemplate(ctx context.Context, template string, data map[string]interface{}) error {
+func (c *DingTalkChannel) SendWithTemplate(ctx context.Context, template string, _ map[string]interface{}) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -169,7 +169,7 @@ func (c *DingTalkChannel) sendRequest(ctx context.Context, payload map[string]in
 }
 
 // Receive receives messages (webhook callback)
-func (c *DingTalkChannel) Receive(ctx context.Context, message string) error {
+func (c *DingTalkChannel) Receive(_ context.Context, _ string) error {
 	return nil
 }
 

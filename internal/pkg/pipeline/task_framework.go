@@ -158,6 +158,9 @@ func (tf *TaskFramework) create(ctx context.Context, task *Task) error {
 
 // start starts task execution
 func (tf *TaskFramework) start(_ context.Context, task *Task) error {
+	if task == nil {
+		return fmt.Errorf("task is nil")
+	}
 	now := time.Now()
 	task.StartedAt = &now
 	task.State = TaskStateStarted
@@ -185,12 +188,12 @@ func (tf *TaskFramework) queue(_ context.Context, task *Task) error {
 			}
 			stepRunId := fmt.Sprintf("%s-%s-%s", tf.execCtx.Pipeline.Namespace, task.Job.Name, step.Name)
 			payload := &taskqueue.StepRunTaskPayload{
-				PipelineId: tf.execCtx.Pipeline.Namespace,
-				JobId:      fmt.Sprintf("%s-%s", tf.execCtx.Pipeline.Namespace, task.Job.Name),
+				PipelineID: tf.execCtx.Pipeline.Namespace,
+				JobID:      fmt.Sprintf("%s-%s", tf.execCtx.Pipeline.Namespace, task.Job.Name),
 				JobName:    task.Job.Name,
 				StepName:   step.Name,
 				StepIndex:  int32(i),
-				StepRunId:  stepRunId,
+				StepRunID:  stepRunId,
 				Uses:       step.Uses,
 				Action:     step.Action,
 				Args:       spec.StructAsMap(step.Args),

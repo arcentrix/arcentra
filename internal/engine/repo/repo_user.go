@@ -32,7 +32,7 @@ import (
 type IUserRepository interface {
 	AddUser(addUserReq *model.AddUserReq) error
 	UpdateUser(userId string, updates map[string]any) error
-	GetUserByUserId(userId string) (*model.User, error)
+	GetUserByUserID(userID string) (*model.User, error)
 	FetchUserInfo(userId string) (*model.UserInfo, error)
 	GetUserByUsername(username string) (string, error)
 	Login(login *model.Login) (*model.User, error)
@@ -68,10 +68,10 @@ func (ur *UserRepo) AddUser(addUserReq *model.AddUserReq) error {
 }
 
 // GetUserByUserId 根据userId获取用户
-func (ur *UserRepo) GetUserByUserId(userId string) (*model.User, error) {
+func (ur *UserRepo) GetUserByUserID(userID string) (*model.User, error) {
 	var user model.User
 	err := ur.Database().Table(user.TableName()).
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		First(&user).Error
 	if err != nil {
 		return nil, err
@@ -80,21 +80,21 @@ func (ur *UserRepo) GetUserByUserId(userId string) (*model.User, error) {
 }
 
 // UpdateUser updates user information (user_id, username, password, created_at cannot be updated)
-func (ur *UserRepo) UpdateUser(userId string, updates map[string]any) error {
+func (ur *UserRepo) UpdateUser(userID string, updates map[string]any) error {
 	var user model.User
 	err := ur.Database().Table(user.TableName()).
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		Updates(updates).Error
 	if err != nil {
 		return err
 	}
 
 	// 清除用户信息缓存
-	ur.invalidateUserInfoCache(userId)
+	ur.invalidateUserInfoCache(userID)
 	return nil
 }
 
-func (ur *UserRepo) FetchUserInfo(userId string) (*model.UserInfo, error) {
+func (ur *UserRepo) FetchUserInfo(userID string) (*model.UserInfo, error) {
 	ctx := context.Background()
 
 	keyFunc := func(params ...any) string {
@@ -105,14 +105,14 @@ func (ur *UserRepo) FetchUserInfo(userId string) (*model.UserInfo, error) {
 		var user model.User
 		err := ur.Database().Table(user.TableName()).
 			Select("user_id, username, full_name, avatar, email, phone").
-			Where("user_id = ?", userId).First(&user).Error
+			Where("user_id = ?", userID).First(&user).Error
 		if err != nil {
 			return nil, fmt.Errorf("failed to get user info: %w", err)
 		}
 
 		// 转换为 UserInfo
 		userInfo := &model.UserInfo{
-			UserId:   user.UserId,
+			UserID:   user.UserID,
 			Username: user.Username,
 			FullName: user.FullName,
 			Avatar:   user.Avatar,
@@ -130,14 +130,14 @@ func (ur *UserRepo) FetchUserInfo(userId string) (*model.UserInfo, error) {
 		cache.WithLogPrefix[*model.UserInfo]("[UserRepo]"),
 	)
 
-	return cq.Get(ctx, userId)
+	return cq.Get(ctx, userID)
 }
 
 func (ur *UserRepo) GetUserByUsername(username string) (string, error) {
 	var user model.User
 	err := ur.Database().Table(user.TableName()).Select("user_id").Where("username = ?", username).
 		First(&user).Error
-	return user.UserId, err
+	return user.UserID, err
 }
 
 func (ur *UserRepo) Login(login *model.Login) (*model.User, error) {
@@ -166,7 +166,7 @@ func (ur *UserRepo) Register(register *model.Register) error {
 	}
 	return ur.Database().Exec(
 		"INSERT INTO t_user (user_id, username, full_name, email, avatar, password, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		register.UserId,
+		register.UserID,
 		register.Username,
 		register.FullName,
 		register.Email,
@@ -187,10 +187,47 @@ func (ur *UserRepo) Logout(userKey string) error {
 // UserWithExt combines user and ext information
 type UserWithExt struct {
 	model.User
-	LastLoginAt      *time.Time `gorm:"column:last_login_at" json:"lastLoginAt"`
+	LastLoginAt      *time.Time `gorm:"column:last_login_at"     json:"lastLoginAt"`
 	InvitationStatus string     `gorm:"column:invitation_status" json:"invitationStatus"`
-	RoleName         *string    `gorm:"column:role_name" json:"roleName"` // 角色名称
+	RoleName         *string    `gorm:"column:role_name"         json:"roleName"` // 角色名称
 }
+
+const userWithExtSelectFields = "" +
+	"u.user_id, u.username, u.full_name, u.avatar, u.email, u.phone, " +
+	"u.is_enabled, u.is_superadmin, ue.last_login_at, " +
+	"COALESCE(ue.invitation_status, 'accepted') AS invitation_status, role.role_name"
+
+const roleSubqueryJoinDefault = "" +
+	"LEFT JOIN (" +
+	"SELECT user_id, name AS role_name " +
+	"FROM (" +
+	"SELECT urb.user_id, r.name, " +
+	"ROW_NUMBER() OVER (PARTITION BY urb.user_id ORDER BY urb.create_time ASC) rn " +
+	"FROM t_user_role_binding urb " +
+	"JOIN t_role r ON r.role_id = urb.role_id " +
+	"WHERE r.is_enabled = 1" +
+	") t WHERE rn = 1" +
+	") role ON role.user_id = u.user_id"
+
+const roleSubqueryJoinByRoleID = "" +
+	"INNER JOIN (" +
+	"SELECT DISTINCT urb.user_id, r.name AS role_name " +
+	"FROM t_user_role_binding urb " +
+	"JOIN t_role r ON r.role_id = urb.role_id " +
+	"WHERE r.is_enabled = 1 AND urb.role_id = ?" +
+	") role ON role.user_id = u.user_id"
+
+const roleSubqueryJoinByRoleName = "" +
+	"INNER JOIN (" +
+	"SELECT user_id, name AS role_name " +
+	"FROM (" +
+	"SELECT urb.user_id, r.name, " +
+	"ROW_NUMBER() OVER (PARTITION BY urb.user_id ORDER BY urb.create_time ASC) rn " +
+	"FROM t_user_role_binding urb " +
+	"JOIN t_role r ON r.role_id = urb.role_id " +
+	"WHERE r.is_enabled = 1 AND r.name = ?" +
+	") t WHERE rn = 1" +
+	") role ON role.user_id = u.user_id"
 
 func (ur *UserRepo) GetUserList(offset int, pageSize int) ([]UserWithExt, int64, error) {
 	var usersExt []UserWithExt
@@ -199,9 +236,9 @@ func (ur *UserRepo) GetUserList(offset int, pageSize int) ([]UserWithExt, int64,
 
 	// join with user ext table and role table to get last login time, invitation status, and role name
 	// use subquery to get the first role name for each user to avoid duplicate rows
-	selectFields := "u.user_id, u.username, u.full_name, u.avatar, u.email, u.phone, u.is_enabled, u.is_superadmin, ue.last_login_at, COALESCE(ue.invitation_status, 'accepted') AS invitation_status, role.role_name"
+	selectFields := userWithExtSelectFields
 	userExtJoin := "LEFT JOIN t_user_ext ue ON ue.user_id = u.user_id"
-	roleSubqueryJoin := "LEFT JOIN (SELECT user_id, name AS role_name FROM (SELECT urb.user_id, r.name, ROW_NUMBER() OVER (PARTITION BY urb.user_id ORDER BY urb.create_time ASC) rn FROM t_user_role_binding urb JOIN t_role r ON r.role_id = urb.role_id WHERE r.is_enabled = 1) t WHERE rn = 1) role ON role.user_id = u.user_id"
+	roleSubqueryJoin := roleSubqueryJoinDefault
 
 	err := ur.Database().
 		Table("t_user AS u").
@@ -225,20 +262,20 @@ func (ur *UserRepo) GetUsersByRole(roleId string, roleName string, offset int, p
 	var usersExt []UserWithExt
 	var count int64
 
-	selectFields := "u.user_id, u.username, u.full_name, u.avatar, u.email, u.phone, u.is_enabled, u.is_superadmin, ue.last_login_at, COALESCE(ue.invitation_status, 'accepted') AS invitation_status, role.role_name"
+	selectFields := userWithExtSelectFields
 	userExtJoin := "LEFT JOIN t_user_ext ue ON ue.user_id = u.user_id"
 
 	// 构建角色子查询，根据 roleId 或 roleName 过滤
 	var roleSubqueryJoin string
 	if roleId != "" {
 		// 按 roleId 查询：使用 INNER JOIN 确保只返回有该角色的用户
-		roleSubqueryJoin = "INNER JOIN (SELECT DISTINCT urb.user_id, r.name AS role_name FROM t_user_role_binding urb JOIN t_role r ON r.role_id = urb.role_id WHERE r.is_enabled = 1 AND urb.role_id = ?) role ON role.user_id = u.user_id"
+		roleSubqueryJoin = roleSubqueryJoinByRoleID
 	} else if roleName != "" {
 		// 按 roleName 查询：使用 INNER JOIN 确保只返回有该角色名称的用户
-		roleSubqueryJoin = "INNER JOIN (SELECT user_id, name AS role_name FROM (SELECT urb.user_id, r.name, ROW_NUMBER() OVER (PARTITION BY urb.user_id ORDER BY urb.create_time ASC) rn FROM t_user_role_binding urb JOIN t_role r ON r.role_id = urb.role_id WHERE r.is_enabled = 1 AND r.name = ?) t WHERE rn = 1) role ON role.user_id = u.user_id"
+		roleSubqueryJoin = roleSubqueryJoinByRoleName
 	} else {
 		// 默认：返回所有用户的第一个角色
-		roleSubqueryJoin = "LEFT JOIN (SELECT user_id, name AS role_name FROM (SELECT urb.user_id, r.name, ROW_NUMBER() OVER (PARTITION BY urb.user_id ORDER BY urb.create_time ASC) rn FROM t_user_role_binding urb JOIN t_role r ON r.role_id = urb.role_id WHERE r.is_enabled = 1) t WHERE rn = 1) role ON role.user_id = u.user_id"
+		roleSubqueryJoin = roleSubqueryJoinDefault
 	}
 
 	db := ur.Database().
@@ -349,7 +386,7 @@ func (ur *UserRepo) SetLoginRespInfo(auth http.Auth, loginResp *model.LoginResp)
 		return fmt.Errorf("failed to marshal token info: %w", err)
 	}
 
-	tokenKey := consts.UserTokenKey + loginResp.UserInfo.UserId
+	tokenKey := consts.UserTokenKey + loginResp.UserInfo.UserID
 	if err = pipe.Set(ctx, tokenKey, accessTokenInfoJson, auth.AccessExpire).Err(); err != nil {
 		return fmt.Errorf("failed to set token in Redis: %w", err)
 	}
@@ -365,7 +402,7 @@ func (ur *UserRepo) SetLoginRespInfo(auth http.Auth, loginResp *model.LoginResp)
 		return fmt.Errorf("failed to marshal refresh token info: %w", err)
 	}
 
-	refreshTokenKey := consts.UserRefreshTokenKey + loginResp.UserInfo.UserId
+	refreshTokenKey := consts.UserRefreshTokenKey + loginResp.UserInfo.UserID
 	if err = pipe.Set(ctx, refreshTokenKey, refreshTokenInfoJson, auth.RefreshExpire).Err(); err != nil {
 		return fmt.Errorf("failed to set refresh token in Redis: %w", err)
 	}
@@ -375,7 +412,7 @@ func (ur *UserRepo) SetLoginRespInfo(auth http.Auth, loginResp *model.LoginResp)
 		return fmt.Errorf("failed to marshal user info: %w", err)
 	}
 
-	userInfoKey := consts.UserInfoKey + loginResp.UserInfo.UserId
+	userInfoKey := consts.UserInfoKey + loginResp.UserInfo.UserID
 	if err = pipe.Set(ctx, userInfoKey, userInfoJson, auth.AccessExpire).Err(); err != nil {
 		return fmt.Errorf("failed to set user info in Redis: %w", err)
 	}
@@ -410,11 +447,11 @@ func (ur *UserRepo) DelToken(key string) error {
 }
 
 // GetUserPassword gets user password hash by user ID
-func (ur *UserRepo) GetUserPassword(userId string) (string, error) {
+func (ur *UserRepo) GetUserPassword(userID string) (string, error) {
 	var user model.User
 	err := ur.Database().Table(user.TableName()).
 		Select("password").
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		First(&user).Error
 	if err != nil {
 		return "", err
@@ -431,10 +468,10 @@ func (ur *UserRepo) ResetPassword(userId, newPasswordHash string) error {
 }
 
 // UpdateAvatar updates user avatar URL
-func (ur *UserRepo) UpdateAvatar(userId, avatarUrl string) error {
+func (ur *UserRepo) UpdateAvatar(userID, avatarUrl string) error {
 	var user model.User
 	result := ur.Database().Table(user.TableName()).
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		Update("avatar", avatarUrl)
 
 	if result.Error != nil {
@@ -443,7 +480,7 @@ func (ur *UserRepo) UpdateAvatar(userId, avatarUrl string) error {
 
 	// 清除用户信息缓存
 	if result.RowsAffected > 0 {
-		ur.invalidateUserInfoCache(userId)
+		ur.invalidateUserInfoCache(userID)
 	}
 
 	return nil
@@ -463,11 +500,11 @@ func (ur *UserRepo) GetUserAvatar(userId string) (string, error) {
 }
 
 // invalidateUserInfoCache 清除用户信息缓存
-func (ur *UserRepo) invalidateUserInfoCache(userId string) {
+func (ur *UserRepo) invalidateUserInfoCache(userID string) {
 	ctx := context.Background()
 	keyFunc := func(params ...any) string {
 		return consts.UserInfoKey + params[0].(string)
 	}
 	cq := cache.NewCachedQuery[*model.UserInfo](ur.ICache, keyFunc, nil)
-	_ = cq.Invalidate(ctx, userId)
+	_ = cq.Invalidate(ctx, userID)
 }

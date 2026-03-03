@@ -103,7 +103,7 @@ func (s *ScmService) pollProject(ctx context.Context, p *model.Project) error {
 	}
 	fromUrl, ok := parseRepoFromUrl(p.RepoUrl)
 	if ok {
-		fromUrl.Url = p.RepoUrl
+		fromUrl.URL = p.RepoUrl
 	}
 	cursor, err := s.loadCursor(p, kind)
 	if err != nil {
@@ -135,7 +135,7 @@ func (s *ScmService) providerConfigFromProject(p *model.Project, kind scm.Provid
 	}
 	base := baseUrlFromRepoUrl(p.RepoUrl)
 	if base != "" {
-		cfg.BaseUrl = base
+		cfg.BaseURL = base
 	}
 	if p.AuthType == model.AuthTypeToken && strings.TrimSpace(p.Credential) != "" {
 		cfg.Token = strings.TrimSpace(p.Credential)
@@ -166,10 +166,7 @@ func (s *ScmService) loadCursor(p *model.Project, kind scm.ProviderKind) (scm.Cu
 	if p == nil {
 		return scm.Cursor{}, nil
 	}
-	settings, err := unmarshalSettings(p.Settings)
-	if err != nil {
-		return scm.Cursor{}, err
-	}
+	settings := unmarshalSettings(p.Settings)
 	scmObj, _ := settings[settingsScmKey].(map[string]any)
 	if scmObj == nil {
 		return scm.Cursor{}, nil
@@ -184,11 +181,11 @@ func (s *ScmService) loadCursor(p *model.Project, kind scm.ProviderKind) (scm.Cu
 	}
 	b, err := sonic.Marshal(raw)
 	if err != nil {
-		return scm.Cursor{}, nil
+		return scm.Cursor{}, err
 	}
 	var c scm.Cursor
 	if err := sonic.Unmarshal(b, &c); err != nil {
-		return scm.Cursor{}, nil
+		return scm.Cursor{}, err
 	}
 	return c, nil
 }
@@ -199,10 +196,7 @@ func (s *ScmService) saveCursor(ctx context.Context, projectId string, kind scm.
 	if err != nil {
 		return err
 	}
-	settings, err := unmarshalSettings(p.Settings)
-	if err != nil {
-		return err
-	}
+	settings := unmarshalSettings(p.Settings)
 	scmObj, _ := settings[settingsScmKey].(map[string]any)
 	if scmObj == nil {
 		scmObj = map[string]any{}
@@ -225,19 +219,19 @@ func (s *ScmService) saveCursor(ctx context.Context, projectId string, kind scm.
 }
 
 // unmarshalSettings unmarshal the settings from the project
-func unmarshalSettings(settings datatypes.JSON) (map[string]any, error) {
+func unmarshalSettings(settings datatypes.JSON) map[string]any {
 	if len(settings) == 0 {
-		return map[string]any{}, nil
+		return map[string]any{}
 	}
 	var out map[string]any
 	if err := sonic.Unmarshal(settings, &out); err != nil {
 		// tolerate legacy non-json
-		return map[string]any{}, nil
+		return map[string]any{}
 	}
 	if out == nil {
 		out = map[string]any{}
 	}
-	return out, nil
+	return out
 }
 
 // baseUrlFromRepoUrl extracts the base URL from the repository URL

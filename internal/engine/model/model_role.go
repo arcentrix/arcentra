@@ -17,7 +17,7 @@ package model
 // Role 角色表（支持自定义角色）
 type Role struct {
 	BaseModel
-	RoleId      string `gorm:"column:role_id;not null;uniqueIndex" json:"roleId"`
+	RoleID      string `gorm:"column:role_id;not null;uniqueIndex" json:"roleId"`
 	Name        string `gorm:"column:name;not null" json:"name"`                      // 角色名称
 	DisplayName string `gorm:"column:display_name" json:"displayName"`                // 显示名称
 	Description string `gorm:"column:description" json:"description"`                 // 角色描述
@@ -37,7 +37,7 @@ const (
 
 // CreateRoleReq request for creating role
 type CreateRoleReq struct {
-	RoleId      string `json:"roleId" binding:"required"`
+	RoleID      string `json:"roleId" binding:"required"`
 	Name        string `json:"name" binding:"required"`
 	DisplayName string `json:"displayName"`
 	Description string `json:"description"`

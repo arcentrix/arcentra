@@ -33,6 +33,8 @@ type PluginExecutor struct {
 	logger        log.Logger
 }
 
+const executorNamePlugin = "plugin"
+
 // NewPluginExecutor 创建插件执行器
 func NewPluginExecutor(pluginManager *plugin.Manager, logger log.Logger) *PluginExecutor {
 	return &PluginExecutor{
@@ -44,7 +46,7 @@ func NewPluginExecutor(pluginManager *plugin.Manager, logger log.Logger) *Plugin
 
 // Name 返回执行器名称
 func (e *PluginExecutor) Name() string {
-	return "plugin"
+	return executorNamePlugin
 }
 
 // CanExecute 检查是否可以执行

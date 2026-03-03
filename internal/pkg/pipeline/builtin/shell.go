@@ -213,7 +213,14 @@ func (m *Manager) handleShellCommand(ctx context.Context, params json.RawMessage
 // shell is the shell interpreter path (e.g., "/bin/sh")
 // args are arguments passed to the shell
 // timeout is timeout in seconds, 0 means no timeout
-func (m *Manager) runShellCommand(ctx context.Context, shell string, args []string, env map[string]string, workDir string, timeout int) (json.RawMessage, error) {
+func (m *Manager) runShellCommand(
+	ctx context.Context,
+	shell string,
+	args []string,
+	env map[string]string,
+	workDir string,
+	timeout int,
+) (json.RawMessage, error) {
 	// Create context with timeout if configured
 	cmdCtx := ctx
 	if timeout > 0 {

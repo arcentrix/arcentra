@@ -36,6 +36,20 @@ type SecretRepo struct {
 	database.IDatabase
 }
 
+var secretSelectFields = []string{
+	"id",
+	"secret_id",
+	"name",
+	"secret_type",
+	"secret_value",
+	"description",
+	"scope",
+	"scope_id",
+	"created_by",
+	"created_at",
+	"updated_at",
+}
+
 // NewSecretRepo creates a secret repository.
 func NewSecretRepo(db database.IDatabase) ISecretRepository {
 	return &SecretRepo{IDatabase: db}
@@ -58,14 +72,18 @@ func (sr *SecretRepo) Update(ctx context.Context, secret *model.Secret) error {
 func (sr *SecretRepo) Get(ctx context.Context, secretId string) (*model.Secret, error) {
 	var secret model.Secret
 	err := sr.Database().WithContext(ctx).Table(secret.TableName()).
-		Select("id", "secret_id", "name", "secret_type", "secret_value", "description", "scope", "scope_id", "created_by", "created_at", "updated_at").
+		Select(secretSelectFields).
 		Where("secret_id = ?", secretId).
 		First(&secret).Error
 	return &secret, err
 }
 
 // List lists secrets with pagination and filters.
-func (sr *SecretRepo) List(ctx context.Context, pageNum, pageSize int, secretType, scope, scopeId, createdBy string) ([]*model.Secret, int64, error) {
+func (sr *SecretRepo) List(
+	ctx context.Context,
+	pageNum, pageSize int,
+	secretType, scope, scopeId, createdBy string,
+) ([]*model.Secret, int64, error) {
 	var secrets []*model.Secret
 	var secret model.Secret
 	var total int64

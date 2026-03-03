@@ -74,21 +74,16 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*Exe
 		return result, err
 	}
 
-	httpConfig, err := e.extractHTTPConfig(req.Step.Args)
-	if err != nil {
-		err = fmt.Errorf("extract HTTP config: %w", err)
-		result.Complete(false, -1, err)
-		return result, err
-	}
+	httpConfig := e.extractHTTPConfig(req.Step.Args)
 
 	method := strings.ToUpper(httpConfig.Method)
 	if method == "" {
 		method = "GET"
 	}
 	if httpConfig.URL == "" {
-		err = fmt.Errorf("URL is required for HTTP execution")
-		result.Complete(false, -1, err)
-		return result, err
+		reqErr := fmt.Errorf("URL is required for HTTP execution")
+		result.Complete(false, -1, reqErr)
+		return result, reqErr
 	}
 
 	requestCtx := ctx
@@ -101,11 +96,11 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*Exe
 	client := e.getHTTPClient(httpConfig)
 	restyReq := e.buildHTTPRequest(client.R().SetContext(requestCtx), httpConfig, method, req.Env)
 
-	resp, httpErr, duration := e.executeHTTP(restyReq, method, httpConfig.URL)
+	resp, duration, httpErr := e.executeHTTP(restyReq, method, httpConfig.URL)
 	if httpErr != nil {
-		err = fmt.Errorf("HTTP request failed: %w", httpErr)
-		result.Complete(false, -1, err)
-		return result, err
+		reqErr := fmt.Errorf("HTTP request failed: %w", httpErr)
+		result.Complete(false, -1, reqErr)
+		return result, reqErr
 	}
 
 	statusCode := resp.StatusCode()
@@ -172,7 +167,7 @@ func (e *HTTPExecutor) buildHTTPRequest(req *resty.Request, cfg *HTTPConfig, met
 	return req
 }
 
-func (e *HTTPExecutor) executeHTTP(req *resty.Request, method, url string) (*resty.Response, error, time.Duration) {
+func (e *HTTPExecutor) executeHTTP(req *resty.Request, method, url string) (*resty.Response, time.Duration, error) {
 	start := time.Now()
 	var resp *resty.Response
 	var err error
@@ -192,9 +187,9 @@ func (e *HTTPExecutor) executeHTTP(req *resty.Request, method, url string) (*res
 	case "OPTIONS":
 		resp, err = req.Options(url)
 	default:
-		return nil, fmt.Errorf("unsupported HTTP method: %s", method), 0
+		return nil, 0, fmt.Errorf("unsupported HTTP method: %s", method)
 	}
-	return resp, err, time.Since(start)
+	return resp, time.Since(start), err
 }
 
 func (e *HTTPExecutor) checkExpectedStatus(statusCode int, expected []int32) bool {
@@ -219,7 +214,7 @@ type HTTPConfig struct {
 }
 
 // extractHTTPConfig 从 step args 中提取 HTTP 配置
-func (e *HTTPExecutor) extractHTTPConfig(args map[string]any) (*HTTPConfig, error) {
+func (e *HTTPExecutor) extractHTTPConfig(args map[string]any) *HTTPConfig {
 	config := &HTTPConfig{
 		Method:          "GET",
 		FollowRedirects: true,
@@ -230,7 +225,7 @@ func (e *HTTPExecutor) extractHTTPConfig(args map[string]any) (*HTTPConfig, erro
 	}
 
 	if args == nil {
-		return config, nil
+		return config
 	}
 
 	// 提取 method
@@ -297,5 +292,5 @@ func (e *HTTPExecutor) extractHTTPConfig(args map[string]any) (*HTTPConfig, erro
 		config.Timeout = int32(timeout)
 	}
 
-	return config, nil
+	return config
 }

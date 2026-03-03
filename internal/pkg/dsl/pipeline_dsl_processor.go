@@ -103,109 +103,118 @@ func (p *Processor) resolvePipelineVariables(pl *spec.Pipeline, ctx *pipeline.Ex
 		if job == nil {
 			continue
 		}
-
-		// Resolve job-level variables
-		if job.Env != nil {
-			resolvedEnv, err := interpreter.ResolveMap(convertStringMapToAnyMap(job.Env))
-			if err != nil {
-				return fmt.Errorf("job '%s' resolve env: %w", job.Name, err)
-			}
-			job.Env = convertAnyMapToStringMap(resolvedEnv)
+		if err := p.resolveJobVariables(job, interpreter); err != nil {
+			return err
 		}
+	}
 
-		// Resolve when condition
-		if job.When != "" {
-			resolved, err := interpreter.Resolve(job.When)
-			if err != nil {
-				return fmt.Errorf("job '%s' resolve when: %w", job.Name, err)
-			}
-			job.When = resolved
+	return nil
+}
+
+func (p *Processor) resolveJobVariables(
+	job *spec.Job,
+	interpreter *interceptor.VariableInterpreter,
+) error {
+	if job.Env != nil {
+		resolvedEnv, err := interpreter.ResolveMap(convertStringMapToAnyMap(job.Env))
+		if err != nil {
+			return fmt.Errorf("job '%s' resolve env: %w", job.Name, err)
 		}
+		job.Env = convertAnyMapToStringMap(resolvedEnv)
+	}
 
-		// Resolve source configuration
-		if job.Source != nil {
-			if err := p.resolveSource(job.Source, interpreter); err != nil {
-				return fmt.Errorf("job '%s' resolve source: %w", job.Name, err)
-			}
+	if job.When != "" {
+		resolved, err := interpreter.Resolve(job.When)
+		if err != nil {
+			return fmt.Errorf("job '%s' resolve when: %w", job.Name, err)
 		}
+		job.When = resolved
+	}
 
-		// Resolve approval configuration
-		if job.Approval != nil && job.Approval.Params != nil {
-			resolvedParams, err := interpreter.ResolveMap(spec.StructAsMap(job.Approval.Params))
-			if err != nil {
-				return fmt.Errorf("job '%s' resolve approval params: %w", job.Name, err)
-			}
-			job.Approval.Params = spec.MapAsStruct(resolvedParams)
+	if job.Source != nil {
+		if err := p.resolveSource(job.Source, interpreter); err != nil {
+			return fmt.Errorf("job '%s' resolve source: %w", job.Name, err)
 		}
+	}
 
-		// Resolve target configuration
-		if job.Target != nil && job.Target.Config != nil {
-			resolvedConfig, err := interpreter.ResolveMap(spec.StructAsMap(job.Target.Config))
-			if err != nil {
-				return fmt.Errorf("job '%s' resolve target config: %w", job.Name, err)
-			}
-			job.Target.Config = spec.MapAsStruct(resolvedConfig)
+	if job.Approval != nil && job.Approval.Params != nil {
+		resolvedParams, err := interpreter.ResolveMap(spec.StructAsMap(job.Approval.Params))
+		if err != nil {
+			return fmt.Errorf("job '%s' resolve approval params: %w", job.Name, err)
 		}
+		job.Approval.Params = spec.MapAsStruct(resolvedParams)
+	}
 
-		// Resolve notify configuration
-		if job.Notify != nil {
-			if err := p.resolveNotify(job.Notify, interpreter); err != nil {
-				return fmt.Errorf("job '%s' resolve notify: %w", job.Name, err)
-			}
+	if job.Target != nil && job.Target.Config != nil {
+		resolvedConfig, err := interpreter.ResolveMap(spec.StructAsMap(job.Target.Config))
+		if err != nil {
+			return fmt.Errorf("job '%s' resolve target config: %w", job.Name, err)
 		}
+		job.Target.Config = spec.MapAsStruct(resolvedConfig)
+	}
 
-		// Resolve variables in each step
-		for j := range job.Steps {
-			step := job.Steps[j]
-			if step == nil {
-				continue
-			}
-
-			// Resolve step-level variables
-			if step.Env != nil {
-				resolvedEnv, err := interpreter.ResolveMap(convertStringMapToAnyMap(step.Env))
-				if err != nil {
-					return fmt.Errorf("job '%s' step '%s' resolve env: %w", job.Name, step.Name, err)
-				}
-				step.Env = convertAnyMapToStringMap(resolvedEnv)
-			}
-
-			// Resolve when condition
-			if step.When != "" {
-				resolved, err := interpreter.Resolve(step.When)
-				if err != nil {
-					return fmt.Errorf("job '%s' step '%s' resolve when: %w", job.Name, step.Name, err)
-				}
-				step.When = resolved
-			}
-
-			// Resolve uses field (may contain variables)
-			if step.Uses != "" {
-				resolved, err := interpreter.Resolve(step.Uses)
-				if err != nil {
-					return fmt.Errorf("job '%s' step '%s' resolve uses: %w", job.Name, step.Name, err)
-				}
-				step.Uses = resolved
-			}
-
-			// Resolve action field
-			if step.Action != "" {
-				resolved, err := interpreter.Resolve(step.Action)
-				if err != nil {
-					return fmt.Errorf("job '%s' step '%s' resolve action: %w", job.Name, step.Name, err)
-				}
-				step.Action = resolved
-			}
-
-			// Resolve args
-			if step.Args != nil {
-				resolvedArgs, err := interpreter.ResolveMap(spec.StructAsMap(step.Args))
-				if err != nil {
-					return fmt.Errorf("job '%s' step '%s' resolve args: %w", job.Name, step.Name, err)
-				}
-				step.Args = spec.MapAsStruct(resolvedArgs)
-			}
+	if job.Notify != nil {
+		if err := p.resolveNotify(job.Notify, interpreter); err != nil {
+			return fmt.Errorf("job '%s' resolve notify: %w", job.Name, err)
 		}
+	}
+
+	for j := range job.Steps {
+		step := job.Steps[j]
+		if step == nil {
+			continue
+		}
+		if err := p.resolveStepVariables(job, step, interpreter); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (p *Processor) resolveStepVariables(
+	job *spec.Job,
+	step *spec.Step,
+	interpreter *interceptor.VariableInterpreter,
+) error {
+	if step.Env != nil {
+		resolvedEnv, err := interpreter.ResolveMap(convertStringMapToAnyMap(step.Env))
+		if err != nil {
+			return fmt.Errorf("job '%s' step '%s' resolve env: %w", job.Name, step.Name, err)
+		}
+		step.Env = convertAnyMapToStringMap(resolvedEnv)
+	}
+
+	if step.When != "" {
+		resolved, err := interpreter.Resolve(step.When)
+		if err != nil {
+			return fmt.Errorf("job '%s' step '%s' resolve when: %w", job.Name, step.Name, err)
+		}
+		step.When = resolved
+	}
+
+	if step.Uses != "" {
+		resolved, err := interpreter.Resolve(step.Uses)
+		if err != nil {
+			return fmt.Errorf("job '%s' step '%s' resolve uses: %w", job.Name, step.Name, err)
+		}
+		step.Uses = resolved
+	}
+
+	if step.Action != "" {
+		resolved, err := interpreter.Resolve(step.Action)
+		if err != nil {
+			return fmt.Errorf("job '%s' step '%s' resolve action: %w", job.Name, step.Name, err)
+		}
+		step.Action = resolved
+	}
+
+	if step.Args != nil {
+		resolvedArgs, err := interpreter.ResolveMap(spec.StructAsMap(step.Args))
+		if err != nil {
+			return fmt.Errorf("job '%s' step '%s' resolve args: %w", job.Name, step.Name, err)
+		}
+		step.Args = spec.MapAsStruct(resolvedArgs)
 	}
 
 	return nil

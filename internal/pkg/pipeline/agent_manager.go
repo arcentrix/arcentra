@@ -41,6 +41,8 @@ type AgentManager struct {
 	statusCacheMu    sync.RWMutex
 }
 
+const agentStatusOffline = "offline"
+
 // NewAgentManager creates a new agent manager
 func NewAgentManager(
 	agentClient agentv1.AgentServiceClient,
@@ -802,7 +804,7 @@ func (am *AgentManager) GetAgentStatus(ctx context.Context, agentID string) (*Ag
 		// Agent not found in cache, return offline status
 		return &AgentStatus{
 			AgentID:               agentID,
-			Status:                "offline",
+			Status:                agentStatusOffline,
 			RunningStepRunsCount:  0,
 			MaxConcurrentStepRuns: 0,
 			Metrics:               make(map[string]string),
@@ -814,7 +816,7 @@ func (am *AgentManager) GetAgentStatus(ctx context.Context, agentID string) (*Ag
 	// Check if heartbeat is stale (more than 5 minutes old)
 	if time.Since(status.LastHeartbeat) > 5*time.Minute {
 		// Mark as offline if heartbeat is stale
-		status.Status = "offline"
+		status.Status = agentStatusOffline
 	}
 
 	return status, nil

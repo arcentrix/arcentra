@@ -56,7 +56,7 @@ func (rt *Router) login(c *fiber.Ctx) error {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
 
-	user, err := userService.Login(login, rt.Http.Auth)
+	user, err := userService.Login(login, rt.HTTP.Auth)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
@@ -89,7 +89,7 @@ func (rt *Router) refresh(c *fiber.Ctx) error {
 	userId := c.Query("userId")
 	refreshToken := c.Query("refreshToken")
 
-	token, err := userLogic.Refresh(userId, refreshToken, &rt.Http.Auth)
+	token, err := userLogic.Refresh(userId, refreshToken, &rt.HTTP.Auth)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
@@ -101,7 +101,7 @@ func (rt *Router) refresh(c *fiber.Ctx) error {
 func (rt *Router) logout(c *fiber.Ctx) error {
 	userLogic := rt.Services.User
 
-	claims, err := auth.ParseAuthorizationToken(c, rt.Http.Auth.SecretKey)
+	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
@@ -153,7 +153,7 @@ func (rt *Router) fetchUserInfo(c *fiber.Ctx) error {
 	var user *model.UserInfo
 	userLogic := rt.Services.User
 
-	claims, err := auth.ParseAuthorizationToken(c, rt.Http.Auth.SecretKey)
+	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}
@@ -172,15 +172,15 @@ func (rt *Router) getUserList(c *fiber.Ctx) error {
 	userLogic := rt.Services.User
 
 	// Support both "page" and "pageNum" parameters
-	pageNum := rt.Http.QueryInt(c, "pageNum")
+	pageNum := rt.HTTP.QueryInt(c, "pageNum")
 	if pageNum == 0 {
-		pageNum = rt.Http.QueryInt(c, "page")
+		pageNum = rt.HTTP.QueryInt(c, "page")
 	}
 	if pageNum == 0 {
 		pageNum = 1
 	}
 
-	pageSize := rt.Http.QueryInt(c, "pageSize")
+	pageSize := rt.HTTP.QueryInt(c, "pageSize")
 	if pageSize == 0 {
 		pageSize = 10
 	}
@@ -208,7 +208,7 @@ func (rt *Router) getUserList(c *fiber.Ctx) error {
 	var response []UserResponse
 	for _, user := range users {
 		response = append(response, UserResponse{
-			UserId:           user.UserId,
+			UserId:           user.UserID,
 			Username:         user.Username,
 			FullName:         user.FullName,
 			Avatar:           user.Avatar,
@@ -244,15 +244,15 @@ func (rt *Router) getUsersByRole(c *fiber.Ctx) error {
 	}
 
 	// Support both "page" and "pageNum" parameters
-	pageNum := rt.Http.QueryInt(c, "pageNum")
+	pageNum := rt.HTTP.QueryInt(c, "pageNum")
 	if pageNum == 0 {
-		pageNum = rt.Http.QueryInt(c, "page")
+		pageNum = rt.HTTP.QueryInt(c, "page")
 	}
 	if pageNum == 0 {
 		pageNum = 1
 	}
 
-	pageSize := rt.Http.QueryInt(c, "pageSize")
+	pageSize := rt.HTTP.QueryInt(c, "pageSize")
 	if pageSize == 0 {
 		pageSize = 10
 	}
@@ -280,7 +280,7 @@ func (rt *Router) getUsersByRole(c *fiber.Ctx) error {
 	var response []UserResponse
 	for _, user := range users {
 		response = append(response, UserResponse{
-			UserId:           user.UserId,
+			UserId:           user.UserID,
 			Username:         user.Username,
 			FullName:         user.FullName,
 			Avatar:           user.Avatar,
@@ -338,7 +338,7 @@ func (rt *Router) uploadAvatar(c *fiber.Ctx) error {
 	uploadService := rt.Services.Upload
 
 	// get current user ID from token
-	claims, err := auth.ParseAuthorizationToken(c, rt.Http.Auth.SecretKey)
+	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
 	}

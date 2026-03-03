@@ -18,12 +18,25 @@ import (
 	"testing"
 )
 
+const (
+	testBootstrapServers = "localhost:9092"
+	testTopicPrefix      = "test-prefix"
+	testSecurityProtocol = "SASL_SSL"
+	testSASLMechanism    = "PLAIN"
+	testSASLUsername     = "user"
+	testSASLPassword     = "pass"
+	testSSLCAFile        = "/ca.crt"
+	testSSLCertFile      = "/cert.crt"
+	testSSLKeyFile       = "/key.key"
+	testSSLPassword      = "password"
+)
+
 func TestNewKafkaConfig_Integration(t *testing.T) {
 	// Test that NewKafkaConfig creates config with defaults
-	config := NewKafkaConfig("localhost:9092")
+	config := NewKafkaConfig(testBootstrapServers)
 
-	if config.BootstrapServers != "localhost:9092" {
-		t.Errorf("expected BootstrapServers to be 'localhost:9092', got %s", config.BootstrapServers)
+	if config.BootstrapServers != testBootstrapServers {
+		t.Errorf("expected BootstrapServers to be '%s', got %s", testBootstrapServers, config.BootstrapServers)
 	}
 	if config.DelaySlotCount != DefaultDelaySlotCount {
 		t.Errorf("expected DelaySlotCount to be %d, got %d", DefaultDelaySlotCount, config.DelaySlotCount)
@@ -43,17 +56,17 @@ func TestNewKafkaConfig_Integration(t *testing.T) {
 }
 
 func TestNewKafkaConfig_WithOptions(t *testing.T) {
-	config := NewKafkaConfig("localhost:9092",
+	config := NewKafkaConfig(testBootstrapServers,
 		WithKafkaGroupID("test-group"),
-		WithKafkaTopicPrefix("test-prefix"),
+		WithKafkaTopicPrefix(testTopicPrefix),
 		WithKafkaAutoCommit(true),
 	)
 
 	if config.GroupID != "test-group" {
 		t.Errorf("expected GroupID to be 'test-group', got %s", config.GroupID)
 	}
-	if config.TopicPrefix != "test-prefix" {
-		t.Errorf("expected TopicPrefix to be 'test-prefix', got %s", config.TopicPrefix)
+	if config.TopicPrefix != testTopicPrefix {
+		t.Errorf("expected TopicPrefix to be '%s', got %s", testTopicPrefix, config.TopicPrefix)
 	}
 	if config.AutoCommit != true {
 		t.Errorf("expected AutoCommit to be true, got %v", config.AutoCommit)
@@ -61,61 +74,61 @@ func TestNewKafkaConfig_WithOptions(t *testing.T) {
 }
 
 func TestKafkaConfig_AuthFields(t *testing.T) {
-	config := NewKafkaConfig("localhost:9092",
-		WithKafkaAuth("SASL_SSL", "PLAIN", "user", "pass"),
+	config := NewKafkaConfig(testBootstrapServers,
+		WithKafkaAuth(testSecurityProtocol, testSASLMechanism, testSASLUsername, testSASLPassword),
 	)
 
-	if config.SecurityProtocol != "SASL_SSL" {
-		t.Errorf("expected SecurityProtocol to be 'SASL_SSL', got %s", config.SecurityProtocol)
+	if config.SecurityProtocol != testSecurityProtocol {
+		t.Errorf("expected SecurityProtocol to be '%s', got %s", testSecurityProtocol, config.SecurityProtocol)
 	}
-	if config.SASLMechanism != "PLAIN" {
-		t.Errorf("expected SASLMechanism to be 'PLAIN', got %s", config.SASLMechanism)
+	if config.SASLMechanism != testSASLMechanism {
+		t.Errorf("expected SASLMechanism to be '%s', got %s", testSASLMechanism, config.SASLMechanism)
 	}
-	if config.SASLUsername != "user" {
-		t.Errorf("expected SASLUsername to be 'user', got %s", config.SASLUsername)
+	if config.SASLUsername != testSASLUsername {
+		t.Errorf("expected SASLUsername to be '%s', got %s", testSASLUsername, config.SASLUsername)
 	}
-	if config.SASLPassword != "pass" {
-		t.Errorf("expected SASLPassword to be 'pass', got %s", config.SASLPassword)
+	if config.SASLPassword != testSASLPassword {
+		t.Errorf("expected SASLPassword to be '%s', got %s", testSASLPassword, config.SASLPassword)
 	}
 }
 
 func TestKafkaConfig_SSLFields(t *testing.T) {
-	config := NewKafkaConfig("localhost:9092",
-		WithKafkaSSL("/ca.crt", "/cert.crt", "/key.key", "password"),
+	config := NewKafkaConfig(testBootstrapServers,
+		WithKafkaSSL(testSSLCAFile, testSSLCertFile, testSSLKeyFile, testSSLPassword),
 	)
 
-	if config.SSLCAFile != "/ca.crt" {
-		t.Errorf("expected SSLCAFile to be '/ca.crt', got %s", config.SSLCAFile)
+	if config.SSLCAFile != testSSLCAFile {
+		t.Errorf("expected SSLCAFile to be '%s', got %s", testSSLCAFile, config.SSLCAFile)
 	}
-	if config.SSLCertFile != "/cert.crt" {
-		t.Errorf("expected SSLCertFile to be '/cert.crt', got %s", config.SSLCertFile)
+	if config.SSLCertFile != testSSLCertFile {
+		t.Errorf("expected SSLCertFile to be '%s', got %s", testSSLCertFile, config.SSLCertFile)
 	}
-	if config.SSLKeyFile != "/key.key" {
-		t.Errorf("expected SSLKeyFile to be '/key.key', got %s", config.SSLKeyFile)
+	if config.SSLKeyFile != testSSLKeyFile {
+		t.Errorf("expected SSLKeyFile to be '%s', got %s", testSSLKeyFile, config.SSLKeyFile)
 	}
-	if config.SSLPassword != "password" {
-		t.Errorf("expected SSLPassword to be 'password', got %s", config.SSLPassword)
+	if config.SSLPassword != testSSLPassword {
+		t.Errorf("expected SSLPassword to be '%s', got %s", testSSLPassword, config.SSLPassword)
 	}
 }
 
 func TestKafkaConfig_AllFields(t *testing.T) {
 	config := &KafkaConfig{
-		BootstrapServers:  "localhost:9092",
+		BootstrapServers:  testBootstrapServers,
 		GroupID:           "test-group",
-		TopicPrefix:       "test-prefix",
+		TopicPrefix:       testTopicPrefix,
 		DelaySlotCount:    24,
 		DelaySlotDuration: 3600000000000, // 1 hour in nanoseconds
 		AutoCommit:        true,
 		SessionTimeout:    30000,
 		MaxPollInterval:   300000,
-		SASLMechanism:     "PLAIN",
-		SASLUsername:      "user",
-		SASLPassword:      "pass",
-		SecurityProtocol:  "SASL_SSL",
-		SSLCAFile:         "/ca.crt",
-		SSLCertFile:       "/cert.crt",
-		SSLKeyFile:        "/key.key",
-		SSLPassword:       "password",
+		SASLMechanism:     testSASLMechanism,
+		SASLUsername:      testSASLUsername,
+		SASLPassword:      testSASLPassword,
+		SecurityProtocol:  testSecurityProtocol,
+		SSLCAFile:         testSSLCAFile,
+		SSLCertFile:       testSSLCertFile,
+		SSLKeyFile:        testSSLKeyFile,
+		SSLPassword:       testSSLPassword,
 	}
 
 	if config.BootstrapServers == "" {
@@ -142,8 +155,8 @@ func TestKafkaConfig_AllFields(t *testing.T) {
 	if config.MaxPollInterval != 300000 {
 		t.Errorf("expected MaxPollInterval to be 300000, got %d", config.MaxPollInterval)
 	}
-	if config.SASLMechanism != "PLAIN" {
-		t.Errorf("expected SASLMechanism to be 'PLAIN', got %s", config.SASLMechanism)
+	if config.SASLMechanism != testSASLMechanism {
+		t.Errorf("expected SASLMechanism to be '%s', got %s", testSASLMechanism, config.SASLMechanism)
 	}
 	if config.SASLUsername != "user" {
 		t.Errorf("expected SASLUsername to be 'user', got %s", config.SASLUsername)
@@ -151,8 +164,8 @@ func TestKafkaConfig_AllFields(t *testing.T) {
 	if config.SASLPassword != "pass" {
 		t.Errorf("expected SASLPassword to be 'pass', got %s", config.SASLPassword)
 	}
-	if config.SecurityProtocol != "SASL_SSL" {
-		t.Errorf("expected SecurityProtocol to be 'SASL_SSL', got %s", config.SecurityProtocol)
+	if config.SecurityProtocol != testSecurityProtocol {
+		t.Errorf("expected SecurityProtocol to be '%s', got %s", testSecurityProtocol, config.SecurityProtocol)
 	}
 	if config.SSLCAFile != "/ca.crt" {
 		t.Errorf("expected SSLCAFile to be '/ca.crt', got %s", config.SSLCAFile)

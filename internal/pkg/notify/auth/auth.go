@@ -23,11 +23,15 @@ import (
 type Type string
 
 const (
-	Token  Type = "token"  // Token authentication
-	OAuth2 Type = "oauth2" // OAuth2 authentication
-	ApiKey Type = "apikey" // API Key authentication
-	Basic  Type = "basic"  // Basic authentication
-	Bearer Type = "bearer" // Bearer token authentication
+	// Token indicates static token authentication.
+	Token Type = "token"
+	// OAuth2 indicates OAuth2 authentication.
+	OAuth2 Type = "oauth2"
+	APIKey Type = "apikey"
+	Basic  Type = "basic"
+	Bearer Type = "bearer"
+
+	authHeaderAuthorization = "Authorization"
 )
 
 // IAuthProvider defines the interface for authentication providers
@@ -55,7 +59,7 @@ func (a *TokenAuth) GetAuthType() Type {
 	return Token
 }
 
-func (a *TokenAuth) Authenticate(ctx context.Context) (string, error) {
+func (a *TokenAuth) Authenticate(_ context.Context) (string, error) {
 	if a.Token == "" {
 		return "", errors.New("token cannot be empty")
 	}
@@ -63,7 +67,7 @@ func (a *TokenAuth) Authenticate(ctx context.Context) (string, error) {
 }
 
 func (a *TokenAuth) GetAuthHeader() (string, string) {
-	return "Authorization", "Bearer " + a.Token
+	return authHeaderAuthorization, "Bearer " + a.Token
 }
 
 func (a *TokenAuth) Validate() error {
@@ -86,7 +90,7 @@ func (a *BearerAuth) GetAuthType() Type {
 	return Bearer
 }
 
-func (a *BearerAuth) Authenticate(ctx context.Context) (string, error) {
+func (a *BearerAuth) Authenticate(_ context.Context) (string, error) {
 	if a.Token == "" {
 		return "", errors.New("bearer token cannot be empty")
 	}
@@ -94,7 +98,7 @@ func (a *BearerAuth) Authenticate(ctx context.Context) (string, error) {
 }
 
 func (a *BearerAuth) GetAuthHeader() (string, string) {
-	return "Authorization", "Bearer " + a.Token
+	return authHeaderAuthorization, "Bearer " + a.Token
 }
 
 func (a *BearerAuth) Validate() error {
@@ -122,10 +126,10 @@ func NewAPIKeyAuth(apiKey, headerName string) *APIKeyAuth {
 }
 
 func (a *APIKeyAuth) GetAuthType() Type {
-	return ApiKey
+	return APIKey
 }
 
-func (a *APIKeyAuth) Authenticate(ctx context.Context) (string, error) {
+func (a *APIKeyAuth) Authenticate(_ context.Context) (string, error) {
 	if a.APIKey == "" {
 		return "", errors.New("api key cannot be empty")
 	}

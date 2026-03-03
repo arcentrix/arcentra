@@ -32,20 +32,26 @@ import (
 
 type AgentService struct {
 	agentRepo              repo.IAgentRepository
+	stepRunRepo            repo.IStepRunRepository
 	generalSettingsService *GeneralSettingsService
 }
 
-func NewAgentService(agentRepo repo.IAgentRepository, generalSettingsService *GeneralSettingsService) *AgentService {
+func NewAgentService(
+	agentRepo repo.IAgentRepository,
+	stepRunRepo repo.IStepRunRepository,
+	generalSettingsService *GeneralSettingsService,
+) *AgentService {
 	return &AgentService{
 		agentRepo:              agentRepo,
+		stepRunRepo:            stepRunRepo,
 		generalSettingsService: generalSettingsService,
 	}
 }
 
 func (al *AgentService) CreateAgent(ctx context.Context, createAgentReq *model.CreateAgentReq) (*model.CreateAgentResp, error) {
-	agentId := id.ShortId()
+	agentID := id.ShortID()
 	agent := &model.Agent{
-		AgentId:   agentId,
+		AgentID:   agentID,
 		AgentName: createAgentReq.AgentName,
 		Address:   "0.0.0.0",
 		Port:      "8080",
@@ -64,8 +70,8 @@ func (al *AgentService) CreateAgent(ctx context.Context, createAgentReq *model.C
 		return nil, err
 	}
 
-	// Generate token for agent communication based on agentId
-	token, err := al.GenerateAgentToken(ctx, agentId)
+	// Generate token for agent communication based on agentID
+	token, err := al.GenerateAgentToken(ctx, agentID)
 	if err != nil {
 		log.Errorw("generate agent token failed", "error", err)
 		return nil, err
@@ -85,8 +91,8 @@ type agentSecretConfig struct {
 	SecretKey string `json:"secret_key"`
 }
 
-// GenerateAgentToken generates a token based on agentId for agent communication.
-func (al *AgentService) GenerateAgentToken(ctx context.Context, agentId string) (string, error) {
+// GenerateAgentToken generates a token based on agentID for agent communication.
+func (al *AgentService) GenerateAgentToken(ctx context.Context, agentID string) (string, error) {
 	settings, err := al.generalSettingsService.GetGeneralSettingsByName(ctx, "system", "agent_secret_key")
 	if err != nil {
 		log.Errorw("failed to get agent secret key configuration", "error", err)
@@ -111,31 +117,31 @@ func (al *AgentService) GenerateAgentToken(ctx context.Context, agentId string) 
 	}
 
 	// Generate token using HMAC-SHA256
-	// Format: agentId:base64(signature)
+	// Format: agentID:base64(signature)
 	h := hmac.New(sha256.New, []byte(config.SecretKey))
-	h.Write([]byte(agentId))
+	h.Write([]byte(agentID))
 	h.Write([]byte(config.Salt))
 	signature := h.Sum(nil)
 
 	signatureStr := base64.URLEncoding.EncodeToString(signature)
-	token := fmt.Sprintf("%s:%s", agentId, signatureStr)
+	token := fmt.Sprintf("%s:%s", agentID, signatureStr)
 	return token, nil
 }
 
-func (al *AgentService) GetAgentByAgentId(ctx context.Context, agentId string) (*model.AgentDetail, error) {
-	detail, err := al.agentRepo.GetDetail(ctx, agentId)
+func (al *AgentService) GetAgentByagentID(ctx context.Context, agentID string) (*model.AgentDetail, error) {
+	detail, err := al.agentRepo.GetDetail(ctx, agentID)
 	if err != nil {
-		log.Errorw("get agent detail by agentId failed", "agentId", agentId, "error", err)
+		log.Errorw("get agent detail by agentID failed", "agentID", agentID, "error", err)
 		return nil, err
 	}
 	return detail, nil
 }
 
-func (al *AgentService) UpdateAgentByAgentId(ctx context.Context, agentId string, updateReq *model.UpdateAgentReq) error {
+func (al *AgentService) UpdateAgentByagentID(ctx context.Context, agentID string, updateReq *model.UpdateAgentReq) error {
 	// Check if agent exists
-	_, err := al.agentRepo.Get(ctx, agentId)
+	_, err := al.agentRepo.Get(ctx, agentID)
 	if err != nil {
-		log.Errorw("get agent by agentId failed", "agentId", agentId, "error", err)
+		log.Errorw("get agent by agentID failed", "agentID", agentID, "error", err)
 		return err
 	}
 
@@ -143,8 +149,8 @@ func (al *AgentService) UpdateAgentByAgentId(ctx context.Context, agentId string
 	updates := buildAgentUpdateMap(updateReq)
 	if len(updates) > 0 {
 		updates["updated_at"] = time.Now()
-		if err := al.agentRepo.Patch(ctx, agentId, updates); err != nil {
-			log.Errorw("update agent failed", "agentId", agentId, "error", err)
+		if err := al.agentRepo.Patch(ctx, agentID, updates); err != nil {
+			log.Errorw("update agent failed", "agentID", agentID, "error", err)
 			return err
 		}
 	}
@@ -163,16 +169,16 @@ func buildAgentUpdateMap(req *model.UpdateAgentReq) map[string]any {
 	return updates
 }
 
-func (al *AgentService) DeleteAgentByAgentId(ctx context.Context, agentId string) error {
-	if err := al.agentRepo.Delete(ctx, agentId); err != nil {
-		log.Errorw("delete agent failed", "agentId", agentId, "error", err)
+func (al *AgentService) DeleteAgentByagentID(ctx context.Context, agentID string) error {
+	if err := al.agentRepo.Delete(ctx, agentID); err != nil {
+		log.Errorw("delete agent failed", "agentID", agentID, "error", err)
 		return err
 	}
 	return nil
 }
 
 func (al *AgentService) ListAgent(ctx context.Context, pageNum, pageSize int) ([]model.Agent, int64, error) {
-		agents, count, err := al.agentRepo.List(ctx, pageNum, pageSize)
+	agents, count, err := al.agentRepo.List(ctx, pageNum, pageSize)
 	if err != nil {
 		log.Errorw("list agent failed", "error", err)
 		return nil, 0, err

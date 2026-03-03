@@ -20,23 +20,23 @@ import (
 
 // EventContext carries attributes for CloudEvents extensions.
 type EventContext struct {
-	PipelineId string
-	StepId     string
+	PipelineID string
+	StepID     string
 	StepName   string
 	PluginName string
-	AgentId    string
-	TraceId    string
-	SpanId     string
+	AgentID    string
+	TraceID    string
+	SpanID     string
 }
 
 // Extensions builds extension attributes.
 func (c EventContext) Extensions() map[string]any {
 	ext := make(map[string]any)
-	if c.PipelineId != "" {
-		ext["pipelineId"] = c.PipelineId
+	if c.PipelineID != "" {
+		ext["pipelineId"] = c.PipelineID
 	}
-	if c.StepId != "" {
-		ext["stepId"] = c.StepId
+	if c.StepID != "" {
+		ext["stepId"] = c.StepID
 	}
 	if c.StepName != "" {
 		ext["stepName"] = c.StepName
@@ -44,24 +44,24 @@ func (c EventContext) Extensions() map[string]any {
 	if c.PluginName != "" {
 		ext["pluginName"] = c.PluginName
 	}
-	if c.AgentId != "" {
-		ext["agentId"] = c.AgentId
+	if c.AgentID != "" {
+		ext["agentId"] = c.AgentID
 	}
-	if c.TraceId != "" {
-		ext["traceId"] = c.TraceId
+	if c.TraceID != "" {
+		ext["traceId"] = c.TraceID
 	}
-	if c.SpanId != "" {
-		ext["spanId"] = c.SpanId
+	if c.SpanID != "" {
+		ext["spanId"] = c.SpanID
 	}
 	return ext
 }
 
 // Subject builds the CloudEvent subject value.
 func (c EventContext) Subject() string {
-	if c.PipelineId == "" || c.StepId == "" {
+	if c.PipelineID == "" || c.StepID == "" {
 		return ""
 	}
-	return "pipeline/" + c.PipelineId + "/step/" + c.StepId
+	return "pipeline/" + c.PipelineID + "/step/" + c.StepID
 }
 
 func buildEventContext(req *ExecutionRequest) EventContext {
@@ -70,12 +70,12 @@ func buildEventContext(req *ExecutionRequest) EventContext {
 		return ctx
 	}
 	if req.Pipeline != nil {
-		ctx.PipelineId = req.Pipeline.Namespace
+		ctx.PipelineID = req.Pipeline.Namespace
 	}
 	if req.Step != nil {
 		stepName := strings.TrimSpace(req.Step.Name)
 		if stepName != "" {
-			ctx.StepId = stepName
+			ctx.StepID = stepName
 			ctx.StepName = stepName
 		}
 		if req.Step.Uses != "" {

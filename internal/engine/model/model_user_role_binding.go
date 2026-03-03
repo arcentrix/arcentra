@@ -19,9 +19,9 @@ import "time"
 // UserRoleBinding 用户角色绑定表（支持多层级权限管理）
 type UserRoleBinding struct {
 	ID         int       `gorm:"column:id;primaryKey;autoIncrement" json:"-"`
-	BindingId  string    `gorm:"column:binding_id;not null;uniqueIndex" json:"bindingId"` // 绑定唯一标识
-	UserId     string    `gorm:"column:user_id;not null;index" json:"userId"`             // 用户ID
-	RoleId     string    `gorm:"column:role_id;not null;index" json:"roleId"`             // 角色ID
+	BindingID  string    `gorm:"column:binding_id;not null;uniqueIndex" json:"bindingId"` // 绑定唯一标识
+	UserID     string    `gorm:"column:user_id;not null;index" json:"userId"`             // 用户ID
+	RoleID     string    `gorm:"column:role_id;not null;index" json:"roleId"`             // 角色ID
 	GrantedBy  *string   `gorm:"column:granted_by" json:"grantedBy"`                      // 授权人ID（可为空）
 	CreateTime time.Time `gorm:"column:create_time;autoCreateTime" json:"createTime"`     // 创建时间
 	UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime" json:"updateTime"`     // 更新时间

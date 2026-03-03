@@ -43,15 +43,21 @@ func NewRoleMenuBindingRepo(db database.IDatabase) IRoleMenuBindingRepository {
 // List returns role menu bindings by roleId.
 func (r *RoleMenuBindingRepo) List(ctx context.Context, roleId string) ([]model.RoleMenuBinding, error) {
 	var bindings []model.RoleMenuBinding
-	err := r.Database().WithContext(ctx).Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
-		Where("role_id = ? AND is_accessible = ?", roleId, model.RoleMenuAccessible).Find(&bindings).Error
+	err := r.Database().
+		WithContext(ctx).
+		Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
+		Where("role_id = ? AND is_accessible = ?", roleId, model.RoleMenuAccessible).
+		Find(&bindings).
+		Error
 	return bindings, err
 }
 
 // ListByResource returns role menu bindings by roleId and resourceId.
 func (r *RoleMenuBindingRepo) ListByResource(ctx context.Context, roleId, resourceId string) ([]model.RoleMenuBinding, error) {
 	var bindings []model.RoleMenuBinding
-	query := r.Database().WithContext(ctx).Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
+	query := r.Database().
+		WithContext(ctx).
+		Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
 		Where("role_id = ? AND is_accessible = ?", roleId, model.RoleMenuAccessible)
 	if resourceId == "" {
 		query = query.Where("resource_id IS NULL OR resource_id = ''")
@@ -68,7 +74,9 @@ func (r *RoleMenuBindingRepo) ListByRoles(ctx context.Context, roleIds []string,
 		return []model.RoleMenuBinding{}, nil
 	}
 	var bindings []model.RoleMenuBinding
-	query := r.Database().WithContext(ctx).Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
+	query := r.Database().
+		WithContext(ctx).
+		Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
 		Where("role_id IN ? AND is_accessible = ?", roleIds, model.RoleMenuAccessible)
 	if resourceId == "" {
 		query = query.Where("resource_id IS NULL OR resource_id = ''")

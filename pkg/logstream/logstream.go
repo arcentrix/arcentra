@@ -18,19 +18,19 @@ import "strings"
 
 // BuildLogMessage represents a build log message sent through Kafka.
 type BuildLogMessage struct {
-	ProjectId     string `json:"projectId,omitempty"`
-	PipelineId    string `json:"pipelineId,omitempty"`
-	PipelineRunId string `json:"pipelineRunId,omitempty"`
-	JobId         string `json:"jobId,omitempty"`
+	ProjectID     string `json:"projectId,omitempty"`
+	PipelineID    string `json:"pipelineId,omitempty"`
+	PipelineRunID string `json:"pipelineRunId,omitempty"`
+	JobID         string `json:"jobId,omitempty"`
 	JobName       string `json:"jobName,omitempty"`
 	StepName      string `json:"stepName,omitempty"`
-	StepRunId     string `json:"stepRunId,omitempty"`
+	StepRunID     string `json:"stepRunId,omitempty"`
 	Timestamp     int64  `json:"timestamp"`
 	LineNumber    int32  `json:"lineNumber"`
 	Level         string `json:"level,omitempty"`
 	Stream        string `json:"stream,omitempty"`
 	Content       string `json:"content,omitempty"`
-	AgentId       string `json:"agentId,omitempty"`
+	AgentID       string `json:"agentId,omitempty"`
 	PluginName    string `json:"pluginName,omitempty"`
 }
 
@@ -40,10 +40,10 @@ func (m *BuildLogMessage) BuildLogKey() string {
 		return ""
 	}
 	parts := []string{
-		m.ProjectId,
-		m.PipelineId,
-		m.PipelineRunId,
-		m.StepRunId,
+		m.ProjectID,
+		m.PipelineID,
+		m.PipelineRunID,
+		m.StepRunID,
 	}
 	return strings.Trim(strings.Join(parts, ":"), ":")
 }

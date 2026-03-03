@@ -174,7 +174,7 @@ func (c *DiscordChannel) sendRequest(ctx context.Context, payload map[string]int
 }
 
 // Receive receives messages (webhook callback)
-func (c *DiscordChannel) Receive(ctx context.Context, message string) error {
+func (c *DiscordChannel) Receive(_ context.Context, _ string) error {
 	return nil
 }
 

@@ -94,11 +94,11 @@ func (p *KafkaLogPublisher) Close() {
 // BuildLogMessageFromEvent builds a build log message from EventContext.
 func BuildLogMessageFromEvent(ctx EventContext, content, stream string) *logstream.BuildLogMessage {
 	return &logstream.BuildLogMessage{
-		PipelineId: ctx.PipelineId,
+		PipelineID: ctx.PipelineID,
 		StepName:   ctx.StepName,
-		StepRunId:  ctx.StepId,
+		StepRunID:  ctx.StepID,
 		PluginName: ctx.PluginName,
-		AgentId:    ctx.AgentId,
+		AgentID:    ctx.AgentID,
 		Timestamp:  time.Now().Unix(),
 		LineNumber: 0,
 		Level:      "info",

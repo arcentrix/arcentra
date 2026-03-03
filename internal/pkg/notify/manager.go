@@ -376,7 +376,7 @@ func (cf *ChannelFactory) CreateAuthProvider(authType auth.Type, config map[stri
 		}
 		return auth.NewBearerAuth(token), nil
 
-	case auth.ApiKey:
+	case auth.APIKey:
 		apiKey, _ := config["api_key"].(string)
 		headerName, _ := config["header_name"].(string)
 		if apiKey == "" {

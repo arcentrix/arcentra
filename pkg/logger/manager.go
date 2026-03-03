@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	managerMu    sync.RWMutex
+	managerMu     sync.RWMutex
 	globalManager IManager
 )
 

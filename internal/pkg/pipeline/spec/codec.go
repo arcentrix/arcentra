@@ -69,8 +69,8 @@ func MarshalProtoByFormat(sp *pipelinev1.Spec, format pipelinev1.SpecFormat, pat
 			return "", err
 		}
 		var obj map[string]any
-		if err := sonic.Unmarshal(rawJSON, &obj); err != nil {
-			return "", err
+		if unmarshalErr := sonic.Unmarshal(rawJSON, &obj); unmarshalErr != nil {
+			return "", unmarshalErr
 		}
 		raw, err := yaml.Marshal(obj)
 		if err != nil {
@@ -81,11 +81,11 @@ func MarshalProtoByFormat(sp *pipelinev1.Spec, format pipelinev1.SpecFormat, pat
 }
 
 func ProtoToSpec(sp *pipelinev1.Spec) *Pipeline {
-	return (*Pipeline)(sp)
+	return sp
 }
 
-func SpecToProto(pl *Pipeline) *pipelinev1.Spec {
-	return (*pipelinev1.Spec)(pl)
+func ToProto(pl *Pipeline) *pipelinev1.Spec {
+	return pl
 }
 
 func StructToAnyMap(in *structpb.Struct) map[string]any {

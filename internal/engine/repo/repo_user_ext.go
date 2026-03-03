@@ -38,6 +38,19 @@ type UserExtRepo struct {
 	database.IDatabase
 }
 
+var userExtSelectFields = []string{
+	"id",
+	"user_id",
+	"timezone",
+	"last_login_at",
+	"invitation_status",
+	"invited_by",
+	"invited_at",
+	"accepted_at",
+	"created_at",
+	"updated_at",
+}
+
 func NewUserExtRepo(db database.IDatabase) IUserExtRepository {
 	return &UserExtRepo{
 		IDatabase: db,
@@ -48,7 +61,7 @@ func NewUserExtRepo(db database.IDatabase) IUserExtRepository {
 func (uer *UserExtRepo) Get(ctx context.Context, userId string) (*model.UserExt, error) {
 	var ext model.UserExt
 	err := uer.Database().WithContext(ctx).Table(ext.TableName()).
-		Select("id", "user_id", "timezone", "last_login_at", "invitation_status", "invited_by", "invited_at", "accepted_at", "created_at", "updated_at").
+		Select(userExtSelectFields).
 		Where("user_id = ?", userId).
 		First(&ext).Error
 	return &ext, err

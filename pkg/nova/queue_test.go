@@ -19,6 +19,11 @@ import (
 	"time"
 )
 
+const (
+	testQueueName   = "test-queue"
+	queueTestTaskID = "task-123"
+)
+
 func TestGenerateTaskID(t *testing.T) {
 	id1 := generateTaskID()
 	id2 := generateTaskID()
@@ -40,20 +45,20 @@ func TestGenerateTaskID(t *testing.T) {
 func TestTaskMessage_Fields(t *testing.T) {
 	task := &Task{Type: "test", Payload: []byte("data")}
 	msg := TaskMessage{
-		TaskID:   "task-123",
+		TaskID:   queueTestTaskID,
 		Task:     task,
-		Queue:    "test-queue",
+		Queue:    testQueueName,
 		Priority: PriorityHigh,
 	}
 
-	if msg.TaskID != "task-123" {
-		t.Errorf("expected TaskID to be 'task-123', got %s", msg.TaskID)
+	if msg.TaskID != queueTestTaskID {
+		t.Errorf("expected TaskID to be '%s', got %s", queueTestTaskID, msg.TaskID)
 	}
 	if msg.Task != task {
 		t.Error("expected Task to match")
 	}
-	if msg.Queue != "test-queue" {
-		t.Errorf("expected Queue to be 'test-queue', got %s", msg.Queue)
+	if msg.Queue != testQueueName {
+		t.Errorf("expected Queue to be '%s', got %s", testQueueName, msg.Queue)
 	}
 	if msg.Priority != PriorityHigh {
 		t.Errorf("expected Priority to be PriorityHigh, got %v", msg.Priority)

@@ -52,8 +52,8 @@ func TestCommitStore_ReadWrite(t *testing.T) {
 	if seq != 0 {
 		t.Errorf("initial Read() = %d, want 0", seq)
 	}
-	if err := cs.Write(42); err != nil {
-		t.Fatal(err)
+	if writeErr := cs.Write(42); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	seq, err = cs.Read()
 	if err != nil {
@@ -112,16 +112,20 @@ func TestWAL_AppendAndRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer wal.Close()
+	defer func() {
+		if closeErr := wal.Close(); closeErr != nil {
+			t.Errorf("close wal failed: %v", closeErr)
+		}
+	}()
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
-		seq, err := wal.Append(ctx, &Record{
+		seq, appendErr := wal.Append(ctx, &Record{
 			Type:    RecordTypeEvent,
 			Codec:   CodecJSON,
 			Payload: []byte(`{"n":` + string(rune('0'+i)) + `}`),
 		})
-		if err != nil {
-			t.Fatal(err)
+		if appendErr != nil {
+			t.Fatal(appendErr)
 		}
 		if seq != uint64(i+1) {
 			t.Errorf("Append seq = %d, want %d", seq, i+1)
@@ -151,7 +155,11 @@ func TestWAL_FlushBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer wal.Close()
+	defer func() {
+		if closeErr := wal.Close(); closeErr != nil {
+			t.Errorf("close wal failed: %v", closeErr)
+		}
+	}()
 	ctx := context.Background()
 	seq, err := wal.Append(ctx, &Record{Type: RecordTypeEvent, Codec: CodecJSON, Payload: []byte("x")})
 	if err != nil {
@@ -185,18 +193,24 @@ func TestWAL_Recovery(t *testing.T) {
 	}
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
-		_, err := wal1.Append(ctx, &Record{Type: RecordTypeEvent, Codec: CodecJSON, Payload: []byte("a")})
-		if err != nil {
-			t.Fatal(err)
+		_, appendErr := wal1.Append(ctx, &Record{Type: RecordTypeEvent, Codec: CodecJSON, Payload: []byte("a")})
+		if appendErr != nil {
+			t.Fatal(appendErr)
 		}
 	}
-	wal1.Close()
+	if closeErr := wal1.Close(); closeErr != nil {
+		t.Fatalf("close wal1 failed: %v", closeErr)
+	}
 	time.Sleep(20 * time.Millisecond)
 	wal2, err := NewWAL(&cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer wal2.Close()
+	defer func() {
+		if closeErr := wal2.Close(); closeErr != nil {
+			t.Errorf("close wal2 failed: %v", closeErr)
+		}
+	}()
 	seq, err := wal2.Append(ctx, &Record{Type: RecordTypeEvent, Codec: CodecJSON, Payload: []byte("b")})
 	if err != nil {
 		t.Fatal(err)
@@ -249,7 +263,11 @@ func TestOutbox_AppendMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer o.Close()
+	defer func() {
+		if closeErr := o.Close(); closeErr != nil {
+			t.Errorf("close outbox failed: %v", closeErr)
+		}
+	}()
 	ctx := context.Background()
 	seq, err := o.AppendMap(ctx, map[string]any{"type": "test", "data": "x"})
 	if err != nil {
@@ -277,14 +295,14 @@ func TestOutbox_SendUpdatesCommit(t *testing.T) {
 	}
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
-		_, err := o.Append(ctx, []byte(`{"n":`+string(rune('0'+i))+`}`))
-		if err != nil {
-			t.Fatal(err)
+		_, appendErr := o.Append(ctx, []byte(`{"n":`+string(rune('0'+i))+`}`))
+		if appendErr != nil {
+			t.Fatal(appendErr)
 		}
 	}
 	time.Sleep(100 * time.Millisecond)
-	if err := o.Close(); err != nil {
-		t.Fatal(err)
+	if closeErr := o.Close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	cs := NewCommitStore(filepath.Join(dir, "agent1"))
 	lastAcked, err := cs.Read()

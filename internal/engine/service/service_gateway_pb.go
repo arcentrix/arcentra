@@ -63,9 +63,11 @@ func (s *GatewayServiceImpl) PushLogs(stream grpc.ClientStreamingServer[gatewayv
 }
 
 // PushEvents receives event stream from agent.
-func (s *GatewayServiceImpl) PushEvents(stream grpc.ClientStreamingServer[gatewayv1.PushEventsRequest, gatewayv1.PushEventsResponse]) error {
+func (s *GatewayServiceImpl) PushEvents(
+	stream grpc.ClientStreamingServer[gatewayv1.PushEventsRequest, gatewayv1.PushEventsResponse],
+) error {
 	var lastAcceptedSeq uint64
-	var agentId string
+	var agentID string
 
 	for {
 		req, err := stream.Recv()
@@ -82,9 +84,9 @@ func (s *GatewayServiceImpl) PushEvents(stream grpc.ClientStreamingServer[gatewa
 		}
 		switch p := req.Payload.(type) {
 		case *gatewayv1.PushEventsRequest_Handshake:
-			agentId = p.Handshake.AgentId
+			agentID = p.Handshake.AgentId
 			lastAcceptedSeq = p.Handshake.LastKnownSeq
-			log.Debugw("PushEvents handshake", "agent_id", agentId, "last_known_seq", lastAcceptedSeq)
+			log.Debugw("PushEvents handshake", "agent_id", agentID, "last_known_seq", lastAcceptedSeq)
 		case *gatewayv1.PushEventsRequest_Batch:
 			if p.Batch == nil || len(p.Batch.Events) == 0 {
 				continue
@@ -96,7 +98,7 @@ func (s *GatewayServiceImpl) PushEvents(stream grpc.ClientStreamingServer[gatewa
 					}
 					log.Debugw("PushEvents event received",
 						"event_id", e.EventId,
-						"agent_id", agentId,
+						"agent_id", agentID,
 						"seq", e.Meta.Seq,
 						"event_type", e.EventType)
 				}

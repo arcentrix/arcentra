@@ -16,7 +16,7 @@ package id
 
 import "github.com/teris-io/shortid"
 
-func ShortId() string {
+func ShortID() string {
 	id, err := shortid.Generate()
 	if err != nil {
 		return ""

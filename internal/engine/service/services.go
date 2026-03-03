@@ -49,17 +49,26 @@ type Services struct {
 // NewServices 初始化所有 service
 func NewServices(
 	db database.IDatabase,
-	cache cache.ICache,
+	cacheStore cache.ICache,
 	repos *repo.Repositories,
-	pluginManager *plugin.Manager,
-	storageProvider storage.IStorage,
+	_ *plugin.Manager,
+	_ storage.IStorage,
 ) *Services {
 	// 基础服务
 	menuService := NewMenuService(repos.Menu)
-	userService := NewUserService(cache, repos.User, repos.UserExt, repos.UserRoleBinding, repos.RoleMenuBinding, repos.Menu, repos.Role, menuService)
+	userService := NewUserService(
+		cacheStore,
+		repos.User,
+		repos.UserExt,
+		repos.UserRoleBinding,
+		repos.RoleMenuBinding,
+		repos.Menu,
+		repos.Role,
+		menuService,
+	)
 	generalSettingsService := NewGeneralSettingsService(repos.GeneralSettings)
-	agentService := NewAgentService(repos.Agent, generalSettingsService)
-	stateStore := ssoutil.NewRedisStateStore(cache)
+	agentService := NewAgentService(repos.Agent, repos.StepRun, generalSettingsService)
+	stateStore := ssoutil.NewRedisStateStore(cacheStore)
 	identityService := NewIdentityService(repos.Identity, repos.User, repos.UserExt, stateStore)
 	teamService := NewTeamService(repos.Team)
 	storageService := NewStorageService(repos.Storage)

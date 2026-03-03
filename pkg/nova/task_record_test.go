@@ -71,8 +71,8 @@ func TestTaskRecord_Fields(t *testing.T) {
 		Metadata:    map[string]any{"key": "value"},
 	}
 
-	if record.TaskID != "task-123" {
-		t.Errorf("expected TaskID to be 'task-123', got %s", record.TaskID)
+	if record.TaskID != testTaskID {
+		t.Errorf("expected TaskID to be '%s', got %s", testTaskID, record.TaskID)
 	}
 	if record.Task != task {
 		t.Error("expected Task to match")
@@ -80,8 +80,8 @@ func TestTaskRecord_Fields(t *testing.T) {
 	if record.Status != TaskStatusCompleted {
 		t.Errorf("expected Status to be TaskStatusCompleted, got %v", record.Status)
 	}
-	if record.Queue != "test-queue" {
-		t.Errorf("expected Queue to be 'test-queue', got %s", record.Queue)
+	if record.Queue != testQueueName {
+		t.Errorf("expected Queue to be '%s', got %s", testQueueName, record.Queue)
 	}
 	if record.Priority != PriorityHigh {
 		t.Errorf("expected Priority to be PriorityHigh, got %v", record.Priority)

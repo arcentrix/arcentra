@@ -30,7 +30,7 @@ func TestLoopMaxTimes(t *testing.T) {
 	l := New(WithMaxTimes(20))
 	l.interval = 1 * time.Microsecond
 	_ = l.Do(func() (bool, error) {
-		count += 1
+		count++
 		return false, nil
 	})
 	assert.Equal(t, 20, count)
@@ -49,7 +49,7 @@ func TestLoopInterval(t *testing.T) {
 	}
 }
 
-func TestLoopRaiot(t *testing.T) {
+func TestLoopRaiot(_ *testing.T) {
 	l := New(WithDeclineRatio(1.5), WithDeclineLimit(time.Second*10))
 	begin := time.Now()
 	_ = l.Do(func() (bool, error) {
@@ -66,21 +66,21 @@ func TestWithContext(t *testing.T) {
 	l := New(WithContext(ctx), WithMaxTimes(10))
 	executed := 0
 	_ = l.Do(func() (bool, error) {
-		executed += 1
+		executed++
 		return false, errors.New("error")
 	})
 
-	assert := require.New(t)
-	assert.Equal(0, executed)
+	req := require.New(t)
+	req.Equal(0, executed)
 
 	ctx, cancel = context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 
 	l = New(WithContext(ctx), WithInterval(100*time.Millisecond), WithMaxTimes(3))
 	_ = l.Do(func() (bool, error) {
-		executed += 1
+		executed++
 		return false, errors.New("error")
 	})
 
-	assert.Equal(2, executed)
+	req.Equal(2, executed)
 }

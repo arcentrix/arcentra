@@ -25,6 +25,8 @@ import (
 	"github.com/bytedance/sonic"
 )
 
+const artifactsBuildIDLatest = "latest"
+
 // ArtifactsUploadArgs 制品上传参数
 type ArtifactsUploadArgs struct {
 	Paths     []string `json:"paths"`               // 要上传的文件/目录路径（相对于workspace）
@@ -63,7 +65,7 @@ func (m *Manager) handleArtifactsUpload(ctx context.Context, params json.RawMess
 	// 获取artifacts目录路径
 	workspaceRoot := execCtx.GetWorkspaceRoot()
 	pipelineName := execCtx.GetPipeline().Namespace
-	buildID := "latest" // TODO: Get build ID from context if available
+	buildID := artifactsBuildIDLatest // TODO: Get build ID from context if available
 
 	artifactsDir := filepath.Join(workspaceRoot, pipelineName, buildID, "artifacts")
 	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {

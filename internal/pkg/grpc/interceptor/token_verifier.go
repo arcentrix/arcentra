@@ -207,20 +207,20 @@ func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string,
 	// Try to find matching agent by verifying token signature
 	for _, agent := range agents {
 		// Skip if we already checked this agent
-		if agentIDHint != "" && agent.AgentId == agentIDHint {
+		if agentIDHint != "" && agent.AgentID == agentIDHint {
 			continue
 		}
 
-		expectedToken, err := v.generateToken(ctx, agent.AgentId)
+		expectedToken, err := v.generateToken(ctx, agent.AgentID)
 		if err != nil {
-			log.Debugw("failed to generate token for agent", "agentId", agent.AgentId, "error", err)
+			log.Debugw("failed to generate token for agent", "agentId", agent.AgentID, "error", err)
 			continue
 		}
 
 		// Extract signature from expected token (new format) for comparison
 		_, expectedSignature, _ := v.parseToken(expectedToken)
 		if token == expectedSignature {
-			return agent.AgentId, nil
+			return agent.AgentID, nil
 		}
 	}
 

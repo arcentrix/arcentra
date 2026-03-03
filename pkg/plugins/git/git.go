@@ -118,7 +118,7 @@ type TagArgs struct {
 // Branch represents a structured branch info.
 type Branch struct {
 	Name     string `json:"name"`
-	CommitId string `json:"commitId"`
+	CommitID string `json:"commitId"`
 	IsRemote bool   `json:"isRemote"`
 	IsHead   bool   `json:"isHead"`
 	Upstream string `json:"upstream,omitempty"`
@@ -127,12 +127,12 @@ type Branch struct {
 // Tag represents a structured tag info.
 type Tag struct {
 	Name     string `json:"name"`
-	CommitId string `json:"commitId"`
+	CommitID string `json:"commitId"`
 }
 
 // Commit represents a structured commit info.
 type Commit struct {
-	CommitId    string    `json:"commitId"`
+	CommitID    string    `json:"commitId"`
 	AuthorName  string    `json:"authorName"`
 	AuthorEmail string    `json:"authorEmail"`
 	CommittedAt time.Time `json:"committedAt"`
@@ -666,7 +666,7 @@ func (p *Git) tag(params json.RawMessage, opts json.RawMessage) (json.RawMessage
 
 type commitGetArgs struct {
 	Path     string            `json:"path"`
-	CommitId string            `json:"commitId"`
+	CommitID string            `json:"commitId"`
 	Env      map[string]string `json:"env"`
 }
 
@@ -720,7 +720,7 @@ func (p *Git) branchesList(params json.RawMessage, opts json.RawMessage) (json.R
 			}
 			b := Branch{
 				Name:     strings.TrimSpace(parts[0]),
-				CommitId: strings.TrimSpace(parts[1]),
+				CommitID: strings.TrimSpace(parts[1]),
 				IsRemote: ref == "refs/remotes",
 			}
 			if len(parts) >= 3 && strings.TrimSpace(parts[2]) == "*" {
@@ -775,13 +775,13 @@ func (p *Git) tagsList(params json.RawMessage, opts json.RawMessage) (json.RawMe
 		if len(parts) < 2 {
 			continue
 		}
-		commitId := strings.TrimSpace(parts[1])
+		commitID := strings.TrimSpace(parts[1])
 		if len(parts) >= 3 && strings.TrimSpace(parts[2]) != "" {
-			commitId = strings.TrimSpace(parts[2])
+			commitID = strings.TrimSpace(parts[2])
 		}
 		tags = append(tags, Tag{
 			Name:     strings.TrimSpace(parts[0]),
-			CommitId: commitId,
+			CommitID: commitID,
 		})
 	}
 	return sonic.Marshal(map[string]any{"tags": tags})
@@ -852,7 +852,7 @@ func (p *Git) commitGet(params json.RawMessage, opts json.RawMessage) (json.RawM
 	if args.Path == "" {
 		return nil, fmt.Errorf("repository path is required")
 	}
-	if args.CommitId == "" {
+	if args.CommitID == "" {
 		return nil, fmt.Errorf("commitId is required")
 	}
 
@@ -862,7 +862,7 @@ func (p *Git) commitGet(params json.RawMessage, opts json.RawMessage) (json.RawM
 			"-s",
 			"--date=iso-strict",
 			"--pretty=format:%H%x1f%an%x1f%ae%x1f%ad%x1f%s",
-			args.CommitId,
+			args.CommitID,
 		}, nil, args.Env, args.Path)
 	if err != nil {
 		return nil, err
@@ -1027,7 +1027,7 @@ func parseCommitRecords(stdout string) []Commit {
 			continue
 		}
 		commits = append(commits, Commit{
-			CommitId:    strings.TrimSpace(parts[0]),
+			CommitID:    strings.TrimSpace(parts[0]),
 			AuthorName:  strings.TrimSpace(parts[1]),
 			AuthorEmail: strings.TrimSpace(parts[2]),
 			CommittedAt: t,
@@ -1047,7 +1047,7 @@ func parseCommitLine(stdout string) (Commit, error) {
 		return Commit{}, fmt.Errorf("parse commit time: %w", err)
 	}
 	return Commit{
-		CommitId:    strings.TrimSpace(parts[0]),
+		CommitID:    strings.TrimSpace(parts[0]),
 		AuthorName:  strings.TrimSpace(parts[1]),
 		AuthorEmail: strings.TrimSpace(parts[2]),
 		CommittedAt: t,

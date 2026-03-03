@@ -96,21 +96,21 @@ func (c *CommitStore) Write(lastAckedSeq uint64) error {
 	crc := crc32.ChecksumIEEE(buf[0:16])
 	binary.BigEndian.PutUint32(buf[16:20], crc)
 
-	if _, err := f.Write(buf); err != nil {
+	if _, writeErr := f.Write(buf); writeErr != nil {
 		_ = os.Remove(tmpPath)
-		return err
+		return writeErr
 	}
-	if err := f.Sync(); err != nil {
+	if syncErr := f.Sync(); syncErr != nil {
 		_ = os.Remove(tmpPath)
-		return err
+		return syncErr
 	}
-	if err := f.Close(); err != nil {
+	if closeErr := f.Close(); closeErr != nil {
 		_ = os.Remove(tmpPath)
-		return err
+		return closeErr
 	}
-	if err := os.Rename(tmpPath, c.path); err != nil {
+	if renameErr := os.Rename(tmpPath, c.path); renameErr != nil {
 		_ = os.Remove(tmpPath)
-		return err
+		return renameErr
 	}
 	dir := filepath.Dir(c.path)
 	d, err := os.Open(dir)

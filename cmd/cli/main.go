@@ -23,7 +23,7 @@ var rootCmd = &cobra.Command{
 	Use:   "arcentra-cli",
 	Short: "arcentra cli is a command line tool",
 	Long:  "arcentra cli is a command line tool",
-	Run: func(cmd *cobra.Command, args []string) {
+	Run: func(cmd *cobra.Command, _ []string) {
 		err := cmd.Help()
 		if err != nil {
 			return

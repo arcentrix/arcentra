@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package time
+package time_test
 
 import (
 	"testing"
 	"time"
+
+	timepkg "github.com/arcentrix/arcentra/pkg/time"
 )
 
 func TestParse(t *testing.T) {
@@ -75,7 +77,7 @@ func TestParse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := Parse(tt.input)
+			result, err := timepkg.Parse(tt.input)
 			if tt.wantError {
 				if err == nil {
 					t.Errorf("Parse(%q) expected error but got none", tt.input)
@@ -114,7 +116,7 @@ func TestMustParse(t *testing.T) {
 					}
 				}()
 			}
-			result := MustParse(tt.input)
+			result := timepkg.MustParse(tt.input)
 			if !tt.wantPanic && result != tt.expected {
 				t.Errorf("MustParse(%q) = %v, want %v", tt.input, result, tt.expected)
 			}
@@ -139,7 +141,7 @@ func TestParseSeconds(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := ParseSeconds(tt.input)
+			result, err := timepkg.ParseSeconds(tt.input)
 			if tt.wantError {
 				if err == nil {
 					t.Errorf("ParseSeconds(%q) expected error but got none", tt.input)
@@ -177,7 +179,7 @@ func TestMustParseSeconds(t *testing.T) {
 					}
 				}()
 			}
-			result := MustParseSeconds(tt.input)
+			result := timepkg.MustParseSeconds(tt.input)
 			if !tt.wantPanic && result != tt.expected {
 				t.Errorf("MustParseSeconds(%q) = %d, want %d", tt.input, result, tt.expected)
 			}
@@ -198,7 +200,7 @@ func TestParseEdgeCases(t *testing.T) {
 
 	for _, tt := range largeTests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := Parse(tt.input)
+			result, err := timepkg.Parse(tt.input)
 			if err != nil {
 				t.Errorf("Parse(%q) unexpected error: %v", tt.input, err)
 			}
@@ -215,7 +217,7 @@ func BenchmarkParse(b *testing.B) {
 	for _, tc := range testCases {
 		b.Run(tc, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				_, _ = Parse(tc)
+				_, _ = timepkg.Parse(tc)
 			}
 		})
 	}

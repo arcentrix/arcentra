@@ -85,7 +85,11 @@ func (gss *GeneralSettingsService) GetGeneralSettingsByName(ctx context.Context,
 }
 
 // GetGeneralSettingsList gets general settings list with pagination and filters.
-func (gss *GeneralSettingsService) GetGeneralSettingsList(ctx context.Context, pageNum, pageSize int, category string) ([]*model.GeneralSettings, int64, error) {
+func (gss *GeneralSettingsService) GetGeneralSettingsList(
+	ctx context.Context,
+	pageNum, pageSize int,
+	category string,
+) ([]*model.GeneralSettings, int64, error) {
 	if pageNum <= 0 {
 		pageNum = 1
 	}

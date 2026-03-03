@@ -36,7 +36,7 @@ type AgentConfig struct {
 	Grpc         GrpcConfig           `mapstructure:"grpc"`
 	Agent        AgentInfo            `mapstructure:"agent"`
 	Log          log.Conf             `mapstructure:"log"`
-	Http         http.Http            `mapstructure:"http"`
+	HTTP         http.HTTP            `mapstructure:"http"`
 	Redis        cache.Redis          `mapstructure:"redis"`
 	TaskQueue    nova.TaskQueueConfig `mapstructure:"taskQueue"`
 	MessageQueue MqConfig             `mapstructure:"messageQueue"`
@@ -157,8 +157,8 @@ func loadConfigFile(confDir string) (AgentConfig, error) {
 			return
 		}
 		// Apply defaults/normalization after reload (e.g. auth token expiry units).
-		ac.Http.SetDefaults()
-		if err := http.ApplyHTTPAuthExpiry(config, &ac.Http); err != nil {
+		ac.HTTP.SetDefaults()
+		if err := http.ApplyHTTPAuthExpiry(config, &ac.HTTP); err != nil {
 			log.Errorw("failed to parse http auth expiry from config", "error", err, "file", e.Name)
 		}
 		ac.Metrics.SetDefaults()
@@ -176,8 +176,8 @@ func loadConfigFile(confDir string) (AgentConfig, error) {
 	}
 
 	// Apply defaults/normalization after initial load (e.g. auth token expiry units).
-	ac.Http.SetDefaults()
-	if err := http.ApplyHTTPAuthExpiry(config, &ac.Http); err != nil {
+	ac.HTTP.SetDefaults()
+	if err := http.ApplyHTTPAuthExpiry(config, &ac.HTTP); err != nil {
 		return ac, err
 	}
 	ac.Metrics.SetDefaults()

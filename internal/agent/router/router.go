@@ -28,23 +28,23 @@ import (
 )
 
 type Router struct {
-	Http        *http.Http
+	HTTP        *http.HTTP
 	ShutdownMgr *shutdown.Manager
 }
 
 func NewRouter(
-	httpConf *http.Http,
+	httpConf *http.HTTP,
 	shutdownMgr *shutdown.Manager,
 ) *Router {
 	return &Router{
-		Http:        httpConf,
+		HTTP:        httpConf,
 		ShutdownMgr: shutdownMgr,
 	}
 }
 
 func (rt *Router) Router() *fiber.App {
 	// 设置默认的 BodyLimit（100MB）
-	bodyLimit := rt.Http.BodyLimit
+	bodyLimit := rt.HTTP.BodyLimit
 	if bodyLimit <= 0 {
 		bodyLimit = 100 * 1024 * 1024 // 100MB 默认值
 	}
@@ -52,9 +52,9 @@ func (rt *Router) Router() *fiber.App {
 	app := fiber.New(fiber.Config{
 		AppName: "Arcentra Agent",
 		// DisableStartupMessage: true,
-		ReadTimeout:  time.Duration(rt.Http.ReadTimeout) * time.Second,
-		WriteTimeout: time.Duration(rt.Http.WriteTimeout) * time.Second,
-		IdleTimeout:  time.Duration(rt.Http.IdleTimeout) * time.Second,
+		ReadTimeout:  time.Duration(rt.HTTP.ReadTimeout) * time.Second,
+		WriteTimeout: time.Duration(rt.HTTP.WriteTimeout) * time.Second,
+		IdleTimeout:  time.Duration(rt.HTTP.IdleTimeout) * time.Second,
 		BodyLimit:    bodyLimit, // 请求体大小限制，用于插件上传等
 	})
 
@@ -63,7 +63,7 @@ func (rt *Router) Router() *fiber.App {
 	// 中间件
 	app.Use(
 		recover.New(),
-		middleware.HttpMetricsMiddleware(),
+		middleware.HTTPMetricsMiddleware(),
 		middleware.CorsMiddleware(),
 		middleware.UnifiedResponseMiddleware(),
 	)

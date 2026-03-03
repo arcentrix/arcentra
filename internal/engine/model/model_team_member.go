@@ -26,9 +26,9 @@ const (
 // TeamMember 团队成员表
 type TeamMember struct {
 	BaseModel
-	TeamId string `gorm:"column:team_id;not null;index:idx_team_user,unique" json:"teamId"`
-	UserId string `gorm:"column:user_id;not null;index:idx_team_user,unique;index:idx_user" json:"userId"`
-	RoleId string `gorm:"column:role_id;not null;index" json:"roleId"` // 角色ID（引用 t_role 表）
+	TeamID string `gorm:"column:team_id;not null;index:idx_team_user,unique" json:"teamId"`
+	UserID string `gorm:"column:user_id;not null;index:idx_team_user,unique;index:idx_user" json:"userId"`
+	RoleID string `gorm:"column:role_id;not null;index" json:"roleId"` // 角色ID（引用 t_role 表）
 }
 
 func (TeamMember) TableName() string {

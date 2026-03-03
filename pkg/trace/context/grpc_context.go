@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package context
+package tracectx
 
 import (
 	"context"
@@ -228,7 +228,14 @@ func UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 
 // StreamClientInterceptor stream client interceptor
 func StreamClientInterceptor() grpc.StreamClientInterceptor {
-	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	return func(
+		ctx context.Context,
+		desc *grpc.StreamDesc,
+		cc *grpc.ClientConn,
+		method string,
+		streamer grpc.Streamer,
+		opts ...grpc.CallOption,
+	) (grpc.ClientStream, error) {
 		ctx = WithSpan(ctx)
 		name := spanName(method)
 		start := time.Now()

@@ -29,12 +29,12 @@ func TestRequestMiddleware_WithExistingRequestId(t *testing.T) {
 	app := fiber.New()
 	app.Use(RequestMiddleware())
 	app.Get("/test", func(c *fiber.Ctx) error {
-		requestId := c.Get("X-Request-Id")
-		if requestId == "" {
+		requestID := c.Get("X-Request-Id")
+		if requestID == "" {
 			t.Error("X-Request-Id header should be set")
 		}
-		if requestId != "existing-request-id-12345" {
-			t.Errorf("X-Request-Id should be preserved, got: %s", requestId)
+		if requestID != "existing-request-id-12345" {
+			t.Errorf("X-Request-Id should be preserved, got: %s", requestID)
 		}
 		return c.SendString("ok")
 	})
@@ -52,19 +52,19 @@ func TestRequestMiddleware_WithExistingRequestId(t *testing.T) {
 	}
 }
 
-// TestRequestMiddleware_WithoutRequestId tests that new UUID is generated when X-Request-Id is missing
+// TestRequestMiddleware_WithoutRequestID tests that new UUID is generated when X-Request-Id is missing
 func TestRequestMiddleware_WithoutRequestId(t *testing.T) {
 	app := fiber.New()
 	app.Use(RequestMiddleware())
 	app.Get("/test", func(c *fiber.Ctx) error {
-		requestId := c.Get("X-Request-Id")
-		if requestId == "" {
+		requestID := c.Get("X-Request-Id")
+		if requestID == "" {
 			t.Error("X-Request-Id header should be generated")
 		}
 		// Validate UUID format
-		_, err := uuid.Parse(requestId)
+		_, err := uuid.Parse(requestID)
 		if err != nil {
-			t.Errorf("X-Request-Id should be a valid UUID, got: %s, error: %v", requestId, err)
+			t.Errorf("X-Request-Id should be a valid UUID, got: %s, error: %v", requestID, err)
 		}
 		return c.SendString("ok")
 	})
@@ -88,14 +88,14 @@ func TestRequestMiddleware_EmptyRequestId(t *testing.T) {
 	app := fiber.New()
 	app.Use(RequestMiddleware())
 	app.Get("/test", func(c *fiber.Ctx) error {
-		requestId := c.Get("X-Request-Id")
-		if requestId == "" {
+		requestID := c.Get("X-Request-Id")
+		if requestID == "" {
 			t.Error("X-Request-Id header should be generated")
 		}
 		// Validate UUID format
-		_, err := uuid.Parse(requestId)
+		_, err := uuid.Parse(requestID)
 		if err != nil {
-			t.Errorf("X-Request-Id should be a valid UUID, got: %s, error: %v", requestId, err)
+			t.Errorf("X-Request-Id should be a valid UUID, got: %s, error: %v", requestID, err)
 		}
 		return c.SendString("ok")
 	})
@@ -120,9 +120,9 @@ func TestRequestMiddleware_UUIDFormat(t *testing.T) {
 	app := fiber.New()
 	app.Use(RequestMiddleware())
 	app.Get("/test", func(c *fiber.Ctx) error {
-		requestId := c.Get("X-Request-Id")
-		if !uuidRegex.MatchString(requestId) {
-			t.Errorf("X-Request-Id should match UUID format, got: %s", requestId)
+		requestID := c.Get("X-Request-Id")
+		if !uuidRegex.MatchString(requestID) {
+			t.Errorf("X-Request-Id should match UUID format, got: %s", requestID)
 		}
 		return c.SendString("ok")
 	})
@@ -141,14 +141,14 @@ func TestRequestMiddleware_UUIDFormat(t *testing.T) {
 
 // TestRequestMiddleware_UniqueUUIDs tests that different requests get different UUIDs
 func TestRequestMiddleware_UniqueUUIDs(t *testing.T) {
-	requestIds := make(map[string]bool)
+	requestIDs := make(map[string]bool)
 
 	app := fiber.New()
 	app.Use(RequestMiddleware())
 	app.Get("/test", func(c *fiber.Ctx) error {
-		requestId := c.Get("X-Request-Id")
+		requestID := c.Get("X-Request-Id")
 		// Store request ID in response header for verification
-		c.Set("X-Test-Request-Id", requestId)
+		c.Set("X-Test-Request-Id", requestID)
 		return c.SendString("ok")
 	})
 
@@ -166,20 +166,20 @@ func TestRequestMiddleware_UniqueUUIDs(t *testing.T) {
 		}
 
 		// Get request ID from response header (set by handler)
-		requestId := resp.Header.Get("X-Test-Request-Id")
-		if requestId == "" {
+		requestID := resp.Header.Get("X-Test-Request-Id")
+		if requestID == "" {
 			t.Errorf("request %d: X-Request-Id should be set", i)
 			continue
 		}
 
-		if requestIds[requestId] {
-			t.Errorf("duplicate request ID generated: %s", requestId)
+		if requestIDs[requestID] {
+			t.Errorf("duplicate request ID generated: %s", requestID)
 		}
-		requestIds[requestId] = true
+		requestIDs[requestID] = true
 	}
 
-	if len(requestIds) != 10 {
-		t.Errorf("expected 10 unique request IDs, got %d", len(requestIds))
+	if len(requestIDs) != 10 {
+		t.Errorf("expected 10 unique request IDs, got %d", len(requestIDs))
 	}
 }
 

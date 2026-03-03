@@ -16,6 +16,7 @@ package request
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/valyala/fasthttp"
@@ -42,6 +44,7 @@ type Request struct {
 	BodyObj any
 	Proxy   string
 	Result  any
+	Timeout time.Duration
 }
 
 // FormFile represents a single multipart file part.
@@ -53,13 +56,19 @@ type FormFile struct {
 }
 
 // NewRequest creates a new request with the given method, headers, and body.
-func NewRequest(url, method string, headers map[string]string, body io.Reader) *Request {
+func NewRequest(requestURL, method string, headers map[string]string, body io.Reader) *Request {
 	return &Request{
 		Method:  method,
-		URL:     url,
+		URL:     requestURL,
 		Headers: headers,
 		Body:    body,
 	}
+}
+
+// WithTimeout sets the request timeout.
+func (r *Request) WithTimeout(timeout time.Duration) *Request {
+	r.Timeout = timeout
+	return r
 }
 
 // WithProxy sets the HTTP proxy URL.
@@ -131,7 +140,10 @@ func (r *Request) WithBodyJSON(body any) *Request {
 }
 
 // Do sends the request using the configured method.
-func (r *Request) Do() (*fasthttp.Response, error) {
+func (r *Request) Do(ctx context.Context) (*fasthttp.Response, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	method := strings.ToUpper(strings.TrimSpace(r.Method))
 	if method == "" {
 		return nil, errors.New("request method is required")
@@ -139,10 +151,10 @@ func (r *Request) Do() (*fasthttp.Response, error) {
 	if !isValidMethod(method) {
 		return nil, fmt.Errorf("invalid request method: %s", method)
 	}
-	return r.do(method)
+	return r.do(ctx, method)
 }
 
-func (r *Request) do(method string) (*fasthttp.Response, error) {
+func (r *Request) do(ctx context.Context, method string) (*fasthttp.Response, error) {
 	req := fasthttp.AcquireRequest()
 	defer fasthttp.ReleaseRequest(req)
 
@@ -182,7 +194,7 @@ func (r *Request) do(method string) (*fasthttp.Response, error) {
 	if err != nil {
 		return resp, err
 	}
-	if err := client.Do(req, resp); err != nil {
+	if err := doWithContext(ctx, r.Timeout, client, req, resp); err != nil {
 		return resp, err
 	}
 
@@ -192,6 +204,32 @@ func (r *Request) do(method string) (*fasthttp.Response, error) {
 		}
 	}
 	return resp, nil
+}
+
+func doWithContext(
+	ctx context.Context,
+	fallbackTimeout time.Duration,
+	client *fasthttp.Client,
+	req *fasthttp.Request,
+	resp *fasthttp.Response,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	timeout := fallbackTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		ctxTimeout := time.Until(deadline)
+		if ctxTimeout <= 0 {
+			return context.DeadlineExceeded
+		}
+		if timeout <= 0 || ctxTimeout < timeout {
+			timeout = ctxTimeout
+		}
+	}
+	if timeout > 0 {
+		return client.DoTimeout(req, resp, timeout)
+	}
+	return client.Do(req, resp)
 }
 
 func (r *Request) withQuery() string {

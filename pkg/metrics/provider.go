@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// revive:disable:var-naming package name is intentional for domain
 package metrics
 
 import (
@@ -31,7 +32,7 @@ func NewMetricsServer(config Config) *Server {
 	// Setup cron metrics with the sink
 	SetupCronMetrics(server.GetSink())
 	// Register HTTP metrics
-	if err := middleware.RegisterHttpMetrics(server.GetRegistry()); err != nil {
+	if err := middleware.RegisterHTTPMetrics(server.GetRegistry()); err != nil {
 		log.Warnw("failed to register HTTP metrics", "error", err)
 	}
 	return server

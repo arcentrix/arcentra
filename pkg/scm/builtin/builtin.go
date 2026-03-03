@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	// Register built-in SCM providers via side-effect imports.
 	_ "github.com/arcentrix/arcentra/pkg/scm/bitbucket"
 	_ "github.com/arcentrix/arcentra/pkg/scm/gitea"
 	_ "github.com/arcentrix/arcentra/pkg/scm/gitee"

@@ -39,7 +39,17 @@ type IdentityService struct {
 	stateStore   util.IStateStore
 }
 
-func NewIdentityService(identityRepo repo.IIdentityRepository, userRepo repo.IUserRepository, userExtRepo repo.IUserExtRepository, stateStore util.IStateStore) *IdentityService {
+const (
+	providerTypeOAuth = "oauth"
+	providerTypeOIDC  = "oidc"
+)
+
+func NewIdentityService(
+	identityRepo repo.IIdentityRepository,
+	userRepo repo.IUserRepository,
+	userExtRepo repo.IUserExtRepository,
+	stateStore util.IStateStore,
+) *IdentityService {
 	return &IdentityService{
 		identityRepo: identityRepo,
 		userRepo:     userRepo,
@@ -76,9 +86,9 @@ func (iis *IdentityService) Authorize(ctx context.Context, providerName string) 
 	log.Debugw("State stored", "state", state, "storedProviderName", integration.Name, "urlProvider", providerName)
 
 	switch integration.ProviderType {
-	case "oauth":
+	case providerTypeOAuth:
 		return provider.AuthCodeURL(state), nil
-	case "oidc":
+	case providerTypeOIDC:
 		return provider.AuthCodeURL(state), nil
 	default:
 		return "", fmt.Errorf("invalid provider type: %s", integration.ProviderType)
@@ -97,7 +107,17 @@ func (iis *IdentityService) Callback(ctx context.Context, providerName, state, c
 		return nil, "", fmt.Errorf("invalid state parameter: state not found or expired")
 	}
 
-	log.Debugw("State loaded", "provider", providerName, "storedProviderName", stateData.ProviderName, "redirectURI", stateData.RedirectURI, "redirectURILength", len(stateData.RedirectURI))
+	log.Debugw(
+		"State loaded",
+		"provider",
+		providerName,
+		"storedProviderName",
+		stateData.ProviderName,
+		"redirectURI",
+		stateData.RedirectURI,
+		"redirectURILength",
+		len(stateData.RedirectURI),
+	)
 
 	// Get the actual provider from database to compare with stored name
 	integration, err := iis.identityRepo.GetProvider(ctx, providerName)
@@ -109,8 +129,23 @@ func (iis *IdentityService) Callback(ctx context.Context, providerName, state, c
 	// Compare stored provider name with database provider name
 	// This handles cases where URL parameter might differ from database name
 	if stateData.ProviderName != integration.Name {
-		log.Warnw("state provider mismatch", "urlProvider", providerName, "storedProviderName", stateData.ProviderName, "dbProviderName", integration.Name, "state", state)
-		return nil, "", fmt.Errorf("invalid state parameter: provider mismatch (stored: %s, url: %s, db: %s)", stateData.ProviderName, providerName, integration.Name)
+		log.Warnw(
+			"state provider mismatch",
+			"urlProvider",
+			providerName,
+			"storedProviderName",
+			stateData.ProviderName,
+			"dbProviderName",
+			integration.Name,
+			"state",
+			state,
+		)
+		return nil, "", fmt.Errorf(
+			"invalid state parameter: provider mismatch (stored: %s, url: %s, db: %s)",
+			stateData.ProviderName,
+			providerName,
+			integration.Name,
+		)
 	}
 
 	// Use the actual provider name from database for consistency
@@ -140,12 +175,12 @@ func (iis *IdentityService) Callback(ctx context.Context, providerName, state, c
 	// Get CoverAttributes configuration
 	var coverAttributes bool
 	switch integration.ProviderType {
-	case "oauth":
+	case providerTypeOAuth:
 		var oauthCfg model.OAuthConfig
 		if unmarshalErr := sonic.Unmarshal(integration.Config, &oauthCfg); unmarshalErr == nil {
 			coverAttributes = oauthCfg.CoverAttributes
 		}
-	case "oidc":
+	case providerTypeOIDC:
 		var oidcCfg model.OIDCConfig
 		if unmarshalErr := sonic.Unmarshal(integration.Config, &oidcCfg); unmarshalErr == nil {
 			coverAttributes = oidcCfg.CoverAttributes
@@ -194,7 +229,7 @@ func (iis *IdentityService) convertToProviderConfig(integration *model.Identity)
 	}
 
 	switch integration.ProviderType {
-	case "oauth":
+	case providerTypeOAuth:
 		var oauthCfg model.OAuthConfig
 		if err := sonic.Unmarshal(integration.Config, &oauthCfg); err != nil {
 			return nil, fmt.Errorf("unmarshal oauth config failed: %w", err)
@@ -219,7 +254,7 @@ func (iis *IdentityService) convertToProviderConfig(integration *model.Identity)
 			return nil, fmt.Errorf("missing authURL or tokenURL in oauth config")
 		}
 
-	case "oidc":
+	case providerTypeOIDC:
 		var oidcCfg model.OIDCConfig
 		if err := sonic.Unmarshal(integration.Config, &oidcCfg); err != nil {
 			return nil, fmt.Errorf("unmarshal oidc config failed: %w", err)
@@ -401,39 +436,44 @@ func applyLDAPFieldMapping(
 }
 
 // registerOrLoginUser handles user registration or login logic according to the SSO flow.
-func (iis *IdentityService) registerOrLoginUser(ctx context.Context, providerName string, userInfo *sso.UserInfoAdapter, coverAttributes bool) (*model.Register, error) {
+func (iis *IdentityService) registerOrLoginUser(
+	ctx context.Context,
+	providerName string,
+	userInfo *sso.UserInfoAdapter,
+	coverAttributes bool,
+) (*model.Register, error) {
 	// Check if user exists by username
-	userId, err := iis.userRepo.GetUserByUsername(userInfo.Username)
-	if err == nil && userId != "" {
+	userID, err := iis.userRepo.GetUserByUsername(userInfo.Username)
+	if err == nil && userID != "" {
 		// User exists - check CoverAttributes configuration
 		log.Debugw("user already exists", "provider", providerName, "username", userInfo.Username, "coverAttributes", coverAttributes)
 
-		existingUser, err := iis.userRepo.GetUserByUserId(userId)
+		existingUser, err := iis.userRepo.GetUserByUserID(userID)
 		if err != nil {
-			log.Errorw("failed to get existing user details", "provider", providerName, "userId", userId, "error", err)
+			log.Errorw("failed to get existing user details", "provider", providerName, "userId", userID, "error", err)
 			return nil, fmt.Errorf("user exists but failed to get user details: %w", err)
 		}
 
 		// Update SSO fields if CoverAttributes is enabled
 		if coverAttributes {
-			log.Debugw("updating SSO fields for existing user", "provider", providerName, "userId", userId)
-			if err := iis.updateSsoFields(userId, userInfo); err != nil {
-				log.Errorw("failed to update SSO fields", "provider", providerName, "userId", userId, "error", err)
+			log.Debugw("updating SSO fields for existing user", "provider", providerName, "userId", userID)
+			if err := iis.updateSsoFields(userID, userInfo); err != nil {
+				log.Errorw("failed to update SSO fields", "provider", providerName, "userId", userID, "error", err)
 				// Continue with login even if update fails
 			} else {
 				// Fetch updated user info after successful update
-				existingUser, err = iis.userRepo.GetUserByUserId(userId)
+				existingUser, err = iis.userRepo.GetUserByUserID(userID)
 				if err != nil {
-					log.Errorw("failed to get updated user details", "provider", providerName, "userId", userId, "error", err)
+					log.Errorw("failed to get updated user details", "provider", providerName, "userId", userID, "error", err)
 				}
 			}
 		} else {
-			log.Debugw("keeping original fields for existing user", "provider", providerName, "userId", userId)
+			log.Debugw("keeping original fields for existing user", "provider", providerName, "userId", userID)
 		}
 
 		// Return existing user info for login
 		return &model.Register{
-			UserId:    existingUser.UserId,
+			UserID:    existingUser.UserID,
 			Username:  existingUser.Username,
 			FullName:  existingUser.FullName,
 			Avatar:    existingUser.Avatar,
@@ -448,7 +488,7 @@ func (iis *IdentityService) registerOrLoginUser(ctx context.Context, providerNam
 }
 
 // updateSsoFields updates SSO-related fields for an existing user.
-func (iis *IdentityService) updateSsoFields(userId string, userInfo *sso.UserInfoAdapter) error {
+func (iis *IdentityService) updateSsoFields(userID string, userInfo *sso.UserInfoAdapter) error {
 	fullName := splitName(userInfo.Name, userInfo.Nickname)
 	if fullName == "" {
 		fullName = userInfo.Username
@@ -470,15 +510,19 @@ func (iis *IdentityService) updateSsoFields(userId string, userInfo *sso.UserInf
 	}
 
 	updates["updated_at"] = time.Now()
-	return iis.userRepo.UpdateUser(userId, updates)
+	return iis.userRepo.UpdateUser(userID, updates)
 }
 
 // createUserWithFullSsoFields creates a new user with complete SSO fields.
-func (iis *IdentityService) createUserWithFullSsoFields(ctx context.Context, providerName string, userInfo *sso.UserInfoAdapter) (*model.Register, error) {
+func (iis *IdentityService) createUserWithFullSsoFields(
+	ctx context.Context,
+	providerName string,
+	userInfo *sso.UserInfoAdapter,
+) (*model.Register, error) {
 	fullName := splitName(userInfo.Name, userInfo.Nickname)
 
 	registerUserInfo := &model.Register{
-		UserId:   id.GetUUIDWithoutDashes(),
+		UserID:   id.GetUUIDWithoutDashes(),
 		Username: userInfo.Username,
 		FullName: fullName,
 		Avatar:   userInfo.AvatarURL,
@@ -509,9 +553,19 @@ func (iis *IdentityService) createUserWithFullSsoFields(ctx context.Context, pro
 	}
 
 	// Create UserExt record
-	err = iis.createUserExtIfNotExists(ctx, registerUserInfo.UserId)
+	err = iis.createUserExtIfNotExists(ctx, registerUserInfo.UserID)
 	if err != nil {
-		log.Errorw("failed to create user ext after registration", "provider", providerName, "username", userInfo.Username, "userId", registerUserInfo.UserId, "error", err)
+		log.Errorw(
+			"failed to create user ext after registration",
+			"provider",
+			providerName,
+			"username",
+			userInfo.Username,
+			"userId",
+			registerUserInfo.UserID,
+			"error",
+			err,
+		)
 		// Don't return error, as user creation succeeded
 	}
 
@@ -519,8 +573,8 @@ func (iis *IdentityService) createUserWithFullSsoFields(ctx context.Context, pro
 }
 
 // createUserExtIfNotExists creates UserExt record if it doesn't exist
-func (iis *IdentityService) createUserExtIfNotExists(ctx context.Context, userId string) error {
-	exists, err := iis.userExtRepo.Exists(ctx, userId)
+func (iis *IdentityService) createUserExtIfNotExists(ctx context.Context, userID string) error {
+	exists, err := iis.userExtRepo.Exists(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to check user ext exists: %w", err)
 	}
@@ -530,7 +584,7 @@ func (iis *IdentityService) createUserExtIfNotExists(ctx context.Context, userId
 
 	now := time.Now()
 	userExt := &model.UserExt{
-		UserId:           userId,
+		UserID:           userID,
 		Timezone:         "UTC",
 		InvitationStatus: model.UserInvitationStatusAccepted,
 	}
@@ -557,7 +611,7 @@ func (iis *IdentityService) CreateProvider(ctx context.Context, provider *model.
 	}
 
 	// generate provider ID
-	provider.ProviderId = id.GetUUID()
+	provider.ProviderID = id.GetUUID()
 
 	if err := iis.identityRepo.CreateProvider(ctx, provider); err != nil {
 		log.Errorw("failed to create provider", "name", provider.Name, "error", err)
@@ -626,9 +680,9 @@ func (iis *IdentityService) preserveConfigKeys(existing, updated *model.Identity
 // getImmutableConfigKeys returns list of immutable config keys for each provider type
 func getImmutableConfigKeys(providerType string) []string {
 	switch providerType {
-	case "oauth":
+	case providerTypeOAuth:
 		return []string{"clientId"}
-	case "oidc":
+	case providerTypeOIDC:
 		return []string{"clientId", "issuer"}
 	case "ldap":
 		return []string{"host", "port", "baseDN"}

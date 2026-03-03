@@ -55,21 +55,21 @@ func (l *GormLoggerAdapter) LogMode(level logger.LogLevel) logger.Interface {
 	return l
 }
 
-func (l *GormLoggerAdapter) Info(ctx context.Context, msg string, data ...interface{}) {
+func (l *GormLoggerAdapter) Info(_ context.Context, msg string, data ...interface{}) {
 	if l.Level < logger.Info {
 		return
 	}
 	l.getLogger().Infow(msg, data...)
 }
 
-func (l *GormLoggerAdapter) Warn(ctx context.Context, msg string, data ...interface{}) {
+func (l *GormLoggerAdapter) Warn(_ context.Context, msg string, data ...interface{}) {
 	if l.Level < logger.Warn {
 		return
 	}
 	l.getLogger().Warnw(msg, data...)
 }
 
-func (l *GormLoggerAdapter) Error(ctx context.Context, msg string, data ...interface{}) {
+func (l *GormLoggerAdapter) Error(_ context.Context, msg string, data ...interface{}) {
 	if l.Level < logger.Error {
 		return
 	}

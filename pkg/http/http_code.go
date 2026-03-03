@@ -19,8 +19,8 @@ var (
 
 	Failed                        = failed(500, "Request failed")
 	RequestParameterParsingFailed = failed(5001, "Request parameter parsing failed")
-	TeamIdIsEmpty                 = failed(5002, "Team id is empty")
-	OrgIdIsEmpty                  = failed(5003, "Org id is empty")
+	TeamIDIsEmpty                 = failed(5002, "Team id is empty")
+	OrgIDIsEmpty                  = failed(5003, "Org id is empty")
 
 	// Unauthorized 401 sso
 	Unauthorized           = failed(4401, "Unauthorized")

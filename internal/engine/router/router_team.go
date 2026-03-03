@@ -70,7 +70,7 @@ func (rt *Router) createTeam(c *fiber.Ctx) error {
 	}
 
 	// 获取当前用户ID
-	claims, err := auth.ParseAuthorizationToken(c, rt.Http.Auth.SecretKey)
+	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil {
 		log.Errorw("authentication failed", "error", err)
 		return http.WithRepErrMsg(c, http.AuthenticationFailed.Code, http.AuthenticationFailed.Msg, c.Path())
@@ -92,7 +92,7 @@ func (rt *Router) createTeam(c *fiber.Ctx) error {
 func (rt *Router) updateTeam(c *fiber.Ctx) error {
 	teamId := c.Params("teamId")
 	if teamId == "" {
-		return http.WithRepErrMsg(c, http.TeamIdIsEmpty.Code, http.TeamIdIsEmpty.Msg, c.Path())
+		return http.WithRepErrMsg(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg, c.Path())
 	}
 
 	var req model.UpdateTeamReq
@@ -117,7 +117,7 @@ func (rt *Router) updateTeam(c *fiber.Ctx) error {
 func (rt *Router) deleteTeam(c *fiber.Ctx) error {
 	teamId := c.Params("teamId")
 	if teamId == "" {
-		return http.WithRepErrMsg(c, http.TeamIdIsEmpty.Code, http.TeamIdIsEmpty.Msg, c.Path())
+		return http.WithRepErrMsg(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg, c.Path())
 	}
 
 	teamService := rt.Services.Team
@@ -135,7 +135,7 @@ func (rt *Router) deleteTeam(c *fiber.Ctx) error {
 func (rt *Router) getTeamById(c *fiber.Ctx) error {
 	teamId := c.Params("teamId")
 	if teamId == "" {
-		return http.WithRepErrMsg(c, http.TeamIdIsEmpty.Code, http.TeamIdIsEmpty.Msg, c.Path())
+		return http.WithRepErrMsg(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg, c.Path())
 	}
 
 	teamService := rt.Services.Team
@@ -198,7 +198,7 @@ func (rt *Router) listTeams(c *fiber.Ctx) error {
 func (rt *Router) getTeamsByOrgId(c *fiber.Ctx) error {
 	orgId := c.Params("orgId")
 	if orgId == "" {
-		return http.WithRepErrMsg(c, http.OrgIdIsEmpty.Code, http.OrgIdIsEmpty.Msg, c.Path())
+		return http.WithRepErrMsg(c, http.OrgIDIsEmpty.Code, http.OrgIDIsEmpty.Msg, c.Path())
 	}
 
 	teamService := rt.Services.Team
@@ -217,7 +217,7 @@ func (rt *Router) getTeamsByOrgId(c *fiber.Ctx) error {
 func (rt *Router) getSubTeams(c *fiber.Ctx) error {
 	teamId := c.Params("teamId")
 	if teamId == "" {
-		return http.WithRepErrMsg(c, http.TeamIdIsEmpty.Code, http.TeamIdIsEmpty.Msg, c.Path())
+		return http.WithRepErrMsg(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg, c.Path())
 	}
 
 	teamService := rt.Services.Team
@@ -235,7 +235,7 @@ func (rt *Router) getSubTeams(c *fiber.Ctx) error {
 // getUserTeams 获取用户所属团队
 func (rt *Router) getUserTeams(c *fiber.Ctx) error {
 	// 获取当前用户ID
-	claims, err := auth.ParseAuthorizationToken(c, rt.Http.Auth.SecretKey)
+	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil {
 		log.Errorw("authentication failed", "error", err)
 		return http.WithRepErrMsg(c, http.AuthenticationFailed.Code, http.AuthenticationFailed.Msg, c.Path())
@@ -257,7 +257,7 @@ func (rt *Router) getUserTeams(c *fiber.Ctx) error {
 func (rt *Router) enableTeam(c *fiber.Ctx) error {
 	teamId := c.Params("teamId")
 	if teamId == "" {
-		return http.WithRepErrMsg(c, http.TeamIdIsEmpty.Code, http.TeamIdIsEmpty.Msg, c.Path())
+		return http.WithRepErrMsg(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg, c.Path())
 	}
 
 	teamService := rt.Services.Team
@@ -275,7 +275,7 @@ func (rt *Router) enableTeam(c *fiber.Ctx) error {
 func (rt *Router) disableTeam(c *fiber.Ctx) error {
 	teamId := c.Params("teamId")
 	if teamId == "" {
-		return http.WithRepErrMsg(c, http.TeamIdIsEmpty.Code, http.TeamIdIsEmpty.Msg, c.Path())
+		return http.WithRepErrMsg(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg, c.Path())
 	}
 
 	teamService := rt.Services.Team
@@ -293,7 +293,7 @@ func (rt *Router) disableTeam(c *fiber.Ctx) error {
 func (rt *Router) updateTeamStatistics(c *fiber.Ctx) error {
 	teamId := c.Params("teamId")
 	if teamId == "" {
-		return http.WithRepErrMsg(c, http.TeamIdIsEmpty.Code, http.TeamIdIsEmpty.Msg, c.Path())
+		return http.WithRepErrMsg(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg, c.Path())
 	}
 
 	teamService := rt.Services.Team

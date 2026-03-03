@@ -29,14 +29,15 @@ import (
 type ParseOption int
 
 const (
-	Second      ParseOption = 1 << iota // Seconds field, default 0
-	Minute                              // Minutes field, default 0
-	Hour                                // Hours field, default 0
-	Dom                                 // Day of month field, default *
-	Month                               // Month field, default *
-	Dow                                 // Day of week field, default *
-	DowOptional                         // Optional day of week field, default *
-	Descriptor                          // Allow descriptors such as @monthly, @weekly, etc.
+	// Second enables the seconds field (default 0).
+	Second      ParseOption = 1 << iota
+	Minute                  // Minutes field, default 0
+	Hour                    // Hours field, default 0
+	Dom                     // Day of month field, default *
+	Month                   // Month field, default *
+	Dow                     // Day of week field, default *
+	DowOptional             // Optional day of week field, default *
+	Descriptor              // Allow descriptors such as @monthly, @weekly, etc.
 )
 
 var places = []ParseOption{
@@ -307,17 +308,17 @@ func mustParseInt(expr string) (uint, error) {
 	return uint(num), nil
 }
 
-// getBits sets all bits in the range [min, max], modulo the given step size.
-func getBits(min, max, step uint) uint64 {
+// getBits sets all bits in the range [lo, hi], modulo the given step size.
+func getBits(lo, hi, step uint) uint64 {
 	var bits uint64
 
 	// If step is 1, use shifts.
 	if step == 1 {
-		return ^(math.MaxUint64 << (max + 1)) & (math.MaxUint64 << min)
+		return ^(math.MaxUint64 << (hi + 1)) & (math.MaxUint64 << lo)
 	}
 
 	// Else, use a simple loop.
-	for i := min; i <= max; i += step {
+	for i := lo; i <= hi; i += step {
 		bits |= 1 << i
 	}
 	return bits

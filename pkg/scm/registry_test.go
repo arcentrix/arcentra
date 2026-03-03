@@ -28,7 +28,7 @@ func (p *dummyProvider) ParseWebhook(_ context.Context, _ WebhookRequest) ([]Eve
 		EventType:    EventTypePush,
 		Repo:         Repo{Host: "example.com", Owner: "o", Name: "n"},
 		ActorName:    "actor",
-		CommitId:     "c",
+		CommitID:     "c",
 		Ref:          "refs/heads/main",
 		OccurredAt:   time.Unix(1, 0).UTC(),
 	}}, nil
@@ -44,6 +44,10 @@ func (p *dummyProvider) PollEvents(_ context.Context, _ Repo, cursor Cursor) ([]
 		Ref:          "refs/tags/v1.0.0",
 		OccurredAt:   time.Unix(2, 0).UTC(),
 	}}, next, nil
+}
+
+func (p *dummyProvider) CreateChangeRequest(_ context.Context, _ ChangeRequestInput) (string, error) {
+	return "https://example.com/pr/1", nil
 }
 
 func TestNewProvider_NotRegistered(t *testing.T) {

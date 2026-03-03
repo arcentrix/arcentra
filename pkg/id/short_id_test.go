@@ -16,8 +16,8 @@ package id
 
 import "testing"
 
-func TestShortId(t *testing.T) {
-	id := ShortId()
+func TestShortID(_ *testing.T) {
+	id := ShortID()
 	if id != "" {
 		println(id)
 	}

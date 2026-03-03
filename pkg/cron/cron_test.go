@@ -22,6 +22,8 @@ import (
 	"github.com/arcentrix/arcentra/pkg/safe"
 )
 
+const modifiedEntryName = "modified"
+
 func TestNew(t *testing.T) {
 	c := New()
 	if c == nil {
@@ -238,9 +240,9 @@ func TestEntries(t *testing.T) {
 	}
 
 	// Verify entries are copies
-	entries[0].Name = "modified"
+	entries[0].Name = modifiedEntryName
 	entries2 := c.Entries()
-	if entries2[0].Name == "modified" {
+	if entries2[0].Name == modifiedEntryName {
 		t.Error("Entries() should return copies, not references")
 	}
 }
@@ -361,7 +363,7 @@ func TestStop(t *testing.T) {
 	}
 }
 
-func TestStop_NotRunning(t *testing.T) {
+func TestStop_NotRunning(_ *testing.T) {
 	c := New()
 	// Should not panic
 	c.Stop()

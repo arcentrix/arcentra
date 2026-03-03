@@ -28,9 +28,10 @@ import (
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/validation"
 	"github.com/arcentrix/arcentra/pkg/dispatch"
-	"github.com/arcentrix/arcentra/pkg/git"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/scm"
+	_ "github.com/arcentrix/arcentra/pkg/scm/builtin" // register builtin SCM providers via side effects.
 	"github.com/arcentrix/arcentra/pkg/serde"
 	timepkg "github.com/arcentrix/arcentra/pkg/time"
 )
@@ -49,8 +50,12 @@ func NewPipelineServiceImpl(services *Services) *PipelineServiceImpl {
 	}
 }
 
-func (s *PipelineServiceImpl) CreatePipeline(ctx context.Context, req *pipelinev1.CreatePipelineRequest) (*pipelinev1.CreatePipelineResponse, error) {
-	if strings.TrimSpace(req.GetProjectId()) == "" || strings.TrimSpace(req.GetName()) == "" || strings.TrimSpace(req.GetPipelineFilePath()) == "" {
+func (s *PipelineServiceImpl) CreatePipeline(
+	ctx context.Context,
+	req *pipelinev1.CreatePipelineRequest,
+) (*pipelinev1.CreatePipelineResponse, error) {
+	if strings.TrimSpace(req.GetProjectId()) == "" || strings.TrimSpace(req.GetName()) == "" ||
+		strings.TrimSpace(req.GetPipelineFilePath()) == "" {
 		return &pipelinev1.CreatePipelineResponse{
 			Success: false,
 			Message: "projectId, name and pipelineFilePath are required",
@@ -87,11 +92,11 @@ func (s *PipelineServiceImpl) CreatePipeline(ctx context.Context, req *pipelinev
 	}
 
 	p := &model.Pipeline{
-		PipelineId:       id.GetUild(),
-		ProjectId:        req.GetProjectId(),
+		PipelineID:       id.GetUild(),
+		ProjectID:        req.GetProjectId(),
 		Name:             strings.TrimSpace(req.GetName()),
 		Description:      strings.TrimSpace(req.GetDescription()),
-		RepoUrl:          repoUrl,
+		RepoURL:          repoUrl,
 		DefaultBranch:    branch,
 		PipelineFilePath: normalizePipelinePath(req.GetPipelineFilePath()),
 		SaveMode:         saveMode,
@@ -115,11 +120,14 @@ func (s *PipelineServiceImpl) CreatePipeline(ctx context.Context, req *pipelinev
 	return &pipelinev1.CreatePipelineResponse{
 		Success:    true,
 		Message:    "pipeline created",
-		PipelineId: p.PipelineId,
+		PipelineId: p.PipelineID,
 	}, nil
 }
 
-func (s *PipelineServiceImpl) UpdatePipeline(ctx context.Context, req *pipelinev1.UpdatePipelineRequest) (*pipelinev1.UpdatePipelineResponse, error) {
+func (s *PipelineServiceImpl) UpdatePipeline(
+	ctx context.Context,
+	req *pipelinev1.UpdatePipelineRequest,
+) (*pipelinev1.UpdatePipelineResponse, error) {
 	if strings.TrimSpace(req.GetPipelineId()) == "" {
 		return &pipelinev1.UpdatePipelineResponse{
 			Success: false,
@@ -177,7 +185,10 @@ func (s *PipelineServiceImpl) UpdatePipeline(ctx context.Context, req *pipelinev
 	return &pipelinev1.UpdatePipelineResponse{Success: true, Message: "pipeline updated"}, nil
 }
 
-func (s *PipelineServiceImpl) GetPipeline(ctx context.Context, req *pipelinev1.GetPipelineRequest) (*pipelinev1.GetPipelineResponse, error) {
+func (s *PipelineServiceImpl) GetPipeline(
+	ctx context.Context,
+	req *pipelinev1.GetPipelineRequest,
+) (*pipelinev1.GetPipelineResponse, error) {
 	if strings.TrimSpace(req.GetPipelineId()) == "" {
 		return &pipelinev1.GetPipelineResponse{
 			Success: false,
@@ -200,7 +211,10 @@ func (s *PipelineServiceImpl) GetPipeline(ctx context.Context, req *pipelinev1.G
 	}, nil
 }
 
-func (s *PipelineServiceImpl) ListPipelines(ctx context.Context, req *pipelinev1.ListPipelinesRequest) (*pipelinev1.ListPipelinesResponse, error) {
+func (s *PipelineServiceImpl) ListPipelines(
+	ctx context.Context,
+	req *pipelinev1.ListPipelinesRequest,
+) (*pipelinev1.ListPipelinesResponse, error) {
 	query := &repo.PipelineQuery{
 		ProjectId: strings.TrimSpace(req.GetProjectId()),
 		Name:      strings.TrimSpace(req.GetName()),
@@ -229,7 +243,10 @@ func (s *PipelineServiceImpl) ListPipelines(ctx context.Context, req *pipelinev1
 	}, nil
 }
 
-func (s *PipelineServiceImpl) DeletePipeline(ctx context.Context, req *pipelinev1.DeletePipelineRequest) (*pipelinev1.DeletePipelineResponse, error) {
+func (s *PipelineServiceImpl) DeletePipeline(
+	ctx context.Context,
+	req *pipelinev1.DeletePipelineRequest,
+) (*pipelinev1.DeletePipelineResponse, error) {
 	if strings.TrimSpace(req.GetPipelineId()) == "" {
 		return &pipelinev1.DeletePipelineResponse{
 			Success: false,
@@ -237,7 +254,10 @@ func (s *PipelineServiceImpl) DeletePipeline(ctx context.Context, req *pipelinev
 			Error:   s.error(400, "pipelineId is required", "validation", nil),
 		}, nil
 	}
-	if err := s.pipelineRepo.Update(ctx, req.GetPipelineId(), map[string]any{"is_enabled": 0, "status": model.PipelineStatusCancelled}); err != nil {
+	if err := s.pipelineRepo.Update(ctx, req.GetPipelineId(), map[string]any{
+		"is_enabled": 0,
+		"status":     model.PipelineStatusCancelled,
+	}); err != nil {
 		return &pipelinev1.DeletePipelineResponse{
 			Success: false,
 			Message: "delete pipeline failed",
@@ -247,7 +267,10 @@ func (s *PipelineServiceImpl) DeletePipeline(ctx context.Context, req *pipelinev
 	return &pipelinev1.DeletePipelineResponse{Success: true, Message: "pipeline deleted"}, nil
 }
 
-func (s *PipelineServiceImpl) TriggerPipeline(ctx context.Context, req *pipelinev1.TriggerPipelineRequest) (*pipelinev1.TriggerPipelineResponse, error) {
+func (s *PipelineServiceImpl) TriggerPipeline(
+	ctx context.Context,
+	req *pipelinev1.TriggerPipelineRequest,
+) (*pipelinev1.TriggerPipelineResponse, error) {
 	if strings.TrimSpace(req.GetPipelineId()) == "" {
 		return &pipelinev1.TriggerPipelineResponse{
 			Success: false,
@@ -266,12 +289,12 @@ func (s *PipelineServiceImpl) TriggerPipeline(ctx context.Context, req *pipeline
 	}
 	requestId := strings.TrimSpace(req.GetRequestId())
 	if requestId != "" {
-		existing, err := s.pipelineRepo.GetRunByRequestId(ctx, pipeline.PipelineId, requestId)
-		if err != nil {
+		existing, getErr := s.pipelineRepo.GetRunByRequestId(ctx, pipeline.PipelineID, requestId)
+		if getErr != nil {
 			return &pipelinev1.TriggerPipelineResponse{
 				Success: false,
 				Message: "check request id failed",
-				Error:   s.error(500, err.Error(), "internal", nil),
+				Error:   s.error(500, getErr.Error(), "internal", nil),
 			}, nil
 		}
 		if existing != nil {
@@ -282,7 +305,7 @@ func (s *PipelineServiceImpl) TriggerPipeline(ctx context.Context, req *pipeline
 			}, nil
 		}
 	}
-	project, err := s.projectRepo.Get(ctx, pipeline.ProjectId)
+	project, err := s.projectRepo.Get(ctx, pipeline.ProjectID)
 	if err != nil {
 		return &pipelinev1.TriggerPipelineResponse{
 			Success: false,
@@ -307,7 +330,7 @@ func (s *PipelineServiceImpl) TriggerPipeline(ctx context.Context, req *pipeline
 			Error:   s.error(400, err.Error(), "validation", nil),
 		}, nil
 	}
-	if err := validation.NewSchemaValidator().Validate((*spec.Pipeline)(parsedSpec)); err != nil {
+	if err := validation.NewSchemaValidator().Validate(parsedSpec); err != nil {
 		return &pipelinev1.TriggerPipelineResponse{
 			Success: false,
 			Message: "spec validation failed",
@@ -318,7 +341,7 @@ func (s *PipelineServiceImpl) TriggerPipeline(ctx context.Context, req *pipeline
 	variablesJSON := serde.MarshalStringMap(req.GetVariables())
 	run := &model.PipelineRun{
 		RunId:               id.GetUild(),
-		PipelineId:          pipeline.PipelineId,
+		PipelineId:          pipeline.PipelineID,
 		RequestId:           requestId,
 		PipelineName:        pipeline.Name,
 		Branch:              pipeline.DefaultBranch,
@@ -332,7 +355,7 @@ func (s *PipelineServiceImpl) TriggerPipeline(ctx context.Context, req *pipeline
 	}
 	if err := s.pipelineRepo.CreateRun(ctx, run); err != nil {
 		if requestId != "" && isDuplicateEntryError(err) {
-			existing, getErr := s.pipelineRepo.GetRunByRequestId(ctx, pipeline.PipelineId, requestId)
+			existing, getErr := s.pipelineRepo.GetRunByRequestId(ctx, pipeline.PipelineID, requestId)
 			if getErr == nil && existing != nil {
 				return &pipelinev1.TriggerPipelineResponse{
 					Success: true,
@@ -347,7 +370,7 @@ func (s *PipelineServiceImpl) TriggerPipeline(ctx context.Context, req *pipeline
 			Error:   s.error(500, err.Error(), "internal", nil),
 		}, nil
 	}
-	_ = s.pipelineRepo.Update(ctx, pipeline.PipelineId, map[string]any{
+	_ = s.pipelineRepo.Update(ctx, pipeline.PipelineID, map[string]any{
 		"status":            model.PipelineStatusPending,
 		"total_runs":        pipeline.TotalRuns + 1,
 		"last_sync_status":  model.PipelineSyncStatusSuccess,
@@ -363,7 +386,10 @@ func (s *PipelineServiceImpl) TriggerPipeline(ctx context.Context, req *pipeline
 	}, nil
 }
 
-func (s *PipelineServiceImpl) StopPipeline(ctx context.Context, req *pipelinev1.StopPipelineRequest) (*pipelinev1.StopPipelineResponse, error) {
+func (s *PipelineServiceImpl) StopPipeline(
+	ctx context.Context,
+	req *pipelinev1.StopPipelineRequest,
+) (*pipelinev1.StopPipelineResponse, error) {
 	if strings.TrimSpace(req.GetRunId()) == "" {
 		return &pipelinev1.StopPipelineResponse{
 			Success: false,
@@ -404,110 +430,96 @@ func (s *PipelineServiceImpl) StopPipeline(ctx context.Context, req *pipelinev1.
 	return &pipelinev1.StopPipelineResponse{Success: true, Message: "pipeline stopped"}, nil
 }
 
-func (s *PipelineServiceImpl) PausePipeline(ctx context.Context, req *pipelinev1.PausePipelineRequest) (*pipelinev1.PausePipelineResponse, error) {
-
-	if strings.TrimSpace(req.GetRunId()) == "" {
+func (s *PipelineServiceImpl) PausePipeline(
+	ctx context.Context,
+	req *pipelinev1.PausePipelineRequest,
+) (*pipelinev1.PausePipelineResponse, error) {
+	if msg, errResp := s.changePipelinePauseState(
+		ctx,
+		req.GetRunId(),
+		req.GetPipelineId(),
+		req.GetReason(),
+		req.GetOperator(),
+		model.PipelineStatusRunning,
+		model.PipelineStatusPaused,
+		"invalid run state for pause",
+		"run is not running",
+		"pause pipeline failed",
+	); errResp != nil {
 		return &pipelinev1.PausePipelineResponse{
 			Success: false,
-			Message: "runId is required",
-			Error:   s.error(400, "runId is required", "validation", nil),
+			Message: msg,
+			Error:   errResp,
 		}, nil
 	}
-	run, err := s.pipelineRepo.GetRun(ctx, req.GetRunId())
-	if err != nil {
-		return &pipelinev1.PausePipelineResponse{
-			Success: false,
-			Message: "run not found",
-			Error:   s.error(404, err.Error(), "not_found", nil),
-		}, nil
-	}
-	if strings.TrimSpace(req.GetPipelineId()) != "" && strings.TrimSpace(req.GetPipelineId()) != run.PipelineId {
-		return &pipelinev1.PausePipelineResponse{
-			Success: false,
-			Message: "pipelineId does not match run",
-			Error:   s.error(400, "pipelineId does not match run", "validation", nil),
-		}, nil
-	}
-	if run.Status != model.PipelineStatusRunning {
-		return &pipelinev1.PausePipelineResponse{
-			Success: false,
-			Message: "invalid run state for pause",
-			Error:   s.error(409, "run is not running", "conflict", nil),
-		}, nil
-	}
-
-	now := time.Now()
-	if err := s.pipelineRepo.UpdateRun(ctx, run.RunId, map[string]any{
-		"status": model.PipelineStatusPaused,
-	}); err != nil {
-		return &pipelinev1.PausePipelineResponse{
-			Success: false,
-			Message: "pause pipeline failed",
-			Error:   s.error(500, err.Error(), "internal", nil),
-		}, nil
-	}
-	_ = s.pipelineRepo.Update(ctx, run.PipelineId, map[string]any{
-		"status":            model.PipelineStatusPaused,
-		"last_sync_status":  model.PipelineSyncStatusSuccess,
-		"last_sync_message": strings.TrimSpace(req.GetReason()),
-		"last_synced_at":    now,
-		"last_editor":       strings.TrimSpace(req.GetOperator()),
-	})
 	return &pipelinev1.PausePipelineResponse{Success: true, Message: "pipeline paused"}, nil
 }
 
-func (s *PipelineServiceImpl) ResumePipeline(ctx context.Context, req *pipelinev1.ResumePipelineRequest) (*pipelinev1.ResumePipelineResponse, error) {
-	if strings.TrimSpace(req.GetRunId()) == "" {
+func (s *PipelineServiceImpl) ResumePipeline(
+	ctx context.Context,
+	req *pipelinev1.ResumePipelineRequest,
+) (*pipelinev1.ResumePipelineResponse, error) {
+	if msg, errResp := s.changePipelinePauseState(
+		ctx,
+		req.GetRunId(),
+		req.GetPipelineId(),
+		req.GetReason(),
+		req.GetOperator(),
+		model.PipelineStatusPaused,
+		model.PipelineStatusRunning,
+		"invalid run state for resume",
+		"run is not paused",
+		"resume pipeline failed",
+	); errResp != nil {
 		return &pipelinev1.ResumePipelineResponse{
 			Success: false,
-			Message: "runId is required",
-			Error:   s.error(400, "runId is required", "validation", nil),
+			Message: msg,
+			Error:   errResp,
 		}, nil
 	}
-	run, err := s.pipelineRepo.GetRun(ctx, req.GetRunId())
+	return &pipelinev1.ResumePipelineResponse{Success: true, Message: "pipeline resumed"}, nil
+}
+
+func (s *PipelineServiceImpl) changePipelinePauseState(
+	ctx context.Context,
+	runID, pipelineID, reason, operator string,
+	expectedStatus, nextStatus int,
+	invalidStateMessage, invalidStateDetail, failedMessage string,
+) (string, *pipelinev1.Error) {
+	if strings.TrimSpace(runID) == "" {
+		return "runId is required", s.error(400, "runId is required", "validation", nil)
+	}
+	run, err := s.pipelineRepo.GetRun(ctx, runID)
 	if err != nil {
-		return &pipelinev1.ResumePipelineResponse{
-			Success: false,
-			Message: "run not found",
-			Error:   s.error(404, err.Error(), "not_found", nil),
-		}, nil
+		return "run not found", s.error(404, err.Error(), "not_found", nil)
 	}
-	if strings.TrimSpace(req.GetPipelineId()) != "" && strings.TrimSpace(req.GetPipelineId()) != run.PipelineId {
-		return &pipelinev1.ResumePipelineResponse{
-			Success: false,
-			Message: "pipelineId does not match run",
-			Error:   s.error(400, "pipelineId does not match run", "validation", nil),
-		}, nil
+	if strings.TrimSpace(pipelineID) != "" && strings.TrimSpace(pipelineID) != run.PipelineId {
+		return "pipelineId does not match run", s.error(400, "pipelineId does not match run", "validation", nil)
 	}
-	if run.Status != model.PipelineStatusPaused {
-		return &pipelinev1.ResumePipelineResponse{
-			Success: false,
-			Message: "invalid run state for resume",
-			Error:   s.error(409, "run is not paused", "conflict", nil),
-		}, nil
+	if run.Status != expectedStatus {
+		return invalidStateMessage, s.error(409, invalidStateDetail, "conflict", nil)
 	}
 
 	now := time.Now()
 	if err := s.pipelineRepo.UpdateRun(ctx, run.RunId, map[string]any{
-		"status": model.PipelineStatusRunning,
+		"status": nextStatus,
 	}); err != nil {
-		return &pipelinev1.ResumePipelineResponse{
-			Success: false,
-			Message: "resume pipeline failed",
-			Error:   s.error(500, err.Error(), "internal", nil),
-		}, nil
+		return failedMessage, s.error(500, err.Error(), "internal", nil)
 	}
 	_ = s.pipelineRepo.Update(ctx, run.PipelineId, map[string]any{
-		"status":            model.PipelineStatusRunning,
+		"status":            nextStatus,
 		"last_sync_status":  model.PipelineSyncStatusSuccess,
-		"last_sync_message": strings.TrimSpace(req.GetReason()),
+		"last_sync_message": strings.TrimSpace(reason),
 		"last_synced_at":    now,
-		"last_editor":       strings.TrimSpace(req.GetOperator()),
+		"last_editor":       strings.TrimSpace(operator),
 	})
-	return &pipelinev1.ResumePipelineResponse{Success: true, Message: "pipeline resumed"}, nil
+	return "", nil
 }
 
-func (s *PipelineServiceImpl) GetPipelineRun(ctx context.Context, req *pipelinev1.GetPipelineRunRequest) (*pipelinev1.GetPipelineRunResponse, error) {
+func (s *PipelineServiceImpl) GetPipelineRun(
+	ctx context.Context,
+	req *pipelinev1.GetPipelineRunRequest,
+) (*pipelinev1.GetPipelineRunResponse, error) {
 	if strings.TrimSpace(req.GetRunId()) == "" {
 		return &pipelinev1.GetPipelineRunResponse{
 			Success: false,
@@ -530,7 +542,10 @@ func (s *PipelineServiceImpl) GetPipelineRun(ctx context.Context, req *pipelinev
 	}, nil
 }
 
-func (s *PipelineServiceImpl) ListPipelineRuns(ctx context.Context, req *pipelinev1.ListPipelineRunsRequest) (*pipelinev1.ListPipelineRunsResponse, error) {
+func (s *PipelineServiceImpl) ListPipelineRuns(
+	ctx context.Context,
+	req *pipelinev1.ListPipelineRunsRequest,
+) (*pipelinev1.ListPipelineRunsResponse, error) {
 	query := &repo.PipelineRunQuery{
 		PipelineId: strings.TrimSpace(req.GetPipelineId()),
 		Status:     int(req.GetStatus()),
@@ -558,7 +573,10 @@ func (s *PipelineServiceImpl) ListPipelineRuns(ctx context.Context, req *pipelin
 	}, nil
 }
 
-func (s *PipelineServiceImpl) GetPipelineSpec(ctx context.Context, req *pipelinev1.GetPipelineSpecRequest) (*pipelinev1.GetPipelineSpecResponse, error) {
+func (s *PipelineServiceImpl) GetPipelineSpec(
+	ctx context.Context,
+	req *pipelinev1.GetPipelineSpecRequest,
+) (*pipelinev1.GetPipelineSpecResponse, error) {
 	p, project, content, headSha, err := s.readDefinition(ctx, req.GetPipelineId())
 	if err != nil {
 		return &pipelinev1.GetPipelineSpecResponse{
@@ -578,7 +596,7 @@ func (s *PipelineServiceImpl) GetPipelineSpec(ctx context.Context, req *pipeline
 			Error:   s.error(500, err.Error(), "internal", nil),
 		}, nil
 	}
-	if err := validation.NewSchemaValidator().Validate((*spec.Pipeline)(def)); err != nil {
+	if err := validation.NewSchemaValidator().Validate(def); err != nil {
 		return &pipelinev1.GetPipelineSpecResponse{
 			Success: false,
 			Message: "validate spec failed",
@@ -596,16 +614,19 @@ func (s *PipelineServiceImpl) GetPipelineSpec(ctx context.Context, req *pipeline
 	}, nil
 }
 
-func (s *PipelineServiceImpl) ValidatePipelineSpec(ctx context.Context, req *pipelinev1.ValidatePipelineSpecRequest) (*pipelinev1.ValidatePipelineSpecResponse, error) {
+func (s *PipelineServiceImpl) ValidatePipelineSpec(
+	ctx context.Context,
+	req *pipelinev1.ValidatePipelineSpecRequest,
+) (*pipelinev1.ValidatePipelineSpecResponse, error) {
 	var def *pipelinev1.Spec
 	var err error
 	if req.GetSpec() == nil && strings.TrimSpace(req.GetPipelineId()) != "" {
-		_, _, loaded, _, err := s.readDefinition(ctx, req.GetPipelineId())
-		if err != nil {
+		_, _, loaded, _, readErr := s.readDefinition(ctx, req.GetPipelineId())
+		if readErr != nil {
 			return &pipelinev1.ValidatePipelineSpecResponse{
 				Success: false,
 				Message: "load spec failed",
-				Error:   s.error(500, err.Error(), "internal", nil),
+				Error:   s.error(500, readErr.Error(), "internal", nil),
 			}, nil
 		}
 		def, err = spec.ParseContentToProto(loaded, req.GetFormat())
@@ -616,11 +637,11 @@ func (s *PipelineServiceImpl) ValidatePipelineSpec(ctx context.Context, req *pip
 				Error:   s.error(400, err.Error(), "validation", nil),
 			}, nil
 		}
-		if err := validation.NewSchemaValidator().Validate((*spec.Pipeline)(def)); err != nil {
+		if validateErr := validation.NewSchemaValidator().Validate(def); validateErr != nil {
 			return &pipelinev1.ValidatePipelineSpecResponse{
 				Success: false,
 				Message: "validation failed",
-				Error:   s.error(400, err.Error(), "validation", nil),
+				Error:   s.error(400, validateErr.Error(), "validation", nil),
 			}, nil
 		}
 	} else {
@@ -632,7 +653,7 @@ func (s *PipelineServiceImpl) ValidatePipelineSpec(ctx context.Context, req *pip
 			}, nil
 		}
 		def = req.GetSpec()
-		err = validation.NewSchemaValidator().Validate((*spec.Pipeline)(def))
+		err = validation.NewSchemaValidator().Validate(def)
 		if err != nil {
 			return &pipelinev1.ValidatePipelineSpecResponse{
 				Success: false,
@@ -649,7 +670,10 @@ func (s *PipelineServiceImpl) ValidatePipelineSpec(ctx context.Context, req *pip
 	}, nil
 }
 
-func (s *PipelineServiceImpl) SavePipelineSpec(ctx context.Context, req *pipelinev1.SavePipelineSpecRequest) (*pipelinev1.SavePipelineSpecResponse, error) {
+func (s *PipelineServiceImpl) SavePipelineSpec(
+	ctx context.Context,
+	req *pipelinev1.SavePipelineSpecRequest,
+) (*pipelinev1.SavePipelineSpecResponse, error) {
 	if strings.TrimSpace(req.GetPipelineId()) == "" || req.GetSpec() == nil {
 		return &pipelinev1.SavePipelineSpecResponse{
 			Success: false,
@@ -676,11 +700,11 @@ func (s *PipelineServiceImpl) SavePipelineSpec(ctx context.Context, req *pipelin
 		}, nil
 	}
 
-	if err := validation.NewSchemaValidator().Validate((*spec.Pipeline)(req.GetSpec())); err != nil {
+	if validateErr := validation.NewSchemaValidator().Validate(req.GetSpec()); validateErr != nil {
 		return &pipelinev1.SavePipelineSpecResponse{
 			Success: false,
 			Message: "validation failed",
-			Error:   s.error(400, err.Error(), "validation", nil),
+			Error:   s.error(400, validateErr.Error(), "validation", nil),
 		}, nil
 	}
 	serialized, err := spec.MarshalProtoByFormat(req.GetSpec(), req.GetFormat(), pipeline.PipelineFilePath)
@@ -703,15 +727,15 @@ func (s *PipelineServiceImpl) SavePipelineSpec(ctx context.Context, req *pipelin
 	}
 	defer func() { _ = os.RemoveAll(workdir) }()
 
-	if err := git.Clone(git.GitCloneRequest{
+	if cloneErr := scm.Clone(scm.GitCloneRequest{
 		Workdir: workdir,
-		RepoURL: pipeline.RepoUrl,
+		RepoURL: pipeline.RepoURL,
 		Branch:  pipeline.DefaultBranch,
-		Auth:    git.NewGitAuthFromMap(auth),
-	}); err != nil {
-		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("clone repo failed: %v", err)), nil
+		Auth:    scm.NewGitAuthFromMap(auth),
+	}); cloneErr != nil {
+		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("clone repo failed: %v", cloneErr)), nil
 	}
-	headSha, err := git.HeadSHA(git.GitHeadSHARequest{Workdir: workdir})
+	headSha, err := scm.HeadSHA(scm.GitHeadSHARequest{Workdir: workdir})
 	if err != nil {
 		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("read head failed: %v", err)), nil
 	}
@@ -726,18 +750,18 @@ func (s *PipelineServiceImpl) SavePipelineSpec(ctx context.Context, req *pipelin
 	}
 
 	targetFile := filepath.Join(workdir, normalizePipelinePath(pipeline.PipelineFilePath))
-	if err := os.MkdirAll(filepath.Dir(targetFile), 0o755); err != nil {
-		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("create directory failed: %v", err)), nil
+	if mkdirErr := os.MkdirAll(filepath.Dir(targetFile), 0o755); mkdirErr != nil {
+		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("create directory failed: %v", mkdirErr)), nil
 	}
-	if err := os.WriteFile(targetFile, []byte(serialized), 0o644); err != nil {
-		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("write spec failed: %v", err)), nil
+	if writeErr := os.WriteFile(targetFile, []byte(serialized), 0o644); writeErr != nil {
+		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("write spec failed: %v", writeErr)), nil
 	}
 
-	if err := git.Add(git.GitAddRequest{
+	if addErr := scm.Add(scm.GitAddRequest{
 		Workdir:  workdir,
 		FilePath: normalizePipelinePath(pipeline.PipelineFilePath),
-	}); err != nil {
-		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("git add failed: %v", err)), nil
+	}); addErr != nil {
+		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("git add failed: %v", addErr)), nil
 	}
 
 	author := strings.TrimSpace(req.GetEditor())
@@ -745,14 +769,14 @@ func (s *PipelineServiceImpl) SavePipelineSpec(ctx context.Context, req *pipelin
 	if message == "" {
 		message = fmt.Sprintf("update pipeline spec: %s", pipeline.Name)
 	}
-	if err := git.Commit(git.GitCommitRequest{
+	if commitErr := scm.Commit(scm.GitCommitRequest{
 		Workdir: workdir,
 		Message: message,
 		Author:  author,
-	}); err != nil {
-		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("git commit failed: %v", err)), nil
+	}); commitErr != nil {
+		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("git commit failed: %v", commitErr)), nil
 	}
-	commitSha, err := git.HeadSHA(git.GitHeadSHARequest{Workdir: workdir})
+	commitSha, err := scm.HeadSHA(scm.GitHeadSHARequest{Workdir: workdir})
 	if err != nil {
 		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("read commit failed: %v", err)), nil
 	}
@@ -762,33 +786,33 @@ func (s *PipelineServiceImpl) SavePipelineSpec(ctx context.Context, req *pipelin
 	saveBranch := targetBranch
 	prURL := ""
 	if mode == model.PipelineSaveModePR {
-		saveBranch = fmt.Sprintf("arcentra/pipeline-%s-%d", pipeline.PipelineId, time.Now().Unix())
-		if err := git.CheckoutNewBranch(git.GitCheckoutBranchRequest{
+		saveBranch = fmt.Sprintf("arcentra/pipeline-%s-%d", pipeline.PipelineID, time.Now().Unix())
+		if checkoutErr := scm.CheckoutNewBranch(scm.GitCheckoutBranchRequest{
 			Workdir: workdir,
 			Branch:  saveBranch,
-		}); err != nil {
-			return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("create branch failed: %v", err)), nil
+		}); checkoutErr != nil {
+			return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("create branch failed: %v", checkoutErr)), nil
 		}
 	}
-	if err := git.Push(git.GitPushRequest{
+	if pushErr := scm.Push(scm.GitPushRequest{
 		Workdir: workdir,
 		Remote:  "origin",
 		Branch:  saveBranch,
-		Auth:    git.NewGitAuthFromMap(auth),
-	}); err != nil {
-		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("git push failed: %v", err)), nil
+		Auth:    scm.NewGitAuthFromMap(auth),
+	}); pushErr != nil {
+		return s.saveFailed(ctx, pipeline, req.GetEditor(), fmt.Sprintf("git push failed: %v", pushErr)), nil
 	}
 	if mode == model.PipelineSaveModePR {
 		base := pipeline.PrTargetBranch
 		if strings.TrimSpace(base) == "" {
 			base = targetBranch
 		}
-		prURL, err = git.CreatePullRequest(git.CreatePullRequestRequest{
+		prURL, err = scm.CreateChangeRequest(scm.ChangeRequestInput{
 			RepoType:        project.RepoType,
 			AuthType:        project.AuthType,
 			Credential:      project.Credential,
 			ProjectRepoURL:  project.RepoUrl,
-			PipelineRepoURL: pipeline.RepoUrl,
+			PipelineRepoURL: pipeline.RepoURL,
 			TargetBranch:    base,
 			SourceBranch:    saveBranch,
 			Title:           message,
@@ -799,7 +823,7 @@ func (s *PipelineServiceImpl) SavePipelineSpec(ctx context.Context, req *pipelin
 	}
 
 	now := time.Now()
-	_ = s.pipelineRepo.Update(ctx, pipeline.PipelineId, map[string]any{
+	_ = s.pipelineRepo.Update(ctx, pipeline.PipelineID, map[string]any{
 		"last_sync_status":     model.PipelineSyncStatusSuccess,
 		"last_sync_message":    "spec saved to repository",
 		"last_synced_at":       now,
@@ -819,7 +843,10 @@ func (s *PipelineServiceImpl) SavePipelineSpec(ctx context.Context, req *pipelin
 	}, nil
 }
 
-func (s *PipelineServiceImpl) readDefinition(ctx context.Context, pipelineId string) (*model.Pipeline, *model.Project, string, string, error) {
+func (s *PipelineServiceImpl) readDefinition(
+	ctx context.Context,
+	pipelineId string,
+) (*model.Pipeline, *model.Project, string, string, error) {
 	if strings.TrimSpace(pipelineId) == "" {
 		return nil, nil, "", "", fmt.Errorf("pipelineId is required")
 	}
@@ -827,7 +854,7 @@ func (s *PipelineServiceImpl) readDefinition(ctx context.Context, pipelineId str
 	if err != nil {
 		return nil, nil, "", "", err
 	}
-	project, err := s.projectRepo.Get(ctx, p.ProjectId)
+	project, err := s.projectRepo.Get(ctx, p.ProjectID)
 	if err != nil {
 		return nil, nil, "", "", err
 	}
@@ -838,7 +865,11 @@ func (s *PipelineServiceImpl) readDefinition(ctx context.Context, pipelineId str
 	return p, project, content, headSha, nil
 }
 
-func (s *PipelineServiceImpl) loadDefinitionFromRepo(ctx context.Context, pipeline *model.Pipeline, project *model.Project) (string, string, error) {
+func (s *PipelineServiceImpl) loadDefinitionFromRepo(
+	ctx context.Context,
+	pipeline *model.Pipeline,
+	project *model.Project,
+) (string, string, error) {
 	auth := scmAuthFromProject(project)
 	workdir, err := os.MkdirTemp("", "arcentra-pipeline-read-*")
 	if err != nil {
@@ -846,15 +877,15 @@ func (s *PipelineServiceImpl) loadDefinitionFromRepo(ctx context.Context, pipeli
 	}
 	defer func() { _ = os.RemoveAll(workdir) }()
 
-	if err := git.Clone(git.GitCloneRequest{
+	if cloneErr := scm.Clone(scm.GitCloneRequest{
 		Workdir: workdir,
-		RepoURL: pipeline.RepoUrl,
+		RepoURL: pipeline.RepoURL,
 		Branch:  pipeline.DefaultBranch,
-		Auth:    git.NewGitAuthFromMap(auth),
-	}); err != nil {
-		return "", "", err
+		Auth:    scm.NewGitAuthFromMap(auth),
+	}); cloneErr != nil {
+		return "", "", cloneErr
 	}
-	headSha, err := git.HeadSHA(git.GitHeadSHARequest{Workdir: workdir})
+	headSha, err := scm.HeadSHA(scm.GitHeadSHARequest{Workdir: workdir})
 	if err != nil {
 		return "", "", err
 	}
@@ -862,15 +893,19 @@ func (s *PipelineServiceImpl) loadDefinitionFromRepo(ctx context.Context, pipeli
 	if err != nil {
 		return "", "", err
 	}
-	if err := ctx.Err(); err != nil {
-		return "", "", err
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", "", ctxErr
 	}
 	return string(content), headSha, nil
 }
 
-func (s *PipelineServiceImpl) saveFailed(ctx context.Context, pipeline *model.Pipeline, editor, message string) *pipelinev1.SavePipelineSpecResponse {
+func (s *PipelineServiceImpl) saveFailed(
+	ctx context.Context,
+	pipeline *model.Pipeline,
+	editor, message string,
+) *pipelinev1.SavePipelineSpecResponse {
 	now := time.Now()
-	_ = s.pipelineRepo.Update(ctx, pipeline.PipelineId, map[string]any{
+	_ = s.pipelineRepo.Update(ctx, pipeline.PipelineID, map[string]any{
 		"last_sync_status":  model.PipelineSyncStatusFailed,
 		"last_sync_message": message,
 		"last_synced_at":    now,
@@ -897,11 +932,11 @@ func toPipelineDetail(p *model.Pipeline) *pipelinev1.PipelineDetail {
 		return nil
 	}
 	return &pipelinev1.PipelineDetail{
-		PipelineId:       p.PipelineId,
-		ProjectId:        p.ProjectId,
+		PipelineId:       p.PipelineID,
+		ProjectId:        p.ProjectID,
 		Name:             p.Name,
 		Description:      p.Description,
-		RepoUrl:          p.RepoUrl,
+		RepoUrl:          p.RepoURL,
 		DefaultBranch:    p.DefaultBranch,
 		PipelineFilePath: p.PipelineFilePath,
 		Status:           pipelinev1.PipelineStatus(p.Status),

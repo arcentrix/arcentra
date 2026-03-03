@@ -41,8 +41,8 @@ func ProvideRedisConfig(agentConf *AgentConfig) cache.Redis {
 }
 
 // ProvideHttpConfig 提供 HTTP 配置
-func ProvideHttpConfig(agentConf *AgentConfig) *http.Http {
-	httpConfig := &agentConf.Http
+func ProvideHttpConfig(agentConf *AgentConfig) *http.HTTP {
+	httpConfig := &agentConf.HTTP
 	httpConfig.SetDefaults()
 	return httpConfig
 }

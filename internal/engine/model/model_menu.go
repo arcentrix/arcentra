@@ -17,8 +17,8 @@ package model
 // Menu 菜单表
 type Menu struct {
 	BaseModel
-	MenuId      string `gorm:"column:menu_id;not null;uniqueIndex" json:"menuId"` // 菜单唯一标识
-	ParentId    string `gorm:"column:parent_id;index" json:"parentId"`            // 父菜单ID（为空表示顶级菜单）
+	MenuID      string `gorm:"column:menu_id;not null;uniqueIndex" json:"menuId"` // 菜单唯一标识
+	ParentID    string `gorm:"column:parent_id;index" json:"parentId"`            // 父菜单ID（为空表示顶级菜单）
 	Name        string `gorm:"column:name;not null" json:"name"`                  // 菜单名称
 	Path        string `gorm:"column:path" json:"path"`                           // 菜单路径（路由路径）
 	Component   string `gorm:"column:component" json:"component"`                 // 组件路径（前端组件）

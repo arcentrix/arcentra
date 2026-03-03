@@ -7,34 +7,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arcentrix/arcentra/pkg/request"
 	"github.com/arcentrix/arcentra/pkg/scm"
 	"github.com/bytedance/sonic"
-	"github.com/go-resty/resty/v2"
+	"github.com/valyala/fasthttp"
 )
 
 type Provider struct {
-	cfg    scm.ProviderConfig
-	client *resty.Client
+	cfg scm.ProviderConfig
 }
 
 func New(cfg scm.ProviderConfig) (scm.Provider, error) {
-	p := &Provider{cfg: cfg}
-	p.client = resty.New().SetTimeout(15 * time.Second)
-
-	apiBase := strings.TrimSpace(cfg.ApiBaseUrl)
-	if apiBase == "" {
-		base := strings.TrimRight(strings.TrimSpace(cfg.BaseUrl), "/")
-		if base == "" {
-			base = "https://gitlab.com"
-		}
-		apiBase = base + "/api/v4"
-	}
-	p.client.SetBaseURL(strings.TrimRight(apiBase, "/"))
-
-	if strings.TrimSpace(cfg.Token) != "" {
-		p.client.SetHeader("PRIVATE-TOKEN", cfg.Token)
-	}
-	return p, nil
+	return &Provider{cfg: cfg}, nil
 }
 
 func (p *Provider) Kind() scm.ProviderKind { return scm.ProviderKindGitLab }
@@ -94,23 +78,26 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 		} `json:"author"`
 	}
 
-	r, err := p.client.R().
-		SetContext(ctx).
-		SetQueryParams(map[string]string{
-			"scope":         "all",
-			"state":         "all",
-			"per_page":      "100",
-			"order_by":      "updated_at",
-			"sort":          "desc",
-			"updated_after": since.Format(time.RFC3339),
-		}).
-		SetResult(&mrs).
-		Get("/projects/" + project + "/merge_requests")
+	httpResp, err := request.NewRequest(
+		p.apiBaseURL()+"/projects/"+project+"/merge_requests",
+		fasthttp.MethodGet,
+		map[string]string{
+			"PRIVATE-TOKEN": strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).WithQueryParams(map[string]string{
+		"scope":         "all",
+		"state":         "all",
+		"per_page":      "100",
+		"order_by":      "updated_at",
+		"sort":          "desc",
+		"updated_after": since.Format(time.RFC3339),
+	}).WithResult(&mrs).Do(ctx)
 	if err != nil {
 		return nil, cursor, err
 	}
-	if r.IsError() {
-		return nil, cursor, fmt.Errorf("gitlab api error: %s", r.Status())
+	if httpResp == nil || httpResp.StatusCode() >= 400 {
+		return nil, cursor, fmt.Errorf("gitlab api error: %d", httpResp.StatusCode())
 	}
 	for _, mr := range mrs {
 		occurred := mr.UpdatedAt
@@ -130,7 +117,7 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 			EventType:    t,
 			Repo:         repo,
 			ActorName:    mr.Author.Name,
-			CommitId:     mr.MergeCommitSha,
+			CommitID:     mr.MergeCommitSha,
 			OccurredAt:   occurred,
 			Change: &scm.Change{
 				Number:        mr.Iid,
@@ -139,7 +126,7 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 				TargetBranch:  mr.TargetBranch,
 				State:         mr.State,
 				IsMerged:      t == scm.EventTypeMergeRequestMerged,
-				MergeCommitId: mr.MergeCommitSha,
+				MergeCommitID: mr.MergeCommitSha,
 			},
 		})
 	}
@@ -147,20 +134,25 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 	var tags []struct {
 		Name   string `json:"name"`
 		Commit struct {
-			Id            string    `json:"id"`
+			ID            string    `json:"id"`
 			CommittedDate time.Time `json:"committed_date"`
 		} `json:"commit"`
 	}
-	r, err = p.client.R().
-		SetContext(ctx).
-		SetQueryParam("per_page", "100").
-		SetResult(&tags).
-		Get("/projects/" + project + "/repository/tags")
+	httpResp, err = request.NewRequest(
+		p.apiBaseURL()+"/projects/"+project+"/repository/tags",
+		fasthttp.MethodGet,
+		map[string]string{
+			"PRIVATE-TOKEN": strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).WithQueryParams(map[string]string{
+		"per_page": "100",
+	}).WithResult(&tags).Do(ctx)
 	if err != nil {
 		return nil, cursor, err
 	}
-	if r.IsError() {
-		return nil, cursor, fmt.Errorf("gitlab api error: %s", r.Status())
+	if httpResp == nil || httpResp.StatusCode() >= 400 {
+		return nil, cursor, fmt.Errorf("gitlab api error: %d", httpResp.StatusCode())
 	}
 	for _, tag := range tags {
 		if tag.Commit.CommittedDate.IsZero() || !tag.Commit.CommittedDate.After(since) {
@@ -174,7 +166,7 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 			EventType:    scm.EventTypeTag,
 			Repo:         repo,
 			ActorName:    "",
-			CommitId:     tag.Commit.Id,
+			CommitID:     tag.Commit.ID,
 			Ref:          "refs/tags/" + tag.Name,
 			OccurredAt:   tag.Commit.CommittedDate,
 			Raw: map[string]any{
@@ -186,13 +178,69 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 	return events, scm.Cursor{Since: next}, nil
 }
 
+// CreateChangeRequest creates GitLab merge request and returns web URL.
+func (p *Provider) CreateChangeRequest(ctx context.Context, req scm.ChangeRequestInput) (string, error) {
+	repoInfo, ok := scm.ParseRepoFromURL(req.PipelineRepoURL)
+	if !ok {
+		return "", fmt.Errorf("invalid repository url: %s", req.PipelineRepoURL)
+	}
+	var out struct {
+		WebURL string `json:"web_url"`
+	}
+	projectPath := url.PathEscape(repoInfo.Owner + "/" + repoInfo.Name)
+	apiBase := strings.TrimSpace(p.cfg.APIBaseURL)
+	if apiBase == "" {
+		base := strings.TrimRight(strings.TrimSpace(p.cfg.BaseURL), "/")
+		if base == "" {
+			base = "https://gitlab.com"
+		}
+		apiBase = base + "/api/v4"
+	}
+	endpoint := strings.TrimRight(apiBase, "/") + "/projects/" + projectPath + "/merge_requests"
+	resp, err := request.NewRequest(
+		endpoint,
+		fasthttp.MethodPost,
+		map[string]string{
+			"PRIVATE-TOKEN": strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).
+		WithBodyJSON(map[string]any{
+			"source_branch": req.SourceBranch,
+			"target_branch": req.TargetBranch,
+			"title":         req.Title,
+			"description":   "created by arcentra pipeline editor",
+		}).
+		WithResult(&out).
+		Do(ctx)
+	if err != nil {
+		return "", err
+	}
+	if resp == nil || resp.StatusCode() >= 400 {
+		return "", fmt.Errorf("gitlab create mr failed: %d", resp.StatusCode())
+	}
+	return out.WebURL, nil
+}
+
+func (p *Provider) apiBaseURL() string {
+	apiBase := strings.TrimSpace(p.cfg.APIBaseURL)
+	if apiBase == "" {
+		base := strings.TrimRight(strings.TrimSpace(p.cfg.BaseURL), "/")
+		if base == "" {
+			base = "https://gitlab.com"
+		}
+		apiBase = base + "/api/v4"
+	}
+	return strings.TrimRight(apiBase, "/")
+}
+
 func (p *Provider) parseMergeRequest(body []byte) ([]scm.Event, error) {
 	var payload struct {
 		User struct {
 			Name string `json:"name"`
 		} `json:"user"`
 		Project struct {
-			WebUrl            string `json:"web_url"`
+			WebURL            string `json:"web_url"`
 			PathWithNamespace string `json:"path_with_namespace"`
 		} `json:"project"`
 		ObjectAttributes struct {
@@ -203,7 +251,7 @@ func (p *Provider) parseMergeRequest(body []byte) ([]scm.Event, error) {
 			SourceBranch string `json:"source_branch"`
 			TargetBranch string `json:"target_branch"`
 			LastCommit   struct {
-				Id string `json:"id"`
+				ID string `json:"id"`
 			} `json:"last_commit"`
 			MergedAt       *time.Time `json:"merged_at"`
 			MergeCommitSha string     `json:"merge_commit_sha"`
@@ -224,7 +272,7 @@ func (p *Provider) parseMergeRequest(body []byte) ([]scm.Event, error) {
 		Owner:    owner,
 		Name:     name,
 		FullName: payload.Project.PathWithNamespace,
-		Url:      payload.Project.WebUrl,
+		URL:      payload.Project.WebURL,
 	}
 
 	occurred := time.Now()
@@ -236,9 +284,9 @@ func (p *Provider) parseMergeRequest(body []byte) ([]scm.Event, error) {
 		occurred = *payload.ObjectAttributes.MergedAt
 		t = scm.EventTypeMergeRequestMerged
 	}
-	commitId := payload.ObjectAttributes.MergeCommitSha
-	if commitId == "" {
-		commitId = payload.ObjectAttributes.LastCommit.Id
+	commitID := payload.ObjectAttributes.MergeCommitSha
+	if commitID == "" {
+		commitID = payload.ObjectAttributes.LastCommit.ID
 	}
 
 	return []scm.Event{{
@@ -246,7 +294,7 @@ func (p *Provider) parseMergeRequest(body []byte) ([]scm.Event, error) {
 		EventType:    t,
 		Repo:         repo,
 		ActorName:    payload.User.Name,
-		CommitId:     commitId,
+		CommitID:     commitID,
 		OccurredAt:   occurred,
 		Change: &scm.Change{
 			Number:        payload.ObjectAttributes.Iid,
@@ -255,7 +303,7 @@ func (p *Provider) parseMergeRequest(body []byte) ([]scm.Event, error) {
 			TargetBranch:  payload.ObjectAttributes.TargetBranch,
 			State:         payload.ObjectAttributes.State,
 			IsMerged:      t == scm.EventTypeMergeRequestMerged,
-			MergeCommitId: payload.ObjectAttributes.MergeCommitSha,
+			MergeCommitID: payload.ObjectAttributes.MergeCommitSha,
 		},
 	}}, nil
 }
@@ -263,7 +311,7 @@ func (p *Provider) parseMergeRequest(body []byte) ([]scm.Event, error) {
 type refPayload struct {
 	Ref     string `json:"ref"`
 	Project struct {
-		WebUrl            string `json:"web_url"`
+		WebURL            string `json:"web_url"`
 		PathWithNamespace string `json:"path_with_namespace"`
 	} `json:"project"`
 	UserName string `json:"user_name"`
@@ -284,14 +332,14 @@ func (p *Provider) parseRefEvent(body []byte, eventType scm.EventType) ([]scm.Ev
 		Owner:    owner,
 		Name:     name,
 		FullName: payload.Project.PathWithNamespace,
-		Url:      payload.Project.WebUrl,
+		URL:      payload.Project.WebURL,
 	}
 	return []scm.Event{{
 		ProviderKind: scm.ProviderKindGitLab,
 		EventType:    eventType,
 		Repo:         repo,
 		ActorName:    payload.UserName,
-		CommitId:     payload.After,
+		CommitID:     payload.After,
 		Ref:          payload.Ref,
 		OccurredAt:   time.Now(),
 	}}, nil

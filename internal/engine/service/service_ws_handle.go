@@ -37,9 +37,9 @@ const (
 )
 
 type WSParams struct {
-	PipelineId string `json:"pipelineId"`
-	JobId      string `json:"jobId"`
-	StepRunId  string `json:"stepRunId"`
+	PipelineID string `json:"pipelineId"`
+	JobID      string `json:"jobId"`
+	StepRunID  string `json:"stepRunId"`
 }
 
 type WSRequest struct {
@@ -84,7 +84,7 @@ func NewWSHandle(hub ws.Hub, logAgg *LogAggregator, stepRunRepo repo.IStepRunRep
 	}
 }
 
-func (h *WSHandle) OnConnect(conn ws.Conn) error {
+func (h *WSHandle) OnConnect(_ ws.Conn) error {
 	return nil
 }
 
@@ -169,14 +169,14 @@ func (h *WSHandle) sendMessage(conn ws.Conn, channel, messageType string, params
 }
 
 func paramsOrNil(p WSParams) *WSParams {
-	if p.PipelineId == "" && p.JobId == "" && p.StepRunId == "" {
+	if p.PipelineID == "" && p.JobID == "" && p.StepRunID == "" {
 		return nil
 	}
 	return &p
 }
 
 func validateParams(params WSParams) error {
-	if params.PipelineId == "" || params.JobId == "" || params.StepRunId == "" {
+	if params.PipelineID == "" || params.JobID == "" || params.StepRunID == "" {
 		return fmt.Errorf("pipelineId, jobId and stepRunId are required")
 	}
 	return nil

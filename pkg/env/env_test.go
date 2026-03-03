@@ -25,17 +25,17 @@ func TestGetEnvInt(t *testing.T) {
 
 func TestGetEnvBool(t *testing.T) {
 	t.Setenv("ARCENTRA_TEST_BOOL", "true")
-	if got := GetEnvBool("ARCENTRA_TEST_BOOL", false); got != true {
+	if got := GetEnvBool("ARCENTRA_TEST_BOOL", false); !got {
 		t.Fatalf("GetEnvBool true = %v, want true", got)
 	}
 
 	t.Setenv("ARCENTRA_TEST_BOOL", "FALSE")
-	if got := GetEnvBool("ARCENTRA_TEST_BOOL", true); got != false {
+	if got := GetEnvBool("ARCENTRA_TEST_BOOL", true); got {
 		t.Fatalf("GetEnvBool false = %v, want false", got)
 	}
 
 	t.Setenv("ARCENTRA_TEST_BOOL", "not-bool")
-	if got := GetEnvBool("ARCENTRA_TEST_BOOL", true); got != true {
+	if got := GetEnvBool("ARCENTRA_TEST_BOOL", true); !got {
 		t.Fatalf("GetEnvBool invalid = %v, want true", got)
 	}
 }

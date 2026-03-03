@@ -109,7 +109,8 @@ func (la *LogAggregator) PushLog(entry *LogEntry) error {
 
 	// 达到缓冲大小，触发刷新
 	if len(stream.buffer) >= la.bufferSize {
-		return la.flushStream(stream)
+		la.flushStream(stream)
+		return nil
 	}
 
 	return nil
@@ -126,9 +127,9 @@ func (la *LogAggregator) PushBatch(entries []*LogEntry) error {
 }
 
 // flushStream 刷新日志流到存储
-func (la *LogAggregator) flushStream(stream *LogStream) error {
+func (la *LogAggregator) flushStream(stream *LogStream) {
 	if len(stream.buffer) == 0 {
-		return nil
+		return
 	}
 
 	// 复制缓冲区以释放锁
@@ -144,8 +145,6 @@ func (la *LogAggregator) flushStream(stream *LogStream) error {
 			log.Errorw("failed to write logs to mysql", "logCount", len(logs), "error", err)
 		}
 	})
-
-	return nil
 }
 
 // writeToMySQL 写入 MySQL
@@ -226,7 +225,7 @@ func (la *LogAggregator) periodicFlush(stepRunID string) {
 		}
 
 		if time.Since(stream.lastFlush) >= la.flushInterval {
-			_ = la.flushStream(stream)
+			la.flushStream(stream)
 		}
 		stream.mu.Unlock()
 	}
@@ -249,7 +248,8 @@ func (la *LogAggregator) CloseStream(stepRunID string) error {
 	if !stream.closed {
 		stream.closed = true
 		// 刷新剩余日志
-		return la.flushStream(stream)
+		la.flushStream(stream)
+		return nil
 	}
 
 	return nil

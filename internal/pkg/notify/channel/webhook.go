@@ -160,7 +160,14 @@ type webhookErrorConfig struct {
 	logPrefix string // "feishu" or "wecom"
 }
 
-func sendWebhookRequest(ctx context.Context, client *resty.Client, url string, authProvider auth.IAuthProvider, payload map[string]interface{}, cfg webhookErrorConfig) error {
+func sendWebhookRequest(
+	ctx context.Context,
+	client *resty.Client,
+	url string,
+	authProvider auth.IAuthProvider,
+	payload map[string]interface{},
+	cfg webhookErrorConfig,
+) error {
 	req := client.R().SetContext(ctx)
 
 	if authProvider != nil {

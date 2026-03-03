@@ -35,7 +35,7 @@ import (
 )
 
 type Router struct {
-	Http        *http.Http
+	HTTP        *http.HTTP
 	Cache       cache.ICache
 	Services    *service.Services
 	ShutdownMgr *shutdown.Manager
@@ -51,14 +51,14 @@ const (
 var localizeFS embed.FS
 
 func NewRouter(
-	httpConf *http.Http,
+	httpConf *http.HTTP,
 	cache cache.ICache,
 	services *service.Services,
 	shutdownMgr *shutdown.Manager,
 	appConf *config.AppConfig,
 ) *Router {
 	return &Router{
-		Http:        httpConf,
+		HTTP:        httpConf,
 		Cache:       cache,
 		Services:    services,
 		ShutdownMgr: shutdownMgr,
@@ -68,7 +68,7 @@ func NewRouter(
 
 func (rt *Router) Router() *fiber.App {
 	// 设置默认的 BodyLimit（100MB）
-	bodyLimit := rt.Http.BodyLimit
+	bodyLimit := rt.HTTP.BodyLimit
 	if bodyLimit <= 0 {
 		bodyLimit = 100 * 1024 * 1024 // 100MB 默认值
 	}
@@ -76,9 +76,9 @@ func (rt *Router) Router() *fiber.App {
 	app := fiber.New(fiber.Config{
 		AppName: "Arcentra",
 		// DisableStartupMessage: true,
-		ReadTimeout:  time.Duration(rt.Http.ReadTimeout) * time.Second,
-		WriteTimeout: time.Duration(rt.Http.WriteTimeout) * time.Second,
-		IdleTimeout:  time.Duration(rt.Http.IdleTimeout) * time.Second,
+		ReadTimeout:  time.Duration(rt.HTTP.ReadTimeout) * time.Second,
+		WriteTimeout: time.Duration(rt.HTTP.WriteTimeout) * time.Second,
+		IdleTimeout:  time.Duration(rt.HTTP.IdleTimeout) * time.Second,
 		BodyLimit:    bodyLimit,                 // 请求体大小限制
 		ProxyHeader:  fiber.HeaderXForwardedFor, // get real ip from proxy header
 	})
@@ -89,7 +89,7 @@ func (rt *Router) Router() *fiber.App {
 		middleware.RequestMiddleware(), // 设置 request_id 到 Locals("request_id")
 		inject.FiberMiddleware(),       // trace middleware 读取 request_id/ip 并传播上下文
 		recover.New(),
-		middleware.HttpMetricsMiddleware(),
+		middleware.HTTPMetricsMiddleware(),
 		middleware.CorsMiddleware(),
 		middleware.UnifiedResponseMiddleware(),
 		middleware.AccessLogMiddleware(),
@@ -160,7 +160,7 @@ func (rt *Router) Router() *fiber.App {
 }
 
 func (rt *Router) routerGroup(r fiber.Router) {
-	auth := middleware.AuthorizationMiddleware(rt.Http.Auth.SecretKey, rt.Cache)
+	auth := middleware.AuthorizationMiddleware(rt.HTTP.Auth.SecretKey, rt.Cache)
 
 	// WebSocket
 	rt.wsRouter(r, auth)

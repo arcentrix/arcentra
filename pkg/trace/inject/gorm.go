@@ -41,6 +41,8 @@ type GormPlugin struct {
 	WithRows bool
 }
 
+const dbOperationQuery = "query"
+
 // Name returns the plugin name
 func (p *GormPlugin) Name() string {
 	return "opentelemetry"
@@ -161,7 +163,7 @@ func (p *GormPlugin) afterCallback(db *gorm.DB) {
 // getOperationName extracts operation name from GORM statement
 func getOperationName(db *gorm.DB) string {
 	if db.Statement == nil {
-		return "query"
+		return dbOperationQuery
 	}
 
 	// Try to get operation from SQL statement type

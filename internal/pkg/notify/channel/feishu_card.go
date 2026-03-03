@@ -180,7 +180,7 @@ func (c *FeishuCardChannel) Send(ctx context.Context, message string) error {
 }
 
 // SendWithTemplate sends card message using template
-func (c *FeishuCardChannel) SendWithTemplate(ctx context.Context, template string, data map[string]interface{}) error {
+func (c *FeishuCardChannel) SendWithTemplate(ctx context.Context, template string, _ map[string]interface{}) error {
 	// Implement template parsing and sending logic
 	return c.Send(ctx, template)
 }

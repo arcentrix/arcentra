@@ -29,11 +29,27 @@ func (rt *Router) generalSettingsRouter(r fiber.Router, auth fiber.Handler) {
 	{
 		// General settings routes (authentication required)
 		// Note: General settings are pre-defined system configurations, only updates are allowed
-		settingsGroup.Get("/", auth, rt.getGeneralSettingsList)                          // GET /general-settings - list general settings
-		settingsGroup.Get("/categories", auth, rt.getCategories)                         // GET /general-settings/categories - get all categories
-		settingsGroup.Get("/:settingsId", auth, rt.getGeneralSettings)                   // GET /general-settings/:settingsId - get general settings
-		settingsGroup.Put("/:settingsId", auth, rt.updateGeneralSettings)                // PUT /general-settings/:settingsId - update general settings
-		settingsGroup.Get("/by-name/:category/:name", auth, rt.getGeneralSettingsByName) // GET /general-settings/by-name/:category/:name - get by name
+		settingsGroup.Get("/", auth, rt.getGeneralSettingsList) // GET /general-settings - list general settings
+		settingsGroup.Get(
+			"/categories",
+			auth,
+			rt.getCategories,
+		) // GET /general-settings/categories - get all categories
+		settingsGroup.Get(
+			"/:settingsId",
+			auth,
+			rt.getGeneralSettings,
+		) // GET /general-settings/:settingsId - get general settings
+		settingsGroup.Put(
+			"/:settingsId",
+			auth,
+			rt.updateGeneralSettings,
+		) // PUT /general-settings/:settingsId - update general settings
+		settingsGroup.Get(
+			"/by-name/:category/:name",
+			auth,
+			rt.getGeneralSettingsByName,
+		) // GET /general-settings/by-name/:category/:name - get by name
 	}
 }
 

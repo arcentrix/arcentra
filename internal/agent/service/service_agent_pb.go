@@ -21,6 +21,7 @@ import (
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/internal/agent/config"
+	"github.com/arcentrix/arcentra/internal/agent/taskqueue"
 	grpcclient "github.com/arcentrix/arcentra/internal/pkg/grpc"
 	"github.com/arcentrix/arcentra/pkg/log"
 )
@@ -90,7 +91,10 @@ func (s *AgentServiceImpl) FetchStepRun(ctx context.Context, req *agentv1.FetchS
 }
 
 // ReportStepRunStatus handles step run status reporting requests
-func (s *AgentServiceImpl) ReportStepRunStatus(ctx context.Context, req *agentv1.ReportStepRunStatusRequest) (*agentv1.ReportStepRunStatusResponse, error) {
+func (s *AgentServiceImpl) ReportStepRunStatus(
+	ctx context.Context,
+	req *agentv1.ReportStepRunStatusRequest,
+) (*agentv1.ReportStepRunStatusResponse, error) {
 	log.Debugw("ReportStepRunStatus request received", "agent_id", req.AgentId, "step_run_id", req.StepRunId, "status", req.Status.String())
 
 	// TODO: Implement step run status reporting logic
@@ -104,8 +108,10 @@ func (s *AgentServiceImpl) ReportStepRunStatus(ctx context.Context, req *agentv1
 func (s *AgentServiceImpl) CancelStepRun(ctx context.Context, req *agentv1.CancelStepRunRequest) (*agentv1.CancelStepRunResponse, error) {
 	log.Infow("CancelStepRun request received", "agent_id", req.AgentId, "step_run_id", req.StepRunId, "reason", req.Reason)
 
-	// TODO: Implement step run cancellation logic
-	// This should cancel the running step run identified by step_run_id
+	if taskqueue.CancelStepRun(req.StepRunId) {
+		log.Infow("step run cancel signal sent", "step_run_id", req.StepRunId)
+	}
+
 	return &agentv1.CancelStepRunResponse{
 		Success: true,
 		Message: "step run cancellation request received",

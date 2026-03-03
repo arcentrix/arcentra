@@ -160,7 +160,7 @@ func (rt *Router) updateStorageConfig(c *fiber.Ctx) error {
 		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request body", c.Path())
 	}
 
-	req.StorageId = storageID
+	req.StorageID = storageID
 	storageConfig, err := storageService.UpdateStorageConfig(c.Context(), &req)
 	if err != nil {
 		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())

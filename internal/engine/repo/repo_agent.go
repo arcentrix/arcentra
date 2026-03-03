@@ -43,6 +43,8 @@ type AgentRepo struct {
 	cache.ICache
 }
 
+const agentListSelectFields = "id, agent_id, agent_name, address, port, os, arch, version, status, labels, metrics, is_enabled"
+
 // NewAgentRepo creates an agent repository with optional cache.
 func NewAgentRepo(db database.IDatabase, cache cache.ICache) IAgentRepository {
 	if cache == nil {
@@ -135,7 +137,7 @@ func (ar *AgentRepo) Update(ctx context.Context, agent *model.Agent) error {
 	if err := ar.Database().WithContext(ctx).Model(agent).Updates(agent).Error; err != nil {
 		return err
 	}
-	ar.invalidateAgentCache(ctx, agent.AgentId)
+	ar.invalidateAgentCache(ctx, agent.AgentID)
 	return nil
 }
 
@@ -180,7 +182,7 @@ func (ar *AgentRepo) List(ctx context.Context, page, size int) ([]model.Agent, i
 		return nil, 0, err
 	}
 
-	if err := ar.Database().WithContext(ctx).Select("id, agent_id, agent_name, address, port, os, arch, version, status, labels, metrics, is_enabled").
+	if err := ar.Database().WithContext(ctx).Select(agentListSelectFields).
 		Table(agent.TableName()).
 		Offset(offset).Limit(size).Find(&agents).Error; err != nil {
 		return nil, 0, err

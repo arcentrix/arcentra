@@ -1,18 +1,4 @@
-// Copyright 2026 Arcentra Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-package git
+package scm
 
 import (
 	"fmt"
@@ -21,6 +7,21 @@ import (
 	"strings"
 )
 
+// NewGitAuthFromMap builds GitAuth from generic credential map.
+func NewGitAuthFromMap(auth map[string]string) GitAuth {
+	token := strings.TrimSpace(auth["token"])
+	if token == "" {
+		token = strings.TrimSpace(auth["password"])
+	}
+	return GitAuth{
+		Username: strings.TrimSpace(auth["username"]),
+		Token:    token,
+		Password: strings.TrimSpace(auth["password"]),
+		SSHKey:   strings.TrimSpace(auth["ssh_key"]),
+	}
+}
+
+// Clone clones repository into workdir and optionally checks out branch.
 func Clone(req GitCloneRequest) error {
 	args := []string{"clone", "--depth", "1"}
 	if strings.TrimSpace(req.Branch) != "" {
@@ -30,6 +31,7 @@ func Clone(req GitCloneRequest) error {
 	return runGit(req.Workdir, req.Auth, args...)
 }
 
+// HeadSHA returns current repository HEAD commit sha.
 func HeadSHA(req GitHeadSHARequest) (string, error) {
 	out, err := runGitOutput(req.Workdir, GitAuth{}, "rev-parse", "HEAD")
 	if err != nil {
@@ -38,10 +40,12 @@ func HeadSHA(req GitHeadSHARequest) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// Add stages file path into git index.
 func Add(req GitAddRequest) error {
 	return runGit(req.Workdir, GitAuth{}, "add", req.FilePath)
 }
 
+// Commit creates a commit in current workdir.
 func Commit(req GitCommitRequest) error {
 	args := []string{"commit", "-m", req.Message}
 	if strings.TrimSpace(req.Author) != "" {
@@ -50,10 +54,12 @@ func Commit(req GitCommitRequest) error {
 	return runGit(req.Workdir, GitAuth{}, args...)
 }
 
+// CheckoutNewBranch creates and switches to a new branch.
 func CheckoutNewBranch(req GitCheckoutBranchRequest) error {
 	return runGit(req.Workdir, GitAuth{}, "checkout", "-b", req.Branch)
 }
 
+// Push pushes branch to remote with provided credentials.
 func Push(req GitPushRequest) error {
 	return runGit(req.Workdir, req.Auth, "push", req.Remote, req.Branch)
 }
@@ -89,7 +95,15 @@ func runGitOutput(workdir string, auth GitAuth, args ...string) (string, error) 
 		askPassPath := askPass.Name()
 		_ = askPass.Close()
 		tmpFiles = append(tmpFiles, askPassPath)
-		script := "#!/bin/sh\ncase \"$1\" in\n  *Username*) echo \"$GIT_USERNAME\" ;;\n  *Password*) echo \"$GIT_PASSWORD\" ;;\n  *) echo \"\" ;;\nesac\n"
+		script := strings.Join([]string{
+			"#!/bin/sh",
+			"case \"$1\" in",
+			"  *Username*) echo \"$GIT_USERNAME\" ;;",
+			"  *Password*) echo \"$GIT_PASSWORD\" ;;",
+			"  *) echo \"\" ;;",
+			"esac",
+			"",
+		}, "\n")
 		if err := os.WriteFile(askPassPath, []byte(script), 0o700); err != nil {
 			return "", err
 		}

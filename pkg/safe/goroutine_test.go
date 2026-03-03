@@ -30,7 +30,7 @@ func TestDo(t *testing.T) {
 	do(panicFunc)
 }
 
-func TestGo(t *testing.T) {
+func TestGo(_ *testing.T) {
 	done := make(chan bool)
 	panicFunc := func() {
 		defer func() {

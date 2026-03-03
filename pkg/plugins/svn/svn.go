@@ -108,8 +108,8 @@ type SVN struct {
 	*plugin.Base
 	name        string
 	description string
-	version string
-	cfg     Config
+	version     string
+	cfg         Config
 }
 
 // Action definitions
@@ -147,23 +147,35 @@ func NewSVN() *SVN {
 // registerActions registers all actions for this plugin
 func (p *SVN) registerActions() {
 	// Register "checkout" action
-	if err := p.Registry().RegisterFunc("checkout", actions["checkout"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.checkout(params, opts)
-	}); err != nil {
+	if err := p.Registry().RegisterFunc(
+		"checkout",
+		actions["checkout"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.checkout(params, opts)
+		},
+	); err != nil {
 		return
 	}
 
 	// Register "update" action
-	if err := p.Registry().RegisterFunc("update", actions["update"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.update(params, opts)
-	}); err != nil {
+	if err := p.Registry().RegisterFunc(
+		"update",
+		actions["update"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.update(params, opts)
+		},
+	); err != nil {
 		return
 	}
 
 	// Register "status" action
-	if err := p.Registry().RegisterFunc("status", actions["status"], func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
-		return p.status(params, opts)
-	}); err != nil {
+	if err := p.Registry().RegisterFunc(
+		"status",
+		actions["status"],
+		func(params json.RawMessage, opts json.RawMessage) (json.RawMessage, error) {
+			return p.status(params, opts)
+		},
+	); err != nil {
 		return
 	}
 

@@ -52,8 +52,8 @@ func (m *Config) SetDefaults() {
 
 // Server represents a metrics server using hashicorp/go-metrics
 type Server struct {
-	config Config
-	server *http.Server
+	config     Config
+	server     *http.Server
 	registry   *prometheus.Registry
 	sink       *PrometheusSink
 	metrics    *metrics.Metrics

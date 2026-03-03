@@ -6,8 +6,8 @@ import (
 
 type ProviderConfig struct {
 	Kind       ProviderKind `json:"kind"`
-	BaseUrl    string       `json:"baseUrl,omitempty"`
-	ApiBaseUrl string       `json:"apiBaseUrl,omitempty"`
+	BaseURL    string       `json:"baseUrl,omitempty"`
+	APIBaseURL string       `json:"apiBaseUrl,omitempty"`
 	Token      string       `json:"token,omitempty"`
 }
 
@@ -48,6 +48,8 @@ type Provider interface {
 	ParseWebhook(ctx context.Context, req WebhookRequest) ([]Event, error)
 	// PollEvents polls the events from the repository
 	PollEvents(ctx context.Context, repo Repo, cursor Cursor) (events []Event, nextCursor Cursor, err error)
+	// CreateChangeRequest creates PR/MR and returns url
+	CreateChangeRequest(ctx context.Context, req ChangeRequestInput) (string, error)
 }
 
 // equalFold compares two strings case-insensitively

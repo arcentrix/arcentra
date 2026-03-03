@@ -17,9 +17,9 @@ package model
 // OrganizationMember 组织成员表
 type OrganizationMember struct {
 	BaseModel
-	OrgId     string `gorm:"column:org_id" json:"orgId"`         // 组织ID
+	OrgID     string `gorm:"column:org_id" json:"orgId"`         // 组织ID
 	UserId    string `gorm:"column:user_id" json:"userId"`       // 用户ID
-	RoleId    string `gorm:"column:role_id;index" json:"roleId"` // 角色ID（引用 t_role 表）
+	RoleID    string `gorm:"column:role_id;index" json:"roleId"` // 角色ID（引用 t_role 表）
 	Username  string `gorm:"column:username" json:"username"`    // 用户名(冗余)
 	Email     string `gorm:"column:email" json:"email"`          // 邮箱(冗余)
 	InvitedBy string `gorm:"column:invited_by" json:"invitedBy"` // 邀请人用户ID

@@ -7,29 +7,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arcentrix/arcentra/pkg/request"
 	"github.com/arcentrix/arcentra/pkg/scm"
 	"github.com/bytedance/sonic"
-	"github.com/go-resty/resty/v2"
+	"github.com/valyala/fasthttp"
 )
 
 type Provider struct {
-	cfg    scm.ProviderConfig
-	client *resty.Client
+	cfg scm.ProviderConfig
 }
 
 func New(cfg scm.ProviderConfig) (scm.Provider, error) {
-	p := &Provider{cfg: cfg}
-	p.client = resty.New().SetTimeout(15 * time.Second)
-
-	apiBase := strings.TrimSpace(cfg.ApiBaseUrl)
-	if apiBase == "" {
-		apiBase = "https://api.bitbucket.org/2.0"
-	}
-	p.client.SetBaseURL(strings.TrimRight(apiBase, "/"))
-	if strings.TrimSpace(cfg.Token) != "" {
-		p.client.SetAuthToken(cfg.Token)
-	}
-	return p, nil
+	return &Provider{cfg: cfg}, nil
 }
 
 func (p *Provider) Kind() scm.ProviderKind { return scm.ProviderKindBitbucket }
@@ -98,20 +87,23 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 	}
 
 	path := fmt.Sprintf("/repositories/%s/%s/pullrequests", url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
-	r, err := p.client.R().
-		SetContext(ctx).
-		SetQueryParams(map[string]string{
-			"state":   "ALL",
-			"sort":    "-updated_on",
-			"pagelen": "50",
-		}).
-		SetResult(&prResp).
-		Get(path)
+	httpResp, err := request.NewRequest(
+		p.apiBaseURL()+path,
+		fasthttp.MethodGet,
+		map[string]string{
+			"Authorization": "Bearer " + strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).WithQueryParams(map[string]string{
+		"state":   "ALL",
+		"sort":    "-updated_on",
+		"pagelen": "50",
+	}).WithResult(&prResp).Do(ctx)
 	if err != nil {
 		return nil, cursor, err
 	}
-	if r.IsError() {
-		return nil, cursor, fmt.Errorf("bitbucket api error: %s", r.Status())
+	if httpResp == nil || httpResp.StatusCode() >= 400 {
+		return nil, cursor, fmt.Errorf("bitbucket api error: %d", httpResp.StatusCode())
 	}
 	for _, pr := range prResp.Values {
 		if pr.UpdatedOn.IsZero() || !pr.UpdatedOn.After(since) {
@@ -134,7 +126,7 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 			EventType:    t,
 			Repo:         repo,
 			ActorName:    pr.Author.User.DisplayName,
-			CommitId:     mergeSha,
+			CommitID:     mergeSha,
 			OccurredAt:   pr.UpdatedOn,
 			Change: &scm.Change{
 				Number:        pr.Id,
@@ -143,7 +135,7 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 				TargetBranch:  pr.Destination.Branch.Name,
 				State:         pr.State,
 				IsMerged:      merged,
-				MergeCommitId: mergeSha,
+				MergeCommitID: mergeSha,
 			},
 		})
 	}
@@ -157,19 +149,22 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 			} `json:"target"`
 		} `json:"values"`
 	}
-	r, err = p.client.R().
-		SetContext(ctx).
-		SetQueryParams(map[string]string{
-			"sort":    "-target.date",
-			"pagelen": "50",
-		}).
-		SetResult(&tagResp).
-		Get(fmt.Sprintf("/repositories/%s/%s/refs/tags", url.PathEscape(repo.Owner), url.PathEscape(repo.Name)))
+	httpResp, err = request.NewRequest(
+		p.apiBaseURL()+fmt.Sprintf("/repositories/%s/%s/refs/tags", url.PathEscape(repo.Owner), url.PathEscape(repo.Name)),
+		fasthttp.MethodGet,
+		map[string]string{
+			"Authorization": "Bearer " + strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).WithQueryParams(map[string]string{
+		"sort":    "-target.date",
+		"pagelen": "50",
+	}).WithResult(&tagResp).Do(ctx)
 	if err != nil {
 		return nil, cursor, err
 	}
-	if r.IsError() {
-		return nil, cursor, fmt.Errorf("bitbucket api error: %s", r.Status())
+	if httpResp == nil || httpResp.StatusCode() >= 400 {
+		return nil, cursor, fmt.Errorf("bitbucket api error: %d", httpResp.StatusCode())
 	}
 	for _, t := range tagResp.Values {
 		if t.Target.Date.IsZero() || !t.Target.Date.After(since) {
@@ -182,13 +177,85 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 			ProviderKind: scm.ProviderKindBitbucket,
 			EventType:    scm.EventTypeTag,
 			Repo:         repo,
-			CommitId:     t.Target.Hash,
+			CommitID:     t.Target.Hash,
 			Ref:          "refs/tags/" + t.Name,
 			OccurredAt:   t.Target.Date,
 		})
 	}
 
 	return events, scm.Cursor{Since: next}, nil
+}
+
+// CreateChangeRequest creates Bitbucket pull request and returns web URL.
+func (p *Provider) CreateChangeRequest(ctx context.Context, req scm.ChangeRequestInput) (string, error) {
+	repoInfo, ok := scm.ParseRepoFromURL(req.PipelineRepoURL)
+	if !ok {
+		return "", fmt.Errorf("invalid repository url: %s", req.PipelineRepoURL)
+	}
+	if strings.TrimSpace(req.SourceBranch) == "" || strings.TrimSpace(req.TargetBranch) == "" {
+		return "", fmt.Errorf("sourceBranch and targetBranch are required")
+	}
+	var out struct {
+		Links struct {
+			Html struct {
+				Href string `json:"href"`
+			} `json:"html"`
+		} `json:"links"`
+	}
+	apiBase := strings.TrimSpace(p.cfg.APIBaseURL)
+	if apiBase == "" {
+		apiBase = "https://api.bitbucket.org/2.0"
+	}
+	endpoint := strings.TrimRight(
+		apiBase,
+		"/",
+	) + fmt.Sprintf(
+		"/repositories/%s/%s/pullrequests",
+		url.PathEscape(repoInfo.Owner),
+		url.PathEscape(repoInfo.Name),
+	)
+	resp, err := request.NewRequest(
+		endpoint,
+		fasthttp.MethodPost,
+		map[string]string{
+			"Authorization": "Bearer " + strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).
+		WithBodyJSON(map[string]any{
+			"title":       req.Title,
+			"description": "created by arcentra pipeline editor",
+			"source": map[string]any{
+				"branch": map[string]any{
+					"name": req.SourceBranch,
+				},
+			},
+			"destination": map[string]any{
+				"branch": map[string]any{
+					"name": req.TargetBranch,
+				},
+			},
+		}).
+		WithResult(&out).
+		Do(ctx)
+	if err != nil {
+		return "", err
+	}
+	if resp == nil || resp.StatusCode() >= 400 {
+		return "", fmt.Errorf("bitbucket create pull request failed: %d", resp.StatusCode())
+	}
+	if strings.TrimSpace(out.Links.Html.Href) == "" {
+		return "", fmt.Errorf("bitbucket create pull request failed: empty html url")
+	}
+	return out.Links.Html.Href, nil
+}
+
+func (p *Provider) apiBaseURL() string {
+	apiBase := strings.TrimSpace(p.cfg.APIBaseURL)
+	if apiBase == "" {
+		apiBase = "https://api.bitbucket.org/2.0"
+	}
+	return strings.TrimRight(apiBase, "/")
 }
 
 func (p *Provider) parsePullRequest(body []byte, key string) ([]scm.Event, error) {
@@ -254,7 +321,7 @@ func (p *Provider) parsePullRequest(body []byte, key string) ([]scm.Event, error
 		EventType:    t,
 		Repo:         repo,
 		ActorName:    payload.Actor.DisplayName,
-		CommitId:     mergeSha,
+		CommitID:     mergeSha,
 		OccurredAt:   occurred,
 		Change: &scm.Change{
 			Number:        payload.PullRequest.Id,
@@ -263,7 +330,7 @@ func (p *Provider) parsePullRequest(body []byte, key string) ([]scm.Event, error
 			TargetBranch:  payload.PullRequest.Destination.Branch.Name,
 			State:         payload.PullRequest.State,
 			IsMerged:      t == scm.EventTypePullMerged,
-			MergeCommitId: mergeSha,
+			MergeCommitID: mergeSha,
 		},
 	}}, nil
 }
@@ -321,7 +388,7 @@ func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
 			EventType:    scm.EventTypeTag,
 			Repo:         repo,
 			ActorName:    payload.Actor.DisplayName,
-			CommitId:     c.New.Target.Hash,
+			CommitID:     c.New.Target.Hash,
 			Ref:          "refs/tags/" + c.New.Name,
 			OccurredAt:   occurred,
 		})

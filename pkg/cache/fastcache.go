@@ -449,11 +449,11 @@ func (fc *FastCache) Clear() {
 	defer fc.mu.Unlock()
 
 	fc.cache.Reset()
-	fc.ttls.Range(func(key, value interface{}) bool {
+	fc.ttls.Range(func(key, _ interface{}) bool {
 		fc.ttls.Delete(key)
 		return true
 	})
-	fc.hashData.Range(func(key, value interface{}) bool {
+	fc.hashData.Range(func(key, _ interface{}) bool {
 		fc.hashData.Delete(key)
 		return true
 	})

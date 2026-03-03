@@ -15,6 +15,7 @@
 package consts
 
 const (
+	// UserInfoKey stores cached user profile payload.
 	UserInfoKey              = "user:info:"
 	UserTokenKey             = "user:token:"
 	UserRefreshTokenKey      = "user:refresh_token:"

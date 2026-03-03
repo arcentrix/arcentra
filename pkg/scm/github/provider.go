@@ -8,31 +8,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arcentrix/arcentra/pkg/request"
 	"github.com/arcentrix/arcentra/pkg/scm"
 	"github.com/bytedance/sonic"
-	"github.com/go-resty/resty/v2"
+	"github.com/valyala/fasthttp"
 )
 
 type Provider struct {
-	cfg    scm.ProviderConfig
-	client *resty.Client
+	cfg scm.ProviderConfig
 }
 
 func New(cfg scm.ProviderConfig) (scm.Provider, error) {
-	p := &Provider{cfg: cfg}
-	p.client = resty.New().SetTimeout(15 * time.Second)
-
-	apiBase := strings.TrimSpace(cfg.ApiBaseUrl)
-	if apiBase == "" {
-		apiBase = "https://api.github.com"
-	}
-	p.client.SetBaseURL(strings.TrimRight(apiBase, "/"))
-
-	if strings.TrimSpace(cfg.Token) != "" {
-		p.client.SetAuthToken(cfg.Token)
-	}
-
-	return p, nil
+	return &Provider{cfg: cfg}, nil
 }
 
 func (p *Provider) Kind() scm.ProviderKind { return scm.ProviderKindGitHub }
@@ -76,16 +63,22 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 
 	path := fmt.Sprintf("/repos/%s/%s/events", url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
 	var resp []githubEvent
-	r, err := p.client.R().
-		SetContext(ctx).
-		SetQueryParam("per_page", "100").
-		SetResult(&resp).
-		Get(path)
+	httpResp, err := request.NewRequest(
+		p.apiBaseURL()+path,
+		fasthttp.MethodGet,
+		map[string]string{
+			"Accept":        "application/vnd.github+json",
+			"Authorization": "Bearer " + strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).WithQueryParams(map[string]string{
+		"per_page": "100",
+	}).WithResult(&resp).Do(ctx)
 	if err != nil {
 		return nil, cursor, err
 	}
-	if r.IsError() {
-		return nil, cursor, fmt.Errorf("github api error: %s", r.Status())
+	if httpResp == nil || httpResp.StatusCode() >= 400 {
+		return nil, cursor, fmt.Errorf("github api error: %d", httpResp.StatusCode())
 	}
 
 	events := make([]scm.Event, 0, len(resp))
@@ -105,6 +98,61 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 	}
 
 	return events, scm.Cursor{Since: next}, nil
+}
+
+// CreateChangeRequest creates GitHub pull request and returns web URL.
+func (p *Provider) CreateChangeRequest(ctx context.Context, req scm.ChangeRequestInput) (string, error) {
+	repoInfo, ok := scm.ParseRepoFromURL(req.PipelineRepoURL)
+	if !ok {
+		return "", fmt.Errorf("invalid repository url: %s", req.PipelineRepoURL)
+	}
+	var out struct {
+		HtmlURL string `json:"html_url"`
+	}
+	apiBase := strings.TrimSpace(p.cfg.APIBaseURL)
+	if apiBase == "" {
+		apiBase = "https://api.github.com"
+	}
+	endpoint := strings.TrimRight(
+		apiBase,
+		"/",
+	) + fmt.Sprintf(
+		"/repos/%s/%s/pulls",
+		url.PathEscape(repoInfo.Owner),
+		url.PathEscape(repoInfo.Name),
+	)
+	resp, err := request.NewRequest(
+		endpoint,
+		fasthttp.MethodPost,
+		map[string]string{
+			"Accept":        "application/vnd.github+json",
+			"Authorization": "Bearer " + strings.TrimSpace(p.cfg.Token),
+		},
+		nil,
+	).
+		WithBodyJSON(map[string]any{
+			"title": req.Title,
+			"head":  req.SourceBranch,
+			"base":  req.TargetBranch,
+			"body":  "created by arcentra pipeline editor",
+		}).
+		WithResult(&out).
+		Do(ctx)
+	if err != nil {
+		return "", err
+	}
+	if resp == nil || resp.StatusCode() >= 400 {
+		return "", fmt.Errorf("github create pr failed: %d", resp.StatusCode())
+	}
+	return out.HtmlURL, nil
+}
+
+func (p *Provider) apiBaseURL() string {
+	apiBase := strings.TrimSpace(p.cfg.APIBaseURL)
+	if apiBase == "" {
+		apiBase = "https://api.github.com"
+	}
+	return strings.TrimRight(apiBase, "/")
 }
 
 type githubEvent struct {
@@ -156,7 +204,7 @@ func (p *Provider) mapEvent(repo scm.Repo, e githubEvent) []scm.Event {
 			TargetBranch:  payload.PullRequest.Base.Ref,
 			State:         payload.PullRequest.State,
 			IsMerged:      payload.PullRequest.Merged,
-			MergeCommitId: payload.PullRequest.MergeSha,
+			MergeCommitID: payload.PullRequest.MergeSha,
 		}
 		if payload.Action == "closed" && payload.PullRequest.Merged {
 			eventType = scm.EventTypePullMerged
@@ -170,7 +218,7 @@ func (p *Provider) mapEvent(repo scm.Repo, e githubEvent) []scm.Event {
 			EventType:    eventType,
 			Repo:         repo,
 			ActorName:    actor,
-			CommitId:     payload.PullRequest.MergeSha,
+			CommitID:     payload.PullRequest.MergeSha,
 			OccurredAt:   occurred,
 			Change:       change,
 		}}
@@ -189,7 +237,7 @@ func (p *Provider) mapEvent(repo scm.Repo, e githubEvent) []scm.Event {
 			EventType:    t,
 			Repo:         repo,
 			ActorName:    actor,
-			CommitId:     payload.Head,
+			CommitID:     payload.Head,
 			Ref:          payload.Ref,
 			OccurredAt:   e.CreatedAt,
 		}}
@@ -253,7 +301,7 @@ func (p *Provider) parsePullRequest(body []byte) ([]scm.Event, error) {
 		Owner:    payload.Repository.Owner.Login,
 		Name:     payload.Repository.Name,
 		FullName: payload.Repository.Owner.Login + "/" + payload.Repository.Name,
-		Url:      payload.Repository.HtmlUrl,
+		URL:      payload.Repository.HtmlUrl,
 	}
 
 	occurred := time.Now()
@@ -273,7 +321,7 @@ func (p *Provider) parsePullRequest(body []byte) ([]scm.Event, error) {
 		EventType:    t,
 		Repo:         repo,
 		ActorName:    payload.Sender.Login,
-		CommitId:     payload.PullRequest.MergeSha,
+		CommitID:     payload.PullRequest.MergeSha,
 		OccurredAt:   occurred,
 		Change: &scm.Change{
 			Number:        payload.PullRequest.Number,
@@ -282,7 +330,7 @@ func (p *Provider) parsePullRequest(body []byte) ([]scm.Event, error) {
 			TargetBranch:  payload.PullRequest.Base.Ref,
 			State:         payload.PullRequest.State,
 			IsMerged:      payload.PullRequest.Merged,
-			MergeCommitId: payload.PullRequest.MergeSha,
+			MergeCommitID: payload.PullRequest.MergeSha,
 		},
 	}}, nil
 }
@@ -318,7 +366,7 @@ func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
 		Owner:    owner,
 		Name:     payload.Repository.Name,
 		FullName: owner + "/" + payload.Repository.Name,
-		Url:      payload.Repository.HtmlUrl,
+		URL:      payload.Repository.HtmlUrl,
 	}
 
 	t := scm.EventTypePush
@@ -334,7 +382,7 @@ func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
 		EventType:    t,
 		Repo:         repo,
 		ActorName:    payload.Pusher.Name,
-		CommitId:     payload.HeadCommit.Id,
+		CommitID:     payload.HeadCommit.Id,
 		Ref:          payload.Ref,
 		OccurredAt:   occurred,
 	}}, nil
@@ -366,7 +414,7 @@ func (p *Provider) parseCreate(body []byte) ([]scm.Event, error) {
 		Owner:    payload.Repository.Owner.Login,
 		Name:     payload.Repository.Name,
 		FullName: payload.Repository.Owner.Login + "/" + payload.Repository.Name,
-		Url:      payload.Repository.HtmlUrl,
+		URL:      payload.Repository.HtmlUrl,
 	}
 	return []scm.Event{{
 		ProviderKind: scm.ProviderKindGitHub,

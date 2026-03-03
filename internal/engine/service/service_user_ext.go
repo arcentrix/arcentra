@@ -36,10 +36,10 @@ func NewUserExt(userExtRepo repo.IUserExtRepository) *UserExt {
 }
 
 // GetUserExt gets user Ext information
-func (ues *UserExt) GetUserExt(ctx context.Context, userId string) (*model.UserExt, error) {
-	Ext, err := ues.userExtRepo.Get(ctx, userId)
+func (ues *UserExt) GetUserExt(ctx context.Context, userID string) (*model.UserExt, error) {
+	Ext, err := ues.userExtRepo.Get(ctx, userID)
 	if err != nil {
-		log.Errorw("failed to get user Ext", "userId", userId, "error", err)
+		log.Errorw("failed to get user Ext", "userId", userID, "error", err)
 		return nil, err
 	}
 	return Ext, nil
@@ -47,17 +47,17 @@ func (ues *UserExt) GetUserExt(ctx context.Context, userId string) (*model.UserE
 
 // CreateUserExt creates user Ext record
 func (ues *UserExt) CreateUserExt(ctx context.Context, Ext *model.UserExt) error {
-	exists, err := ues.userExtRepo.Exists(ctx, Ext.UserId)
+	exists, err := ues.userExtRepo.Exists(ctx, Ext.UserID)
 	if err != nil {
-		log.Errorw("failed to check user Ext exists", "userId", Ext.UserId, "error", err)
+		log.Errorw("failed to check user Ext exists", "userId", Ext.UserID, "error", err)
 		return err
 	}
 	if exists {
-		return fmt.Errorf("user Ext already exists for user: %s", Ext.UserId)
+		return fmt.Errorf("user Ext already exists for user: %s", Ext.UserID)
 	}
 
 	if err := ues.userExtRepo.Create(ctx, Ext); err != nil {
-		log.Errorw("failed to create user Ext", "userId", Ext.UserId, "error", err)
+		log.Errorw("failed to create user Ext", "userId", Ext.UserID, "error", err)
 		return err
 	}
 
@@ -65,18 +65,18 @@ func (ues *UserExt) CreateUserExt(ctx context.Context, Ext *model.UserExt) error
 }
 
 // UpdateUserExt updates user Ext information
-func (ues *UserExt) UpdateUserExt(ctx context.Context, userId string, Ext *model.UserExt) error {
-	exists, err := ues.userExtRepo.Exists(ctx, userId)
+func (ues *UserExt) UpdateUserExt(ctx context.Context, userID string, Ext *model.UserExt) error {
+	exists, err := ues.userExtRepo.Exists(ctx, userID)
 	if err != nil {
-		log.Errorw("failed to check user Ext exists", "userId", userId, "error", err)
+		log.Errorw("failed to check user Ext exists", "userId", userID, "error", err)
 		return err
 	}
 	if !exists {
-		return fmt.Errorf("user Ext not found for user: %s", userId)
+		return fmt.Errorf("user Ext not found for user: %s", userID)
 	}
 
-	if err := ues.userExtRepo.Update(ctx, userId, Ext); err != nil {
-		log.Errorw("failed to update user Ext", "userId", userId, "error", err)
+	if err := ues.userExtRepo.Update(ctx, userID, Ext); err != nil {
+		log.Errorw("failed to update user Ext", "userId", userID, "error", err)
 		return err
 	}
 
@@ -94,7 +94,7 @@ func (ues *UserExt) UpdateLastLogin(ctx context.Context, userId string) error {
 	if !exists {
 		now := time.Now()
 		Ext := &model.UserExt{
-			UserId:           userId,
+			UserID:           userId,
 			Timezone:         "UTC",
 			LastLoginAt:      &now,
 			InvitationStatus: model.UserInvitationStatusAccepted,

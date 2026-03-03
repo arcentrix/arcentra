@@ -424,7 +424,7 @@ func (hc *HybridCache) Clear(ctx context.Context) {
 	}
 
 	// Clear pending updates
-	hc.pendingUpdates.Range(func(key, value interface{}) bool {
+	hc.pendingUpdates.Range(func(key, _ interface{}) bool {
 		hc.pendingUpdates.Delete(key)
 		return true
 	})

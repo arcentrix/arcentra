@@ -56,7 +56,7 @@ func New(options ...Option) *Loop {
 
 // sleepUntilCtxDone sleep d duration until ctx done.
 // Done maybe triggered by context timeout of deadline exceeded.
-func sleepUntilCtxDone(d time.Duration, ctx context.Context) (abort bool) {
+func sleepUntilCtxDone(ctx context.Context, d time.Duration) (abort bool) {
 	if ctx == nil {
 		time.Sleep(d)
 		return false
@@ -100,7 +100,7 @@ func (l *Loop) Do(f func() (bool, error)) error {
 			if l.declineLimit > 0 && l.lastSleepTime > l.declineLimit {
 				l.lastSleepTime = l.declineLimit
 			}
-			if sleepUntilCtxDone(l.lastSleepTime, l.ctx) {
+			if sleepUntilCtxDone(l.ctx, l.lastSleepTime) {
 				return nil
 			}
 			continue
@@ -108,7 +108,7 @@ func (l *Loop) Do(f func() (bool, error)) error {
 
 		// Reset the last sleep time to the interval time
 		l.lastSleepTime = l.interval
-		if sleepUntilCtxDone(l.lastSleepTime, l.ctx) {
+		if sleepUntilCtxDone(l.ctx, l.lastSleepTime) {
 			return nil
 		}
 	}

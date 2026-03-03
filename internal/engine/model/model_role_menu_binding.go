@@ -18,10 +18,10 @@ package model
 // 注意：同一角色在同一资源下对同一菜单只能有一条记录
 type RoleMenuBinding struct {
 	BaseModel
-	RoleMenuId   string `gorm:"column:role_menu_id;not null;uniqueIndex" json:"roleMenuId"` // 关联唯一标识
-	RoleId       string `gorm:"column:role_id;not null;index" json:"roleId"`                // 角色ID（引用 t_role 表）
-	MenuId       string `gorm:"column:menu_id;not null;index" json:"menuId"`                // 菜单ID（引用 t_menu 表）
-	ResourceId   string `gorm:"column:resource_id;index" json:"resourceId"`                 // 资源ID（组织ID/团队ID/项目ID，平台级为空）
+	RoleMenuID   string `gorm:"column:role_menu_id;not null;uniqueIndex" json:"roleMenuId"` // 关联唯一标识
+	RoleID       string `gorm:"column:role_id;not null;index" json:"roleId"`                // 角色ID（引用 t_role 表）
+	MenuID       string `gorm:"column:menu_id;not null;index" json:"menuId"`                // 菜单ID（引用 t_menu 表）
+	ResourceID   string `gorm:"column:resource_id;index" json:"resourceId"`                 // 资源ID（组织ID/团队ID/项目ID，平台级为空）
 	IsVisible    int    `gorm:"column:is_visible;default:1" json:"isVisible"`               // 是否可见：0-隐藏，1-显示
 	IsAccessible int    `gorm:"column:is_accessible;default:1" json:"isAccessible"`         // 是否可访问：0-不可访问，1-可访问
 }

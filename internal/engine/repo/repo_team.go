@@ -51,6 +51,60 @@ type TeamRepo struct {
 	database.IDatabase
 }
 
+var teamSelectFields = []string{
+	"id",
+	"team_id",
+	"org_id",
+	"name",
+	"display_name",
+	"description",
+	"avatar",
+	"parent_team_id",
+	"path",
+	"level",
+	"settings",
+	"visibility",
+	"is_enabled",
+	"total_members",
+	"total_projects",
+	"created_at",
+	"updated_at",
+}
+
+var teamSummaryFields = []string{
+	"team_id",
+	"org_id",
+	"name",
+	"display_name",
+	"description",
+	"avatar",
+	"parent_team_id",
+	"path",
+	"level",
+	"settings",
+	"visibility",
+	"is_enabled",
+	"total_members",
+	"total_projects",
+}
+
+var teamUserListFields = []string{
+	"t.team_id",
+	"t.org_id",
+	"t.name",
+	"t.display_name",
+	"t.description",
+	"t.avatar",
+	"t.parent_team_id",
+	"t.path",
+	"t.level",
+	"t.settings",
+	"t.visibility",
+	"t.is_enabled",
+	"t.total_members",
+	"t.total_projects",
+}
+
 func NewTeamRepo(db database.IDatabase) ITeamRepository {
 	return &TeamRepo{IDatabase: db}
 }
@@ -75,8 +129,11 @@ func (r *TeamRepo) Delete(ctx context.Context, teamId string) error {
 // Get returns team by teamId.
 func (r *TeamRepo) Get(ctx context.Context, teamId string) (*model.Team, error) {
 	var t model.Team
-	err := r.Database().WithContext(ctx).Select("id", "team_id", "org_id", "name", "display_name", "description", "avatar", "parent_team_id", "path", "level", "settings", "visibility", "is_enabled", "total_members", "total_projects", "created_at", "updated_at").
-		Where("team_id = ?", teamId).First(&t).Error
+	err := r.Database().
+		WithContext(ctx).Select(teamSelectFields).
+		Where("team_id = ?", teamId).
+		First(&t).
+		Error
 	if err != nil {
 		return nil, err
 	}
@@ -86,8 +143,11 @@ func (r *TeamRepo) Get(ctx context.Context, teamId string) (*model.Team, error) 
 // GetByName returns team by orgId and name.
 func (r *TeamRepo) GetByName(ctx context.Context, orgId, name string) (*model.Team, error) {
 	var t model.Team
-	err := r.Database().WithContext(ctx).Select("id", "team_id", "org_id", "name", "display_name", "description", "avatar", "parent_team_id", "path", "level", "settings", "visibility", "is_enabled", "total_members", "total_projects", "created_at", "updated_at").
-		Where("org_id = ? AND name = ?", orgId, name).First(&t).Error
+	err := r.Database().
+		WithContext(ctx).Select(teamSelectFields).
+		Where("org_id = ? AND name = ?", orgId, name).
+		First(&t).
+		Error
 	if err != nil {
 		return nil, err
 	}
@@ -133,9 +193,10 @@ func (r *TeamRepo) List(ctx context.Context, query *model.TeamQueryReq) ([]*mode
 	}
 
 	// 查询结果，指定字段排除创建和更新时间
-	err := db.Select("team_id", "org_id", "name", "display_name", "description", "avatar", "parent_team_id", "path", "level", "settings", "visibility", "is_enabled", "total_members", "total_projects").
+	err := db.Select(teamSummaryFields).
 		Order("team_id DESC").
-		Find(&teams).Error
+		Find(&teams).
+		Error
 	return teams, total, err
 }
 
@@ -143,7 +204,7 @@ func (r *TeamRepo) List(ctx context.Context, query *model.TeamQueryReq) ([]*mode
 func (r *TeamRepo) ListByOrg(ctx context.Context, orgId string) ([]*model.Team, error) {
 	var teams []*model.Team
 	err := r.Database().WithContext(ctx).
-		Select("team_id", "org_id", "name", "display_name", "description", "avatar", "parent_team_id", "path", "level", "settings", "visibility", "is_enabled", "total_members", "total_projects").
+		Select(teamSummaryFields).
 		Where("org_id = ? AND is_enabled = ?", orgId, 1).
 		Order("level ASC, team_id DESC").
 		Find(&teams).Error
@@ -154,7 +215,7 @@ func (r *TeamRepo) ListByOrg(ctx context.Context, orgId string) ([]*model.Team, 
 func (r *TeamRepo) ListSubTeams(ctx context.Context, parentTeamId string) ([]*model.Team, error) {
 	var teams []*model.Team
 	err := r.Database().WithContext(ctx).
-		Select("team_id", "org_id", "name", "display_name", "description", "avatar", "parent_team_id", "path", "level", "settings", "visibility", "is_enabled", "total_members", "total_projects").
+		Select(teamSummaryFields).
 		Where("parent_team_id = ? AND is_enabled = ?", parentTeamId, 1).
 		Order("team_id DESC").
 		Find(&teams).Error
@@ -267,8 +328,11 @@ func (r *TeamRepo) BatchGet(ctx context.Context, teamIds []string) ([]*model.Tea
 	}
 
 	var teams []*model.Team
-	err := r.Database().WithContext(ctx).Select("id", "team_id", "org_id", "name", "display_name", "description", "avatar", "parent_team_id", "path", "level", "settings", "visibility", "is_enabled", "total_members", "total_projects", "created_at", "updated_at").
-		Where("team_id IN ?", teamIds).Find(&teams).Error
+	err := r.Database().
+		WithContext(ctx).Select(teamSelectFields).
+		Where("team_id IN ?", teamIds).
+		Find(&teams).
+		Error
 	return teams, err
 }
 
@@ -276,7 +340,7 @@ func (r *TeamRepo) BatchGet(ctx context.Context, teamIds []string) ([]*model.Tea
 func (r *TeamRepo) ListByUser(ctx context.Context, userId string) ([]*model.Team, error) {
 	var teams []*model.Team
 	err := r.Database().WithContext(ctx).Table("t_team t").
-		Select("t.team_id", "t.org_id", "t.name", "t.display_name", "t.description", "t.avatar", "t.parent_team_id", "t.path", "t.level", "t.settings", "t.visibility", "t.is_enabled", "t.total_members", "t.total_projects").
+		Select(teamUserListFields).
 		Joins("JOIN t_team_member tm ON t.team_id = tm.team_id").
 		Where("tm.user_id = ? AND t.is_enabled = ?", userId, 1).
 		Order("t.team_id DESC").

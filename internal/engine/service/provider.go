@@ -31,10 +31,10 @@ var ProviderSet = wire.NewSet(
 // ProvideServices 提供统一的 Services 实例
 func ProvideServices(
 	db database.IDatabase,
-	cache cache.ICache,
+	cacheStore cache.ICache,
 	repos *repo.Repositories,
 	pluginManager *plugin.Manager,
 	storageProvider storage.IStorage,
 ) *Services {
-	return NewServices(db, cache, repos, pluginManager, storageProvider)
+	return NewServices(db, cacheStore, repos, pluginManager, storageProvider)
 }

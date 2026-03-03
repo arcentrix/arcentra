@@ -21,7 +21,7 @@ import (
 // Organization 组织表
 type Organization struct {
 	BaseModel
-	OrgId       string         `gorm:"column:org_id" json:"orgId"`                // 组织唯一标识
+	OrgID       string         `gorm:"column:org_id" json:"orgId"`                // 组织唯一标识
 	Name        string         `gorm:"column:name" json:"name"`                   // 组织名称
 	DisplayName string         `gorm:"column:display_name" json:"displayName"`    // 组织显示名称
 	Description string         `gorm:"column:description" json:"description"`     // 组织描述
@@ -33,7 +33,7 @@ type Organization struct {
 	Settings    datatypes.JSON `gorm:"column:settings;type:json" json:"settings"` // 组织设置
 	Plan        string         `gorm:"column:plan" json:"plan"`                   // 订阅计划(free/pro/enterprise)
 	Status      int            `gorm:"column:status" json:"status"`               // 状态: 0-未激活, 1-正常, 2-冻结, 3-已删除
-	OwnerUserId string         `gorm:"column:owner_user_id" json:"ownerUserId"`   // 组织所有者用户ID
+	OwnerUserID string         `gorm:"column:owner_user_id" json:"ownerUserId"`   // 组织所有者用户ID
 	IsEnabled   int            `gorm:"column:is_enabled" json:"isEnabled"`        // 0: disabled, 1: enabled
 
 	// 统计字段

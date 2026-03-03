@@ -58,16 +58,16 @@ func (s *GatewayServiceImpl) Send(ctx context.Context, events []outbox.Event) (o
 			},
 		},
 	}
-	if err := stream.Send(handshake); err != nil {
-		return outbox.SendResult{}, fmt.Errorf("send handshake: %w", err)
+	if sendErr := stream.Send(handshake); sendErr != nil {
+		return outbox.SendResult{}, fmt.Errorf("send handshake: %w", sendErr)
 	}
 	batch := &gatewayv1.EventBatch{
 		BatchId: fmt.Sprintf("batch-%d", events[0].Seq),
 		Events:  make([]*gatewayv1.Event, 0, len(events)),
 	}
 	for _, e := range events {
-		payload, err := structpb.NewStruct(e.Payload)
-		if err != nil {
+		payload, payloadErr := structpb.NewStruct(e.Payload)
+		if payloadErr != nil {
 			payload, _ = structpb.NewStruct(map[string]any{})
 		}
 		batch.Events = append(batch.Events, &gatewayv1.Event{
@@ -86,8 +86,8 @@ func (s *GatewayServiceImpl) Send(ctx context.Context, events []outbox.Event) (o
 	req := &gatewayv1.PushEventsRequest{
 		Payload: &gatewayv1.PushEventsRequest_Batch{Batch: batch},
 	}
-	if err := stream.Send(req); err != nil {
-		return outbox.SendResult{}, fmt.Errorf("send batch: %w", err)
+	if sendErr := stream.Send(req); sendErr != nil {
+		return outbox.SendResult{}, fmt.Errorf("send batch: %w", sendErr)
 	}
 	resp, err := stream.CloseAndRecv()
 	if err != nil {

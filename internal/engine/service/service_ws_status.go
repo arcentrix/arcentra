@@ -174,7 +174,7 @@ func (h *WSHandle) getStepRun(params WSParams) (*model.StepRun, error) {
 	if h.stepRunRepo == nil {
 		return nil, fmt.Errorf("step run repository is not available")
 	}
-	return h.stepRunRepo.Get(context.Background(), params.PipelineId, params.JobId, params.StepRunId)
+	return h.stepRunRepo.Get(context.Background(), params.PipelineID, params.JobID, params.StepRunID)
 }
 
 func isRunningStatus(status int) bool {
@@ -278,12 +278,12 @@ func parseSubject(subject string) (pipelineId, jobName, stepName string) {
 }
 
 func matchStatusSubscription(params WSParams, info eventInfo) bool {
-	if params.PipelineId != "" && info.pipelineId != "" && params.PipelineId != info.pipelineId {
+	if params.PipelineID != "" && info.pipelineId != "" && params.PipelineID != info.pipelineId {
 		return false
 	}
 
-	jobName := deriveJobName(params.PipelineId, params.JobId)
-	stepName := deriveStepName(params.JobId, params.StepRunId)
+	jobName := deriveJobName(params.PipelineID, params.JobID)
+	stepName := deriveStepName(params.JobID, params.StepRunID)
 
 	if info.jobName != "" && jobName != "" && info.jobName != jobName {
 		return false

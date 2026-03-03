@@ -20,7 +20,7 @@ import (
 
 type User struct {
 	BaseModel
-	UserId       string `gorm:"column:user_id" json:"userId"`
+	UserID       string `gorm:"column:user_id" json:"userId"`
 	Username     string `gorm:"column:username" json:"username"`
 	FullName     string `gorm:"column:full_name" json:"fullName"`
 	Password     string `gorm:"column:password" json:"password"`
@@ -36,7 +36,7 @@ func (User) TableName() string {
 }
 
 type Register struct {
-	UserId    string    `json:"userId"`
+	UserID    string    `json:"userId"`
 	Username  string    `json:"username"`
 	FullName  string    `gorm:"column:full_name" json:"fullName"`
 	Email     string    `json:"email"`
@@ -62,7 +62,7 @@ type LoginResp struct {
 
 // RoleDTO 角色数据传输对象
 type RoleDTO struct {
-	RoleId      string `json:"roleId"`      // 角色ID
+	RoleID      string `json:"roleId"`      // 角色ID
 	Name        string `json:"name"`        // 角色名称
 	DisplayName string `json:"displayName"` // 显示名称
 	Description string `json:"description"` // 角色描述
@@ -70,8 +70,8 @@ type RoleDTO struct {
 
 // MenuDTO 菜单数据传输对象
 type MenuDTO struct {
-	MenuId      string    `json:"menuId"`
-	ParentId    string    `json:"parentId"`
+	MenuID      string    `json:"menuId"`
+	ParentID    string    `json:"parentId"`
 	Name        string    `json:"name"`
 	Path        string    `json:"path"`
 	Component   string    `json:"component"`
@@ -84,7 +84,7 @@ type MenuDTO struct {
 }
 
 type UserInfo struct {
-	UserId    string `json:"userId"`
+	UserID    string `json:"userId"`
 	Username  string `json:"username"`
 	FullName  string `json:"fullName"`
 	Avatar    string `json:"avatar"`
@@ -94,7 +94,7 @@ type UserInfo struct {
 }
 
 type AddUserReq struct {
-	UserId    string    `json:"userId"`
+	UserID    string    `json:"userId"`
 	Username  string    `json:"username"`
 	FullName  string    `gorm:"column:full_name" json:"fullName"`
 	Password  string    `json:"password"`

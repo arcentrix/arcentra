@@ -17,26 +17,27 @@ package taskqueue
 import "strings"
 
 const (
+	// TaskTypeStepRun identifies step-run execution tasks.
 	TaskTypeStepRun = "pipeline.step_run"
 )
 
 // StepRunTaskPayload is the payload for step run execution.
 type StepRunTaskPayload struct {
-	ProjectId     string            `json:"projectId,omitempty"`
-	PipelineId    string            `json:"pipelineId,omitempty"`
-	PipelineRunId string            `json:"pipelineRunId,omitempty"`
-	JobId         string            `json:"jobId,omitempty"`
+	ProjectID     string            `json:"projectId,omitempty"`
+	PipelineID    string            `json:"pipelineId,omitempty"`
+	PipelineRunID string            `json:"pipelineRunId,omitempty"`
+	JobID         string            `json:"jobId,omitempty"`
 	JobName       string            `json:"jobName,omitempty"`
 	StepName      string            `json:"stepName,omitempty"`
 	StepIndex     int32             `json:"stepIndex,omitempty"`
-	StepRunId     string            `json:"stepRunId,omitempty"`
+	StepRunID     string            `json:"stepRunId,omitempty"`
 	Uses          string            `json:"uses,omitempty"`
 	Action        string            `json:"action,omitempty"`
 	Args          map[string]any    `json:"args,omitempty"`
 	Env           map[string]string `json:"env,omitempty"`
 	Workspace     string            `json:"workspace,omitempty"`
 	Timeout       string            `json:"timeout,omitempty"`
-	AgentId       string            `json:"agentId,omitempty"`
+	AgentID       string            `json:"agentId,omitempty"`
 }
 
 // StepRunKey returns a composite key for the step run task.
@@ -45,10 +46,10 @@ func StepRunKey(payload *StepRunTaskPayload) string {
 		return ""
 	}
 	parts := []string{
-		payload.ProjectId,
-		payload.PipelineId,
-		payload.PipelineRunId,
-		payload.StepRunId,
+		payload.ProjectID,
+		payload.PipelineID,
+		payload.PipelineRunID,
+		payload.StepRunID,
 	}
 	return strings.Trim(strings.Join(parts, ":"), ":")
 }

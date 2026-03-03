@@ -192,7 +192,7 @@ func Run(app *App, cleanup func()) {
 
 	// start HTTP server (async)
 	safe.Go(func() {
-		addr := appConf.Http.Host + ":" + fmt.Sprintf("%d", appConf.Http.Port)
+		addr := appConf.HTTP.Host + ":" + fmt.Sprintf("%d", appConf.HTTP.Port)
 		log.Infow("HTTP listener started",
 			"address", addr,
 		)

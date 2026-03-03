@@ -8,13 +8,13 @@ import (
 // RequestMiddleware set request id
 func RequestMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		requestId := c.Request().Header.Peek("X-Request-Id")
-		if len(requestId) == 0 {
-			requestId = []byte(uuid.New().String())
+		requestID := c.Request().Header.Peek("X-Request-Id")
+		if len(requestID) == 0 {
+			requestID = []byte(uuid.New().String())
 		}
-		c.Request().Header.Set("X-Request-Id", string(requestId))
-		c.Set("X-Request-Id", string(requestId))
-		c.Locals("request_id", string(requestId))
+		c.Request().Header.Set("X-Request-Id", string(requestID))
+		c.Set("X-Request-Id", string(requestID))
+		c.Locals("request_id", string(requestID))
 		return c.Next()
 	}
 }
