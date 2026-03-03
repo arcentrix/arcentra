@@ -1,334 +1,61 @@
 ```mermaid
 graph TB
-    subgraph "平台端 Platform"
-        direction TB
-        A[组织/团队管理] --> B[项目管理]
-        B --> C[流水线 Pipeline]
-        C --> D[构建 Build]
-        D --> E[部署 Deploy]
-        F[权限管理 RBAC] --> A
-        F --> B
-        F --> C
-        F --> D
-        F --> E
-    end
 
-    subgraph "Agent 节点"
-        direction TB
-        G[gRPC 客户端] --> H[任务队列消费者]
-        H --> I[Executor 执行器]
-        I --> J[Shell Executor]
-        I --> K[Docker Executor]
-        I --> L[Kubernetes Executor]
-        I --> M[Plugin Executor]
-        I --> N[状态上报]
-    end
+subgraph Platform
+A[Organization] --> B[Team]
+B --> C[Project]
+C --> D[Pipeline]
+D --> E[Build]
+E --> F[Deploy]
+R[RBAC] --> A
+R --> B
+R --> C
+R --> D
+R --> E
+R --> F
+end
 
-    subgraph "插件系统 Plugin System"
-        direction TB
-        O[go-plugin gRPC] --> P[Pipeline DSL 解析器]
-        P --> Q[任务结构生成器]
-        Q --> R[Job/Stage/Step/Task]
-    end
+subgraph Agent
+G[gRPC Client] --> H[Queue Consumer]
+H --> I[Executor]
+I --> J[Shell Executor]
+I --> K[Docker Executor]
+I --> L[Kubernetes Executor]
+I --> M[Plugin Executor]
+M --> N[Status Report]
+end
 
-    subgraph "存储层 Storage"
-        direction LR
-        S[(MySQL 8<br/>InnoDB)]
-        T[(Kafka<br/>消息队列)]
-        U[(Redis<br/>任务队列)]
-    end
+subgraph Storage
+S[(MySQL)]
+T[(Kafka)]
+U[(Redis)]
+end
 
-    subgraph "基础设施 Infrastructure"
-        direction LR
-        V[Kubernetes]
-        W[Helm]
-        X[Kustomize]
-        Y[ArgoCD GitOps]
-    end
+subgraph Infrastructure
+V[Kubernetes]
+W[Helm]
+X[Kustomize]
+Y[ArgoCD]
+end
 
-    %% 连接关系
-    C -.->|推送任务| T
-    T -->|拉取任务| H
-    N -->|上报状态| C
-    
-    M -->|调用| O
-    O -->|返回任务结构| M
-    
-    A -->|存储| S
-    B -->|存储| S
-    C -->|存储| S
-    D -->|存储| S
-    E -->|存储| S
-    F -->|存储| S
-    
-    H -.->|可选| U
-    
-    J -->|执行| V
-    K -->|执行| V
-    L -->|执行| V
-    
-    V -->|部署| W
-    V -->|配置| X
-    Y -->|GitOps| V
+D --> T
+T --> H
+N --> D
 
-    style A fill:#e1f5ff
-    style B fill:#e1f5ff
-    style C fill:#e1f5ff
-    style D fill:#e1f5ff
-    style E fill:#e1f5ff
-    style F fill:#e1f5ff
-    style G fill:#fff4e1
-    style H fill:#fff4e1
-    style I fill:#fff4e1
-    style O fill:#e8f5e9
-    style S fill:#f3e5f5
-    style T fill:#f3e5f5
-    style U fill:#f3e5f5
-```
+A --> S
+B --> S
+C --> S
+D --> S
+E --> S
+F --> S
 
-```mermaid
-graph LR
-    subgraph "数据流 Data Flow"
-        direction TB
-        A1[用户操作] --> A2[平台端 API]
-        A2 --> A3[业务逻辑处理]
-        A3 --> A4[任务入队]
-        A4 --> A5[Kafka/Redis 队列]
-        A5 --> A6[Agent 拉取]
-        A6 --> A7[Executor 执行]
-        A7 --> A8[状态上报]
-        A8 --> A9[平台端更新]
-    end
-    
-    subgraph "插件流程 Plugin Flow"
-        direction TB
-        B1[Pipeline DSL] --> B2[插件解析]
-        B2 --> B3[go-plugin gRPC]
-        B3 --> B4[生成任务结构]
-        B4 --> B5[返回标准格式]
-        B5 --> B6[Agent 执行]
-    end
-    
-    A7 -.->|调用插件| B3
-    B5 --> A7
-```
+H --> U
 
-```mermaid
-erDiagram
-    ORGANIZATION ||--o{ TEAM : contains
-    TEAM ||--o{ PROJECT : contains
-    PROJECT ||--o{ PIPELINE : contains
-    PIPELINE ||--o{ BUILD : has
-    BUILD ||--o{ DEPLOY : has
-    
-    USER ||--o{ USER_ROLE_BINDING : has
-    ROLE ||--o{ USER_ROLE_BINDING : assigned_to
-    ROLE ||--o{ ROLE_MENU_BINDING : has
-    MENU ||--o{ ROLE_MENU_BINDING : assigned_to
-    
-    ORGANIZATION {
-        string org_id PK
-        string name
-        timestamp created_at
-        timestamp updated_at
-    }
-    
-    TEAM {
-        string team_id PK
-        string org_id FK
-        string name
-        timestamp created_at
-    }
-    
-    PROJECT {
-        string project_id PK
-        string team_id FK
-        string name
-        timestamp created_at
-    }
-    
-    PIPELINE {
-        string pipeline_id PK
-        string project_id FK
-        string name
-        text dsl_config
-        timestamp created_at
-    }
-    
-    BUILD {
-        string build_id PK
-        string pipeline_id FK
-        string status
-        timestamp created_at
-    }
-    
-    USER {
-        string user_id PK
-        string username
-        string email
-        timestamp created_at
-    }
-    
-    ROLE {
-        string role_id PK
-        string name
-        string scope
-        timestamp created_at
-    }
-```
+J --> V
+K --> V
+L --> V
 
-```mermaid
-graph TB
-    subgraph "Pipeline DSL 解析器架构 Pipeline DSL Parser Architecture"
-        direction TB
-        
-        subgraph "输入层 Input Layer"
-            A1[数据库 dsl_config<br/>JSON 格式] --> A2[Pipeline Service]
-            A2 --> A3[读取 DSL 配置]
-        end
-        
-        subgraph "解析层 Parsing Layer"
-            direction TB
-            A3 --> B1[JSON 反序列化<br/>sonic.Unmarshal]
-            B1 --> B2[Pipeline Schema<br/>结构体映射]
-            B2 --> B3[Pipeline 对象]
-            B3 --> B4[Jobs 数组]
-            B4 --> B5[Steps 数组]
-        end
-        
-        subgraph "验证层 Validation Layer"
-            direction TB
-            B5 --> C1[Schema 验证]
-            C1 --> C2[必填字段检查]
-            C2 --> C3[类型验证]
-            C3 --> C4[引用完整性检查]
-        end
-        
-        subgraph "处理层 Processing Layer"
-            direction TB
-            C4 --> D1[变量解释器<br/>Variable Interpreter]
-            D1 --> D2[环境变量替换<br/>${VAR}]
-            D2 --> D3[条件评估器<br/>When Condition Eval]
-            D3 --> D4[表达式解析<br/>expr-lang/expr]
-            D4 --> D5[上下文注入<br/>ExecutionContext]
-        end
-        
-        subgraph "任务生成层 Task Generation Layer"
-            direction TB
-            D5 --> E1[Pipeline Runner]
-            E1 --> E2[Job Runner<br/>并发控制]
-            E2 --> E3[Step Runner]
-            E3 --> E4[任务结构生成<br/>Job/Step/Task]
-            E4 --> E5[执行计划构建]
-        end
-        
-        subgraph "插件集成层 Plugin Integration Layer"
-            direction TB
-            E5 --> F1[插件管理器<br/>Plugin Manager]
-            F1 --> F2[go-plugin gRPC]
-            F2 --> F3[插件调用<br/>Execute Method]
-            F3 --> F4[Source 插件<br/>Git/SVN/Artifact]
-            F3 --> F5[Action 插件<br/>Shell/Docker/K8s]
-            F3 --> F6[Target 插件<br/>Deploy/Notify]
-        end
-        
-        subgraph "执行层 Execution Layer"
-            direction TB
-            F4 --> G1[Agent 选择器<br/>Agent Selector]
-            F5 --> G1
-            F6 --> G1
-            G1 --> G2[任务队列<br/>Kafka/Redis]
-            G2 --> G3[Executor 执行]
-            G3 --> G4[状态上报]
-        end
-    end
-    
-    style A1 fill:#e3f2fd
-    style B1 fill:#fff3e0
-    style C1 fill:#f3e5f5
-    style D1 fill:#e8f5e9
-    style E1 fill:#fff9c4
-    style F1 fill:#fce4ec
-    style G1 fill:#e0f2f1
-```
-
-```mermaid
-sequenceDiagram
-    participant User as 用户/API
-    participant Service as Pipeline Service
-    participant DB as MySQL Database
-    participant Parser as DSL Parser
-    participant Interpreter as Variable Interpreter
-    participant Runner as Pipeline Runner
-    participant Plugin as Plugin Manager
-    participant Agent as Agent/Executor
-    
-    User->>Service: 触发 Pipeline 执行
-    Service->>DB: 查询 dsl_config (JSON)
-    DB-->>Service: 返回 DSL 配置
-    
-    Service->>Parser: 解析 DSL JSON
-    Parser->>Parser: JSON 反序列化
-    Parser->>Parser: Schema 验证
-    Parser-->>Service: Pipeline 结构体
-    
-    Service->>Interpreter: 变量替换
-    Interpreter->>Interpreter: 解析 ${VAR}
-    Interpreter->>Interpreter: 环境变量注入
-    Interpreter-->>Service: 处理后的 Pipeline
-    
-    Service->>Runner: 执行 Pipeline
-    Runner->>Runner: 评估 When 条件
-    Runner->>Runner: 并发控制
-    
-    loop 每个 Job
-        Runner->>Runner: Job Runner
-        loop 每个 Step
-            Runner->>Runner: Step Runner
-            Runner->>Plugin: 调用插件 (uses)
-            Plugin->>Plugin: go-plugin gRPC
-            Plugin-->>Runner: 插件执行结果
-        end
-    end
-    
-    Runner->>Agent: 提交任务到队列
-    Agent->>Agent: 执行任务
-    Agent-->>Service: 上报状态
-    Service->>DB: 更新执行状态
-```
-
-```mermaid
-graph LR
-    subgraph "DSL 数据结构 DSL Data Structure"
-        direction TB
-        A[Pipeline<br/>namespace, version, variables]
-        A --> B[Jobs[]<br/>name, concurrency, timeout]
-        B --> C[Steps[]<br/>name, uses, action, args]
-        B --> D[Source<br/>type: git/svn/artifact]
-        B --> E[Approval<br/>required, plugin, params]
-        B --> F[Target<br/>type: k8s/docker/s3]
-        B --> G[Notify<br/>on_success, on_failure]
-    end
-    
-    subgraph "解析后的执行结构 Execution Structure"
-        direction TB
-        H[PipelineRunner]
-        H --> I[JobRunner<br/>并发组管理]
-        I --> J[StepRunner<br/>顺序执行]
-        J --> K[Plugin Executor<br/>uses: plugin-name]
-        K --> L[Task<br/>标准化任务格式]
-    end
-    
-    A -.->|解析| H
-    B -.->|映射| I
-    C -.->|映射| J
-    C -.->|uses 字段| K
-    
-    style A fill:#e1f5ff
-    style B fill:#e1f5ff
-    style C fill:#e1f5ff
-    style H fill:#fff4e1
-    style I fill:#fff4e1
-    style J fill:#fff4e1
-    style K fill:#e8f5e9
+V --> W
+V --> X
+Y --> V
 ```
