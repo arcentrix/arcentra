@@ -27,7 +27,43 @@ type Response struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-// WithRepJSON 只返回json数据
+type ResponseErr struct {
+	ErrCode   int    `json:"code"`
+	ErrMsg    any    `json:"errMsg"`
+	Path      string `json:"path,omitempty"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+// WithRepErr return operation result, return struct with path field
+func WithRepErr(c *fiber.Ctx, code int, errMsg string, path string) error {
+	return c.JSON(ResponseErr{
+		ErrCode:   code,
+		ErrMsg:    errMsg,
+		Path:      path,
+		Timestamp: time.Now().Unix(),
+	})
+}
+
+// WithRepErrMsg return error json data
+func WithRepErrMsg(c *fiber.Ctx, code int, errMsg string, path string) error {
+	return c.JSON(ResponseErr{
+		ErrCode:   code,
+		ErrMsg:    errMsg,
+		Path:      path,
+		Timestamp: time.Now().Unix(),
+	})
+}
+
+// WithRepErrNotData return error json data, return struct without path field
+func WithRepErrNotData(c *fiber.Ctx, errMsg string) error {
+	return c.JSON(ResponseErr{
+		ErrCode:   Success.Code,
+		ErrMsg:    errMsg,
+		Timestamp: time.Now().Unix(),
+	})
+}
+
+// WithRepJSON return success json data
 func WithRepJSON(c *fiber.Ctx, detail any) error {
 	return c.JSON(Response{
 		Code:      Success.Code,
@@ -37,7 +73,7 @@ func WithRepJSON(c *fiber.Ctx, detail any) error {
 	})
 }
 
-// WithRepMsg 返回自定义code, msg
+// WithRepMsg return custom code, msg
 func WithRepMsg(c *fiber.Ctx, code int, msg string) error {
 	return c.JSON(Response{
 		Code:      code,
@@ -46,7 +82,7 @@ func WithRepMsg(c *fiber.Ctx, code int, msg string) error {
 	})
 }
 
-// WithRepDetail 返回自定义code, msg, detail
+// WithRepDetail return custom code, msg, detail
 func WithRepDetail(c *fiber.Ctx, code int, msg string, detail any) error {
 	return c.JSON(Response{
 		Code:      code,
@@ -56,7 +92,7 @@ func WithRepDetail(c *fiber.Ctx, code int, msg string, detail any) error {
 	})
 }
 
-// WithRepNotDetail 只成功的返回操作结果，返回结构体没有detail字段
+// WithRepNotDetail return success json data, return struct without detail field
 func WithRepNotDetail(c *fiber.Ctx) error {
 	return c.JSON(Response{
 		Code:      Success.Code,

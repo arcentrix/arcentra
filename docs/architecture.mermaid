@@ -1,61 +1,76 @@
-```markdown
-graph TB
+flowchart LR
+  %% Arcentra high-level architecture derived from current code and docs.
 
-subgraph Platform
-A[Organization] --> B[Team]
-B --> C[Project]
-C --> D[Pipeline]
-D --> E[Build]
-E --> F[Deploy]
-R[RBAC] --> A
-R --> B
-R --> C
-R --> D
-R --> E
-R --> F
-end
+  subgraph Clients["Clients"]
+    UI["Web Console / API Clients"]
+    CLI["CLI"]
+    SCM["SCM Webhook Source"]
+  end
 
-subgraph Agent
-G[gRPC Client] --> H[Queue Consumer]
-H --> I[Executor]
-I --> J[Shell Executor]
-I --> K[Docker Executor]
-I --> L[Kubernetes Executor]
-I --> M[Plugin Executor]
-M --> N[Status Report]
-end
+  subgraph ControlPlane["Arcentra Control Plane (cmd/arcentra)"]
+    HTTP["Fiber HTTP API<br/>internal/engine/router/*"]
+    GRPCS["gRPC Server<br/>internal/pkg/grpc/grpc_server.go"]
+    APP["Service Layer<br/>internal/engine/service/*"]
+    PIPE["Pipeline Service<br/>service_pipeline_pb.go"]
+    REPO["Repository Layer<br/>internal/engine/repo/*"]
+    PM["Plugin Manager<br/>pkg/plugin"]
+    STORE["Storage Provider<br/>internal/pkg/storage"]
+    CRON["Cron Scheduler<br/>pkg/cron"]
+  end
 
-subgraph Storage
-S[(MySQL)]
-T[(Kafka)]
-U[(Redis)]
-end
+  subgraph Runtime["Pipeline Runtime (internal/pkg/pipeline)"]
+    SPEC["Spec Decode + Validate<br/>spec/codec + validation"]
+    EXECCTX["Execution Context<br/>variables / when / env"]
+    TF["Task Framework<br/>prepare > create > start > queue > wait"]
+    SR["Step Runner<br/>builtin/plugin/local/remote"]
+  end
 
-subgraph Infrastructure
-V[Kubernetes]
-W[Helm]
-X[Kustomize]
-Y[ArgoCD]
-end
+  subgraph AgentPlane["Agent Runtime (cmd/arcentra-agent)"]
+    AGHTTP["Agent HTTP (health/version)"]
+    AGGRPC["gRPC Client + Heartbeat<br/>internal/agent/bootstrap"]
+    WORKER["TaskQueue Worker<br/>internal/agent/taskqueue/worker.go"]
+    AEXEC["Agent Executor<br/>internal/pkg/executor/*"]
+  end
 
-D --> T
-T --> H
-N --> D
+  subgraph Infra["Infrastructure"]
+    MYSQL["MySQL<br/>metadata + pipeline/runs"]
+    REDIS["Redis Cache / Stream"]
+    KAFKA["Kafka<br/>TaskQueue + Event/Log topics"]
+    GIT["Git Repository<br/>pipeline file source of truth"]
+    OBS["Metrics / Trace / Logs"]
+  end
 
-A --> S
-B --> S
-C --> S
-D --> S
-E --> S
-F --> S
+  UI --> HTTP
+  CLI --> HTTP
+  SCM --> HTTP
 
-H --> U
+  HTTP --> APP
+  APP --> PIPE
+  PIPE --> REPO
+  APP --> PM
+  APP --> STORE
+  APP --> GRPCS
+  CRON --> APP
 
-J --> V
-K --> V
-L --> V
+  PIPE --> SPEC
+  SPEC --> EXECCTX
+  EXECCTX --> TF
+  TF --> SR
+  SR --> PM
+  SR --> AEXEC
 
-V --> W
-V --> X
-Y --> V
-```
+  REPO --> MYSQL
+  REPO --> REDIS
+  STORE --> MYSQL
+  PIPE <--> GIT
+
+  TF --> KAFKA
+  WORKER --> KAFKA
+  AGGRPC --> GRPCS
+  AGHTTP --> AGGRPC
+  WORKER --> AEXEC
+  AEXEC --> PM
+
+  ControlPlane --> OBS
+  AgentPlane --> OBS
+  Runtime --> OBS

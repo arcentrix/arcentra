@@ -13,8 +13,6 @@
 
 **面向现代工程系统的云原生 CI/CD 控制平面。**
 
-<p align="center"><em>架构图：<a href="./docs/architecture.mermaid">docs/architecture.mermaid</a></em></p>
-
 </div>
 
 Arcentra 是一个开源 CI/CD 控制平面，面向需要集中编排、分布执行的大规模工程体系。

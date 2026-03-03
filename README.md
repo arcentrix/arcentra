@@ -13,8 +13,6 @@
 
 **A Cloud-native CI/CD Control Plane for modern engineering systems.**
 
-<p align="center"><em>Architecture Diagram: <a href="./docs/architecture.mermaid">docs/architecture.mermaid</a></em></p>
-
 </div>
 
 Arcentra is an open-source CI/CD control plane built for teams that need centralized orchestration with distributed execution.
