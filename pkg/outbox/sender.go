@@ -43,9 +43,10 @@ type SendResult struct {
 }
 
 // Sender sends events to the Gateway.
+// lastKnownSeq is the last locally committed (acked) seq; send it in handshake so the server can align and avoid reprocessing.
 // Implementations (e.g. gateway.GrpcSender) live in the service layer.
 type Sender interface {
-	Send(ctx context.Context, events []Event) (SendResult, error)
+	Send(ctx context.Context, lastKnownSeq uint64, events []Event) (SendResult, error)
 }
 
 // RecordToEvent converts a WAL Record to Event for sending.

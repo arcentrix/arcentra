@@ -22,8 +22,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/plugin"
 )
 
-// Manager 执行器管理器
-// 负责管理和选择合适的执行器
+// Manager 执行器管理器，负责注册与选择执行器。
 type Manager struct {
 	executors []Executor
 	mu        sync.RWMutex
@@ -31,22 +30,21 @@ type Manager struct {
 	logPub    LogPublisher
 }
 
-// NewExecutorManager 创建执行器管理器
+// NewExecutorManager 创建执行器管理器。
 func NewExecutorManager() *Manager {
 	return &Manager{
 		executors: make([]Executor, 0),
 	}
 }
 
-// Register 注册执行器
+// Register 注册执行器。
 func (m *Manager) Register(executor Executor) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.executors = append(m.executors, executor)
 }
 
-// SelectExecutor 选择合适的执行器
-// 按照注册顺序检查每个执行器是否可以执行
+// SelectExecutor 按注册顺序选择第一个可执行该请求的执行器。
 func (m *Manager) SelectExecutor(req *ExecutionRequest) (Executor, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -60,8 +58,7 @@ func (m *Manager) SelectExecutor(req *ExecutionRequest) (Executor, error) {
 	return nil, fmt.Errorf("no executor available for step: %s", req.Step.Name)
 }
 
-// Execute 执行 step
-// 自动选择合适的执行器并执行
+// Execute 选择执行器并执行 step，会触发 started/success/failure 事件。
 func (m *Manager) Execute(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
 	executor, err := m.SelectExecutor(req)
 	if err != nil {
@@ -81,7 +78,7 @@ func (m *Manager) Execute(ctx context.Context, req *ExecutionRequest) (*Executio
 	return result, nil
 }
 
-// ListExecutors 列出所有注册的执行器
+// ListExecutors 列出所有已注册执行器。
 func (m *Manager) ListExecutors() []Executor {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -91,7 +88,7 @@ func (m *Manager) ListExecutors() []Executor {
 	return result
 }
 
-// GetExecutor 根据名称获取执行器
+// GetExecutor 按名称返回执行器。
 func (m *Manager) GetExecutor(name string) Executor {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

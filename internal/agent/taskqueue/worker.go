@@ -25,6 +25,7 @@ import (
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	steprunv1 "github.com/arcentrix/arcentra/api/steprun/v1"
 	"github.com/arcentrix/arcentra/internal/agent/config"
+	"github.com/arcentrix/arcentra/internal/pkg/executor"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/nova"
@@ -34,7 +35,10 @@ import (
 
 var runningStepRunCancel sync.Map
 
-func StartWorker(ctx context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper) (nova.TaskQueue, error) {
+// StartWorker starts the task queue worker. When execManager is non-nil, step run tasks
+// are executed via executor.Manager (events go through Outbox when SetEventPublisher is used);
+// otherwise the legacy executeStepRun (shell only) is used.
+func StartWorker(ctx context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper, execManager *executor.Manager) (nova.TaskQueue, error) {
 	if agentConf == nil {
 		return nil, nil
 	}
@@ -81,6 +85,9 @@ func StartWorker(ctx context.Context, agentConf *config.AgentConfig, grpcClient 
 				"jobName", payload.JobName,
 				"stepName", payload.StepName,
 			)
+			if execManager != nil {
+				return executeStepRunViaExecutor(ctx, agentConf, grpcClient, execManager, &payload)
+			}
 			return executeStepRun(ctx, agentConf, grpcClient, &payload)
 		default:
 			log.Debugw("unknown task type", "type", task.Type)
@@ -113,6 +120,65 @@ func withMessageCodec(value string) nova.QueueOption {
 		return nil
 	}
 	return nova.WithMessageCodec(codec)
+}
+
+func executeStepRunViaExecutor(
+	ctx context.Context,
+	agentConf *config.AgentConfig,
+	grpcClient *grpc.ClientWrapper,
+	execManager *executor.Manager,
+	payload *taskqueue.StepRunTaskPayload,
+) error {
+	if payload == nil {
+		return nil
+	}
+	stepCtx, cancel := context.WithCancel(ctx)
+	runningStepRunCancel.Store(payload.StepRunID, cancel)
+	defer func() {
+		runningStepRunCancel.Delete(payload.StepRunID)
+		cancel()
+	}()
+
+	start := time.Now()
+	_ = reportStepRunStatus(grpcClient, agentConf, payload.StepRunID, steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING, 0, "", start, 0, nil)
+
+	req := PayloadToExecutionRequest(payload, agentConf.Agent.JobTimeout)
+	result, execErr := execManager.Execute(stepCtx, req)
+	end := time.Now().Unix()
+	metrics := map[string]string{"executor": "agent-shell"}
+	if result != nil && result.Metadata != nil {
+		if v, ok := result.Metadata["outputBytes"]; ok {
+			if s, ok := v.(string); ok {
+				metrics["outputBytes"] = s
+			}
+		}
+	}
+	if result != nil && len(result.Output) > 0 {
+		metrics["outputBytes"] = fmt.Sprintf("%d", len(result.Output))
+	}
+	status, exitCode, errMsg := resultToStepRunStatus(stepCtx, result, execErr)
+	_ = reportStepRunStatus(grpcClient, agentConf, payload.StepRunID, status, exitCode, errMsg, start, end, metrics)
+	return execErr
+}
+
+func resultToStepRunStatus(ctx context.Context, result *executor.ExecutionResult, execErr error) (steprunv1.StepRunStatus, int32, string) {
+	if ctx.Err() == context.DeadlineExceeded {
+		return steprunv1.StepRunStatus_STEP_RUN_STATUS_TIMEOUT, 1, "timeout"
+	}
+	if ctx.Err() == context.Canceled {
+		return steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED, 1, "cancelled"
+	}
+	if result == nil {
+		errMsg := ""
+		if execErr != nil {
+			errMsg = execErr.Error()
+		}
+		return steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, 1, errMsg
+	}
+	if result.Success {
+		return steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS, result.ExitCode, ""
+	}
+	return steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, result.ExitCode, result.Error
 }
 
 func CancelStepRun(stepRunId string) bool {

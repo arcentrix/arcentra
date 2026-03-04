@@ -28,10 +28,12 @@ import (
 	"github.com/arcentrix/arcentra/internal/agent/router"
 	"github.com/arcentrix/arcentra/internal/agent/service"
 	"github.com/arcentrix/arcentra/internal/agent/taskqueue"
+	"github.com/arcentrix/arcentra/internal/pkg/executor"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
 	"github.com/arcentrix/arcentra/pkg/cron"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/metrics"
+	"github.com/arcentrix/arcentra/pkg/outbox"
 	"github.com/arcentrix/arcentra/pkg/safe"
 	"github.com/arcentrix/arcentra/pkg/shutdown"
 	"github.com/gofiber/fiber/v2"
@@ -49,6 +51,8 @@ type Agent struct {
 	ConfigFile    string // Configuration file path
 	ShutdownMgr   *shutdown.Manager
 	TaskQueue     interface{ Stop() error }
+	Outbox        *outbox.Outbox    // local outbox for reliable event sending; nil when agent id not set
+	ExecManager   *executor.Manager // step executor (ShellExecutor + events via Outbox)
 }
 
 type InitAppFunc func(configPath string) (*Agent, func(), error)
@@ -60,12 +64,14 @@ func NewAgent(
 	logger *log.Logger,
 	agentConf *config.AgentConfig,
 	shutdownMgr *shutdown.Manager,
+	outbox *outbox.Outbox,
+	execManager *executor.Manager,
 ) (*Agent, func(), error) {
 	httpApp := rt.Router()
 
 	// Create agent service
 	agentService := service.NewAgentServiceImpl(agentConf, grpcClient)
-	taskQueue, err := taskqueue.StartWorker(context.Background(), agentConf, grpcClient)
+	taskQueue, err := taskqueue.StartWorker(context.Background(), agentConf, grpcClient, execManager)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -96,6 +102,11 @@ func NewAgent(
 				log.Errorw("failed to stop task queue", "error", err)
 			}
 		}
+		if outbox != nil {
+			if err := outbox.Close(); err != nil {
+				log.Errorw("failed to close outbox", "error", err)
+			}
+		}
 	}
 
 	app := &Agent{
@@ -107,6 +118,8 @@ func NewAgent(
 		AgentService:  agentService,
 		ShutdownMgr:   shutdownMgr,
 		TaskQueue:     taskQueue,
+		Outbox:        outbox,
+		ExecManager:   execManager,
 	}
 	return app, cleanup, nil
 }

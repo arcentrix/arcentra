@@ -33,9 +33,9 @@ type PluginExecutor struct {
 	logger        log.Logger
 }
 
-const executorNamePlugin = "plugin"
+const namePlugin = "plugin"
 
-// NewPluginExecutor 创建插件执行器
+// NewPluginExecutor 创建插件执行器。
 func NewPluginExecutor(pluginManager *plugin.Manager, logger log.Logger) *PluginExecutor {
 	return &PluginExecutor{
 		pluginManager: pluginManager,
@@ -44,13 +44,13 @@ func NewPluginExecutor(pluginManager *plugin.Manager, logger log.Logger) *Plugin
 	}
 }
 
-// Name 返回执行器名称
+// Name 返回执行器名称。
 func (e *PluginExecutor) Name() string {
-	return executorNamePlugin
+	return namePlugin
 }
 
-// CanExecute 检查是否可以执行
-// 插件执行器可以执行所有不需要 RunRemotely 的 step
+// CanExecute 检查是否可以执行。
+// 不执行 RunRemotely 的 step 由插件执行器处理。
 func (e *PluginExecutor) CanExecute(req *ExecutionRequest) bool {
 	if req == nil || req.Step == nil {
 		return false
@@ -59,7 +59,7 @@ func (e *PluginExecutor) CanExecute(req *ExecutionRequest) bool {
 	return !req.Step.RunRemotely
 }
 
-// Execute 执行 step
+// Execute 执行 step。
 // 根据 step 的 args 判断执行方式：
 // - 如果 args 中包含 url 字段，使用 HTTP 执行
 // - 否则使用 Shell/Plugin 执行（本地或远程）

@@ -121,7 +121,7 @@ func (o *Outbox) sendBatch() {
 	if len(events) == 0 {
 		return
 	}
-	result, err := o.sender.Send(o.ctx, events)
+	result, err := o.sender.Send(o.ctx, lastAcked, events)
 	if err != nil {
 		return
 	}

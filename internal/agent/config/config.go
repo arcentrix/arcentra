@@ -40,8 +40,20 @@ type AgentConfig struct {
 	Redis        cache.Redis          `mapstructure:"redis"`
 	TaskQueue    nova.TaskQueueConfig `mapstructure:"taskQueue"`
 	MessageQueue MqConfig             `mapstructure:"messageQueue"`
+	Outbox       OutboxConfig         `mapstructure:"outbox"`
 	Metrics      metrics.Config       `mapstructure:"metrics"`
 	Pprof        pprof.Config         `mapstructure:"pprof"`
+}
+
+// OutboxConfig holds agent-side outbox (WAL) settings for reliable event sending.
+// WAL directory is fixed at 工作目录/data/wal (work directory = agent.workspaceDir; default "./data/wal" when workspaceDir is empty).
+type OutboxConfig struct {
+	// SendIntervalMs is the send loop poll interval in milliseconds (default: 50).
+	SendIntervalMs int `mapstructure:"sendIntervalMs"`
+	// SendBatchSize is the batch size per send call (default: 100).
+	SendBatchSize int `mapstructure:"sendBatchSize"`
+	// MaxDiskUsageMB is the max disk usage in MB; Append blocks when exceeded (default: 5120).
+	MaxDiskUsageMB int64 `mapstructure:"maxDiskUsageMB"`
 }
 
 type MqConfig struct {

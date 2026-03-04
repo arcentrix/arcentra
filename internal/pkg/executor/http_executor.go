@@ -26,6 +26,8 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
+const nameHTTP = "http"
+
 // HTTPExecutor HTTP 执行器
 // 执行 HTTP 类型的请求
 // 注意：HTTPExecutor 不应直接注册到 Manager，而是通过 PluginExecutor 内部调用
@@ -47,13 +49,13 @@ func NewHTTPExecutor(logger log.Logger) *HTTPExecutor {
 	}
 }
 
-// Name 返回执行器名称
+// Name 返回执行器名称。
 func (e *HTTPExecutor) Name() string {
-	return "http"
+	return nameHTTP
 }
 
-// CanExecute 检查是否可以执行
-// HTTP 执行器可以执行 ExecutionType 为 HTTP 的 plugin
+// CanExecute 检查是否可以执行。
+// HTTP 执行器由 PluginExecutor 按需调用，不直接注册到 Manager。
 func (e *HTTPExecutor) CanExecute(req *ExecutionRequest) bool {
 	if req == nil || req.Step == nil {
 		return false
@@ -64,7 +66,7 @@ func (e *HTTPExecutor) CanExecute(req *ExecutionRequest) bool {
 	return false
 }
 
-// Execute 执行 HTTP 请求
+// Execute 执行 HTTP 请求。
 func (e *HTTPExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
 	result := NewExecutionResult(e.Name())
 

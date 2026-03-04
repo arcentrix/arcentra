@@ -65,15 +65,17 @@ type RemoteExecutionResult struct {
 	Metrics   map[string]string
 }
 
-// UnifiedExecutor 统一执行器
-// 根据 RunRemotely 字段自动选择本地 plugin 执行或远程执行
+const nameUnified = "unified"
+
+// UnifiedExecutor 统一执行器。
+// 根据 RunRemotely 自动选择本地 plugin 或远程执行。
 type UnifiedExecutor struct {
 	pluginManager  *plugin.Manager
 	remoteExecutor RemoteExecutor
 	logger         log.Logger
 }
 
-// NewUnifiedExecutor 创建统一执行器
+// NewUnifiedExecutor 创建统一执行器。
 func NewUnifiedExecutor(
 	pluginManager *plugin.Manager,
 	remoteExecutor RemoteExecutor,
@@ -86,13 +88,13 @@ func NewUnifiedExecutor(
 	}
 }
 
-// Name 返回执行器名称
+// Name 返回执行器名称。
 func (e *UnifiedExecutor) Name() string {
-	return "unified"
+	return nameUnified
 }
 
-// CanExecute 检查是否可以执行
-// 统一执行器可以执行所有 step（只要 pluginManager 或 remoteExecutor 可用）
+// CanExecute 检查是否可以执行。
+// 在 pluginManager 或 remoteExecutor 可用时可执行 step。
 func (e *UnifiedExecutor) CanExecute(req *ExecutionRequest) bool {
 	if req == nil || req.Step == nil {
 		return false

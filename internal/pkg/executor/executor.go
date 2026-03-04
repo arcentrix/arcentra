@@ -16,6 +16,7 @@ package executor
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -197,4 +198,44 @@ func (r *ExecutionResult) WithMetadata(key string, value any) *ExecutionResult {
 	}
 	r.Metadata[key] = value
 	return r
+}
+
+// ParseTimeout 解析超时字符串，无效或空时使用 defaultSec 作为默认秒数。
+func ParseTimeout(raw string, defaultSec int) time.Duration {
+	if strings.TrimSpace(raw) != "" {
+		if d, err := time.ParseDuration(raw); err == nil {
+			return d
+		}
+	}
+	if defaultSec > 0 {
+		return time.Duration(defaultSec) * time.Second
+	}
+	return 0
+}
+
+// BuildCommandFromStepArgs 从 step.Args 中提取 shell 命令（run / script / command / commands）。
+// 供 ShellExecutor 及需要从 StepInfo 取命令的调用方使用。
+func BuildCommandFromStepArgs(step *StepInfo) string {
+	if step == nil || step.Args == nil {
+		return ""
+	}
+	for _, key := range []string{"run", "script", "command"} {
+		if value, ok := step.Args[key]; ok {
+			if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
+				return text
+			}
+		}
+	}
+	if value, ok := step.Args["commands"]; ok {
+		if list, ok := value.([]any); ok {
+			parts := make([]string, 0, len(list))
+			for i := range list {
+				if text, ok := list[i].(string); ok && strings.TrimSpace(text) != "" {
+					parts = append(parts, text)
+				}
+			}
+			return strings.Join(parts, "\n")
+		}
+	}
+	return ""
 }

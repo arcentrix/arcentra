@@ -16,6 +16,7 @@ package outbox
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -312,6 +313,82 @@ func TestOutbox_SendUpdatesCommit(t *testing.T) {
 	if lastAcked < 1 {
 		t.Errorf("commit not updated: lastAcked=%d", lastAcked)
 	}
+	// Handshake must carry lastKnownSeq from commit (first send gets 0)
+	if len(mock.lastKnownSeq) < 1 || mock.lastKnownSeq[0] != 0 {
+		t.Errorf("first Send should get lastKnownSeq=0, got %v", mock.lastKnownSeq)
+	}
+}
+
+// TestOutbox_NoCommitOnSendFailure verifies that when Send returns an error, commit is not updated
+// (so the next send batch will resume from last_acked+1 with the same events).
+func TestOutbox_NoCommitOnSendFailure(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		WALDir:         dir,
+		AgentId:        "agent1",
+		FsyncInterval:  5 * time.Millisecond,
+		SendInterval:   15 * time.Millisecond,
+		MaxDiskUsageMB: 100,
+	}
+	cfg.SetDefaults()
+	mock := &failingThenOKSender{}
+	o, err := NewOutbox(cfg, mock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if closeErr := o.Close(); closeErr != nil {
+			t.Errorf("close outbox: %v", closeErr)
+		}
+	}()
+	ctx := context.Background()
+	_, _ = o.Append(ctx, []byte(`{"n":1}`))
+	_, _ = o.Append(ctx, []byte(`{"n":2}`))
+	time.Sleep(20 * time.Millisecond) // let flush
+	// First sendBatch: Send fails -> commit must not advance
+	time.Sleep(30 * time.Millisecond) // allow 2 ticker cycles
+	cs := NewCommitStore(filepath.Join(dir, "agent1"))
+	lastAcked, err := cs.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lastAcked != 0 {
+		t.Errorf("after first Send failure commit must stay 0, got lastAcked=%d", lastAcked)
+	}
+	// Next sendBatch: Send succeeds -> commit advances
+	time.Sleep(30 * time.Millisecond)
+	lastAcked2, _ := cs.Read()
+	if lastAcked2 < 2 {
+		t.Errorf("after successful Send commit should be >= 2, got lastAcked=%d", lastAcked2)
+	}
+	// First Send call must have received lastKnownSeq=0 (resume from 0+1)
+	if len(mock.lastKnownSeq) < 1 || mock.lastKnownSeq[0] != 0 {
+		t.Errorf("first Send should get lastKnownSeq=0, got %v", mock.lastKnownSeq)
+	}
+	// Second Send call must have received lastKnownSeq=0 again (we had not committed)
+	if len(mock.lastKnownSeq) < 2 || mock.lastKnownSeq[1] != 0 {
+		t.Errorf("second Send should get lastKnownSeq=0 (no commit after failure), got %v", mock.lastKnownSeq)
+	}
+}
+
+type failingThenOKSender struct {
+	callCount    int
+	lastKnownSeq []uint64
+}
+
+func (m *failingThenOKSender) Send(ctx context.Context, lastKnownSeq uint64, events []Event) (SendResult, error) {
+	m.callCount++
+	if m.lastKnownSeq == nil {
+		m.lastKnownSeq = make([]uint64, 0)
+	}
+	m.lastKnownSeq = append(m.lastKnownSeq, lastKnownSeq)
+	if m.callCount == 1 {
+		return SendResult{}, errors.New("network error")
+	}
+	if len(events) == 0 {
+		return SendResult{}, nil
+	}
+	return SendResult{LastSeq: events[len(events)-1].Seq}, nil
 }
 
 func TestPath_Sanitize(t *testing.T) {
@@ -328,14 +405,17 @@ func TestPath_Sanitize(t *testing.T) {
 }
 
 type mockSender struct {
-	sent [][]Event
+	sent         [][]Event
+	lastKnownSeq []uint64 // lastKnownSeq passed for each Send call
 }
 
-func (m *mockSender) Send(ctx context.Context, events []Event) (SendResult, error) {
+func (m *mockSender) Send(ctx context.Context, lastKnownSeq uint64, events []Event) (SendResult, error) {
 	if m.sent == nil {
 		m.sent = make([][]Event, 0)
+		m.lastKnownSeq = make([]uint64, 0)
 	}
 	m.sent = append(m.sent, append([]Event(nil), events...))
+	m.lastKnownSeq = append(m.lastKnownSeq, lastKnownSeq)
 	if len(events) == 0 {
 		return SendResult{}, nil
 	}
