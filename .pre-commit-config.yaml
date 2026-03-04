@@ -24,3 +24,10 @@ repos:
       - id: go-imports
       - id: no-go-testing
 #       - id: golangci-lint
+  - repo: local
+    hooks:
+      - id: addlicense
+        name: addlicense
+        entry: make addlicense
+        language: system
+        pass_filenames: false
