@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -70,7 +69,7 @@ func NewAgent(
 	httpApp := rt.Router()
 
 	// Create agent service
-	agentService := service.NewAgentServiceImpl(agentConf, grpcClient)
+	agentService := service.NewAgentServiceImpl(agentConf, grpcClient, metricsServer)
 	taskQueue, err := taskqueue.StartWorker(context.Background(), agentConf, grpcClient, execManager)
 	if err != nil {
 		return nil, nil, err
@@ -126,15 +125,12 @@ func NewAgent(
 
 // Bootstrap init app, return App instance and cleanup function
 func Bootstrap(configFile string, initApp InitAppFunc) (*Agent, func(), *config.AgentConfig, error) {
-	// Wire build App (所有依赖都由 wire 自动注入)
 	app, cleanup, err := initApp(configFile)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	// 获取配置（从 app 中获取）
 	agentConf := app.AgentConf
-	// 保存配置文件路径
 	app.ConfigFile = configFile
 
 	return app, cleanup, agentConf, nil
@@ -208,7 +204,15 @@ func Run(app *Agent, cleanup func()) {
 	}
 
 	// close components in order
-	app.tryUnregisterAgent()
+	resp, err := app.AgentService.Unregister(context.Background(), &agentv1.UnregisterRequest{})
+	if err != nil {
+		log.Errorw("Agent unregistration failed", "error", err)
+	}
+	if resp != nil && resp.Success {
+		log.Info("Agent unregistered successfully")
+	} else {
+		log.Errorw("Agent unregistration failed", "error", resp.Message)
+	}
 
 	// close HTTP server
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -258,12 +262,22 @@ func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 			if state == connectivity.Ready || state == connectivity.Idle {
 				// 连接成功，先注册，再启动心跳
 				log.Info("gRPC client connected, registering agent")
-				if err := app.tryRegisterAgent(); err != nil {
+				if _, err := app.AgentService.Register(context.Background(), &agentv1.RegisterRequest{}); err != nil {
 					log.Warnw("agent registration failed", "error", err)
 					return
 				}
 				log.Info("agent registration successful, starting heartbeat")
-				app.startPeriodicHeartbeat()
+				resp, err := app.AgentService.Heartbeat(context.Background(), nil)
+				if err != nil {
+					log.Warnw("heartbeat failed", "error", err)
+					return
+				}
+				if resp != nil && resp.Success {
+					log.Info("heartbeat successful")
+				} else {
+					log.Warnw("heartbeat failed", "error", resp.Message)
+					return
+				}
 				return
 			}
 		}
@@ -273,199 +287,4 @@ func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 	}
 
 	log.Warnw("wait gRPC client connection timeout, heartbeat not started", "timeout", maxWaitTime)
-}
-
-func (app *Agent) tryRegisterAgent() error {
-	if app == nil || app.AgentConf == nil || app.GrpcClient == nil || app.GrpcClient.AgentClient == nil {
-		return fmt.Errorf("agent grpc client is not ready")
-	}
-	req := &agentv1.RegisterRequest{
-		AgentId:               app.AgentConf.Agent.ID,
-		Token:                 app.AgentConf.Grpc.Token,
-		Ip:                    "",
-		Os:                    runtime.GOOS,
-		Arch:                  runtime.GOARCH,
-		Version:               "0.0.0",
-		MaxConcurrentStepRuns: int32(app.AgentConf.Agent.MaxConcurrentJobs),
-		Labels:                app.AgentConf.Agent.Labels,
-	}
-	ctx, cancel := app.GrpcClient.WithTimeoutAndAuth(context.Background())
-	defer cancel()
-	resp, err := app.GrpcClient.AgentClient.Register(ctx, req)
-	if err != nil {
-		return err
-	}
-	if !resp.Success {
-		return fmt.Errorf("register rejected: %s", resp.Message)
-	}
-	if resp.AgentId != "" {
-		app.AgentConf.Agent.ID = resp.AgentId
-	}
-	if resp.HeartbeatInterval > 0 {
-		app.AgentConf.Agent.Interval = int(resp.HeartbeatInterval)
-	}
-	if len(resp.Labels) > 0 {
-		app.AgentConf.Agent.Labels = resp.Labels
-	}
-	return nil
-}
-
-func (app *Agent) tryUnregisterAgent() {
-	if app == nil || app.AgentConf == nil || app.GrpcClient == nil || app.GrpcClient.AgentClient == nil {
-		return
-	}
-	if app.AgentConf.Agent.ID == "" {
-		return
-	}
-	ctx, cancel := app.GrpcClient.WithTimeoutAndAuth(context.Background())
-	defer cancel()
-	_, err := app.GrpcClient.AgentClient.Unregister(ctx, &agentv1.UnregisterRequest{
-		AgentId: app.AgentConf.Agent.ID,
-		Reason:  "agent shutdown",
-	})
-	if err != nil {
-		log.Warnw("agent unregister failed", "agentId", app.AgentConf.Agent.ID, "error", err)
-	}
-}
-
-// startPeriodicHeartbeat starts a cron job that periodically calls Heartbeat to keep connection alive
-func (app *Agent) startPeriodicHeartbeat() {
-	appConf := app.AgentConf
-
-	if app.AgentService == nil {
-		log.Warn("AgentService is nil, skipping heartbeat setup")
-		return
-	}
-
-	// Get heartbeat interval from config (default to 60 seconds)
-	interval := appConf.Agent.Interval
-	if interval <= 0 {
-		interval = 60
-	}
-
-	// Create cron spec: @every {interval}s
-	spec := fmt.Sprintf("@every %ds", interval)
-
-	// Add heartbeat job to global cron
-	err := cron.AddFunc(spec, func() {
-		// Get current running step runs count from metrics
-		runningStepRunsCount := getRunningStepRunsCount(app.MetricsServer)
-
-		// Build heartbeat request
-		req := &agentv1.HeartbeatRequest{
-			AgentId:              appConf.Agent.ID,
-			AgentName:            appConf.Agent.Name,
-			Status:               agentv1.AgentStatus_AGENT_STATUS_ONLINE,
-			RunningStepRunsCount: runningStepRunsCount,
-			Timestamp:            time.Now().Unix(),
-		}
-
-		// Call Heartbeat through gRPC client
-		if app.GrpcClient != nil && app.GrpcClient.AgentClient != nil {
-			ctx, cancel := app.GrpcClient.WithTimeoutAndAuth(context.Background())
-			defer cancel()
-
-			resp, err := app.GrpcClient.AgentClient.Heartbeat(ctx, req)
-			if err != nil || !resp.Success {
-				log.Warnw("Periodic heartbeat failed", "error", err)
-				return
-			}
-			log.Debugw("Heartbeat Message", "message", resp.Message, "timestamp", resp.Timestamp)
-
-			// Update configuration from heartbeat response (except id, interval, labels)
-			// if app.ConfigFile != "" {
-			// 	if err := config.UpdateConfigFromHeartbeatResponse(app.ConfigFile, resp); err != nil {
-			// 		log.Warnw("Failed to update config from heartbeat response", "error", err)
-			// 	}
-			// }
-		}
-	}, "agent-heartbeat")
-	if err != nil {
-		log.Errorw("Failed to add heartbeat cron job", "error", err)
-		return
-	}
-
-	log.Infow("Added periodic heartbeat to crond", "interval", spec)
-
-	// Do initial heartbeat immediately
-	runningStepRunsCount := getRunningStepRunsCount(app.MetricsServer)
-	req := &agentv1.HeartbeatRequest{
-		AgentId:              appConf.Agent.ID,
-		AgentName:            appConf.Agent.Name,
-		Status:               agentv1.AgentStatus_AGENT_STATUS_ONLINE,
-		RunningStepRunsCount: runningStepRunsCount,
-		Timestamp:            time.Now().Unix(),
-	}
-
-	if app.GrpcClient != nil && app.GrpcClient.AgentClient != nil {
-		ctx, cancel := app.GrpcClient.WithTimeoutAndAuth(context.Background())
-		defer cancel()
-
-		resp, err := app.GrpcClient.AgentClient.Heartbeat(ctx, req)
-		if err != nil || !resp.Success {
-			log.Warnw("Initial heartbeat failed", "error", err)
-			return
-		}
-		log.Infow("Initial heartbeat Message", "message", resp.Message)
-
-		// Update configuration from heartbeat response (except id, interval, labels)
-		// if app.ConfigFile != "" {
-		// 	if err := config.UpdateConfigFromHeartbeatResponse(app.ConfigFile, resp); err != nil {
-		// 		log.Warnw("Failed to update config from heartbeat response", "error", err)
-		// 	}
-		// }
-	}
-}
-
-// getRunningStepRunsCount gets the current running step runs count from prometheus metrics
-// It searches for common metric names: agent_running_step_runs, running_step_runs, agent_step_runs_running
-func getRunningStepRunsCount(metricsServer *metrics.Server) int32 {
-	if metricsServer == nil {
-		return 0
-	}
-
-	registry := metricsServer.GetRegistry()
-	if registry == nil {
-		return 0
-	}
-
-	// Gather all metrics
-	metricFamilies, err := registry.Gather()
-	if err != nil {
-		log.Debugw("Failed to gather metrics", "error", err)
-		return 0
-	}
-
-	// Common metric names to check (including legacy names for backward compatibility)
-	metricNames := []string{
-		"agent_running_step_runs",
-		"running_step_runs",
-		"agent_step_runs_running",
-		"step_runs_running",
-		// Legacy metric names (for backward compatibility)
-		"agent_running_jobs",
-		"running_tasks",
-		"agent_running_tasks",
-		"agent_tasks_running",
-		"tasks_running",
-	}
-
-	// Search for the metric
-	for _, mf := range metricFamilies {
-		for _, name := range metricNames {
-			if mf.GetName() == name {
-				// Get the first metric value
-				for _, metric := range mf.GetMetric() {
-					if metric.Gauge != nil {
-						return int32(metric.Gauge.GetValue())
-					}
-					if metric.Counter != nil {
-						return int32(metric.Counter.GetValue())
-					}
-				}
-			}
-		}
-	}
-
-	return 0
 }
