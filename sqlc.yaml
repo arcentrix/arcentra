@@ -1,0 +1,41 @@
+# Copyright 2026 Arcentra Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# sqlc 配置文件，需在项目根目录执行: sqlc generate
+# 详见 https://docs.sqlc.dev/en/latest/reference/config.html
+
+version: "2"
+
+sql:
+  - engine: "mysql"
+    schema: "internal/db/schema"
+    queries: "internal/db/sql"
+    gen:
+      go:
+        package: "db"
+        out: "internal/db/queries"
+        sql_package: "database/sql"
+        sql_driver: "github.com/go-sql-driver/mysql"
+        emit_interface: true
+        emit_json_tags: true
+        emit_prepared_queries: false
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        query_parameter_limit: 0
+        overrides:
+          - db_type: "json"
+            go_type:
+              import: "gorm.io/datatypes"
+              package: "datatypes"
+              type: "JSON"

@@ -11,3 +11,4 @@ docs/*.md
 /cmd/arcentra/wire_gen.go
 /cmd/arcentra-agent/wire_gen.go
 .DS_Store
+/internal/db/queries/*.go

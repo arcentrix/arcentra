@@ -242,6 +242,35 @@ wire-clean:
 	@echo ">> wire files cleaned."
 
 # -----------------------------------------------------------------------------
+# sqlc (type-safe SQL code generation)
+# -----------------------------------------------------------------------------
+.PHONY: sqlc-install ## ensure sqlc is installed (install if missing)
+sqlc-install:
+	@command -v sqlc >/dev/null 2>&1 || { \
+		echo ">> sqlc not found, installing..."; \
+		go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest; \
+	}
+	@echo ">> sqlc installed: $$(which sqlc)"
+
+.PHONY: sqlc ## generate Go code from SQL (internal/db/sql + schema -> internal/db/queries)
+sqlc: sqlc-install
+	@echo ">> generating sqlc code..."
+	@sqlc generate
+	@echo ">> sqlc code generation done."
+
+.PHONY: sqlc-verify ## verify sqlc config and queries compile
+sqlc-verify: sqlc-install
+	@echo ">> verifying sqlc config and queries..."
+	@sqlc compile
+	@echo ">> sqlc verify done."
+
+.PHONY: sqlc-clean ## remove sqlc generated Go files
+sqlc-clean:
+	@echo ">> cleaning sqlc generated files..."
+	@rm -f internal/db/queries/*.go 2>/dev/null || true
+	@echo ">> sqlc generated files cleaned."
+
+# -----------------------------------------------------------------------------
 # Static analysis / code quality
 # -----------------------------------------------------------------------------
 .PHONY: staticcheck-install ## ensure staticcheck is installed (install if missing)
@@ -266,11 +295,17 @@ addlicense-install:
 	}
 	@echo ">> addlicense installed: $$(which addlicense)"
 
-.PHONY: addlicense ## run addlicense code analysis
+.PHONY: addlicense ## run addlicense (add headers to .go files, skip generated)
 addlicense: addlicense-install
 	@echo ">> running addlicense..."
-	@addlicense -v -l apache -c "Arcentra Authors." $(find . -name "*.go" -not -name "wire_gen.go" -not -name "*.pb.go" -not -name "*_grpc.pb.go")
-	@echo ">> addlicense analysis done."
+	@addlicense -v -l apache -c "Arcentra Authors." \
+		--skip-files "wire_gen\.go" \
+		--skip-files "\.pb\.go$$" \
+		--skip-files "_grpc\.pb\.go$$" \
+		--skip-dirs "./idea" \
+		--skip-dirs "./.vscode" \
+		--skip-dirs "./.cursor" \
+	@echo ">> addlicense done."
 
 # -----------------------------------------------------------------------------
 # Version management
