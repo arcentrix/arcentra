@@ -15,50 +15,41 @@
 package database
 
 import (
-	"fmt"
 	"time"
-
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
 const (
 	dataTablePrefix = "t_"
 )
 
-// SourceConfig represents a single database source/replica configuration
-type SourceConfig struct {
-	Host     string
-	Port     string
-	User     string
-	Password string
-	DBName   string
-}
-
-// MySQLConfig represents MySQL data source configuration
-type MySQLConfig struct {
-	Host     string `mapstructure:"host"`
-	Port     string `mapstructure:"port"`
-	User     string `mapstructure:"user"`
-	Password string `mapstructure:"password"`
-	DBName   string `mapstructure:"dbname"`
-	// Primary and Replicas for DBResolver support
-	// If Primary is empty, use Host/Port/User/Password/DBName as the default source
-	// If Replicas is empty, no read-write separation will be configured
-	Primary  []SourceConfig `mapstructure:"primary"`
-	Replicas []SourceConfig `mapstructure:"replicas"`
-}
-
-// Database represents the database configuration with common settings and data sources
-type Database struct {
-	// Common configuration for all data sources
+// DatabaseOptions holds common connection pool and logging options
+type DatabaseOptions struct {
 	OutPut       bool `mapstructure:"output"`
 	MaxOpenConns int  `mapstructure:"maxOpenConns"`
 	MaxIdleConns int  `mapstructure:"maxIdleConns"`
 	MaxLifetime  int  `mapstructure:"maxLifeTime"`
 	MaxIdleTime  int  `mapstructure:"maxIdleTime"`
-	// Data source configurations
-	MySQL MySQLConfig `mapstructure:"mysql"`
+}
+
+// SQLiteConfig represents SQLite data source configuration (DSN only)
+type SQLiteConfig struct {
+	DSN string `mapstructure:"dsn"`
+}
+
+// MySQLConfig represents MySQL data source configuration (DSN only)
+type MySQLConfig struct {
+	DSN string `mapstructure:"dsn"`
+}
+
+// Database represents the database configuration
+type Database struct {
+	// Driver is the database driver: "mysql" or "sqlite". Defaults to "mysql" when empty.
+	Driver string `mapstructure:"driver"`
+	// Data source configurations (only the one matching driver is required)
+	MySQL  MySQLConfig  `mapstructure:"mysql"`
+	SQLite SQLiteConfig `mapstructure:"sqlite"`
+	// Common options for connection pool and logging
+	Options DatabaseOptions `mapstructure:"options"`
 }
 
 // GetConnMaxLifetime returns ConnMaxLifetime as time.Duration from common config
@@ -75,30 +66,4 @@ func GetConnMaxIdleTime(maxIdleTime int) time.Duration {
 		return time.Duration(maxIdleTime) * time.Second
 	}
 	return 60 * time.Second // Default 1 minute
-}
-
-// buildMySQLDSN builds MySQL DSN string from configuration
-func buildMySQLDSN(user, password, host, port, db string) string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		user, password, host, port, db)
-}
-
-// buildDialectors converts SourceConfig slice to gorm.Dialector slice
-func buildDialectors(configs []SourceConfig) ([]gorm.Dialector, error) {
-	if len(configs) == 0 {
-		return nil, nil
-	}
-	dialectors := make([]gorm.Dialector, 0, len(configs))
-	for _, c := range configs {
-		if c.Host == "" || c.User == "" || c.DBName == "" {
-			return nil, fmt.Errorf("incomplete database source config: host, user, and dbname are required")
-		}
-		port := c.Port
-		if port == "" {
-			port = "3306"
-		}
-		dsn := buildMySQLDSN(c.User, c.Password, c.Host, port, c.DBName)
-		dialectors = append(dialectors, mysql.Open(dsn))
-	}
-	return dialectors, nil
 }

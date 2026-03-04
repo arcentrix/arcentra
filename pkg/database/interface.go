@@ -17,9 +17,9 @@ package database
 import "gorm.io/gorm"
 
 // IDatabase defines database interface for backward compatibility
-// It provides access to the underlying MySQL database connection
+// It provides access to the default database connection (MySQL or SQLite per config)
 type IDatabase interface {
-	// Database returns the underlying *gorm.DB (MySQL)
+	// Database returns the default *gorm.DB (MySQL or SQLite)
 	Database() *gorm.DB
 }
 
@@ -33,7 +33,7 @@ func NewDatabaseAdapter(manager Manager) IDatabase {
 	return &databaseAdapter{manager: manager}
 }
 
-// Database returns the MySQL database connection
+// Database returns the default database connection
 func (d *databaseAdapter) Database() *gorm.DB {
-	return d.manager.MySQL()
+	return d.manager.Default()
 }

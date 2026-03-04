@@ -15,35 +15,52 @@
 package database
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/trace/inject"
 
-	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 	"gorm.io/gorm/schema"
-	"gorm.io/plugin/dbresolver"
 )
 
-// Manager defines the unified database interface for managing MySQL connections
+// Manager defines the unified database interface for managing database connections
 type Manager interface {
-	// MySQL returns the MySQL database connection
+	// MySQL returns the MySQL database connection (may be nil if using SQLite only)
 	MySQL() *gorm.DB
-
+	// SQLite returns the SQLite database connection (may be nil if using MySQL only)
+	SQLite() *gorm.DB
+	// Default returns the default database connection for the configured driver
+	Default() *gorm.DB
 	// Close closes all database connections
 	Close() error
 }
 
 // managerImpl implements the Manager interface
 type managerImpl struct {
-	mysql *gorm.DB
+	mysql  *gorm.DB
+	sqlite *gorm.DB
+	driver string // "mysql" or "sqlite", used by Default()
 }
 
 // MySQL returns the MySQL database connection
 func (m *managerImpl) MySQL() *gorm.DB {
+	return m.mysql
+}
+
+// SQLite returns the SQLite database connection
+func (m *managerImpl) SQLite() *gorm.DB {
+	return m.sqlite
+}
+
+// Default returns the default database connection
+func (m *managerImpl) Default() *gorm.DB {
+	if m.driver == "sqlite" && m.sqlite != nil {
+		return m.sqlite
+	}
 	return m.mysql
 }
 
@@ -59,6 +76,14 @@ func (m *managerImpl) Close() error {
 			}
 		}
 	}
+	if m.sqlite != nil {
+		sqlDB, err := m.sqlite.DB()
+		if err == nil {
+			if err := sqlDB.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("failed to close SQLite: %w", err))
+			}
+		}
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("errors closing databases: %v", errs)
@@ -67,29 +92,58 @@ func (m *managerImpl) Close() error {
 	return nil
 }
 
-// NewManager creates a new database manager with MySQL connections
+// NewManager creates a new database manager with MySQL and/or SQLite connections
 func NewManager(cfg Database) (Manager, error) {
 	m := &managerImpl{}
 
-	// Initialize MySQL connection
-	mysqlDB, err := newMySQLConnection(cfg.MySQL, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect MySQL: %w", err)
+	driver := cfg.Driver
+	if driver == "" {
+		driver = "mysql"
 	}
-	m.mysql = mysqlDB
-	log.Info("MySQL database connected successfully")
-	if err := inject.RegisterGormPlugin(m.mysql, false, false); err != nil {
-		log.Warnw("failed to register OpenTelemetry gorm plugin (mysql)", "error", err)
+	opts := cfg.Options
+	hasMySQL := cfg.MySQL.DSN != ""
+	hasSQLite := cfg.SQLite.DSN != ""
+
+	if driver == "sqlite" && !hasSQLite {
+		return nil, fmt.Errorf("database driver is sqlite but sqlite.dsn is empty")
+	}
+	if driver == "mysql" && !hasMySQL {
+		return nil, fmt.Errorf("database driver is mysql but mysql.dsn is empty")
+	}
+	if !hasMySQL && !hasSQLite {
+		return nil, fmt.Errorf("no database configured: set either mysql.dsn or sqlite.dsn")
 	}
 
+	if hasMySQL {
+		mysqlDB, err := newMySQLConnection(cfg.MySQL, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect MySQL: %w", err)
+		}
+		m.mysql = mysqlDB
+		log.Info("MySQL database connected successfully")
+		if err := inject.RegisterGormPlugin(m.mysql, false, false); err != nil {
+			log.Warnw("failed to register OpenTelemetry gorm plugin (mysql)", "error", err)
+		}
+	}
+
+	if hasSQLite {
+		sqliteDB, err := newSQLiteConnection(cfg.SQLite, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to connect SQLite: %w", err)
+		}
+		m.sqlite = sqliteDB
+		log.Info("SQLite database connected successfully")
+		if err := inject.RegisterGormPlugin(m.sqlite, false, false); err != nil {
+			log.Warnw("failed to register OpenTelemetry gorm plugin (sqlite)", "error", err)
+		}
+	}
+
+	m.driver = driver
 	return m, nil
 }
 
-// newMySQLConnection creates a MySQL connection using GORM with DBResolver support
-func newMySQLConnection(mysqlCfg MySQLConfig, commonCfg Database) (*gorm.DB, error) {
-	// Determine default DSN (used as primary source if no Primary configured)
-	defaultDSN := buildMySQLDSN(mysqlCfg.User, mysqlCfg.Password, mysqlCfg.Host, mysqlCfg.Port, mysqlCfg.DBName)
-
+// buildGormLogger returns a GORM logger based on options (used by MySQL and SQLite)
+func buildGormLogger(opts DatabaseOptions) gormlogger.Interface {
 	logConfig := gormlogger.Config{
 		SlowThreshold:             time.Second,
 		LogLevel:                  gormlogger.Silent,
@@ -97,82 +151,35 @@ func newMySQLConnection(mysqlCfg MySQLConfig, commonCfg Database) (*gorm.DB, err
 		IgnoreRecordNotFoundError: true,
 		ParameterizedQueries:      true,
 	}
-
-	var gormLogger gormlogger.Interface
-	if commonCfg.OutPut {
-		gormLogger = NewGormLoggerAdapter(logConfig, gormlogger.Info)
-	} else {
-		gormLogger = gormlogger.Default.LogMode(gormlogger.Silent)
+	if opts.OutPut {
+		return NewGormLoggerAdapter(logConfig, gormlogger.Info)
 	}
+	return gormlogger.Default.LogMode(gormlogger.Silent)
+}
 
-	// Open primary connection
-	db, err := gorm.Open(mysql.Open(defaultDSN), &gorm.Config{
-		Logger: gormLogger,
+// defaultGormConfig returns common GORM config (logger + naming strategy)
+func defaultGormConfig(opts DatabaseOptions) *gorm.Config {
+	return &gorm.Config{
+		Logger: buildGormLogger(opts),
 		NamingStrategy: schema.NamingStrategy{
 			TablePrefix:   dataTablePrefix,
 			SingularTable: true,
 		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to open MySQL connection: %w", err)
 	}
+}
 
-	// Configure DBResolver if Primary or Replicas are provided
-	hasPrimary := len(mysqlCfg.Primary) > 0
-	hasReplicas := len(mysqlCfg.Replicas) > 0
-
-	if hasPrimary || hasReplicas {
-		resolverConfig := dbresolver.Config{
-			TraceResolverMode: commonCfg.OutPut,
-		}
-
-		// Build primary dialectors
-		if hasPrimary {
-			primaryDialectors, buildErr := buildDialectors(mysqlCfg.Primary)
-			if buildErr != nil {
-				return nil, fmt.Errorf("failed to build primary dialectors: %w", buildErr)
-			}
-			resolverConfig.Sources = primaryDialectors
-		}
-
-		// Build replicas dialectors
-		if hasReplicas {
-			replicasDialectors, buildErr := buildDialectors(mysqlCfg.Replicas)
-			if buildErr != nil {
-				return nil, fmt.Errorf("failed to build replicas dialectors: %w", buildErr)
-			}
-			resolverConfig.Replicas = replicasDialectors
-		}
-
-		// Register DBResolver plugin
-		err = db.Use(dbresolver.Register(resolverConfig).
-			SetConnMaxIdleTime(GetConnMaxIdleTime(commonCfg.MaxIdleTime)).
-			SetConnMaxLifetime(GetConnMaxLifetime(commonCfg.MaxLifetime)).
-			SetMaxIdleConns(commonCfg.MaxIdleConns).
-			SetMaxOpenConns(commonCfg.MaxOpenConns))
-		if err != nil {
-			return nil, fmt.Errorf("failed to register DBResolver plugin: %w", err)
-		}
+// applyConnPool applies connection pool settings to the underlying sql.DB
+func applyConnPool(sqlDB *sql.DB, opts DatabaseOptions, defaultMaxOpen, defaultMaxIdle int) {
+	maxOpen := opts.MaxOpenConns
+	if maxOpen <= 0 {
+		maxOpen = defaultMaxOpen
 	}
-
-	// Configure connection pool for primary connection
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get underlying sql.DB handle: %w", err)
+	maxIdle := opts.MaxIdleConns
+	if maxIdle <= 0 {
+		maxIdle = defaultMaxIdle
 	}
-
-	sqlDB.SetMaxOpenConns(commonCfg.MaxOpenConns)
-	sqlDB.SetMaxIdleConns(commonCfg.MaxIdleConns)
-	sqlDB.SetConnMaxLifetime(GetConnMaxLifetime(commonCfg.MaxLifetime))
-	sqlDB.SetConnMaxIdleTime(GetConnMaxIdleTime(commonCfg.MaxIdleTime))
-
-	if err := sqlDB.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping MySQL: %w", err)
-	}
-
-	if hasPrimary || hasReplicas {
-		log.Info("MySQL database connected successfully with DBResolver (read-write separation enabled)")
-	}
-
-	return db, nil
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
+	sqlDB.SetConnMaxLifetime(GetConnMaxLifetime(opts.MaxLifetime))
+	sqlDB.SetConnMaxIdleTime(GetConnMaxIdleTime(opts.MaxIdleTime))
 }

@@ -132,32 +132,30 @@ refreshExpire = 7200
 secretKey = "bf284d03-ba65-42d4-a9fe-0d2fbfe61060"
 
 [database]
-# Common configuration for all data sources
+# driver: "mysql" or "sqlite"
+driver = "mysql"
+
+# MySQL: DSN only (use this when driver = "mysql")
+[database.mysql]
+dsn = "root:muP4woo9Aidiph2jeX8u@tcp(127.0.0.1:3306)/arcentra?charset=utf8mb4&parseTime=True&loc=Local"
+
+# WARNING: control not supported for SQLite database
+# SQLite: DSN only (use this when driver = "sqlite")
+# [database.sqlite]
+# dsn = "./data/arcentra.db"
+
+# Common options (connection pool and logging)
+[database.options]
 # sql print, false or true
 output = true
 # max open connections
 maxOpenConns = 500
 # max idle connections
 maxIdleConns = 5
-# max life time
-# unit: second
+# max life time (seconds)
 maxLifeTime = 300
-# max Idle Time
-# unit: second
+# max idle time (seconds)
 maxIdleTime = 60
-
-# MySQL data source configuration
-[database.mysql]
-# mysql host
-host = "127.0.0.1"
-# mysql port
-port = "3306"
-# mysql user
-user = "root"
-# mysql password
-password = "muP4woo9Aidiph2jeX8u"
-# mysql database name
-dbname = "arcentra"
 
 [redis]
 # support single, cluster, sentinel

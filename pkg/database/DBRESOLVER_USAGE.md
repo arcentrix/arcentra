@@ -12,77 +12,42 @@
 - ✅ 适用于原生 SQL
 - ✅ 事务支持
 
-## 配置示例
+## 配置结构（TOML）
 
-### 基础配置（单数据库，无读写分离）
+配置统一为：`driver`、数据源（`mysql` 或 `sqlite`，仅 `dsn`）、公共 `options`。
 
 ```toml
 [database]
-# 公共配置
+# driver: "mysql" 或 "sqlite"，缺省为 mysql
+driver = "mysql"
+
+# MySQL（driver = "mysql" 时必填）
+[database.mysql]
+dsn = "user:password@tcp(localhost:3306)/arcentra?charset=utf8mb4&parseTime=True&loc=Local"
+
+# SQLite（driver = "sqlite" 时必填）
+# [database.sqlite]
+# dsn = "./data/arcentra.db"
+
+# 公共选项：连接池与日志
+[database.options]
 output = true
 maxOpenConns = 500
 maxIdleConns = 5
 maxLifeTime = 300
 maxIdleTime = 60
-
-# MySQL 数据源配置
-[database.mysql]
-host = "127.0.0.1"
-port = "3306"
-user = "root"
-password = "password"
-dbname = "Arcentra"
 ```
 
-### 读写分离配置
+### SQLite 配置说明
 
-```toml
-[database]
-# 公共配置
-output = true
-maxOpenConns = 500
-maxIdleConns = 5
-maxLifeTime = 300
-maxIdleTime = 60
+- **driver**：`database.driver` 可选 `mysql` 或 `sqlite`，缺省为 `mysql`。
+- **二选一**：按需只配置 `database.mysql.dsn` 或 `database.sqlite.dsn`；`driver` 决定默认连接。
+- **DSN 示例**：
+  - SQLite 文件：`./data/arcentra.db`
+  - SQLite 内存：`file::memory:?cache=shared`
+  - MySQL：`user:password@tcp(127.0.0.1:3306)/dbname?charset=utf8mb4&parseTime=True&loc=Local`
 
-# MySQL 数据源配置
-[database.mysql]
-host = "127.0.0.1"  # 默认主库（如果 primary 为空则使用此配置）
-port = "3306"
-user = "root"
-password = "password"
-dbname = "Arcentra"
-
-# 配置多个主库（primary）
-[[database.mysql.primary]]
-host = "127.0.0.1"
-port = "3306"
-user = "root"
-password = "password"
-dbname = "Arcentra"
-
-[[database.mysql.primary]]
-host = "127.0.0.2"
-port = "3306"
-user = "root"
-password = "password"
-dbname = "Arcentra"
-
-# 配置多个从库（replicas）
-[[database.mysql.replicas]]
-host = "127.0.0.3"
-port = "3306"
-user = "readonly"
-password = "password"
-dbname = "Arcentra"
-
-[[database.mysql.replicas]]
-host = "127.0.0.4"
-port = "3306"
-user = "readonly"
-password = "password"
-dbname = "Arcentra"
-```
+**注意**：SQLite 与 MySQL 在部分 SQL 方言上存在差异；若有 Raw SQL 或迁移脚本需按驱动区分。当前配置为单 DSN，无主从/读写分离。
 
 ## 自动读写分离
 

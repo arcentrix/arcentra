@@ -37,6 +37,7 @@ require (
 	google.golang.org/grpc v1.77.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/driver/mysql v1.6.0
+	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.0
 	sigs.k8s.io/yaml v1.6.0
 )
@@ -55,6 +56,8 @@ require (
 	go.opentelemetry.io/otel/sdk v1.39.0
 	gorm.io/plugin/dbresolver v1.6.2
 )
+
+require github.com/mattn/go-sqlite3 v1.14.22 // indirect
 
 require (
 	cloud.google.com/go v0.112.0 // indirect
