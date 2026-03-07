@@ -336,6 +336,81 @@ func TestStateMachine_ToDot(t *testing.T) {
 	}
 }
 
+// TestStateMachine_TransitionValidatesCurrentState 确保 Transition(from, to) 在校验 currentState == from 失败时返回错误，避免并发竞态。
+func TestStateMachine_TransitionValidatesCurrentState(t *testing.T) {
+	sm := NewWithState(OrderCreated)
+	sm.Allow(OrderCreated, OrderPaid).
+		Allow(OrderPaid, OrderShipped)
+
+	_ = sm.TransitTo(OrderPaid)
+	// 当前状态已是 OrderPaid，用 from=OrderCreated 调用应失败
+	err := sm.Transition(OrderCreated, OrderShipped, "")
+	if err == nil {
+		t.Error("expected Transition to fail when currentState != from")
+	}
+	if !errors.Is(err, ErrStateMismatch) {
+		t.Errorf("expected errors.Is(ErrStateMismatch), got: %v", err)
+	}
+	if sm.Current() != OrderPaid {
+		t.Errorf("expected state to remain %v, got %v", OrderPaid, sm.Current())
+	}
+}
+
+// TestStateMachine_HooksRunOutsideLock 确保 hooks 在锁外执行，hook 内可安全调用 Current() 等，不会死锁。
+func TestStateMachine_HooksRunOutsideLock(t *testing.T) {
+	sm := NewWithState(OrderCreated)
+	sm.Allow(OrderCreated, OrderPaid)
+
+	sm.OnEnter(OrderPaid, func(state OrderStatus) error {
+		// 工业级优化：hooks 在锁外执行，允许在 hook 内回调 FSM
+		if !sm.Is(OrderPaid) {
+			t.Errorf("expected Current() to be PAID when OnEnter runs, got %v", sm.Current())
+		}
+		return nil
+	})
+
+	if err := sm.TransitTo(OrderPaid); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestStateMachine_SentinelErrors 确保 Transition/TriggerEvent 返回的 error 可用 errors.Is 判断。
+func TestStateMachine_SentinelErrors(t *testing.T) {
+	// ErrInvalidTransition
+	sm := NewWithState(OrderCreated)
+	sm.Allow(OrderCreated, OrderPaid)
+	err := sm.TransitTo(OrderShipped)
+	if err == nil {
+		t.Fatal("expected invalid transition to fail")
+	}
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Errorf("expected errors.Is(ErrInvalidTransition), got: %v", err)
+	}
+
+	// ErrEventNotDefined
+	sm2 := NewWithState(OrderCreated)
+	sm2.Allow(OrderCreated, OrderPaid)
+	sm2.AddEventTransition(OrderCreated, Event("pay"), OrderPaid)
+	err = sm2.TriggerEvent(Event("unknown"))
+	if err == nil {
+		t.Fatal("expected unknown event to fail")
+	}
+	if !errors.Is(err, ErrEventNotDefined) {
+		t.Errorf("expected errors.Is(ErrEventNotDefined), got: %v", err)
+	}
+
+	// ErrInvalidHistorySize
+	if err := ValidateHistorySize(0); !errors.Is(err, ErrInvalidHistorySize) {
+		t.Errorf("ValidateHistorySize(0): expected ErrInvalidHistorySize, got: %v", err)
+	}
+	if err := ValidateHistorySize(-1); !errors.Is(err, ErrInvalidHistorySize) {
+		t.Errorf("ValidateHistorySize(-1): expected ErrInvalidHistorySize, got: %v", err)
+	}
+	if err := ValidateHistorySize(10); err != nil {
+		t.Errorf("ValidateHistorySize(10): expected nil, got: %v", err)
+	}
+}
+
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }

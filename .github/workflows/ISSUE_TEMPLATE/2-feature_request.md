@@ -13,7 +13,7 @@ assignees: []
 ## Component(s) Affected
 
 - [ ] API contracts (`api/**`, protobuf, gRPC)
-- [ ] Pipeline engine (`internal/engine/**`)
+- [ ] Pipeline engine (`internal/control/**`)
 - [ ] Agent / executor / plugin system
 - [ ] Storage / repository layer
 - [ ] Observability (logs/metrics/tracing)

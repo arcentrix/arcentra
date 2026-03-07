@@ -780,10 +780,11 @@ func (c *Context) ToMap() map[string]any {
 					"to":        string(record.To),
 					"event":     string(record.Event),
 					"timestamp": record.Timestamp,
-					"error":     record.Error != nil,
+					"error":     record.Error,
+					"success":   record.Success,
 				}
-				if record.Error != nil {
-					historyData[i]["errorMessage"] = record.Error.Error()
+				if record.Error != "" {
+					historyData[i]["error"] = record.Error
 				}
 			}
 			result["stateHistory"] = historyData
