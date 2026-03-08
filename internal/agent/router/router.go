@@ -83,17 +83,15 @@ func (rt *Router) Router() *fiber.App {
 	// 优雅下线接口 - 触发服务优雅关闭
 	app.Post("/shutdown", func(c *fiber.Ctx) error {
 		if rt.ShutdownMgr == nil {
-			return c.Status(fiber.StatusInternalServerError).
-				JSON(http.WithRepErr(c, fiber.StatusInternalServerError, "shutdown manager not initialized", c.Path()))
+			return http.Err(c, fiber.StatusInternalServerError, "shutdown manager not initialized")
 		}
 
 		if rt.ShutdownMgr.Shutdown() {
 			log.Info("Graceful shutdown triggered via HTTP endpoint")
-			return c.JSON(http.WithRepDetail(c, fiber.StatusOK, "shutdown initiated", nil))
+			return http.Detail(c, map[string]any{"message": "shutdown initiated"})
 		}
 
-		return c.Status(fiber.StatusConflict).
-			JSON(http.WithRepErr(c, fiber.StatusConflict, "shutdown already in progress", c.Path()))
+		return http.Err(c, fiber.StatusConflict, "shutdown already in progress")
 	})
 
 	// 版本信息
@@ -103,8 +101,7 @@ func (rt *Router) Router() *fiber.App {
 
 	// 找不到路径时的处理 - 必须在所有路由注册之后
 	app.Use(func(c *fiber.Ctx) error {
-		return c.Status(fiber.StatusNotFound).
-			JSON(http.WithRepErr(c, fiber.StatusNotFound, "request path not found", c.Path()))
+		return http.Err(c, fiber.StatusNotFound, "request path not found")
 	})
 
 	return app

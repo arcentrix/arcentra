@@ -98,8 +98,7 @@ buf-install: ## install buf if missing
 
 .PHONY: buf
 buf: buf-install ## generate protobuf code
-	cd $(PROTO_DIR)
-	buf generate --template buf.gen.yaml
+	cd $(PROTO_DIR) && buf generate --template buf.gen.yaml
 
 .PHONY: wire-install
 wire-install: ## install wire
@@ -108,8 +107,7 @@ wire-install: ## install wire
 .PHONY: wire
 wire: wire-install ## generate dependency injection code
 	test -d $(CMD_PATH)
-	cd $(CMD_PATH)
-	wire
+	cd $(CMD_PATH) && wire
 
 .PHONY: sqlc-install
 sqlc-install: ## install sqlc

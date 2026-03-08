@@ -17,7 +17,6 @@ package router
 import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -35,47 +34,45 @@ func (rt *Router) userExtRouter(r fiber.Router, auth fiber.Handler) {
 func (rt *Router) getUserExt(c *fiber.Ctx) error {
 	userId := c.Params("userId")
 	if userId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "user id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
 	userExtService := rt.Services.UserExt
 
 	ext, err := userExtService.GetUserExt(c.Context(), userId)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, ext)
-	return nil
+	return http.Detail(c, ext)
 }
 
 // updateUserExt updates user ext information
 func (rt *Router) updateUserExt(c *fiber.Ctx) error {
 	userId := c.Params("userId")
 	if userId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "user id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
 	var ext model.UserExt
 	if err := c.BodyParser(&ext); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request parameters", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request parameters")
 	}
 
 	userExtService := rt.Services.UserExt
 
 	if err := userExtService.UpdateUserExt(c.Context(), userId, &ext); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.OPERATION, "update user ext")
-	return nil
+	return http.Operation(c)
 }
 
 // updateTimezone updates user timezone
 func (rt *Router) updateTimezone(c *fiber.Ctx) error {
 	userId := c.Params("userId")
 	if userId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "user id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
 	type TimezoneReq struct {
@@ -84,28 +81,27 @@ func (rt *Router) updateTimezone(c *fiber.Ctx) error {
 
 	var req TimezoneReq
 	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request parameters", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request parameters")
 	}
 
 	if req.Timezone == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "timezone is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "timezone is required")
 	}
 
 	userExtService := rt.Services.UserExt
 
 	if err := userExtService.UpdateTimezone(c.Context(), userId, req.Timezone); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.OPERATION, "update user timezone")
-	return nil
+	return http.Operation(c)
 }
 
 // updateInvitationStatus updates invitation status
 func (rt *Router) updateInvitationStatus(c *fiber.Ctx) error {
 	userId := c.Params("userId")
 	if userId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "user id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
 	type InvitationStatusReq struct {
@@ -114,19 +110,18 @@ func (rt *Router) updateInvitationStatus(c *fiber.Ctx) error {
 
 	var req InvitationStatusReq
 	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request parameters", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request parameters")
 	}
 
 	if req.Status == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "status is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "status is required")
 	}
 
 	userExtService := rt.Services.UserExt
 
 	if err := userExtService.UpdateInvitationStatus(c.Context(), userId, req.Status); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.OPERATION, "update invitation status")
-	return nil
+	return http.Operation(c)
 }

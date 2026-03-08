@@ -17,7 +17,6 @@ package router
 import (
 	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -47,7 +46,7 @@ func (rt *Router) uploadFile(c *fiber.Ctx) error {
 	// get file from form
 	file, err := c.FormFile("file")
 	if err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "file is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "file is required")
 	}
 
 	// get optional custom path from query parameter
@@ -56,12 +55,10 @@ func (rt *Router) uploadFile(c *fiber.Ctx) error {
 	// upload file
 	response, err := uploadService.UploadFile(c.Context(), file, "", customPath)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, response)
-	c.Locals(middleware.OPERATION, "upload file")
-	return nil
+	return http.Detail(c, response)
 }
 
 // uploadFileWithStorage uploads a file to specific storage
@@ -71,13 +68,13 @@ func (rt *Router) uploadFileWithStorage(c *fiber.Ctx) error {
 	// get storage ID from path parameter
 	storageId := c.Params("storageId")
 	if storageId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "storageId is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "storageId is required")
 	}
 
 	// get file from form
 	file, err := c.FormFile("file")
 	if err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "file is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "file is required")
 	}
 
 	// get optional custom path from query parameter
@@ -86,12 +83,10 @@ func (rt *Router) uploadFileWithStorage(c *fiber.Ctx) error {
 	// upload file
 	response, err := uploadService.UploadFile(c.Context(), file, storageId, customPath)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, response)
-	c.Locals(middleware.OPERATION, "upload file")
-	return nil
+	return http.Detail(c, response)
 }
 
 // createStorageConfig creates a new storage configuration
@@ -100,17 +95,15 @@ func (rt *Router) createStorageConfig(c *fiber.Ctx) error {
 
 	var req service.CreateStorageConfigRequest
 	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request body", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
 	storageConfig, err := storageService.CreateStorageConfig(c.Context(), &req)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, storageConfig)
-	c.Locals(middleware.OPERATION, "create storage config")
-	return nil
+	return http.Detail(c, storageConfig)
 }
 
 // listStorageConfigs gets storage configuration list
@@ -119,12 +112,10 @@ func (rt *Router) listStorageConfigs(c *fiber.Ctx) error {
 
 	storageConfigs, err := storageService.ListStorageConfigs(c.Context())
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, storageConfigs)
-	c.Locals(middleware.OPERATION, "list storage configs")
-	return nil
+	return http.Detail(c, storageConfigs)
 }
 
 // getStorageConfig gets a storage configuration by ID
@@ -133,17 +124,15 @@ func (rt *Router) getStorageConfig(c *fiber.Ctx) error {
 
 	storageID := c.Params("id")
 	if storageID == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "storage id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "storage id is required")
 	}
 
 	storageConfig, err := storageService.GetStorageConfig(c.Context(), storageID)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, storageConfig)
-	c.Locals(middleware.OPERATION, "get storage config")
-	return nil
+	return http.Detail(c, storageConfig)
 }
 
 // updateStorageConfig updates a storage configuration
@@ -152,23 +141,21 @@ func (rt *Router) updateStorageConfig(c *fiber.Ctx) error {
 
 	storageID := c.Params("id")
 	if storageID == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "storage id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "storage id is required")
 	}
 
 	var req service.UpdateStorageConfigRequest
 	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request body", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
 	req.StorageID = storageID
 	storageConfig, err := storageService.UpdateStorageConfig(c.Context(), &req)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, storageConfig)
-	c.Locals(middleware.OPERATION, "update storage config")
-	return nil
+	return http.Detail(c, storageConfig)
 }
 
 // deleteStorageConfig deletes a storage configuration
@@ -177,17 +164,15 @@ func (rt *Router) deleteStorageConfig(c *fiber.Ctx) error {
 
 	storageID := c.Params("id")
 	if storageID == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "storage id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "storage id is required")
 	}
 
 	err := storageService.DeleteStorageConfig(c.Context(), storageID)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, map[string]interface{}{"id": storageID})
-	c.Locals(middleware.OPERATION, "delete storage config")
-	return nil
+	return http.Detail(c, map[string]interface{}{"id": storageID})
 }
 
 // setDefaultStorageConfig sets a storage configuration as default
@@ -196,17 +181,15 @@ func (rt *Router) setDefaultStorageConfig(c *fiber.Ctx) error {
 
 	storageID := c.Params("id")
 	if storageID == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "storage id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "storage id is required")
 	}
 
 	err := storageService.SetDefaultStorageConfig(c.Context(), storageID)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, map[string]interface{}{"id": storageID})
-	c.Locals(middleware.OPERATION, "set default storage config")
-	return nil
+	return http.Detail(c, map[string]interface{}{"id": storageID})
 }
 
 // getDefaultStorageConfig gets the default storage configuration
@@ -215,10 +198,8 @@ func (rt *Router) getDefaultStorageConfig(c *fiber.Ctx) error {
 
 	storageConfig, err := storageService.GetDefaultStorageConfig(c.Context())
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, storageConfig)
-	c.Locals(middleware.OPERATION, "get default storage config")
-	return nil
+	return http.Detail(c, storageConfig)
 }

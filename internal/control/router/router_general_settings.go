@@ -19,7 +19,6 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -60,21 +59,19 @@ func (rt *Router) updateGeneralSettings(c *fiber.Ctx) error {
 	// get settings ID from path parameter
 	settingsId := c.Params("settingsId")
 	if settingsId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid settings id", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid settings id")
 	}
 
 	var settings model.GeneralSettings
 	if err := c.BodyParser(&settings); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request body", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
 	if err := generalSettingsService.UpdateGeneralSettings(c.Context(), settingsId, &settings); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, settings)
-	c.Locals(middleware.OPERATION, "update general settings")
-	return nil
+	return http.Detail(c, settings)
 }
 
 // getGeneralSettings gets a general settings by settings ID
@@ -84,17 +81,15 @@ func (rt *Router) getGeneralSettings(c *fiber.Ctx) error {
 	// get settings ID from path parameter
 	settingsId := c.Params("settingsId")
 	if settingsId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid settings id", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid settings id")
 	}
 
 	settings, err := generalSettingsService.GetGeneralSettingsByID(c.Context(), settingsId)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, settings)
-	c.Locals(middleware.OPERATION, "get general settings")
-	return nil
+	return http.Detail(c, settings)
 }
 
 // getGeneralSettingsByName gets a general settings by category and name
@@ -105,17 +100,15 @@ func (rt *Router) getGeneralSettingsByName(c *fiber.Ctx) error {
 	name := c.Params("name")
 
 	if category == "" || name == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "category and name are required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "category and name are required")
 	}
 
 	settings, err := generalSettingsService.GetGeneralSettingsByName(c.Context(), category, name)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, settings)
-	c.Locals(middleware.OPERATION, "get general settings by name")
-	return nil
+	return http.Detail(c, settings)
 }
 
 // getGeneralSettingsList gets general settings list with pagination and filters
@@ -129,7 +122,7 @@ func (rt *Router) getGeneralSettingsList(c *fiber.Ctx) error {
 
 	settingsList, total, err := generalSettingsService.GetGeneralSettingsList(c.Context(), pageNum, pageSize, category)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// construct response
@@ -140,9 +133,7 @@ func (rt *Router) getGeneralSettingsList(c *fiber.Ctx) error {
 		"pageSize": pageSize,
 	}
 
-	c.Locals(middleware.DETAIL, response)
-	c.Locals(middleware.OPERATION, "get general settings list")
-	return nil
+	return http.Detail(c, response)
 }
 
 // getCategories gets all distinct categories
@@ -151,10 +142,8 @@ func (rt *Router) getCategories(c *fiber.Ctx) error {
 
 	categories, err := generalSettingsService.GetCategories(c.Context())
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, map[string]interface{}{"categories": categories})
-	c.Locals(middleware.OPERATION, "get categories")
-	return nil
+	return http.Detail(c, map[string]any{"categories": categories})
 }

@@ -34,69 +34,75 @@ type ResponseErr struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-// WithRepErr return operation result, return struct with path field
-func WithRepErr(c *fiber.Ctx, code int, errMsg string, path string) error {
-	return c.JSON(ResponseErr{
-		ErrCode:   code,
-		ErrMsg:    errMsg,
-		Path:      path,
-		Timestamp: time.Now().Unix(),
+const (
+	// DETAIL Detail 用于设置响应数据，例如查询，分页等，需要返回数据
+	// e.g: c.Set(DETAIL, value)
+	DETAIL = "detail"
+
+	// OPERATION Operation 用于设置响应数据，例如新增，修改，删除等，不需要返回数据，只返回操作结果
+	// e.g: c.Set(OPERATION, "")
+	OPERATION = "operation"
+)
+
+// Msg return custom code, msg
+func Msg(c *fiber.Ctx, code int, msg string) error {
+	return c.JSON(Response{
+		Code:      code,
+		Msg:       msg,
+		Timestamp: now(),
 	})
 }
 
-// WithRepErrMsg return error json data
-func WithRepErrMsg(c *fiber.Ctx, code int, errMsg string, path string) error {
-	return c.JSON(ResponseErr{
-		ErrCode:   code,
-		ErrMsg:    errMsg,
-		Path:      path,
-		Timestamp: time.Now().Unix(),
+// JSON 成功且带数据时统一用此方法写出响应（由统一响应中间件调用）。
+func JSON(c *fiber.Ctx, detail any) error {
+	return c.JSON(Response{
+		Code:      Success.Code,
+		Detail:    detail,
+		Msg:       Success.Msg,
+		Timestamp: now(),
 	})
 }
 
-// WithRepErrNotData return error json data, return struct without path field
-func WithRepErrNotData(c *fiber.Ctx, errMsg string) error {
+// Detail 在 handler 中设置待返回数据并 return nil，由统一响应中间件用 JSON 写出。
+func Detail(c *fiber.Ctx, detail any) error {
+	c.Locals(DETAIL, detail)
+	return nil
+}
+
+// Operation return success json data, return struct without detail field
+func Operation(c *fiber.Ctx) error {
+	c.Locals(OPERATION, "")
+	return nil
+}
+
+// NotDetail return success json data, return struct without detail field
+func NotDetail(c *fiber.Ctx) error {
+	return c.JSON(Response{
+		Code:      Success.Code,
+		Msg:       Success.Msg,
+		Timestamp: now(),
+	})
+}
+
+// Err return error json data
+func Err(c *fiber.Ctx, code int, errMsg string) error {
+	return c.JSON(ResponseErr{
+		ErrCode:   code,
+		ErrMsg:    errMsg,
+		Path:      c.Path(),
+		Timestamp: now(),
+	})
+}
+
+// ErrNotData return error json data, return struct without path field
+func ErrNotData(c *fiber.Ctx, errMsg string) error {
 	return c.JSON(ResponseErr{
 		ErrCode:   Success.Code,
 		ErrMsg:    errMsg,
-		Timestamp: time.Now().Unix(),
+		Timestamp: now(),
 	})
 }
 
-// WithRepJSON return success json data
-func WithRepJSON(c *fiber.Ctx, detail any) error {
-	return c.JSON(Response{
-		Code:      Success.Code,
-		Detail:    detail,
-		Msg:       Success.Msg,
-		Timestamp: time.Now().Unix(),
-	})
-}
-
-// WithRepMsg return custom code, msg
-func WithRepMsg(c *fiber.Ctx, code int, msg string) error {
-	return c.JSON(Response{
-		Code:      code,
-		Msg:       msg,
-		Timestamp: time.Now().Unix(),
-	})
-}
-
-// WithRepDetail return custom code, msg, detail
-func WithRepDetail(c *fiber.Ctx, code int, msg string, detail any) error {
-	return c.JSON(Response{
-		Code:      code,
-		Detail:    detail,
-		Msg:       msg,
-		Timestamp: time.Now().Unix(),
-	})
-}
-
-// WithRepNotDetail return success json data, return struct without detail field
-func WithRepNotDetail(c *fiber.Ctx) error {
-	return c.JSON(Response{
-		Code:      Success.Code,
-		Msg:       Success.Msg,
-		Timestamp: time.Now().Unix(),
-	})
+func now() int64 {
+	return time.Now().Unix()
 }

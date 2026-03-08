@@ -17,7 +17,6 @@ package router
 import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -39,16 +38,15 @@ func (rt *Router) createRole(c *fiber.Ctx) error {
 	roleLogic := rt.Services.Role
 
 	if err := c.BodyParser(&createRoleReq); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request body", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
 	role, err := roleLogic.CreateRole(c.Context(), createRoleReq)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
+		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 
-	c.Locals(middleware.DETAIL, role)
-	return nil
+	return http.Detail(c, role)
 }
 
 // listRole GET /role - list roles with pagination
@@ -66,7 +64,7 @@ func (rt *Router) listRole(c *fiber.Ctx) error {
 
 	roles, count, err := roleLogic.ListRoles(c.Context(), pageNum, pageSize)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
+		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 
 	result := make(map[string]any)
@@ -74,66 +72,62 @@ func (rt *Router) listRole(c *fiber.Ctx) error {
 	result["count"] = count
 	result["pageNum"] = pageNum
 	result["pageSize"] = pageSize
-	c.Locals(middleware.DETAIL, result)
-	return nil
+	return http.Detail(c, result)
 }
 
 // getRole GET /role/:roleId - get role by roleId
 func (rt *Router) getRole(c *fiber.Ctx) error {
 	roleId := c.Params("roleId")
 	if roleId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "role id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "role id is required")
 	}
 
 	roleLogic := rt.Services.Role
 	role, err := roleLogic.GetRoleByRoleID(c.Context(), roleId)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.NotFound.Code, "role not found", c.Path())
+		return http.Err(c, http.NotFound.Code, "role not found")
 	}
 
-	c.Locals(middleware.DETAIL, role)
-	return nil
+	return http.Detail(c, role)
 }
 
 // updateRole PUT /role/:roleId - update role
 func (rt *Router) updateRole(c *fiber.Ctx) error {
 	roleId := c.Params("roleId")
 	if roleId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "role id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "role id is required")
 	}
 
 	var updateReq *model.UpdateRoleReq
 	if err := c.BodyParser(&updateReq); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request body", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
 	roleLogic := rt.Services.Role
 	if err := roleLogic.UpdateRoleByRoleID(c.Context(), roleId, updateReq); err != nil {
-		return http.WithRepErrMsg(c, http.NotFound.Code, "role not found", c.Path())
+		return http.Err(c, http.NotFound.Code, "role not found")
 	}
 
 	// Get updated role
 	updatedRole, err := roleLogic.GetRoleByRoleID(c.Context(), roleId)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
+		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 
-	c.Locals(middleware.DETAIL, updatedRole)
-	return nil
+	return http.Detail(c, updatedRole)
 }
 
 // deleteRole DELETE /role/:roleId - delete role
 func (rt *Router) deleteRole(c *fiber.Ctx) error {
 	roleId := c.Params("roleId")
 	if roleId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "role id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "role id is required")
 	}
 
 	roleLogic := rt.Services.Role
 	if err := roleLogic.DeleteRoleByRoleID(c.Context(), roleId); err != nil {
-		return http.WithRepErrMsg(c, http.NotFound.Code, "role not found", c.Path())
+		return http.Err(c, http.NotFound.Code, "role not found")
 	}
 
-	c.Locals(middleware.OPERATION, "delete role")
-	return nil
+	return http.Operation(c)
 }

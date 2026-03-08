@@ -21,7 +21,6 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/pkg/auth"
 	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/gofiber/fiber/v2"
 )
@@ -63,7 +62,7 @@ func (rt *Router) createPipeline(c *fiber.Ctx) error {
 		CreatedBy        string            `json:"createdBy"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg, c.Path())
+		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
 
 	createdBy := strings.TrimSpace(req.CreatedBy)
@@ -84,23 +83,22 @@ func (rt *Router) createPipeline(c *fiber.Ctx) error {
 		CreatedBy:        createdBy,
 	})
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+		return http.Err(c, e.code, e.msg)
 	}
 
-	c.Locals(middleware.DETAIL, map[string]any{
+	return http.Detail(c, map[string]any{
 		"pipelineId": resp.GetPipelineId(),
 		"message":    resp.GetMessage(),
 	})
-	return nil
 }
 
 func (rt *Router) updatePipeline(c *fiber.Ctx) error {
 	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
 	if pipelineId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "pipeline id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 
 	var req struct {
@@ -115,7 +113,7 @@ func (rt *Router) updatePipeline(c *fiber.Ctx) error {
 		IsEnabled        int32             `json:"isEnabled"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg, c.Path())
+		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
 
 	resp, err := rt.pipelineService().UpdatePipeline(c.Context(), &pipelinev1.UpdatePipelineRequest{
@@ -131,30 +129,28 @@ func (rt *Router) updatePipeline(c *fiber.Ctx) error {
 		IsEnabled:        req.IsEnabled,
 	})
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+		return http.Err(c, e.code, e.msg)
 	}
 
-	c.Locals(middleware.OPERATION, pipelineId)
-	return nil
+	return http.Operation(c)
 }
 
 func (rt *Router) getPipeline(c *fiber.Ctx) error {
 	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
 	if pipelineId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "pipeline id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	resp, err := rt.pipelineService().GetPipeline(c.Context(), &pipelinev1.GetPipelineRequest{PipelineId: pipelineId})
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+		return http.Err(c, e.code, e.msg)
 	}
-	c.Locals(middleware.DETAIL, resp.GetPipeline())
-	return nil
+	return http.Detail(c, resp.GetPipeline())
 }
 
 func (rt *Router) listPipelines(c *fiber.Ctx) error {
@@ -167,69 +163,66 @@ func (rt *Router) listPipelines(c *fiber.Ctx) error {
 	}
 	resp, err := rt.pipelineService().ListPipelines(c.Context(), req)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if !resp.GetSuccess() {
-		return http.WithRepErrMsg(c, http.Failed.Code, resp.GetMessage(), c.Path())
+		return http.Err(c, http.Failed.Code, resp.GetMessage())
 	}
-	c.Locals(middleware.DETAIL, map[string]any{
+	return http.Detail(c, map[string]any{
 		"list":     resp.GetPipelines(),
 		"total":    resp.GetTotal(),
 		"page":     resp.GetPage(),
 		"pageSize": resp.GetPageSize(),
 	})
-	return nil
 }
 
 func (rt *Router) deletePipeline(c *fiber.Ctx) error {
 	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
 	if pipelineId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "pipeline id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	resp, err := rt.pipelineService().DeletePipeline(c.Context(), &pipelinev1.DeletePipelineRequest{PipelineId: pipelineId})
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+		return http.Err(c, e.code, e.msg)
 	}
-	c.Locals(middleware.OPERATION, pipelineId)
-	return nil
+	return http.Operation(c)
 }
 
 func (rt *Router) getPipelineSpec(c *fiber.Ctx) error {
 	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
 	if pipelineId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "pipeline id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	resp, err := rt.pipelineService().GetPipelineSpec(c.Context(), &pipelinev1.GetPipelineSpecRequest{PipelineId: pipelineId})
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+		return http.Err(c, e.code, e.msg)
 	}
-	c.Locals(middleware.DETAIL, map[string]any{
+	return http.Detail(c, map[string]any{
 		"spec":             resp.GetSpec(),
 		"format":           resp.GetFormat().String(),
 		"headCommitSha":    resp.GetHeadCommitSha(),
 		"branch":           resp.GetBranch(),
 		"pipelineFilePath": resp.GetPipelineFilePath(),
 	})
-	return nil
 }
 
 func (rt *Router) validatePipelineSpec(c *fiber.Ctx) error {
 	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
 	if pipelineId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "pipeline id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	var req struct {
 		Spec   *pipelinev1.Spec `json:"spec"`
 		Format string           `json:"format"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg, c.Path())
+		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
 	resp, err := rt.pipelineService().ValidatePipelineSpec(c.Context(), &pipelinev1.ValidatePipelineSpecRequest{
 		PipelineId: pipelineId,
@@ -237,22 +230,21 @@ func (rt *Router) validatePipelineSpec(c *fiber.Ctx) error {
 		Format:     parseSpecFormat(req.Format),
 	})
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+		return http.Err(c, e.code, e.msg)
 	}
-	c.Locals(middleware.DETAIL, map[string]any{
+	return http.Detail(c, map[string]any{
 		"jobsCount": resp.GetJobsCount(),
 		"warnings":  resp.GetWarnings(),
 	})
-	return nil
 }
 
 func (rt *Router) savePipelineSpec(c *fiber.Ctx) error {
 	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
 	if pipelineId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "pipeline id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	var req struct {
 		Spec                  *pipelinev1.Spec `json:"spec"`
@@ -263,7 +255,7 @@ func (rt *Router) savePipelineSpec(c *fiber.Ctx) error {
 		Editor                string           `json:"editor"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg, c.Path())
+		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
 	editor := strings.TrimSpace(req.Editor)
 	if editor == "" {
@@ -279,25 +271,24 @@ func (rt *Router) savePipelineSpec(c *fiber.Ctx) error {
 		Editor:                editor,
 	})
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+		return http.Err(c, e.code, e.msg)
 	}
-	c.Locals(middleware.DETAIL, map[string]any{
+	return http.Detail(c, map[string]any{
 		"commitSha": resp.GetCommitSha(),
 		"branch":    resp.GetBranch(),
 		"saveMode":  resp.GetSaveMode().String(),
 		"prUrl":     resp.GetPrUrl(),
 		"prBranch":  resp.GetPrBranch(),
 	})
-	return nil
 }
 
 func (rt *Router) triggerPipeline(c *fiber.Ctx) error {
 	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
 	if pipelineId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "pipeline id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	var req struct {
 		Variables   map[string]string `json:"variables"`
@@ -305,7 +296,7 @@ func (rt *Router) triggerPipeline(c *fiber.Ctx) error {
 		RequestId   string            `json:"requestId"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg, c.Path())
+		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
 	triggeredBy := strings.TrimSpace(req.TriggeredBy)
 	if triggeredBy == "" {
@@ -318,22 +309,21 @@ func (rt *Router) triggerPipeline(c *fiber.Ctx) error {
 		RequestId:   req.RequestId,
 	})
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+		return http.Err(c, e.code, e.msg)
 	}
-	c.Locals(middleware.DETAIL, map[string]any{
+	return http.Detail(c, map[string]any{
 		"runId":   resp.GetRunId(),
 		"message": resp.GetMessage(),
 	})
-	return nil
 }
 
 func (rt *Router) listPipelineRuns(c *fiber.Ctx) error {
 	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
 	if pipelineId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "pipeline id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	resp, err := rt.pipelineService().ListPipelineRuns(c.Context(), &pipelinev1.ListPipelineRunsRequest{
 		PipelineId: pipelineId,
@@ -342,47 +332,45 @@ func (rt *Router) listPipelineRuns(c *fiber.Ctx) error {
 		PageSize:   int32(maxIntWithOne(rt.HTTP.QueryInt(c, "pageSize"))),
 	})
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if !resp.GetSuccess() {
-		return http.WithRepErrMsg(c, http.Failed.Code, resp.GetMessage(), c.Path())
+		return http.Err(c, http.Failed.Code, resp.GetMessage())
 	}
-	c.Locals(middleware.DETAIL, map[string]any{
+	return http.Detail(c, map[string]any{
 		"list":     resp.GetRuns(),
 		"total":    resp.GetTotal(),
 		"page":     resp.GetPage(),
 		"pageSize": resp.GetPageSize(),
 	})
-	return nil
 }
 
 func (rt *Router) getPipelineRun(c *fiber.Ctx) error {
 	runId := strings.TrimSpace(c.Params("runId"))
 	if runId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "run id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "run id is required")
 	}
 	resp, err := rt.pipelineService().GetPipelineRun(c.Context(), &pipelinev1.GetPipelineRunRequest{RunId: runId})
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+		return http.Err(c, e.code, e.msg)
 	}
-	c.Locals(middleware.DETAIL, resp.GetRun())
-	return nil
+	return http.Detail(c, resp.GetRun())
 }
 
 func (rt *Router) stopPipeline(c *fiber.Ctx) error {
 	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
 	runId := strings.TrimSpace(c.Params("runId"))
 	if pipelineId == "" || runId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "pipeline id and run id are required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "pipeline id and run id are required")
 	}
 	var req struct {
 		Reason string `json:"reason"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg, c.Path())
+		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
 	resp, err := rt.pipelineService().StopPipeline(c.Context(), &pipelinev1.StopPipelineRequest{
 		PipelineId: pipelineId,
@@ -390,13 +378,12 @@ func (rt *Router) stopPipeline(c *fiber.Ctx) error {
 		Reason:     req.Reason,
 	})
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+		return http.Err(c, e.code, e.msg)
 	}
-	c.Locals(middleware.OPERATION, runId)
-	return nil
+	return http.Operation(c)
 }
 
 func (rt *Router) pausePipeline(c *fiber.Ctx) error {
@@ -411,14 +398,14 @@ func (rt *Router) changePipelinePauseState(c *fiber.Ctx, pause bool) error {
 	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
 	runId := strings.TrimSpace(c.Params("runId"))
 	if pipelineId == "" || runId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "pipeline id and run id are required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "pipeline id and run id are required")
 	}
 	var req struct {
 		Reason   string `json:"reason"`
 		Operator string `json:"operator"`
 	}
 	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg, c.Path())
+		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
 	operator := strings.TrimSpace(req.Operator)
 	if operator == "" {
@@ -427,8 +414,7 @@ func (rt *Router) changePipelinePauseState(c *fiber.Ctx, pause bool) error {
 	if err := rt.applyPauseState(c, pause, pipelineId, runId, req.Reason, operator); err != nil {
 		return err
 	}
-	c.Locals(middleware.OPERATION, runId)
-	return nil
+	return http.Operation(c)
 }
 
 func (rt *Router) applyPauseState(
@@ -444,10 +430,10 @@ func (rt *Router) applyPauseState(
 			Operator:   operator,
 		})
 		if err != nil {
-			return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+			return http.Err(c, http.Failed.Code, err.Error())
 		}
 		if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-			return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+			return http.Err(c, e.code, e.msg)
 		}
 		return nil
 	}
@@ -459,10 +445,10 @@ func (rt *Router) applyPauseState(
 		Operator:   operator,
 	})
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
-		return http.WithRepErrMsg(c, e.code, e.msg, c.Path())
+		return http.Err(c, e.code, e.msg)
 	}
 	return nil
 }

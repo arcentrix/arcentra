@@ -20,7 +20,6 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/auth"
 	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -46,24 +45,22 @@ func (rt *Router) createSecret(c *fiber.Ctx) error {
 	// get user ID from token
 	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	var secret model.Secret
 	if err := c.BodyParser(&secret); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request body", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
 	if err := secretService.CreateSecret(c.Context(), &secret, claims.UserId); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// mask secret value in response
 	secret.SecretValue = "***MASKED***"
 
-	c.Locals(middleware.DETAIL, secret)
-	c.Locals(middleware.OPERATION, "create secret")
-	return nil
+	return http.Detail(c, secret)
 }
 
 // updateSecret updates a secret
@@ -72,27 +69,25 @@ func (rt *Router) updateSecret(c *fiber.Ctx) error {
 
 	secretId := c.Params("secretId")
 	if secretId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "secretId is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "secretId is required")
 	}
 
 	var secret model.Secret
 	if err := c.BodyParser(&secret); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request body", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
 	if err := secretService.UpdateSecret(c.Context(), secretId, &secret); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// get updated secret (masked)
 	updatedSecret, err := secretService.GetSecretByID(c.Context(), secretId)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, updatedSecret)
-	c.Locals(middleware.OPERATION, "update secret")
-	return nil
+	return http.Detail(c, updatedSecret)
 }
 
 // getSecret gets a secret by ID (masked value)
@@ -101,17 +96,15 @@ func (rt *Router) getSecret(c *fiber.Ctx) error {
 
 	secretId := c.Params("secretId")
 	if secretId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "secretId is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "secretId is required")
 	}
 
 	secret, err := secretService.GetSecretByID(c.Context(), secretId)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, secret)
-	c.Locals(middleware.OPERATION, "get secret")
-	return nil
+	return http.Detail(c, secret)
 }
 
 // getSecretValue gets the decrypted secret value (use with caution)
@@ -120,7 +113,7 @@ func (rt *Router) getSecretValue(c *fiber.Ctx) error {
 
 	secretId := c.Params("secretId")
 	if secretId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "secretId is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "secretId is required")
 	}
 
 	// TODO: Add additional permission check here
@@ -128,15 +121,13 @@ func (rt *Router) getSecretValue(c *fiber.Ctx) error {
 
 	value, err := secretService.GetSecretValue(c.Context(), secretId)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, map[string]interface{}{
+	return http.Detail(c, map[string]any{
 		"secretId": secretId,
 		"value":    value,
 	})
-	c.Locals(middleware.OPERATION, "get secret value")
-	return nil
 }
 
 // getSecretList gets secret list with pagination and filters
@@ -153,7 +144,7 @@ func (rt *Router) getSecretList(c *fiber.Ctx) error {
 
 	secrets, total, err := secretService.GetSecretList(c.Context(), pageNum, pageSize, secretType, scope, scopeId, createdBy)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// construct response
@@ -164,9 +155,7 @@ func (rt *Router) getSecretList(c *fiber.Ctx) error {
 		"pageSize": pageSize,
 	}
 
-	c.Locals(middleware.DETAIL, response)
-	c.Locals(middleware.OPERATION, "get secret list")
-	return nil
+	return http.Detail(c, response)
 }
 
 // deleteSecret deletes a secret
@@ -175,16 +164,14 @@ func (rt *Router) deleteSecret(c *fiber.Ctx) error {
 
 	secretId := c.Params("secretId")
 	if secretId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "secretId is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "secretId is required")
 	}
 
 	if err := secretService.DeleteSecret(c.Context(), secretId); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, map[string]interface{}{"secretId": secretId})
-	c.Locals(middleware.OPERATION, "delete secret")
-	return nil
+	return http.Detail(c, map[string]any{"secretId": secretId})
 }
 
 // getSecretsByScope gets secrets by scope and scope_id
@@ -195,15 +182,13 @@ func (rt *Router) getSecretsByScope(c *fiber.Ctx) error {
 	scopeId := c.Params("scopeId")
 
 	if scope == "" || scopeId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "scope and scopeId are required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "scope and scopeId are required")
 	}
 
 	secrets, err := secretService.GetSecretsByScope(c.Context(), scope, scopeId)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, map[string]interface{}{"secrets": secrets})
-	c.Locals(middleware.OPERATION, "get secrets by scope")
-	return nil
+	return http.Detail(c, map[string]any{"secrets": secrets})
 }

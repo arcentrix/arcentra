@@ -17,7 +17,6 @@ package router
 import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -40,16 +39,15 @@ func (rt *Router) createAgent(c *fiber.Ctx) error {
 	agentLogic := rt.Services.Agent
 
 	if err := c.BodyParser(&createAgentReq); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
+		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 
 	agent, err := agentLogic.CreateAgent(c.Context(), createAgentReq)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
+		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 
-	c.Locals(middleware.DETAIL, agent)
-	return nil
+	return http.Detail(c, agent)
 }
 
 // listAgent GET /agent - list agents with pagination
@@ -67,7 +65,7 @@ func (rt *Router) listAgent(c *fiber.Ctx) error {
 
 	agents, count, err := agentLogic.ListAgent(c.Context(), pageNum, pageSize)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
+		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 
 	result := make(map[string]any)
@@ -75,8 +73,7 @@ func (rt *Router) listAgent(c *fiber.Ctx) error {
 	result["count"] = count
 	result["pageNum"] = pageNum
 	result["pageSize"] = pageSize
-	c.Locals(middleware.DETAIL, result)
-	return nil
+	return http.Detail(c, result)
 }
 
 // getAgentStatistics GET /agent/statistics - get agent statistics
@@ -85,7 +82,7 @@ func (rt *Router) getAgentStatistics(c *fiber.Ctx) error {
 
 	total, online, offline, err := agentLogic.GetAgentStatistics(c.Context())
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
+		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 
 	result := make(map[string]any)
@@ -93,66 +90,62 @@ func (rt *Router) getAgentStatistics(c *fiber.Ctx) error {
 	result["online"] = online
 	result["offline"] = offline
 
-	c.Locals(middleware.DETAIL, result)
-	return nil
+	return http.Detail(c, result)
 }
 
 // getAgent GET /agent/:agentId - get agent by agentId
 func (rt *Router) getAgent(c *fiber.Ctx) error {
 	agentId := c.Params("agentId")
 	if agentId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "agent id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "agent id is required")
 	}
 
 	agentLogic := rt.Services.Agent
 	agent, err := agentLogic.GetAgentByagentID(c.Context(), agentId)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.NotFound.Code, "agent not found", c.Path())
+		return http.Err(c, http.NotFound.Code, "agent not found")
 	}
 
-	c.Locals(middleware.DETAIL, agent)
-	return nil
+	return http.Detail(c, agent)
 }
 
 // updateAgent PUT /agent/:agentId - update agent
 func (rt *Router) updateAgent(c *fiber.Ctx) error {
 	agentId := c.Params("agentId")
 	if agentId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "agent id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "agent id is required")
 	}
 
 	var updateReq *model.UpdateAgentReq
 	if err := c.BodyParser(&updateReq); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request body", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
 	agentLogic := rt.Services.Agent
 	if err := agentLogic.UpdateAgentByagentID(c.Context(), agentId, updateReq); err != nil {
-		return http.WithRepErrMsg(c, http.NotFound.Code, "agent not found", c.Path())
+		return http.Err(c, http.NotFound.Code, "agent not found")
 	}
 
 	// Get updated agent
 	updatedAgent, err := agentLogic.GetAgentByagentID(c.Context(), agentId)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
+		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 
-	c.Locals(middleware.DETAIL, updatedAgent)
-	return nil
+	return http.Detail(c, updatedAgent)
 }
 
 // deleteAgent DELETE /agent/:agentId - delete agent
 func (rt *Router) deleteAgent(c *fiber.Ctx) error {
 	agentId := c.Params("agentId")
 	if agentId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "agent id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "agent id is required")
 	}
 
 	agentLogic := rt.Services.Agent
 	if err := agentLogic.DeleteAgentByagentID(c.Context(), agentId); err != nil {
-		return http.WithRepErrMsg(c, http.NotFound.Code, "agent not found", c.Path())
+		return http.Err(c, http.NotFound.Code, "agent not found")
 	}
 
-	c.Locals(middleware.OPERATION, "delete agent")
-	return nil
+	return http.Operation(c)
 }

@@ -20,7 +20,6 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/auth"
 	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -53,35 +52,33 @@ func (rt *Router) login(c *fiber.Ctx) error {
 	userService := rt.Services.User
 
 	if err := c.BodyParser(&login); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	user, err := userService.Login(login, rt.HTTP.Auth)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	result["token"] = user.Token
 	result["role"] = nil
 
-	c.Locals(middleware.DETAIL, user)
-	return nil
+	return http.Detail(c, result)
 }
 
 func (rt *Router) register(c *fiber.Ctx) error {
 	var register *model.Register
 	userLogic := rt.Services.User
 	if err := c.BodyParser(&register); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	if err := userLogic.Register(register); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.OPERATION, "")
-	return nil
+	return http.NotDetail(c)
 }
 
 func (rt *Router) refresh(c *fiber.Ctx) error {
@@ -91,11 +88,10 @@ func (rt *Router) refresh(c *fiber.Ctx) error {
 
 	token, err := userLogic.Refresh(userId, refreshToken, &rt.HTTP.Auth)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, token)
-	return nil
+	return http.Detail(c, token)
 }
 
 func (rt *Router) logout(c *fiber.Ctx) error {
@@ -103,50 +99,47 @@ func (rt *Router) logout(c *fiber.Ctx) error {
 
 	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	if err := userLogic.Logout(claims.UserId); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.OPERATION, "")
-	return nil
+	return http.NotDetail(c)
 }
 
 func (rt *Router) addUser(c *fiber.Ctx) error {
 	var addUserReq *model.AddUserReq
 	userLogic := rt.Services.User
 	if err := c.BodyParser(&addUserReq); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
+		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 
 	if err := userLogic.AddUser(c.Context(), *addUserReq); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
+		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 
-	c.Locals(middleware.OPERATION, "")
-	return nil
+	return http.NotDetail(c)
 }
 
 func (rt *Router) updateUser(c *fiber.Ctx) error {
 	var updateReq *model.UpdateUserReq
 	userLogic := rt.Services.User
 	if err := c.BodyParser(&updateReq); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request body", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
 	userId := c.Params("userId")
 	if userId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "user id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
 	if err := userLogic.UpdateUser(userId, updateReq); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, http.Failed.Msg, c.Path())
+		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 
-	c.Locals(middleware.OPERATION, "update user information")
-	return nil
+	return http.NotDetail(c)
 }
 
 func (rt *Router) fetchUserInfo(c *fiber.Ctx) error {
@@ -155,16 +148,15 @@ func (rt *Router) fetchUserInfo(c *fiber.Ctx) error {
 
 	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	user, err = userLogic.FetchUserInfo(claims.UserId)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, user)
-	return nil
+	return http.Detail(c, user)
 }
 
 // getUserList gets user list with pagination
@@ -187,7 +179,7 @@ func (rt *Router) getUserList(c *fiber.Ctx) error {
 
 	users, count, err := userLogic.GetUserList(pageNum, pageSize)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// build response without created_at and updated_at
@@ -222,14 +214,13 @@ func (rt *Router) getUserList(c *fiber.Ctx) error {
 		})
 	}
 
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	result["users"] = response
 	result["count"] = count
 	result["pageNum"] = pageNum
 	result["pageSize"] = pageSize
 
-	c.Locals(middleware.DETAIL, result)
-	return nil
+	return http.Detail(c, result)
 }
 
 // getUsersByRole GET /users/by-role - get users by roleId or roleName
@@ -240,7 +231,7 @@ func (rt *Router) getUsersByRole(c *fiber.Ctx) error {
 	roleName := c.Query("roleName")
 
 	if roleId == "" && roleName == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "roleId or roleName is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "roleId or roleName is required")
 	}
 
 	// Support both "page" and "pageNum" parameters
@@ -259,7 +250,7 @@ func (rt *Router) getUsersByRole(c *fiber.Ctx) error {
 
 	users, count, err := userLogic.GetUsersByRole(roleId, roleName, pageNum, pageSize)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// build response without created_at and updated_at
@@ -294,14 +285,13 @@ func (rt *Router) getUsersByRole(c *fiber.Ctx) error {
 		})
 	}
 
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	result["users"] = response
 	result["count"] = count
 	result["pageNum"] = pageNum
 	result["pageSize"] = pageSize
 
-	c.Locals(middleware.DETAIL, result)
-	return nil
+	return http.Detail(c, result)
 }
 
 // resetPassword resets user password
@@ -311,25 +301,24 @@ func (rt *Router) resetPassword(c *fiber.Ctx) error {
 	// get user ID from path parameter
 	userId := c.Params("userId")
 	if userId == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "user id is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
 	var req model.ResetPasswordReq
 	if err := c.BodyParser(&req); err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "invalid request parameters", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request parameters")
 	}
 
 	// validate required fields
 	if req.NewPassword == "" {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "newPassword is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "newPassword is required")
 	}
 
 	if err := userLogic.ResetPassword(userId, &req); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.OPERATION, "reset user password")
-	return nil
+	return http.NotDetail(c)
 }
 
 // uploadAvatar uploads avatar for current user
@@ -340,24 +329,24 @@ func (rt *Router) uploadAvatar(c *fiber.Ctx) error {
 	// get current user ID from token
 	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// get file from form
 	file, err := c.FormFile("file")
 	if err != nil {
-		return http.WithRepErrMsg(c, http.BadRequest.Code, "file is required", c.Path())
+		return http.Err(c, http.BadRequest.Code, "file is required")
 	}
 
 	// upload avatar to object storage
 	response, err := uploadService.UploadAvatar(c.Context(), file, claims.UserId)
 	if err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// update user avatar in database with complete URL
 	if err := userService.UpdateAvatar(claims.UserId, response.FileURL); err != nil {
-		return http.WithRepErrMsg(c, http.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// prepare response with avatar URL
@@ -371,7 +360,5 @@ func (rt *Router) uploadAvatar(c *fiber.Ctx) error {
 		"uploadTime":   response.UploadTime,
 	}
 
-	c.Locals(middleware.DETAIL, result)
-	c.Locals(middleware.OPERATION, "upload user avatar")
-	return nil
+	return http.Detail(c, result)
 }

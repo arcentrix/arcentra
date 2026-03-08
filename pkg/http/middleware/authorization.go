@@ -59,18 +59,18 @@ func AuthorizationMiddleware(secretKey string, store cache.ICache) fiber.Handler
 
 		// 如果两种方式都没有获取到 token，返回错误
 		if tokenString == "" {
-			return http.WithRepErrMsg(c, http.TokenBeEmpty.Code, http.TokenBeEmpty.Msg, c.Path())
+			return http.Err(c, http.TokenBeEmpty.Code, http.TokenBeEmpty.Msg)
 		}
 
 		claims, err := jwt.ParseToken(tokenString, secretKey)
 		if err != nil {
 			// 检查是否是令牌过期错误
 			if errors.Is(err, goJwt.ErrTokenExpired) {
-				return http.WithRepErrMsg(c, http.TokenExpired.Code, http.TokenExpired.Msg, c.Path())
+				return http.Err(c, http.TokenExpired.Code, http.TokenExpired.Msg)
 			}
 			log.Errorw("parse token failed: ", "error", err)
 			// 其他令牌无效的情况
-			return http.WithRepErrMsg(c, http.InvalidToken.Code, http.InvalidToken.Msg, c.Path())
+			return http.Err(c, http.InvalidToken.Code, http.InvalidToken.Msg)
 		}
 
 		// 从 Redis 中获取 Token 信息
@@ -78,20 +78,20 @@ func AuthorizationMiddleware(secretKey string, store cache.ICache) fiber.Handler
 		tokenInfoStr, err := store.Get(context.Background(), tokenKey).Result()
 		if err != nil {
 			log.Errorw("cache get token failed: ", "error", err, "tokenKey", tokenKey)
-			return http.WithRepErrMsg(c, http.TokenExpired.Code, http.TokenExpired.Msg, c.Path())
+			return http.Err(c, http.TokenExpired.Code, http.TokenExpired.Msg)
 		}
 
 		// 解析 Token 信息
 		var tokenInfo http.TokenInfo
 		if err := sonic.UnmarshalString(tokenInfoStr, &tokenInfo); err != nil {
 			log.Errorw("failed to unmarshal token info: ", "error", err)
-			return http.WithRepErrMsg(c, http.InvalidToken.Code, http.InvalidToken.Msg, c.Path())
+			return http.Err(c, http.InvalidToken.Code, http.InvalidToken.Msg)
 		}
 
 		// 验证请求中的 Token 是否与 Redis 中存储的 Token 匹配
 		if tokenInfo.AccessToken != tokenString {
 			log.Errorw("token mismatch for user: ", "user_id", claims.UserId)
-			return http.WithRepErrMsg(c, http.InvalidToken.Code, http.InvalidToken.Msg, c.Path())
+			return http.Err(c, http.InvalidToken.Code, http.InvalidToken.Msg)
 		}
 
 		c.Locals("claims", claims)
@@ -117,19 +117,19 @@ func PermissionMiddleware(permissionChecker PermissionChecker, excludedPaths []s
 		claimsValue := c.Locals("claims")
 		if claimsValue == nil {
 			log.Errorw("claims not found in context", "path", currentPath)
-			return http.WithRepErrMsg(c, http.Unauthorized.Code, http.Unauthorized.Msg, currentPath)
+			return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
 		}
 
 		claims, ok := claimsValue.(*jwt.AuthClaims)
 		if !ok || claims == nil {
 			log.Errorw("invalid claims type", "path", currentPath)
-			return http.WithRepErrMsg(c, http.Unauthorized.Code, http.Unauthorized.Msg, currentPath)
+			return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
 		}
 
 		userID := claims.UserId
 		if userID == "" {
 			log.Errorw("user id is empty", "path", currentPath)
-			return http.WithRepErrMsg(c, http.Unauthorized.Code, http.Unauthorized.Msg, currentPath)
+			return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
 		}
 
 		// 获取资源ID（优先从 query 参数获取，其次从 header 获取）
@@ -148,13 +148,13 @@ func PermissionMiddleware(permissionChecker PermissionChecker, excludedPaths []s
 		allowedRoutes, err := permissionChecker.GetUserRoutes(c.Context(), userID, resourceID)
 		if err != nil {
 			log.Errorw("failed to get user routes", "userId", userID, "resourceId", resourceID, "error", err)
-			return http.WithRepErrMsg(c, http.InternalError.Code, http.InternalError.Msg, currentPath)
+			return http.Err(c, http.InternalError.Code, http.InternalError.Msg)
 		}
 
 		// 检查当前路径是否在允许的路由列表中
 		if !isRouteAllowed(currentPath, allowedRoutes) {
 			log.Debugw("permission denied", "userId", userID, "resourceId", resourceID, "path", currentPath, "allowedRoutes", allowedRoutes)
-			return http.WithRepErrMsg(c, http.Forbidden.Code, http.Forbidden.Msg, currentPath)
+			return http.Err(c, http.Forbidden.Code, http.Forbidden.Msg)
 		}
 
 		return c.Next()

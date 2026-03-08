@@ -17,15 +17,13 @@ package router
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strconv"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/service"
-	httpx "github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/http/middleware"
+	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/bytedance/sonic"
 	"github.com/gofiber/fiber/v2"
@@ -64,15 +62,15 @@ func (rt *Router) authorize(c *fiber.Ctx) error {
 
 	providerName := c.Params("provider")
 	if providerName == "" {
-		return httpx.WithRepErrMsg(c, httpx.ProviderIsRequired.Code, httpx.ProviderIsRequired.Msg, c.Path())
+		return http.Err(c, http.ProviderIsRequired.Code, http.ProviderIsRequired.Msg)
 	}
 
 	authorize, err := identityService.Authorize(c.Context(), providerName)
 	if err != nil {
-		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	return c.Redirect(authorize, http.StatusTemporaryRedirect)
+	return c.Redirect(authorize, fiber.StatusTemporaryRedirect)
 }
 
 // callback handles OAuth/OIDC authorization callback
@@ -85,7 +83,7 @@ func (rt *Router) callback(c *fiber.Ctx) error {
 	codeRaw := c.Query("code")
 
 	if stateRaw == "" || codeRaw == "" || providerName == "" {
-		return httpx.WithRepErrMsg(c, httpx.InvalidStatusParameter.Code, httpx.InvalidStatusParameter.Msg, c.Path())
+		return http.Err(c, http.InvalidStatusParameter.Code, http.InvalidStatusParameter.Msg)
 	}
 
 	// Ensure URL decoding (Fiber should do this automatically, but we ensure it)
@@ -103,7 +101,7 @@ func (rt *Router) callback(c *fiber.Ctx) error {
 
 	userInfo, _, err := identityService.Callback(c.Context(), providerName, state, code)
 	if err != nil {
-		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// 自动登录：使用 Login 方法（密码为空时跳过密码验证）
@@ -116,7 +114,7 @@ func (rt *Router) callback(c *fiber.Ctx) error {
 	loginResp, err := userService.Login(loginReq, rt.HTTP.Auth)
 	if err != nil {
 		log.Errorw("OAuth auto login failed", "provider", providerName, "userId", userInfo.UserID, "error", err)
-		return httpx.WithRepErrMsg(c, httpx.Failed.Code, fmt.Sprintf("OAuth login failed: %v", err), c.Path())
+		return http.Err(c, http.Failed.Code, fmt.Sprintf("OAuth login failed: %v", err))
 	}
 
 	// 解析 expireAt 以设置 cookie 过期时间（expireAt 是 Unix 时间戳字符串）
@@ -158,7 +156,7 @@ func (rt *Router) callback(c *fiber.Ctx) error {
 	// 在 Fiber 中，c.Cookie() 会立即将 cookie 添加到响应头
 	// c.Redirect() 会发送 302 响应，cookie 会随响应头一起发送
 	// 使用 StatusFound (302) 进行临时重定向
-	return c.Redirect(rt.getBaseURL(), http.StatusFound)
+	return c.Redirect(rt.getBaseURL(), fiber.StatusFound)
 }
 
 // listProviders lists all providers (supports ?type=xxx filter)
@@ -178,7 +176,7 @@ func (rt *Router) listProviders(c *fiber.Ctx) error {
 	}
 
 	if err != nil {
-		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// build response without timestamps
@@ -206,8 +204,7 @@ func (rt *Router) listProviders(c *fiber.Ctx) error {
 		}
 	}
 
-	c.Locals(middleware.DETAIL, response)
-	return nil
+	return http.Detail(c, response)
 }
 
 // getProvider gets a specific provider
@@ -216,16 +213,15 @@ func (rt *Router) getProvider(c *fiber.Ctx) error {
 
 	name := c.Params("name")
 	if name == "" {
-		return httpx.WithRepErrMsg(c, httpx.ProviderIsRequired.Code, httpx.ProviderIsRequired.Msg, c.Path())
+		return http.Err(c, http.ProviderIsRequired.Code, http.ProviderIsRequired.Msg)
 	}
 
 	provider, err := identityService.GetProvider(c.Context(), name)
 	if err != nil {
-		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, provider)
-	return nil
+	return http.Detail(c, provider)
 }
 
 // listProviderTypes lists all provider types
@@ -234,11 +230,10 @@ func (rt *Router) listProviderTypes(c *fiber.Ctx) error {
 
 	providerTypes, err := identityService.GetProviderTypeList(c.Context())
 	if err != nil {
-		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, providerTypes)
-	return nil
+	return http.Detail(c, providerTypes)
 }
 
 // ldapLogin handles LDAP login (authentication methods requiring username and password)
@@ -247,22 +242,22 @@ func (rt *Router) ldapLogin(c *fiber.Ctx) error {
 
 	providerName := c.Params("provider")
 	if providerName == "" {
-		return httpx.WithRepErrMsg(c, httpx.ProviderIsRequired.Code, httpx.ProviderIsRequired.Msg, c.Path())
+		return http.Err(c, http.ProviderIsRequired.Code, http.ProviderIsRequired.Msg)
 	}
 
 	var req service.LDAPLoginRequest
 	if err := c.BodyParser(&req); err != nil {
-		return httpx.WithRepErrMsg(c, httpx.BadRequest.Code, httpx.BadRequest.Msg, c.Path())
+		return http.Err(c, http.BadRequest.Code, http.BadRequest.Msg)
 	}
 
 	if req.Username == "" || req.Password == "" {
-		return httpx.WithRepErrMsg(c, httpx.UsernameArePasswordIsRequired.Code, httpx.UsernameArePasswordIsRequired.Msg, c.Path())
+		return http.Err(c, http.UsernameArePasswordIsRequired.Code, http.UsernameArePasswordIsRequired.Msg)
 	}
 
 	// Step 1: Verify LDAP identity and map/create Arcentra user
 	userInfo, err := identityService.LDAPLogin(c.Context(), providerName, req.Username, req.Password)
 	if err != nil {
-		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// Step 2 & 3: Generate Arcentra token using Login method (password empty for LDAP)
@@ -276,12 +271,11 @@ func (rt *Router) ldapLogin(c *fiber.Ctx) error {
 	loginResp, err := userService.Login(loginReq, rt.HTTP.Auth)
 	if err != nil {
 		log.Errorw("LDAP auto login failed", "provider", providerName, "userId", userInfo.UserID, "error", err)
-		return httpx.WithRepErrMsg(c, httpx.Failed.Code, fmt.Sprintf("failed to generate token: %v", err), c.Path())
+		return http.Err(c, http.Failed.Code, fmt.Sprintf("failed to generate token: %v", err))
 	}
 
 	// Step 4: Return LoginResp with Arcentra token (subsequent requests only use Arcentra token)
-	c.Locals(middleware.DETAIL, loginResp)
-	return nil
+	return http.Detail(c, loginResp)
 }
 
 // createProvider creates an identity provider
@@ -290,21 +284,19 @@ func (rt *Router) createProvider(c *fiber.Ctx) error {
 
 	var provider model.Identity
 	if err := c.BodyParser(&provider); err != nil {
-		return httpx.WithRepErrMsg(c, httpx.BadRequest.Code, "invalid request parameters", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request parameters")
 	}
 
 	// validate required fields
 	if provider.Name == "" || provider.ProviderType == "" {
-		return httpx.WithRepErrMsg(c, httpx.BadRequest.Code, "name and providerType are required fields", c.Path())
+		return http.Err(c, http.BadRequest.Code, "name and providerType are required fields")
 	}
 
 	if err := identityService.CreateProvider(c.Context(), &provider); err != nil {
-		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.DETAIL, provider)
-	c.Locals(middleware.OPERATION, "create identity provider")
-	return nil
+	return http.Detail(c, provider)
 }
 
 // updateProvider updates an identity provider
@@ -313,20 +305,19 @@ func (rt *Router) updateProvider(c *fiber.Ctx) error {
 
 	name := c.Params("name")
 	if name == "" {
-		return httpx.WithRepErrMsg(c, httpx.ProviderIsRequired.Code, httpx.ProviderIsRequired.Msg, c.Path())
+		return http.Err(c, http.ProviderIsRequired.Code, http.ProviderIsRequired.Msg)
 	}
 
 	var provider model.Identity
 	if err := c.BodyParser(&provider); err != nil {
-		return httpx.WithRepErrMsg(c, httpx.BadRequest.Code, "invalid request parameters", c.Path())
+		return http.Err(c, http.BadRequest.Code, "invalid request parameters")
 	}
 
 	if err := identityService.UpdateProvider(c.Context(), name, &provider); err != nil {
-		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.OPERATION, "update identity provider")
-	return nil
+	return http.Operation(c)
 }
 
 // toggleProvider toggles the enabled status of an identity provider
@@ -335,15 +326,14 @@ func (rt *Router) toggleProvider(c *fiber.Ctx) error {
 
 	name := c.Params("name")
 	if name == "" {
-		return httpx.WithRepErrMsg(c, httpx.ProviderIsRequired.Code, httpx.ProviderIsRequired.Msg, c.Path())
+		return http.Err(c, http.ProviderIsRequired.Code, http.ProviderIsRequired.Msg)
 	}
 
 	if err := identityService.ToggleProvider(c.Context(), name); err != nil {
-		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.OPERATION, "toggle identity provider status")
-	return nil
+	return http.Operation(c)
 }
 
 // deleteProvider deletes an identity provider
@@ -352,15 +342,14 @@ func (rt *Router) deleteProvider(c *fiber.Ctx) error {
 
 	name := c.Params("name")
 	if name == "" {
-		return httpx.WithRepErrMsg(c, httpx.ProviderIsRequired.Code, httpx.ProviderIsRequired.Msg, c.Path())
+		return http.Err(c, http.ProviderIsRequired.Code, http.ProviderIsRequired.Msg)
 	}
 
 	if err := identityService.DeleteProvider(c.Context(), name); err != nil {
-		return httpx.WithRepErrMsg(c, httpx.Failed.Code, err.Error(), c.Path())
+		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	c.Locals(middleware.OPERATION, "delete identity provider")
-	return nil
+	return http.Operation(c)
 }
 
 // getCookiePath gets cookie path from database configuration

@@ -28,7 +28,7 @@ import (
 func ExceptionMiddleware(c *fiber.Ctx) error {
 	defer func() {
 		if err := recover(); err != nil {
-			_ = http.WithRepErr(c, http.InternalError.Code, errorToString(err), c.Path())
+			_ = http.Err(c, http.InternalError.Code, errorToString(err))
 			log.Errorw("panic", "error", err, "path", c.Path())
 		}
 	}()
