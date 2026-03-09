@@ -84,6 +84,49 @@ rotateNum = 3
 # unit: MB
 rotateSize = 256
 
+# ------------------------------------------------------------------------------
+# 多 category 日志（pkg/logger）：使用 logger.InitMulti(multiConf) 时读取本段
+# 与 [log] 二选一或并存；若使用本段，需在代码中从 viper 解析 "logger" 得到 logger.MultiConf
+# 使用方式：logger.Category("http").Infow(...) 等
+# ------------------------------------------------------------------------------
+# [logger.default]
+#   # 输出目标：stdout 或 file
+#   output = "stdout"
+#   # 日志目录（output=file 时生效）
+#   path = "logs"
+#   # 日志文件名（output=file 时生效）
+#   filename = "app.log"
+#   # 日志级别：DEBUG INFO WARN ERROR
+#   level = "INFO"
+#   # 按时间滚动保留小时数
+#   keepHours = 7
+#   # 单文件大小上限，单位 MB
+#   rotateSize = 100
+#   # 滚动保留文件个数
+#   rotateNum = 10
+#
+# # 已配置的 category 会写入各自文件，日志中带 category=<名称>
+# [logger.categories.http]
+#   output = "file"
+#   path = "logs"
+#   filename = "http.log"
+#   level = "INFO"
+#   keepHours = 7
+#   rotateSize = 100
+#   rotateNum = 10
+#
+# [logger.categories.plugin]
+#   output = "file"
+#   path = "logs"
+#   filename = "plugin.log"
+#   level = "DEBUG"
+#
+# [logger.categories.cron]
+#   output = "file"
+#   path = "logs"
+#   filename = "cron.log"
+#   level = "WARN"
+
 [grpc]
 # grpc server host
 host = "0.0.0.0"

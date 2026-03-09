@@ -40,10 +40,10 @@ type IManager interface {
 	Names() []string
 }
 
-// MultiConf defines multi-channel logger configuration.
+// MultiConf defines multi-category logger configuration. Used by TOML/viper with mapstructure tags.
 type MultiConf struct {
-	Default  *Conf
-	Channels map[string]*Conf
+	Default    *Conf            `mapstructure:"default" toml:"default"`
+	Categories map[string]*Conf `mapstructure:"categories" toml:"categories"`
 }
 
 // SetDefaults initializes missing fields for MultiConf.
@@ -51,8 +51,8 @@ func (c *MultiConf) SetDefaults() {
 	if c.Default == nil {
 		c.Default = SetDefaults()
 	}
-	if c.Channels == nil {
-		c.Channels = map[string]*Conf{}
+	if c.Categories == nil {
+		c.Categories = map[string]*Conf{}
 	}
 }
 
@@ -65,18 +65,18 @@ func (c *MultiConf) Validate() error {
 	if err := c.Default.Validate(); err != nil {
 		return fmt.Errorf("invalid default logger config: %w", err)
 	}
-	for name, conf := range c.Channels {
+	for name, conf := range c.Categories {
 		n := strings.TrimSpace(name)
 		if n == "" {
-			return fmt.Errorf("logger channel name cannot be empty")
+			return fmt.Errorf("logger category name cannot be empty")
 		}
 		if conf == nil {
 			conf = cloneConf(c.Default)
-			c.Channels[name] = conf
+			c.Categories[name] = conf
 		}
 		inheritConf(conf, c.Default)
 		if err := conf.Validate(); err != nil {
-			return fmt.Errorf("invalid logger config for channel %q: %w", name, err)
+			return fmt.Errorf("invalid logger config for category %q: %w", name, err)
 		}
 	}
 	return nil
@@ -84,10 +84,10 @@ func (c *MultiConf) Validate() error {
 
 type manager struct {
 	defaultLogger *Logger
-	channels      map[string]*Logger
+	categories    map[string]*Logger
 }
 
-// InitMulti initializes a manager with default + named channel loggers.
+// InitMulti initializes a manager with default + named category loggers.
 func InitMulti(conf *MultiConf) error {
 	m, err := NewManager(conf)
 	if err != nil {
@@ -123,16 +123,16 @@ func NewManager(conf *MultiConf) (IManager, error) {
 	}
 	m := &manager{
 		defaultLogger: &Logger{Logger: defaultSlog.With("category", "default")},
-		channels:      make(map[string]*Logger, len(conf.Channels)),
+		categories:    make(map[string]*Logger, len(conf.Categories)),
 	}
 
-	for name, channelConf := range conf.Channels {
-		channelName := strings.TrimSpace(name)
-		channelLogger, channelErr := buildLogger(channelConf, channelName)
-		if channelErr != nil {
-			return nil, channelErr
+	for name, categoryConf := range conf.Categories {
+		categoryName := strings.TrimSpace(name)
+		categoryLogger, err := buildLogger(categoryConf, categoryName)
+		if err != nil {
+			return nil, err
 		}
-		m.channels[channelName] = &Logger{Logger: channelLogger}
+		m.categories[categoryName] = &Logger{Logger: categoryLogger}
 	}
 
 	return m, nil
@@ -143,8 +143,8 @@ func ProvideManager(conf *MultiConf) (IManager, error) {
 	return NewManager(conf)
 }
 
-// Channel returns named channel logger from global manager.
-func Channel(name string) *Logger {
+// Category returns named category logger from global manager.
+func Category(name string) *Logger {
 	return GetManager().Get(name)
 }
 
@@ -161,30 +161,31 @@ func GetManager() IManager {
 	return defaultManagerFromGlobal()
 }
 
-// Get returns logger by channel name.
+// Get returns logger by category name. 仅返回已配置的 category，未配置的名称回退到 default（category=default），需在 InitMulti 的 Categories 中配置后才有独立 category。
 func (m *manager) Get(name string) *Logger {
 	if m == nil || m.defaultLogger == nil {
 		return &Logger{Logger: GetLogger()}
 	}
-	channelName := strings.TrimSpace(name)
-	if channelName == "" || strings.EqualFold(channelName, "default") {
+	categoryName := strings.TrimSpace(name)
+	if categoryName == "" || strings.EqualFold(categoryName, "default") {
 		return m.defaultLogger
 	}
-	if l, ok := m.channels[channelName]; ok {
+	if l, ok := m.categories[categoryName]; ok {
 		return l
 	}
-	return &Logger{Logger: m.defaultLogger.With("channel", channelName)}
+	// 未配置的 category 统一走 default（category=default）
+	return m.defaultLogger
 }
 
-// Names returns registered channel names.
+// Names returns registered category names.
 func (m *manager) Names() []string {
 	if m == nil {
 		return nil
 	}
-	names := make([]string, 0, len(m.channels)+1)
+	names := make([]string, 0, len(m.categories)+1)
 	names = append(names, "default")
-	for channelName := range m.channels {
-		names = append(names, channelName)
+	for categoryName := range m.categories {
+		names = append(names, categoryName)
 	}
 	sort.Strings(names)
 	return names
@@ -197,7 +198,7 @@ func initGlobalManagerWithDefault(defaultLogger *slog.Logger) {
 	}
 	setGlobalManager(&manager{
 		defaultLogger: &Logger{Logger: defaultLogger.With("category", "default")},
-		channels:      map[string]*Logger{},
+		categories:    map[string]*Logger{},
 	})
 }
 
@@ -219,7 +220,7 @@ func defaultManagerFromGlobal() IManager {
 
 	setGlobalManager(&manager{
 		defaultLogger: &Logger{Logger: GetLogger().With("category", "default")},
-		channels:      map[string]*Logger{},
+		categories:    map[string]*Logger{},
 	})
 
 	managerMu.RLock()

@@ -142,7 +142,7 @@ func TestOTelHandlerFallbackContext(t *testing.T) {
 	}
 }
 
-// TestInitMulti verifies multi-channel logger initialization.
+// TestInitMulti verifies multi-category logger initialization.
 func TestInitMulti(t *testing.T) {
 	tmpDir := t.TempDir()
 	conf := &MultiConf{
@@ -152,7 +152,7 @@ func TestInitMulti(t *testing.T) {
 			Filename: "app.log",
 			Level:    "INFO",
 		},
-		Channels: map[string]*Conf{
+		Categories: map[string]*Conf{
 			"http": {
 				Output:   "file",
 				Path:     tmpDir,
@@ -172,8 +172,8 @@ func TestInitMulti(t *testing.T) {
 		t.Fatalf("InitMulti() should not fail: %v", err)
 	}
 
-	Channel("http").Infow("http request", "path", "/health")
-	Channel("plugin").Infow("plugin run", "name", "git")
+	Category("http").Infow("http request", "path", "/health")
+	Category("plugin").Infow("plugin run", "name", "git")
 	Infow("default run", "module", "app")
 
 	httpContent, err := os.ReadFile(filepath.Join(tmpDir, "http.log"))
@@ -201,8 +201,8 @@ func TestInitMulti(t *testing.T) {
 	}
 }
 
-// TestChannelFallback verifies unknown channel falls back to default logger.
-func TestChannelFallback(t *testing.T) {
+// TestCategoryFallback verifies unknown category falls back to default logger (category=default only).
+func TestCategoryFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 	conf := &MultiConf{
 		Default: &Conf{
@@ -217,13 +217,40 @@ func TestChannelFallback(t *testing.T) {
 		t.Fatalf("InitMulti() should not fail: %v", err)
 	}
 
-	Channel("cron").Infow("cron event", "task", "cleanup")
+	Category("cron").Infow("cron event", "task", "cleanup")
 	content, err := os.ReadFile(filepath.Join(tmpDir, "fallback.log"))
 	if err != nil {
 		t.Fatalf("failed to read fallback.log: %v", err)
 	}
 	text := string(content)
-	if !strings.Contains(text, "category=default") || !strings.Contains(text, "channel=cron") {
-		t.Fatalf("expected fallback log to include default category and channel field: %s", text)
+	if !strings.Contains(text, "category=default") {
+		t.Fatalf("expected fallback log to include category=default: %s", text)
 	}
+}
+
+func TestPrintLog(t *testing.T) {
+	Init(SetDefaults())
+	Info("test")
+	Infow("test", "key", "value")
+	Debug("test")
+	Debugw("test", "key", "value")
+	Warn("test")
+	Warnw("test", "key", "value")
+	Error("test")
+	Errorw("test", "key", "value")
+
+	ch := Category("cron")
+	ch.Info("test")
+	ch.Infow("test", "key", "value")
+	ch.Debug("test")
+	ch.Debugw("test", "key", "value")
+	ch.Warn("test")
+	ch.Warnw("test", "key", "value")
+	ch.Error("test")
+	ch.Errorw("test", "key", "value")
+
+	ch.InfoContext(context.Background(), "test", "key", "value")
+	ch.DebugContext(context.Background(), "test", "key", "value")
+	ch.WarnContext(context.Background(), "test", "key", "value")
+	ch.ErrorContext(context.Background(), "test", "key", "value")
 }

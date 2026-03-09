@@ -36,15 +36,15 @@ var (
 // ProviderSet is the Wire provider set for the logger package.
 var ProviderSet = wire.NewSet(ProvideLogger)
 
-// Conf defines logger configuration.
+// Conf defines logger configuration. Used by TOML/viper with mapstructure tags.
 type Conf struct {
-	Output     string
-	Path       string
-	Filename   string
-	Level      string
-	KeepHours  int
-	RotateSize int
-	RotateNum  int
+	Output     string `mapstructure:"output" toml:"output"`
+	Path       string `mapstructure:"path" toml:"path"`
+	Filename   string `mapstructure:"filename" toml:"filename"`
+	Level      string `mapstructure:"level" toml:"level"`
+	KeepHours  int    `mapstructure:"keepHours" toml:"keepHours"`
+	RotateSize int    `mapstructure:"rotateSize" toml:"rotateSize"`
+	RotateNum  int    `mapstructure:"rotateNum" toml:"rotateNum"`
 }
 
 // Logger wraps slog.Logger to satisfy dependency injection usage.
@@ -156,7 +156,7 @@ func buildLogger(conf *Conf, category string) (*slog.Logger, error) {
 		},
 	}
 
-	base := slog.NewTextHandler(output, handlerOptions)
+	base := slog.NewJSONHandler(output, handlerOptions)
 	l := slog.New(newLogTrace(base))
 	if strings.TrimSpace(category) != "" {
 		l = l.With("category", strings.TrimSpace(category))
@@ -251,7 +251,7 @@ func ensureLogger() {
 
 	once.Do(func() {
 		if _, err := New(SetDefaults()); err != nil {
-			fallback := slog.New(newLogTrace(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+			fallback := slog.New(newLogTrace(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 			mu.Lock()
 			global = fallback
 			mu.Unlock()
