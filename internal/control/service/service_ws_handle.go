@@ -25,7 +25,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/ws"
 	"github.com/bytedance/sonic"
-	fws "github.com/fasthttp/websocket"
+	"github.com/fasthttp/websocket"
 )
 
 const (
@@ -122,8 +122,8 @@ func (h *WSHandle) OnDisconnect(conn ws.Conn, err error) {
 	h.removeStatusSubscription(conn.ID())
 
 	// 客户端主动断开通常会触发 CloseNormalClosure(1000) / CloseGoingAway(1001)
-	if err != nil && fws.IsCloseError(err, fws.CloseNormalClosure, fws.CloseGoingAway) {
-		var ce *fws.CloseError
+	if err != nil && websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+		var ce *websocket.CloseError
 		if errors.As(err, &ce) {
 			log.Infow("ws client disconnected", "conn", conn.ID(), "remote", conn.RemoteAddr(), "code", ce.Code, "text", ce.Text)
 			return

@@ -15,6 +15,7 @@
 package database
 
 import (
+	"cmp"
 	"database/sql"
 	"fmt"
 	"time"
@@ -96,10 +97,7 @@ func (m *managerImpl) Close() error {
 func NewManager(cfg Database) (Manager, error) {
 	m := &managerImpl{}
 
-	driver := cfg.Driver
-	if driver == "" {
-		driver = "mysql"
-	}
+	driver := cmp.Or(cfg.Driver, "mysql")
 	opts := cfg.Options
 	hasMySQL := cfg.MySQL.DSN != ""
 	hasSQLite := cfg.SQLite.DSN != ""

@@ -16,11 +16,9 @@ package service
 
 import (
 	"github.com/arcentrix/arcentra/internal/control/repo"
-	"github.com/arcentrix/arcentra/internal/pkg/storage"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
-	"github.com/arcentrix/arcentra/pkg/plugin"
-	ssoutil "github.com/arcentrix/arcentra/pkg/sso/util"
+	"github.com/arcentrix/arcentra/pkg/sso/util"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -51,8 +49,6 @@ func NewServices(
 	db database.IDatabase,
 	cacheStore cache.ICache,
 	repos *repo.Repositories,
-	_ *plugin.Manager,
-	_ storage.IStorage,
 ) *Services {
 	// 基础服务
 	menuService := NewMenuService(repos.Menu)
@@ -68,7 +64,7 @@ func NewServices(
 	)
 	generalSettingsService := NewGeneralSettingsService(repos.GeneralSettings)
 	agentService := NewAgentService(repos.Agent, repos.StepRun, generalSettingsService)
-	stateStore := ssoutil.NewRedisStateStore(cacheStore)
+	stateStore := util.NewRedisStateStore(cacheStore)
 	identityService := NewIdentityService(repos.Identity, repos.User, repos.UserExt, stateStore)
 	teamService := NewTeamService(repos.Team)
 	storageService := NewStorageService(repos.Storage)

@@ -16,10 +16,8 @@ package service
 
 import (
 	"github.com/arcentrix/arcentra/internal/control/repo"
-	"github.com/arcentrix/arcentra/internal/pkg/storage"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
-	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/google/wire"
 )
 
@@ -33,8 +31,6 @@ func ProvideServices(
 	db database.IDatabase,
 	cacheStore cache.ICache,
 	repos *repo.Repositories,
-	pluginManager *plugin.Manager,
-	storageProvider storage.IStorage,
 ) *Services {
-	return NewServices(db, cacheStore, repos, pluginManager, storageProvider)
+	return NewServices(db, cacheStore, repos)
 }
