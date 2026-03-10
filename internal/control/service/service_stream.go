@@ -787,15 +787,3 @@ func (s *StreamServiceImpl) fetchAgentStepRuns(ctx context.Context, agentId stri
 	}
 	return resp, nil
 }
-
-func (s *StreamServiceImpl) queryAgents(ctx context.Context, agentIds []string) ([]model.Agent, error) {
-	var agents []model.Agent
-	query := s.mysql.WithContext(ctx).Table((&model.Agent{}).TableName())
-	if len(agentIds) > 0 {
-		query = query.Where("agent_id IN ?", agentIds)
-	}
-	if err := query.Find(&agents).Error; err != nil {
-		return nil, err
-	}
-	return agents, nil
-}
