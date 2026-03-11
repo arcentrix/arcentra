@@ -61,17 +61,17 @@ func (g *Group) Wait() error {
 // The first call to return a non-nil error cancels the group; its error will be
 // returned by Wait.
 func (g *Group) Go(fn func(ctx context.Context) error) {
-	g.wg.Add(1)
-	trace.GoWithContext(g.ctx, func(ctx context.Context) {
-		defer g.wg.Done()
-		if err := fn(ctx); err != nil {
-			g.errOnce.Do(func() {
-				g.err = err
-				if g.cancel != nil {
-					g.cancel()
-				}
-			})
-		}
+	g.wg.Go(func() {
+		trace.GoWithContext(g.ctx, func(ctx context.Context) {
+			if err := fn(ctx); err != nil {
+				g.errOnce.Do(func() {
+					g.err = err
+					if g.cancel != nil {
+						g.cancel()
+					}
+				})
+			}
+		})
 	})
 }
 

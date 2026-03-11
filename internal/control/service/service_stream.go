@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -742,12 +743,7 @@ func matchEventTypeFilter(filters []streamv1.EventType, eventType streamv1.Event
 	if len(filters) == 0 {
 		return true
 	}
-	for _, one := range filters {
-		if one == eventType {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(filters, eventType)
 }
 
 func detectResource(event map[string]any) (resourceType, resourceId string) {

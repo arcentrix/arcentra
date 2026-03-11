@@ -16,10 +16,8 @@ package orderly
 
 import (
 	"reflect"
-	"sync"
 	"testing"
 
-	"github.com/arcentrix/arcentra/pkg/safe"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -404,23 +402,26 @@ func TestMap_Concurrent(t *testing.T) {
 			m.Set(string(rune('a'+i)), i)
 		}
 
-		var wg sync.WaitGroup
-		workers := 10
-		wg.Add(workers)
+		var eg errgroup.Group
+		const workers = 10
 
 		for i := 0; i < workers; i++ {
-			safe.Go(func() {
-				defer wg.Done()
+			eg.Go(func() error {
 				count := 0
 				m.ForEach(func(k string, v any) {
 					count++
 				})
+
 				if count != 50 {
-					t.Errorf("Concurrent ForEach() count = %d, want 50", count)
+					t.Fatalf("Concurrent ForEach() count = %d, want 50", count)
 				}
+				return nil
 			})
 		}
-		wg.Wait()
+
+		if err := eg.Wait(); err != nil {
+			t.Fatalf("concurrent ForEach failed: %v", err)
+		}
 	})
 
 	t.Run("concurrent Keys and ToSlice", func(t *testing.T) {
@@ -429,27 +430,28 @@ func TestMap_Concurrent(t *testing.T) {
 			m.Set(string(rune('a'+i)), i)
 		}
 
-		var wg sync.WaitGroup
+		var eg errgroup.Group
 		workers := 10
-		wg.Add(workers * 2)
 
 		for i := 0; i < workers; i++ {
-			safe.Go(func() {
-				defer wg.Done()
+			eg.Go(func() error {
 				keys := m.Keys()
 				if len(keys) != 50 {
 					t.Errorf("Concurrent Keys() length = %d, want 50", len(keys))
 				}
+				return nil
 			})
 
-			safe.Go(func() {
-				defer wg.Done()
+			eg.Go(func() error {
 				slice := m.ToSlice()
 				if len(slice) != 50 {
 					t.Errorf("Concurrent ToSlice() length = %d, want 50", len(slice))
 				}
+				return nil
 			})
 		}
-		wg.Wait()
+		if err := eg.Wait(); err != nil {
+			t.Fatalf("concurrent Keys and ToSlice failed: %v", err)
+		}
 	})
 }

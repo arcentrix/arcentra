@@ -154,15 +154,12 @@ func (tw *TimerWheel) AddAt(task *Task, executeAt time.Time, callback func(*Task
 
 // run is the timer wheel running loop
 func (tw *TimerWheel) run(tickerC <-chan time.Time) {
-	defer tw.wg.Done()
 
-	for {
-		select {
-		case <-tickerC:
-			tw.tick()
-		case <-tw.stopCh:
-			return
-		}
+	select {
+	case <-tickerC:
+		tw.tick()
+	case <-tw.stopCh:
+		return
 	}
 }
 
