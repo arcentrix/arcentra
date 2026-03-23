@@ -18,7 +18,7 @@ import "testing"
 
 func TestProducerOptionsApply(t *testing.T) {
 	cfg := ProducerConfig{}
-	WithProducerClientOptions(
+	WithProducerOptions(
 		WithSecurityProtocol("SASL_SSL"),
 	).apply(&cfg)
 	WithProducerAcks("1").apply(&cfg)
@@ -56,7 +56,7 @@ func TestNormalizeProducerConfig_Defaults(t *testing.T) {
 
 func TestConsumerOptionsApply(t *testing.T) {
 	cfg := ConsumerConfig{}
-	WithConsumerClientOptions(
+	WithConsumerOptions(
 		WithSecurityProtocol("PLAINTEXT"),
 	).apply(&cfg)
 	WithConsumerAutoOffsetReset("latest").apply(&cfg)

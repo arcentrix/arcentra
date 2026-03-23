@@ -47,62 +47,62 @@ type SslConfig struct {
 	Password string `mapstructure:"password"`
 }
 
-// ClientOption defines optional configuration for ClientConfig.
-type ClientOption interface {
+// Option defines optional configuration for ClientConfig.
+type Option interface {
 	apply(*Config)
 }
 
-type clientOptionFunc func(*Config)
+type optionFunc func(*Config)
 
-func (fn clientOptionFunc) apply(cfg *Config) {
-	fn(cfg)
+func (fn optionFunc) apply(conf *Config) {
+	fn(conf)
 }
 
-func WithSecurityProtocol(securityProtocol string) ClientOption {
-	return clientOptionFunc(func(cfg *Config) {
-		cfg.SecurityProtocol = securityProtocol
+func WithSecurityProtocol(securityProtocol string) Option {
+	return optionFunc(func(conf *Config) {
+		conf.SecurityProtocol = securityProtocol
 	})
 }
 
-func WithSaslMechanism(mechanism string) ClientOption {
-	return clientOptionFunc(func(cfg *Config) {
-		cfg.Sasl.Mechanism = mechanism
+func WithSaslMechanism(mechanism string) Option {
+	return optionFunc(func(conf *Config) {
+		conf.Sasl.Mechanism = mechanism
 	})
 }
 
-func WithSaslUsername(username string) ClientOption {
-	return clientOptionFunc(func(cfg *Config) {
-		cfg.Sasl.Username = username
+func WithSaslUsername(username string) Option {
+	return optionFunc(func(conf *Config) {
+		conf.Sasl.Username = username
 	})
 }
 
-func WithSaslPassword(password string) ClientOption {
-	return clientOptionFunc(func(cfg *Config) {
-		cfg.Sasl.Password = password
+func WithSaslPassword(password string) Option {
+	return optionFunc(func(conf *Config) {
+		conf.Sasl.Password = password
 	})
 }
 
-func WithSslCaFile(path string) ClientOption {
-	return clientOptionFunc(func(cfg *Config) {
-		cfg.Ssl.CaFile = path
+func WithSslCaFile(path string) Option {
+	return optionFunc(func(conf *Config) {
+		conf.Ssl.CaFile = path
 	})
 }
 
-func WithSslCertFile(path string) ClientOption {
-	return clientOptionFunc(func(cfg *Config) {
-		cfg.Ssl.CertFile = path
+func WithSslCertFile(path string) Option {
+	return optionFunc(func(conf *Config) {
+		conf.Ssl.CertFile = path
 	})
 }
 
-func WithSslKeyFile(path string) ClientOption {
-	return clientOptionFunc(func(cfg *Config) {
-		cfg.Ssl.KeyFile = path
+func WithSslKeyFile(path string) Option {
+	return optionFunc(func(conf *Config) {
+		conf.Ssl.KeyFile = path
 	})
 }
 
-func WithSslPassword(password string) ClientOption {
-	return clientOptionFunc(func(cfg *Config) {
-		cfg.Ssl.Password = password
+func WithSslPassword(password string) Option {
+	return optionFunc(func(conf *Config) {
+		conf.Ssl.Password = password
 	})
 }
 
@@ -112,34 +112,34 @@ type Client struct {
 }
 
 // NewKafkaClient creates a new Client using options.
-func NewKafkaClient(bootstrapServers string, opts ...ClientOption) (*Client, error) {
-	cfg := Config{
+func NewKafkaClient(bootstrapServers string, opts ...Option) (*Client, error) {
+	conf := Config{
 		BootstrapServers: bootstrapServers,
 	}
 	for _, opt := range opts {
-		opt.apply(&cfg)
+		opt.apply(&conf)
 	}
-	if err := mq.RequireNonEmpty("bootstrapServers", cfg.BootstrapServers); err != nil {
+	if err := mq.RequireNonEmpty("bootstrapServers", conf.BootstrapServers); err != nil {
 		return nil, err
 	}
-	return &Client{Config: cfg}, nil
+	return &Client{Config: conf}, nil
 }
 
-func buildBaseConfig(cfg Config) (*kafka.ConfigMap, error) {
-	if err := mq.RequireNonEmpty("bootstrapServers", cfg.BootstrapServers); err != nil {
+func buildBaseConfig(conf Config) (*kafka.ConfigMap, error) {
+	if err := mq.RequireNonEmpty("bootstrapServers", conf.BootstrapServers); err != nil {
 		return nil, err
 	}
 
 	config := &kafka.ConfigMap{
-		"bootstrap.servers":        cfg.BootstrapServers,
-		"security.protocol":        cfg.SecurityProtocol,
-		"sasl.mechanism":           cfg.Sasl.Mechanism,
-		"sasl.username":            cfg.Sasl.Username,
-		"sasl.password":            cfg.Sasl.Password,
-		"ssl.ca.location":          cfg.Ssl.CaFile,
-		"ssl.certificate.location": cfg.Ssl.CertFile,
-		"ssl.key.location":         cfg.Ssl.KeyFile,
-		"ssl.key.password":         cfg.Ssl.Password,
+		"bootstrap.servers":        conf.BootstrapServers,
+		"security.protocol":        conf.SecurityProtocol,
+		"sasl.mechanism":           conf.Sasl.Mechanism,
+		"sasl.username":            conf.Sasl.Username,
+		"sasl.password":            conf.Sasl.Password,
+		"ssl.ca.location":          conf.Ssl.CaFile,
+		"ssl.certificate.location": conf.Ssl.CertFile,
+		"ssl.key.location":         conf.Ssl.KeyFile,
+		"ssl.key.password":         conf.Ssl.Password,
 	}
 
 	return config, nil

@@ -91,7 +91,7 @@ func (h *WSHandle) consumeStatusEvents() {
 		return
 	}
 
-	clientOptions := []kafka.ClientOption{
+	clientOptions := []kafka.Option{
 		kafka.WithSecurityProtocol(h.kafkaCfg.SecurityProtocol),
 		kafka.WithSaslMechanism(h.kafkaCfg.Sasl.Mechanism),
 		kafka.WithSaslUsername(h.kafkaCfg.Sasl.Username),
@@ -106,7 +106,7 @@ func (h *WSHandle) consumeStatusEvents() {
 		h.kafkaCfg.BootstrapServers,
 		statusTopic,
 		clientId,
-		kafka.WithConsumerClientOptions(clientOptions...),
+		kafka.WithConsumerOptions(clientOptions...),
 		kafka.WithConsumerAutoOffsetReset("earliest"),
 	)
 	if err != nil {

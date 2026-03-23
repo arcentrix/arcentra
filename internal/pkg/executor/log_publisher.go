@@ -38,7 +38,7 @@ type KafkaLogPublisher struct {
 
 // NewKafkaLogPublisher creates a Kafka log publisher from Kafka config.
 func NewKafkaLogPublisher(cfg kafka.Config, clientID string) (*KafkaLogPublisher, error) {
-	clientOptions := []kafka.ClientOption{
+	clientOptions := []kafka.Option{
 		kafka.WithSecurityProtocol(cfg.SecurityProtocol),
 		kafka.WithSaslMechanism(cfg.Sasl.Mechanism),
 		kafka.WithSaslUsername(cfg.Sasl.Username),
@@ -52,7 +52,7 @@ func NewKafkaLogPublisher(cfg kafka.Config, clientID string) (*KafkaLogPublisher
 	producer, err := kafka.NewProducer(
 		cfg.BootstrapServers,
 		clientID,
-		kafka.WithProducerClientOptions(clientOptions...),
+		kafka.WithProducerOptions(clientOptions...),
 		kafka.WithProducerAcks(cfg.Acks),
 		kafka.WithProducerRetries(cfg.Retries),
 		kafka.WithProducerCompression(cfg.Compression),

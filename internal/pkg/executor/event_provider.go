@@ -56,7 +56,7 @@ func NewEventPublisherFromConfig(appConf *config.AppConfig) EventPublisher {
 			mqKafka.BootstrapServers,
 			"arcentra",
 			resolveEventTopic,
-			kafka.WithProducerClientOptions(
+			kafka.WithProducerOptions(
 				kafka.WithSecurityProtocol(mqKafka.SecurityProtocol),
 				kafka.WithSaslMechanism(mqKafka.Sasl.Mechanism),
 				kafka.WithSaslUsername(mqKafka.Sasl.Username),

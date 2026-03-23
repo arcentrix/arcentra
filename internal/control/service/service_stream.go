@@ -88,7 +88,7 @@ func (s *StreamServiceImpl) startKafkaLogConsumer(cfg KafkaSettings) {
 		return
 	}
 
-	clientOptions := []kafka.ClientOption{
+	clientOptions := []kafka.Option{
 		kafka.WithSecurityProtocol(cfg.SecurityProtocol),
 		kafka.WithSaslMechanism(cfg.Sasl.Mechanism),
 		kafka.WithSaslUsername(cfg.Sasl.Username),
@@ -103,7 +103,7 @@ func (s *StreamServiceImpl) startKafkaLogConsumer(cfg KafkaSettings) {
 		cfg.BootstrapServers,
 		"BUILD_LOGS",
 		"arcentra",
-		kafka.WithConsumerClientOptions(clientOptions...),
+		kafka.WithConsumerOptions(clientOptions...),
 		kafka.WithConsumerAutoOffsetReset("earliest"),
 	)
 	if err != nil {
@@ -500,7 +500,7 @@ func (s *StreamServiceImpl) newTopicConsumer(suffix string) (*kafka.Consumer, er
 		s.kafkaCfg.BootstrapServers,
 		streamStatusTopic,
 		streamConsumerGroup+"-"+suffix,
-		kafka.WithConsumerClientOptions(
+		kafka.WithConsumerOptions(
 			kafka.WithSecurityProtocol(s.kafkaCfg.SecurityProtocol),
 			kafka.WithSaslMechanism(s.kafkaCfg.Sasl.Mechanism),
 			kafka.WithSaslUsername(s.kafkaCfg.Sasl.Username),

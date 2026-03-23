@@ -91,7 +91,7 @@ func newKafkaBroker(config *queueConfig) (MessageQueueBroker, DelayManager, erro
 		kafkaConfig.DelaySlotDuration = config.DelaySlotDuration
 	}
 
-	clientOptions := []mqkafka.ClientOption{
+	clientOptions := []mqkafka.Option{
 		mqkafka.WithSecurityProtocol(kafkaConfig.SecurityProtocol),
 		mqkafka.WithSaslMechanism(kafkaConfig.SASLMechanism),
 		mqkafka.WithSaslUsername(kafkaConfig.SASLUsername),
@@ -110,7 +110,7 @@ func newKafkaBroker(config *queueConfig) (MessageQueueBroker, DelayManager, erro
 	producer, err := mqkafka.NewProducer(
 		kafkaConfig.BootstrapServers,
 		programName,
-		mqkafka.WithProducerClientOptions(clientOptions...),
+		mqkafka.WithProducerOptions(clientOptions...),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create producer: %w", err)
@@ -120,7 +120,7 @@ func newKafkaBroker(config *queueConfig) (MessageQueueBroker, DelayManager, erro
 		kafkaConfig.BootstrapServers,
 		fmt.Sprintf("%s%s", kafkaConfig.TopicPrefix, PriorityNormalSuffix),
 		programName,
-		mqkafka.WithConsumerClientOptions(clientOptions...),
+		mqkafka.WithConsumerOptions(clientOptions...),
 		mqkafka.WithConsumerEnableAutoCommit(kafkaConfig.AutoCommit),
 		mqkafka.WithConsumerSessionTimeoutMs(kafkaConfig.SessionTimeout),
 		mqkafka.WithConsumerMaxPollIntervalMs(kafkaConfig.MaxPollInterval),

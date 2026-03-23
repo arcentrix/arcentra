@@ -16,7 +16,6 @@ package kafka
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/arcentrix/arcentra/pkg/mq"
@@ -27,6 +26,7 @@ import (
 type ConsumerConfig struct {
 	Config `json:",inline" mapstructure:",squash"`
 
+	GroupId           string `json:"groupId" mapstructure:"groupId"`
 	AutoOffsetReset   string `json:"autoOffsetReset" mapstructure:"autoOffsetReset"`
 	EnableAutoCommit  *bool  `json:"enableAutoCommit" mapstructure:"enableAutoCommit"`
 	SessionTimeoutMs  int    `json:"sessionTimeoutMs" mapstructure:"sessionTimeoutMs"`
@@ -40,39 +40,45 @@ type ConsumerOption interface {
 
 type consumerOptionFunc func(*ConsumerConfig)
 
-func (fn consumerOptionFunc) apply(cfg *ConsumerConfig) {
-	fn(cfg)
+func (fn consumerOptionFunc) apply(conf *ConsumerConfig) {
+	fn(conf)
 }
 
-func WithConsumerClientOptions(opts ...ClientOption) ConsumerOption {
-	return consumerOptionFunc(func(cfg *ConsumerConfig) {
+func WithConsumerOptions(opts ...Option) ConsumerOption {
+	return consumerOptionFunc(func(conf *ConsumerConfig) {
 		for _, opt := range opts {
-			opt.apply(&cfg.Config)
+			opt.apply(&conf.Config)
 		}
 	})
 }
 
+func WithConsumerGroupId(groupId string) ConsumerOption {
+	return consumerOptionFunc(func(conf *ConsumerConfig) {
+		conf.GroupId = groupId
+	})
+}
+
 func WithConsumerAutoOffsetReset(reset string) ConsumerOption {
-	return consumerOptionFunc(func(cfg *ConsumerConfig) {
-		cfg.AutoOffsetReset = reset
+	return consumerOptionFunc(func(conf *ConsumerConfig) {
+		conf.AutoOffsetReset = reset
 	})
 }
 
 func WithConsumerEnableAutoCommit(enable bool) ConsumerOption {
-	return consumerOptionFunc(func(cfg *ConsumerConfig) {
-		cfg.EnableAutoCommit = &enable
+	return consumerOptionFunc(func(conf *ConsumerConfig) {
+		conf.EnableAutoCommit = &enable
 	})
 }
 
 func WithConsumerSessionTimeoutMs(timeoutMs int) ConsumerOption {
-	return consumerOptionFunc(func(cfg *ConsumerConfig) {
-		cfg.SessionTimeoutMs = timeoutMs
+	return consumerOptionFunc(func(conf *ConsumerConfig) {
+		conf.SessionTimeoutMs = timeoutMs
 	})
 }
 
 func WithConsumerMaxPollIntervalMs(intervalMs int) ConsumerOption {
-	return consumerOptionFunc(func(cfg *ConsumerConfig) {
-		cfg.MaxPollIntervalMs = intervalMs
+	return consumerOptionFunc(func(conf *ConsumerConfig) {
+		conf.MaxPollIntervalMs = intervalMs
 	})
 }
 
@@ -89,7 +95,7 @@ func NewConsumer(bootstrapServers string, topicName string, clientId string, opt
 	if err := mq.RequireNonEmpty("clientId", clientId); err != nil {
 		return nil, err
 	}
-	cfg := ConsumerConfig{
+	conf := ConsumerConfig{
 		Config: Config{
 			BootstrapServers: bootstrapServers,
 		},
@@ -98,16 +104,16 @@ func NewConsumer(bootstrapServers string, topicName string, clientId string, opt
 		MaxPollIntervalMs: 300000,
 	}
 	for _, opt := range opts {
-		opt.apply(&cfg)
+		opt.apply(&conf)
 	}
-	normalizeConsumerConfig(&cfg)
+	normalizeConsumerConfig(&conf)
 
 	enableAutoCommit := true
-	if cfg.EnableAutoCommit != nil {
-		enableAutoCommit = *cfg.EnableAutoCommit
+	if conf.EnableAutoCommit != nil {
+		enableAutoCommit = *conf.EnableAutoCommit
 	}
 
-	config, err := buildBaseConfig(cfg.Config)
+	config, err := buildBaseConfig(conf.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -115,13 +121,15 @@ func NewConsumer(bootstrapServers string, topicName string, clientId string, opt
 	if err != nil {
 		return nil, err
 	}
-	groupId := strings.ToUpper(fmt.Sprintf("%s_CONSUMER", strings.TrimSpace(topicName)))
+	if conf.GroupId == "" {
+		return nil, fmt.Errorf("groupId is required, use WithConsumerGroupId to set it")
+	}
 	_ = config.SetKey("client.id", clientID)
-	_ = config.SetKey("group.id", groupId)
-	_ = config.SetKey("auto.offset.reset", cfg.AutoOffsetReset)
+	_ = config.SetKey("group.id", conf.GroupId)
+	_ = config.SetKey("auto.offset.reset", conf.AutoOffsetReset)
 	_ = config.SetKey("enable.auto.commit", enableAutoCommit)
-	_ = config.SetKey("session.timeout.ms", cfg.SessionTimeoutMs)
-	_ = config.SetKey("max.poll.interval.ms", cfg.MaxPollIntervalMs)
+	_ = config.SetKey("session.timeout.ms", conf.SessionTimeoutMs)
+	_ = config.SetKey("max.poll.interval.ms", conf.MaxPollIntervalMs)
 
 	consumer, err := kafka.NewConsumer(config)
 	if err != nil {
@@ -131,15 +139,15 @@ func NewConsumer(bootstrapServers string, topicName string, clientId string, opt
 	return &Consumer{consumer: consumer}, nil
 }
 
-func normalizeConsumerConfig(cfg *ConsumerConfig) {
-	if cfg.AutoOffsetReset == "" {
-		cfg.AutoOffsetReset = "earliest"
+func normalizeConsumerConfig(conf *ConsumerConfig) {
+	if conf.AutoOffsetReset == "" {
+		conf.AutoOffsetReset = "earliest"
 	}
-	if cfg.SessionTimeoutMs == 0 {
-		cfg.SessionTimeoutMs = 10000
+	if conf.SessionTimeoutMs == 0 {
+		conf.SessionTimeoutMs = 10000
 	}
-	if cfg.MaxPollIntervalMs == 0 {
-		cfg.MaxPollIntervalMs = 300000
+	if conf.MaxPollIntervalMs == 0 {
+		conf.MaxPollIntervalMs = 300000
 	}
 }
 
