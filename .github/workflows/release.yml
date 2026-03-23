@@ -12,11 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: Arcentra Release
-
-permissions:
-  contents: write
-  packages: write
+name: Release
 
 on:
   push:
@@ -24,14 +20,88 @@ on:
       - "v*"
       - "[0-9][0-9].*"
 
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
-  release:
-    name: Build & Release (GoReleaser)
+  # ──────────────────────────────────────────────────────────────────
+  # 质量门禁：fmt / lint / test
+  # ──────────────────────────────────────────────────────────────────
+  quality-gate:
+    name: Quality Gate
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          UNFMT=$(gofmt -l .)
+          if [ -n "$UNFMT" ]; then
+            echo "::error::Unformatted Go files found"
+            echo "$UNFMT"
+            exit 1
+          fi
+
+      - name: Install Buf CLI
+        run: |
+          curl -sSL "https://github.com/bufbuild/buf/releases/latest/download/buf-$(uname -s)-$(uname -m)" \
+            -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf
+
+      - name: Install codegen tools
+        run: |
+          go install github.com/google/wire/cmd/wire@latest
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+
+      - name: Generate code
+        run: |
+          cd api && buf generate --template buf.gen.yaml && cd ..
+          cd cmd/arcentra && wire && cd ../..
+          cd cmd/arcentra-agent && wire && cd ../..
+          sqlc generate
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+  # ──────────────────────────────────────────────────────────────────
+  # 原生构建：3 个平台 × 3 个二进制（每个平台在原生架构 runner 上构建）
+  # ──────────────────────────────────────────────────────────────────
+  build:
+    name: Build (${{ matrix.target }})
+    needs: quality-gate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - target: linux-arm64
+            os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - target: darwin-arm64
+            os: macos-14
+            goos: darwin
+            goarch: arm64
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -41,43 +111,96 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # CGO deps for linux build
-      - name: Install librdkafka (Linux)
+      - name: Install Buf CLI
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            pkg-config librdkafka-dev
+          curl -sSL "https://github.com/bufbuild/buf/releases/latest/download/buf-$(uname -s)-$(uname -m)" \
+            -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: latest
-          args: release --clean
+      - name: Install codegen tools
+        run: |
+          go install github.com/google/wire/cmd/wire@latest
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+
+      - name: Generate code
+        run: |
+          cd api && buf generate --template buf.gen.yaml && cd ..
+          cd cmd/arcentra && wire && cd ../..
+          cd cmd/arcentra-agent && wire && cd ../..
+          sqlc generate
+
+      - name: Build release binaries
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  docker:
-    name: Build & Push Docker Images
-    runs-on: ubuntu-latest
-    needs: release
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Extract version
-        id: vars
+          CGO_ENABLED: "1"
         run: |
-          if [ -f VERSION ]; then
-            VERSION=$(cat VERSION | tr -d '[:space:]\n\r')
-          elif [ -n "$GITHUB_REF_NAME" ]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-          else
-            VERSION="$(date +%y).0.0.0"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          COMMIT="$(git rev-parse HEAD)"
+          BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          LDFLAGS="-s -w \
+            -X 'github.com/arcentrix/arcentra/pkg/version.Version=${VERSION}' \
+            -X 'github.com/arcentrix/arcentra/pkg/version.GitBranch=${BRANCH}' \
+            -X 'github.com/arcentrix/arcentra/pkg/version.GitCommit=${COMMIT}' \
+            -X 'github.com/arcentrix/arcentra/pkg/version.BuildTime=${BUILD_TIME}'"
+
+          mkdir -p build
+          for target in arcentra arcentra-agent cli; do
+            echo "Building ${target}..."
+            go build -trimpath -ldflags "${LDFLAGS}" -o "build/${target}" "./cmd/${target}"
+          done
+          mv build/cli build/arcentra-cli
+
+      - name: Package artifacts
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ARCHIVE="arcentra-${{ matrix.target }}-${TAG}"
+          mkdir -p "dist/${ARCHIVE}"
+
+          cp build/arcentra build/arcentra-agent build/arcentra-cli "dist/${ARCHIVE}/"
+          cp -r conf.d "dist/${ARCHIVE}/"
+          [ -d deploy ] && cp -r deploy "dist/${ARCHIVE}/"
+          [ -f README.md ] && cp README.md "dist/${ARCHIVE}/"
+          [ -f LICENSE ] && cp LICENSE "dist/${ARCHIVE}/"
+
+          cd dist
+          tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}-${{ github.ref_name }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  # ──────────────────────────────────────────────────────────────────
+  # Docker 多平台镜像（arcentra + arcentra-agent）
+  # ──────────────────────────────────────────────────────────────────
+  docker:
+    name: Docker Image
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download amd64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-amd64-${{ github.ref_name }}
+          path: tmp/amd64
+
+      - name: Download arm64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64-${{ github.ref_name }}
+          path: tmp/arm64
+
+      - name: Prepare binary layout
+        run: |
+          mkdir -p dist/linux/amd64 dist/linux/arm64
+          tar xzf tmp/amd64/*.tar.gz --strip-components=1 -C dist/linux/amd64
+          tar xzf tmp/arm64/*.tar.gz --strip-components=1 -C dist/linux/arm64
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -85,33 +208,101 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GHCR
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push multi-arch images
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push arcentra
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ci
+          push: true
+          target: arcentra
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push arcentra-agent
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ci
+          push: true
+          target: arcentra-agent
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-agent:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-agent:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────────────────────────
+  # 生成 Changelog 并发布 GitHub Release
+  # ──────────────────────────────────────────────────────────────────
+  release:
+    name: GitHub Release
+    needs: [build, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        id: changelog
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Append Docker image info to changelog
         run: |
-          set -euo pipefail
-          VERSION="${{ steps.vars.outputs.version }}"
-          PLATFORMS="linux/amd64,linux/arm64"
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          cat >> CHANGELOG.md << EOF
 
-          docker buildx build \
-            --platform "${PLATFORMS}" \
-            --push \
-            --provenance=false \
-            --target arcentra \
-            -t "ghcr.io/${{ github.repository }}:${VERSION}" \
-            -t "ghcr.io/${{ github.repository }}:latest" \
-            .
+          ---
 
-          docker buildx build \
-            --platform "${PLATFORMS}" \
-            --push \
-            --provenance=false \
-            --target arcentra-agent \
-            -t "ghcr.io/${{ github.repository }}-agent:${VERSION}" \
-            -t "ghcr.io/${{ github.repository }}-agent:latest" \
-            .
+          ### Docker
+
+          \`\`\`bash
+          # Multi-arch: linux/amd64, linux/arm64
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-agent:${VERSION}
+          \`\`\`
+
+          | Tag | Image |
+          |-----|-------|
+          | \`${VERSION}\` | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}\` |
+          | \`${VERSION}\` | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-agent:${VERSION}\` |
+          EOF
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: "*-${{ github.ref_name }}"
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: CHANGELOG.md
+          files: artifacts/*.tar.gz
