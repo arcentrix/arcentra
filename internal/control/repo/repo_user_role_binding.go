@@ -23,11 +23,11 @@ import (
 
 // IUserRoleBindingRepository defines user role binding persistence with context support.
 type IUserRoleBindingRepository interface {
-	List(ctx context.Context, userId string) ([]model.UserRoleBinding, error)
-	GetByRole(ctx context.Context, userId, roleId string) (*model.UserRoleBinding, error)
+	List(ctx context.Context, userID string) ([]model.UserRoleBinding, error)
+	GetByRole(ctx context.Context, userID, roleID string) (*model.UserRoleBinding, error)
 	Create(ctx context.Context, binding *model.UserRoleBinding) error
-	Delete(ctx context.Context, bindingId string) error
-	DeleteByUser(ctx context.Context, userId string) error
+	Delete(ctx context.Context, bindingID string) error
+	DeleteByUser(ctx context.Context, userID string) error
 }
 
 type UserRoleBindingRepo struct {
@@ -40,19 +40,19 @@ func NewUserRoleBindingRepo(db database.IDatabase) IUserRoleBindingRepository {
 	}
 }
 
-// List returns user role bindings by userId.
-func (r *UserRoleBindingRepo) List(ctx context.Context, userId string) ([]model.UserRoleBinding, error) {
+// List returns user role bindings by userID.
+func (r *UserRoleBindingRepo) List(ctx context.Context, userID string) ([]model.UserRoleBinding, error) {
 	var bindings []model.UserRoleBinding
 	err := r.Database().WithContext(ctx).Select("binding_id", "user_id", "role_id", "granted_by", "create_time", "update_time").
-		Where("user_id = ?", userId).Find(&bindings).Error
+		Where("user_id = ?", userID).Find(&bindings).Error
 	return bindings, err
 }
 
-// GetByRole returns user role binding by userId and roleId.
-func (r *UserRoleBindingRepo) GetByRole(ctx context.Context, userId, roleId string) (*model.UserRoleBinding, error) {
+// GetByRole returns user role binding by userID and roleID.
+func (r *UserRoleBindingRepo) GetByRole(ctx context.Context, userID, roleID string) (*model.UserRoleBinding, error) {
 	var binding model.UserRoleBinding
 	err := r.Database().WithContext(ctx).Select("binding_id", "user_id", "role_id", "granted_by", "create_time", "update_time").
-		Where("user_id = ? AND role_id = ?", userId, roleId).First(&binding).Error
+		Where("user_id = ? AND role_id = ?", userID, roleID).First(&binding).Error
 	if err != nil {
 		return nil, err
 	}
@@ -64,12 +64,12 @@ func (r *UserRoleBindingRepo) Create(ctx context.Context, binding *model.UserRol
 	return r.Database().WithContext(ctx).Create(binding).Error
 }
 
-// Delete deletes user role binding by bindingId.
-func (r *UserRoleBindingRepo) Delete(ctx context.Context, bindingId string) error {
-	return r.Database().WithContext(ctx).Where("binding_id = ?", bindingId).Delete(&model.UserRoleBinding{}).Error
+// Delete deletes user role binding by bindingID.
+func (r *UserRoleBindingRepo) Delete(ctx context.Context, bindingID string) error {
+	return r.Database().WithContext(ctx).Where("binding_id = ?", bindingID).Delete(&model.UserRoleBinding{}).Error
 }
 
-// DeleteByUser deletes all user role bindings by userId.
-func (r *UserRoleBindingRepo) DeleteByUser(ctx context.Context, userId string) error {
-	return r.Database().WithContext(ctx).Where("user_id = ?", userId).Delete(&model.UserRoleBinding{}).Error
+// DeleteByUser deletes all user role bindings by userID.
+func (r *UserRoleBindingRepo) DeleteByUser(ctx context.Context, userID string) error {
+	return r.Database().WithContext(ctx).Where("user_id = ?", userID).Delete(&model.UserRoleBinding{}).Error
 }

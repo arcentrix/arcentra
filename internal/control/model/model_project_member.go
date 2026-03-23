@@ -17,6 +17,7 @@ package model
 // ProjectMemberRole 项目成员角色（兼容旧版，保留用于快速角色名称引用）
 type ProjectMemberRole string
 
+// ProjectRoleOwner and related constants define project member role identifiers.
 const (
 	ProjectRoleOwner      ProjectMemberRole = "owner"      // 所有者(完全控制)
 	ProjectRoleMaintainer ProjectMemberRole = "maintainer" // 维护者(管理项目、成员)
@@ -28,9 +29,9 @@ const (
 // ProjectMember 项目成员表
 type ProjectMember struct {
 	BaseModel
-	ProjectId string `gorm:"column:project_id;not null;index:idx_project_user,unique" json:"projectId"`
-	UserId    string `gorm:"column:user_id;not null;index:idx_project_user,unique;index:idx_user" json:"userId"`
-	RoleId    string `gorm:"column:role_id;not null;index" json:"roleId"` // 角色ID（引用 t_role 表）
+	ProjectID string `gorm:"column:project_id;not null;index:idx_project_user,unique" json:"projectId"`
+	UserID    string `gorm:"column:user_id;not null;index:idx_project_user,unique;index:idx_user" json:"userId"`
+	RoleID    string `gorm:"column:role_id;not null;index" json:"roleId"` // 角色ID（引用 t_role 表）
 }
 
 func (pm *ProjectMember) TableName() string {

@@ -39,9 +39,9 @@ func sanitizeScope(s string) string {
 // buildWALDir builds the WAL directory from config.
 func buildWALDir(cfg *Config) string {
 	parts := []string{cfg.WALDir}
-	if cfg.ProjectId != "" && cfg.PipelineId != "" {
-		parts = append(parts, sanitizeScope(cfg.ProjectId), sanitizeScope(cfg.PipelineId))
+	if cfg.ProjectID != "" && cfg.PipelineID != "" {
+		parts = append(parts, sanitizeScope(cfg.ProjectID), sanitizeScope(cfg.PipelineID))
 	}
-	parts = append(parts, sanitizeScope(cfg.AgentId))
+	parts = append(parts, sanitizeScope(cfg.AgentID))
 	return filepath.Join(parts...)
 }

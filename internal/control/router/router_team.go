@@ -24,39 +24,39 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func (rt *Router) teamRouter(r fiber.Router, auth fiber.Handler) {
+func (rt *Router) teamRouter(r fiber.Router, authMW fiber.Handler) {
 	teamGroup := r.Group("/team")
 	{
 		// 创建团队
-		teamGroup.Post("/create", auth, rt.createTeam)
+		teamGroup.Post("/create", authMW, rt.createTeam)
 
 		// 更新团队
-		teamGroup.Put("/:teamId", auth, rt.updateTeam)
+		teamGroup.Put("/:teamID", authMW, rt.updateTeam)
 
 		// 删除团队
-		teamGroup.Delete("/:teamId", auth, rt.deleteTeam)
+		teamGroup.Delete("/:teamID", authMW, rt.deleteTeam)
 
 		// 获取团队详情
-		teamGroup.Get("/:teamId", auth, rt.getTeamById)
+		teamGroup.Get("/:teamID", authMW, rt.getTeamByID)
 
 		// 查询团队列表
-		teamGroup.Get("/list", auth, rt.listTeams)
+		teamGroup.Get("/list", authMW, rt.listTeams)
 
 		// 获取组织下的所有团队
-		teamGroup.Get("/org/:orgId", auth, rt.getTeamsByOrgId)
+		teamGroup.Get("/org/:orgId", authMW, rt.getTeamsByOrgID)
 
 		// 获取子团队
-		teamGroup.Get("/:teamId/subteams", auth, rt.getSubTeams)
+		teamGroup.Get("/:teamID/subteams", authMW, rt.getSubTeams)
 
 		// 获取用户所属团队
-		teamGroup.Get("/user/myteams", auth, rt.getUserTeams)
+		teamGroup.Get("/user/myteams", authMW, rt.getUserTeams)
 
 		// 启用/禁用团队
-		teamGroup.Post("/:teamId/enable", auth, rt.enableTeam)
-		teamGroup.Post("/:teamId/disable", auth, rt.disableTeam)
+		teamGroup.Post("/:teamID/enable", authMW, rt.enableTeam)
+		teamGroup.Post("/:teamID/disable", authMW, rt.disableTeam)
 
 		// 更新团队统计信息
-		teamGroup.Post("/:teamId/statistics", auth, rt.updateTeamStatistics)
+		teamGroup.Post("/:teamID/statistics", authMW, rt.updateTeamStatistics)
 	}
 }
 
@@ -77,7 +77,7 @@ func (rt *Router) createTeam(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.CreateTeam(c.Context(), &req, claims.UserId)
+	result, err := teamService.CreateTeam(c.Context(), &req, claims.UserID)
 	if err != nil {
 		log.Errorw("create team failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
@@ -88,8 +88,8 @@ func (rt *Router) createTeam(c *fiber.Ctx) error {
 
 // updateTeam 更新团队
 func (rt *Router) updateTeam(c *fiber.Ctx) error {
-	teamId := c.Params("teamId")
-	if teamId == "" {
+	teamID := c.Params("teamID")
+	if teamID == "" {
 		return http.Err(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg)
 	}
 
@@ -101,7 +101,7 @@ func (rt *Router) updateTeam(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.UpdateTeam(c.Context(), teamId, &req)
+	result, err := teamService.UpdateTeam(c.Context(), teamID, &req)
 	if err != nil {
 		log.Errorw("update team failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
@@ -112,14 +112,14 @@ func (rt *Router) updateTeam(c *fiber.Ctx) error {
 
 // deleteTeam 删除团队
 func (rt *Router) deleteTeam(c *fiber.Ctx) error {
-	teamId := c.Params("teamId")
-	if teamId == "" {
+	teamID := c.Params("teamID")
+	if teamID == "" {
 		return http.Err(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg)
 	}
 
 	teamService := rt.Services.Team
 
-	if err := teamService.DeleteTeam(c.Context(), teamId); err != nil {
+	if err := teamService.DeleteTeam(c.Context(), teamID); err != nil {
 		log.Errorw("delete team failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -127,16 +127,16 @@ func (rt *Router) deleteTeam(c *fiber.Ctx) error {
 	return http.Operation(c)
 }
 
-// getTeamById 获取团队详情
-func (rt *Router) getTeamById(c *fiber.Ctx) error {
-	teamId := c.Params("teamId")
-	if teamId == "" {
+// getTeamByID 获取团队详情
+func (rt *Router) getTeamByID(c *fiber.Ctx) error {
+	teamID := c.Params("teamID")
+	if teamID == "" {
 		return http.Err(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg)
 	}
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.GetTeamById(c.Context(), teamId)
+	result, err := teamService.GetTeamByID(c.Context(), teamID)
 	if err != nil {
 		log.Errorw("get team by id failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
@@ -150,9 +150,9 @@ func (rt *Router) listTeams(c *fiber.Ctx) error {
 	var query model.TeamQueryReq
 
 	// 解析查询参数
-	query.OrgId = c.Query("orgId")
+	query.OrgID = c.Query("orgId")
 	query.Name = c.Query("name")
-	query.ParentTeamId = c.Query("parentTeamId")
+	query.ParentTeamID = c.Query("parentTeamId")
 
 	if visibilityStr := c.Query("visibility", ""); visibilityStr != "" {
 		if visibility, err := strconv.Atoi(visibilityStr); err == nil {
@@ -188,16 +188,16 @@ func (rt *Router) listTeams(c *fiber.Ctx) error {
 	return http.Detail(c, result)
 }
 
-// getTeamsByOrgId 获取组织下的所有团队
-func (rt *Router) getTeamsByOrgId(c *fiber.Ctx) error {
-	orgId := c.Params("orgId")
-	if orgId == "" {
+// getTeamsByOrgID 获取组织下的所有团队
+func (rt *Router) getTeamsByOrgID(c *fiber.Ctx) error {
+	orgID := c.Params("orgId")
+	if orgID == "" {
 		return http.Err(c, http.OrgIDIsEmpty.Code, http.OrgIDIsEmpty.Msg)
 	}
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.GetTeamsByOrgId(c.Context(), orgId)
+	result, err := teamService.GetTeamsByOrgID(c.Context(), orgID)
 	if err != nil {
 		log.Errorw("get teams by org id failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
@@ -208,14 +208,14 @@ func (rt *Router) getTeamsByOrgId(c *fiber.Ctx) error {
 
 // getSubTeams 获取子团队
 func (rt *Router) getSubTeams(c *fiber.Ctx) error {
-	teamId := c.Params("teamId")
-	if teamId == "" {
+	teamID := c.Params("teamID")
+	if teamID == "" {
 		return http.Err(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg)
 	}
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.GetSubTeams(c.Context(), teamId)
+	result, err := teamService.GetSubTeams(c.Context(), teamID)
 	if err != nil {
 		log.Errorw("get sub teams failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
@@ -235,7 +235,7 @@ func (rt *Router) getUserTeams(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.GetTeamsByUserId(c.Context(), claims.UserId)
+	result, err := teamService.GetTeamsByUserID(c.Context(), claims.UserID)
 	if err != nil {
 		log.Errorw("get teams by user id failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
@@ -246,14 +246,14 @@ func (rt *Router) getUserTeams(c *fiber.Ctx) error {
 
 // enableTeam 启用团队
 func (rt *Router) enableTeam(c *fiber.Ctx) error {
-	teamId := c.Params("teamId")
-	if teamId == "" {
+	teamID := c.Params("teamID")
+	if teamID == "" {
 		return http.Err(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg)
 	}
 
 	teamService := rt.Services.Team
 
-	if err := teamService.EnableTeam(c.Context(), teamId); err != nil {
+	if err := teamService.EnableTeam(c.Context(), teamID); err != nil {
 		log.Errorw("enable team failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -263,14 +263,14 @@ func (rt *Router) enableTeam(c *fiber.Ctx) error {
 
 // disableTeam 禁用团队
 func (rt *Router) disableTeam(c *fiber.Ctx) error {
-	teamId := c.Params("teamId")
-	if teamId == "" {
+	teamID := c.Params("teamID")
+	if teamID == "" {
 		return http.Err(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg)
 	}
 
 	teamService := rt.Services.Team
 
-	if err := teamService.DisableTeam(c.Context(), teamId); err != nil {
+	if err := teamService.DisableTeam(c.Context(), teamID); err != nil {
 		log.Errorw("disable team failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -280,14 +280,14 @@ func (rt *Router) disableTeam(c *fiber.Ctx) error {
 
 // updateTeamStatistics 更新团队统计信息
 func (rt *Router) updateTeamStatistics(c *fiber.Ctx) error {
-	teamId := c.Params("teamId")
-	if teamId == "" {
+	teamID := c.Params("teamID")
+	if teamID == "" {
 		return http.Err(c, http.TeamIDIsEmpty.Code, http.TeamIDIsEmpty.Msg)
 	}
 
 	teamService := rt.Services.Team
 
-	if err := teamService.UpdateTeamStatistics(c.Context(), teamId); err != nil {
+	if err := teamService.UpdateTeamStatistics(c.Context(), teamID); err != nil {
 		log.Errorw("update team statistics failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}

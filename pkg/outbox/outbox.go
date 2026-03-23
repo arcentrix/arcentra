@@ -112,7 +112,7 @@ func (o *Outbox) sendBatch() {
 	}
 	events := make([]Event, 0, len(recs))
 	for _, r := range recs {
-		e, convertErr := RecordToEvent(r, o.cfg.AgentId, o.cfg.PipelineId)
+		e, convertErr := RecordToEvent(r, o.cfg.AgentID, o.cfg.PipelineID)
 		if convertErr != nil {
 			continue
 		}

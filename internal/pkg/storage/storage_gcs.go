@@ -209,7 +209,7 @@ func (g *GCSStorage) Delete(ctx context.Context, objectName string) error {
 	return g.Bucket.Object(fullPath).Delete(ctx)
 }
 
-func (g *GCSStorage) GetPresignedURL(ctx context.Context, objectName string, expiry time.Duration) (string, error) {
+func (g *GCSStorage) GetPresignedURL(_ context.Context, objectName string, expiry time.Duration) (string, error) {
 	fullPath := getFullPath(g.s.BasePath, objectName)
 
 	// GCS 使用 SignedURL 生成预签名链接

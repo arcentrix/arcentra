@@ -87,17 +87,17 @@ func TestStateMachine_Hooks(t *testing.T) {
 	// 记录钩子执行顺序
 	var executionOrder []string
 
-	sm.OnExit(OrderCreated, func(state OrderStatus) error {
+	sm.OnExit(OrderCreated, func(_ OrderStatus) error {
 		executionOrder = append(executionOrder, "exit:created")
 		return nil
 	})
 
-	sm.OnTransition(func(from, to OrderStatus, event Event) error {
+	sm.OnTransition(func(_, _ OrderStatus, _ Event) error {
 		executionOrder = append(executionOrder, "transition")
 		return nil
 	})
 
-	sm.OnEnter(OrderPaid, func(state OrderStatus) error {
+	sm.OnEnter(OrderPaid, func(_ OrderStatus) error {
 		executionOrder = append(executionOrder, "enter:paid")
 		return nil
 	})
@@ -126,7 +126,7 @@ func TestStateMachine_HookErrors(t *testing.T) {
 	testErr := errors.New("hook error")
 
 	// 注册一个会失败的钩子
-	sm.OnEnter(OrderPaid, func(state OrderStatus) error {
+	sm.OnEnter(OrderPaid, func(_ OrderStatus) error {
 		return testErr
 	})
 
@@ -146,7 +146,7 @@ func TestStateMachine_Validators(t *testing.T) {
 	sm.Allow(OrderCreated, OrderPaid)
 
 	// 添加验证器
-	sm.AddValidator(func(from, to OrderStatus, event Event) error {
+	sm.AddValidator(func(_, to OrderStatus, _ Event) error {
 		if to == OrderPaid {
 			return errors.New("payment not allowed")
 		}
@@ -273,7 +273,7 @@ func TestStateMachine_OnError(t *testing.T) {
 	sm.Allow(OrderCreated, OrderPaid)
 
 	var errorCaught bool
-	sm.OnError(func(from, to OrderStatus, event Event, err error) {
+	sm.OnError(func(_, _ OrderStatus, _ Event, _ error) {
 		errorCaught = true
 	})
 
@@ -285,7 +285,7 @@ func TestStateMachine_OnError(t *testing.T) {
 	}
 }
 
-func TestStateMachine_Concurrency(t *testing.T) {
+func TestStateMachine_Concurrency(_ *testing.T) {
 	sm := NewWithState(OrderCreated)
 	sm.Allow(OrderCreated, OrderPaid).
 		Allow(OrderPaid, OrderCreated)
@@ -361,7 +361,7 @@ func TestStateMachine_HooksRunOutsideLock(t *testing.T) {
 	sm := NewWithState(OrderCreated)
 	sm.Allow(OrderCreated, OrderPaid)
 
-	sm.OnEnter(OrderPaid, func(state OrderStatus) error {
+	sm.OnEnter(OrderPaid, func(_ OrderStatus) error {
 		// 工业级优化：hooks 在锁外执行，允许在 hook 内回调 FSM
 		if !sm.Is(OrderPaid) {
 			t.Errorf("expected Current() to be PAID when OnEnter runs, got %v", sm.Current())

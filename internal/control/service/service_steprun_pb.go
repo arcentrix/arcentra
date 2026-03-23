@@ -48,12 +48,12 @@ func (s *StepRunServiceImpl) CreateStepRun(
 	if strings.TrimSpace(req.PipelineId) == "" || strings.TrimSpace(req.JobId) == "" || strings.TrimSpace(req.StepName) == "" {
 		return &steprunv1.CreateStepRunResponse{Success: false, Message: "pipelineId/jobId/stepName are required"}, nil
 	}
-	stepRunId := strings.TrimSpace(req.PipelineId) + "-" + strings.TrimSpace(req.JobName) + "-" + strings.TrimSpace(req.StepName)
-	if strings.Trim(stepRunId, "-") == "" {
-		stepRunId = id.ShortID()
+	stepRunID := strings.TrimSpace(req.PipelineId) + "-" + strings.TrimSpace(req.JobName) + "-" + strings.TrimSpace(req.StepName)
+	if strings.Trim(stepRunID, "-") == "" {
+		stepRunID = id.ShortID()
 	}
 	entity := &model.StepRun{
-		StepRunID:       stepRunId,
+		StepRunID:       stepRunID,
 		Name:            strings.TrimSpace(req.StepName),
 		PipelineID:      strings.TrimSpace(req.PipelineId),
 		PipelineRunID:   strings.TrimSpace(req.PipelineRunId),
@@ -73,21 +73,21 @@ func (s *StepRunServiceImpl) CreateStepRun(
 		CreatedBy:       "system",
 	}
 	if err := s.stepRunRepo.Create(ctx, entity); err != nil {
-		log.Errorw("create step run failed", "stepRunId", stepRunId, "error", err)
+		log.Errorw("create step run failed", "stepRunID", stepRunID, "error", err)
 		return &steprunv1.CreateStepRunResponse{Success: false, Message: fmt.Sprintf("create step run failed: %v", err)}, nil
 	}
-	return &steprunv1.CreateStepRunResponse{Success: true, Message: "created", StepRunId: stepRunId}, nil
+	return &steprunv1.CreateStepRunResponse{Success: true, Message: "created", StepRunId: stepRunID}, nil
 }
 
 func (s *StepRunServiceImpl) GetStepRun(ctx context.Context, req *steprunv1.GetStepRunRequest) (*steprunv1.GetStepRunResponse, error) {
 	if s.stepRunRepo == nil {
 		return &steprunv1.GetStepRunResponse{Success: false, Message: "step run repository unavailable"}, nil
 	}
-	stepRunId := strings.TrimSpace(req.StepRunId)
-	if stepRunId == "" {
-		return &steprunv1.GetStepRunResponse{Success: false, Message: "stepRunId is required"}, nil
+	stepRunID := strings.TrimSpace(req.StepRunId)
+	if stepRunID == "" {
+		return &steprunv1.GetStepRunResponse{Success: false, Message: "stepRunID is required"}, nil
 	}
-	entity, err := s.stepRunRepo.GetByStepRunId(ctx, stepRunId)
+	entity, err := s.stepRunRepo.GetByStepRunID(ctx, stepRunID)
 	if err != nil {
 		return &steprunv1.GetStepRunResponse{Success: false, Message: fmt.Sprintf("query step run failed: %v", err)}, nil
 	}
@@ -109,11 +109,11 @@ func (s *StepRunServiceImpl) ListStepRuns(
 		return &steprunv1.ListStepRunsResponse{Success: false, Message: "step run repository unavailable"}, nil
 	}
 	filter := repo.StepRunFilter{
-		PipelineId:    strings.TrimSpace(req.PipelineId),
-		PipelineRunId: strings.TrimSpace(req.PipelineRunId),
-		JobId:         strings.TrimSpace(req.JobId),
+		PipelineID:    strings.TrimSpace(req.PipelineId),
+		PipelineRunID: strings.TrimSpace(req.PipelineRunId),
+		JobID:         strings.TrimSpace(req.JobId),
 		StepName:      strings.TrimSpace(req.StepName),
-		AgentId:       strings.TrimSpace(req.AgentId),
+		AgentID:       strings.TrimSpace(req.AgentId),
 		Status:        int(req.Status),
 		Page:          int(req.Page),
 		PageSize:      int(req.PageSize),
@@ -153,9 +153,9 @@ func (s *StepRunServiceImpl) UpdateStepRun(
 	if s.stepRunRepo == nil {
 		return &steprunv1.UpdateStepRunResponse{Success: false, Message: "step run repository unavailable"}, nil
 	}
-	stepRunId := strings.TrimSpace(req.StepRunId)
-	if stepRunId == "" {
-		return &steprunv1.UpdateStepRunResponse{Success: false, Message: "stepRunId is required"}, nil
+	stepRunID := strings.TrimSpace(req.StepRunId)
+	if stepRunID == "" {
+		return &steprunv1.UpdateStepRunResponse{Success: false, Message: "stepRunID is required"}, nil
 	}
 	updates := map[string]any{}
 	if req.Env != nil {
@@ -167,7 +167,7 @@ func (s *StepRunServiceImpl) UpdateStepRun(
 	if len(updates) == 0 {
 		return &steprunv1.UpdateStepRunResponse{Success: true, Message: "no changes"}, nil
 	}
-	if err := s.stepRunRepo.PatchByStepRunId(ctx, stepRunId, updates); err != nil {
+	if err := s.stepRunRepo.PatchByStepRunID(ctx, stepRunID, updates); err != nil {
 		return &steprunv1.UpdateStepRunResponse{Success: false, Message: fmt.Sprintf("update step run failed: %v", err)}, nil
 	}
 	return &steprunv1.UpdateStepRunResponse{Success: true, Message: "updated"}, nil
@@ -180,11 +180,11 @@ func (s *StepRunServiceImpl) DeleteStepRun(
 	if s.stepRunRepo == nil {
 		return &steprunv1.DeleteStepRunResponse{Success: false, Message: "step run repository unavailable"}, nil
 	}
-	stepRunId := strings.TrimSpace(req.StepRunId)
-	if stepRunId == "" {
-		return &steprunv1.DeleteStepRunResponse{Success: false, Message: "stepRunId is required"}, nil
+	stepRunID := strings.TrimSpace(req.StepRunId)
+	if stepRunID == "" {
+		return &steprunv1.DeleteStepRunResponse{Success: false, Message: "stepRunID is required"}, nil
 	}
-	if err := s.stepRunRepo.DeleteByStepRunId(ctx, stepRunId); err != nil {
+	if err := s.stepRunRepo.DeleteByStepRunID(ctx, stepRunID); err != nil {
 		return &steprunv1.DeleteStepRunResponse{Success: false, Message: fmt.Sprintf("delete step run failed: %v", err)}, nil
 	}
 	return &steprunv1.DeleteStepRunResponse{Success: true, Message: "deleted"}, nil
@@ -197,9 +197,9 @@ func (s *StepRunServiceImpl) CancelStepRun(
 	if s.stepRunRepo == nil {
 		return &steprunv1.CancelStepRunResponse{Success: false, Message: "step run repository unavailable"}, nil
 	}
-	stepRunId := strings.TrimSpace(req.StepRunId)
-	if stepRunId == "" {
-		return &steprunv1.CancelStepRunResponse{Success: false, Message: "stepRunId is required"}, nil
+	stepRunID := strings.TrimSpace(req.StepRunId)
+	if stepRunID == "" {
+		return &steprunv1.CancelStepRunResponse{Success: false, Message: "stepRunID is required"}, nil
 	}
 	updates := map[string]any{
 		"status":        int(steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED),
@@ -207,7 +207,7 @@ func (s *StepRunServiceImpl) CancelStepRun(
 	}
 	now := time.Now()
 	updates["end_time"] = now
-	if err := s.stepRunRepo.PatchByStepRunId(ctx, stepRunId, updates); err != nil {
+	if err := s.stepRunRepo.PatchByStepRunID(ctx, stepRunID, updates); err != nil {
 		return &steprunv1.CancelStepRunResponse{Success: false, Message: fmt.Sprintf("cancel step run failed: %v", err)}, nil
 	}
 	return &steprunv1.CancelStepRunResponse{Success: true, Message: "cancelled"}, nil
@@ -220,21 +220,21 @@ func (s *StepRunServiceImpl) RetryStepRun(
 	if s.stepRunRepo == nil {
 		return &steprunv1.RetryStepRunResponse{Success: false, Message: "step run repository unavailable"}, nil
 	}
-	oldStepRunId := strings.TrimSpace(req.StepRunId)
-	if oldStepRunId == "" {
-		return &steprunv1.RetryStepRunResponse{Success: false, Message: "stepRunId is required"}, nil
+	oldStepRunID := strings.TrimSpace(req.StepRunId)
+	if oldStepRunID == "" {
+		return &steprunv1.RetryStepRunResponse{Success: false, Message: "stepRunID is required"}, nil
 	}
-	oldRun, err := s.stepRunRepo.GetByStepRunId(ctx, oldStepRunId)
+	oldRun, err := s.stepRunRepo.GetByStepRunID(ctx, oldStepRunID)
 	if err != nil {
 		return &steprunv1.RetryStepRunResponse{Success: false, Message: fmt.Sprintf("load step run failed: %v", err)}, nil
 	}
 	if oldRun == nil {
 		return &steprunv1.RetryStepRunResponse{Success: false, Message: "step run not found"}, nil
 	}
-	newStepRunId := oldStepRunId + "-retry-" + id.ShortID()
+	newStepRunID := oldStepRunID + "-retry-" + id.ShortID()
 	newRun := *oldRun
 	newRun.ID = 0
-	newRun.StepRunID = newStepRunId
+	newRun.StepRunID = newStepRunID
 	newRun.Status = int(steprunv1.StepRunStatus_STEP_RUN_STATUS_PENDING)
 	newRun.CurrentRetry = oldRun.CurrentRetry + 1
 	newRun.ExitCode = nil
@@ -245,7 +245,7 @@ func (s *StepRunServiceImpl) RetryStepRun(
 	if err := s.stepRunRepo.Create(ctx, &newRun); err != nil {
 		return &steprunv1.RetryStepRunResponse{Success: false, Message: fmt.Sprintf("create retry step run failed: %v", err)}, nil
 	}
-	return &steprunv1.RetryStepRunResponse{Success: true, Message: "retry created", NewStepRunId: newStepRunId}, nil
+	return &steprunv1.RetryStepRunResponse{Success: true, Message: "retry created", NewStepRunId: newStepRunID}, nil
 }
 
 func (s *StepRunServiceImpl) ListStepRunArtifacts(
@@ -255,11 +255,11 @@ func (s *StepRunServiceImpl) ListStepRunArtifacts(
 	if s.stepRunRepo == nil {
 		return &steprunv1.ListStepRunArtifactsResponse{Success: false, Message: "step run repository unavailable"}, nil
 	}
-	stepRunId := strings.TrimSpace(req.StepRunId)
-	if stepRunId == "" {
-		return &steprunv1.ListStepRunArtifactsResponse{Success: false, Message: "stepRunId is required"}, nil
+	stepRunID := strings.TrimSpace(req.StepRunId)
+	if stepRunID == "" {
+		return &steprunv1.ListStepRunArtifactsResponse{Success: false, Message: "stepRunID is required"}, nil
 	}
-	artifacts, err := s.stepRunRepo.ListArtifactsByStepRunId(ctx, stepRunId)
+	artifacts, err := s.stepRunRepo.ListArtifactsByStepRunID(ctx, stepRunID)
 	if err != nil {
 		return &steprunv1.ListStepRunArtifactsResponse{Success: false, Message: fmt.Sprintf("list artifacts failed: %v", err)}, nil
 	}

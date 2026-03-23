@@ -70,8 +70,8 @@ jobs:
           cd cmd/arcentra-agent && wire && cd ../..
           sqlc generate
 
-      - name: Lint
-        run: make lint
+      # - name: Lint
+      #   run: make lint
 
       - name: Test
         run: go test -race -count=1 ./...

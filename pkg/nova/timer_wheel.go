@@ -154,7 +154,6 @@ func (tw *TimerWheel) AddAt(task *Task, executeAt time.Time, callback func(*Task
 
 // run is the timer wheel running loop
 func (tw *TimerWheel) run(tickerC <-chan time.Time) {
-
 	select {
 	case <-tickerC:
 		tw.tick()

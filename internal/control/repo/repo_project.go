@@ -28,18 +28,18 @@ import (
 // IProjectRepository defines project persistence with context support for timeout, tracing and cancellation.
 type IProjectRepository interface {
 	Create(ctx context.Context, p *model.Project) error
-	Get(ctx context.Context, projectId string) (*model.Project, error)
-	GetByName(ctx context.Context, orgId, name string) (*model.Project, error)
-	Update(ctx context.Context, projectId string, updates map[string]interface{}) error
-	Delete(ctx context.Context, projectId string) error
+	Get(ctx context.Context, projectID string) (*model.Project, error)
+	GetByName(ctx context.Context, orgID, name string) (*model.Project, error)
+	Update(ctx context.Context, projectID string, updates map[string]interface{}) error
+	Delete(ctx context.Context, projectID string) error
 	List(ctx context.Context, query *model.ProjectQueryReq) ([]*model.Project, int64, error)
-	ListByOrg(ctx context.Context, orgId string, pageNum, pageSize int, status *int) ([]*model.Project, int64, error)
-	ListByUser(ctx context.Context, userId string, pageNum, pageSize int, orgId, role string) ([]*model.Project, int64, error)
-	Exists(ctx context.Context, projectId string) (bool, error)
-	NameExists(ctx context.Context, orgId, name string, excludeProjectId ...string) (bool, error)
-	UpdateStatistics(ctx context.Context, projectId string, stats *model.ProjectStatisticsReq) error
-	Enable(ctx context.Context, projectId string) error
-	Disable(ctx context.Context, projectId string) error
+	ListByOrg(ctx context.Context, orgID string, pageNum, pageSize int, status *int) ([]*model.Project, int64, error)
+	ListByUser(ctx context.Context, userID string, pageNum, pageSize int, orgID, role string) ([]*model.Project, int64, error)
+	Exists(ctx context.Context, projectID string) (bool, error)
+	NameExists(ctx context.Context, orgID, name string, excludeProjectID ...string) (bool, error)
+	UpdateStatistics(ctx context.Context, projectID string, stats *model.ProjectStatisticsReq) error
+	Enable(ctx context.Context, projectID string) error
+	Disable(ctx context.Context, projectID string) error
 }
 
 type ProjectRepo struct {
@@ -56,25 +56,25 @@ func (r *ProjectRepo) Create(ctx context.Context, p *model.Project) error {
 	return r.Database().WithContext(ctx).Create(p).Error
 }
 
-// Update updates project by projectId.
-func (r *ProjectRepo) Update(ctx context.Context, projectId string, updates map[string]interface{}) error {
+// Update updates project by projectID.
+func (r *ProjectRepo) Update(ctx context.Context, projectID string, updates map[string]interface{}) error {
 	return r.Database().WithContext(ctx).Model(&model.Project{}).
-		Where("project_id = ?", projectId).
+		Where("project_id = ?", projectID).
 		Updates(updates).Error
 }
 
-// Delete soft-deletes project by projectId (sets status to disabled).
-func (r *ProjectRepo) Delete(ctx context.Context, projectId string) error {
+// Delete soft-deletes project by projectID (sets status to disabled).
+func (r *ProjectRepo) Delete(ctx context.Context, projectID string) error {
 	return r.Database().WithContext(ctx).Model(&model.Project{}).
-		Where("project_id = ?", projectId).
+		Where("project_id = ?", projectID).
 		Update("status", model.ProjectStatusDisabled).Error
 }
 
-// Get returns project by projectId.
-func (r *ProjectRepo) Get(ctx context.Context, projectId string) (*model.Project, error) {
+// Get returns project by projectID.
+func (r *ProjectRepo) Get(ctx context.Context, projectID string) (*model.Project, error) {
 	var p model.Project
 	err := r.Database().WithContext(ctx).
-		Where("project_id = ?", projectId).
+		Where("project_id = ?", projectID).
 		First(&p).Error
 	if err != nil {
 		return nil, err
@@ -82,11 +82,11 @@ func (r *ProjectRepo) Get(ctx context.Context, projectId string) (*model.Project
 	return &p, nil
 }
 
-// GetByName returns project by orgId and name.
-func (r *ProjectRepo) GetByName(ctx context.Context, orgId, name string) (*model.Project, error) {
+// GetByName returns project by orgID and name.
+func (r *ProjectRepo) GetByName(ctx context.Context, orgID, name string) (*model.Project, error) {
 	var p model.Project
 	err := r.Database().WithContext(ctx).
-		Where("org_id = ? AND name = ?", orgId, name).
+		Where("org_id = ? AND name = ?", orgID, name).
 		First(&p).Error
 	if err != nil {
 		return nil, err
@@ -101,8 +101,8 @@ func (r *ProjectRepo) List(ctx context.Context, query *model.ProjectQueryReq) ([
 
 	db := r.Database().WithContext(ctx).Model(&model.Project{})
 
-	if query.OrgId != "" {
-		db = db.Where("org_id = ?", query.OrgId)
+	if query.OrgID != "" {
+		db = db.Where("org_id = ?", query.OrgID)
 	}
 	if query.Name != "" {
 		db = db.Where("name LIKE ?", "%"+query.Name+"%")
@@ -151,13 +151,13 @@ func (r *ProjectRepo) List(ctx context.Context, query *model.ProjectQueryReq) ([
 	return projects, total, err
 }
 
-// ListByOrg lists projects by orgId with pagination.
-func (r *ProjectRepo) ListByOrg(ctx context.Context, orgId string, pageNum, pageSize int, status *int) ([]*model.Project, int64, error) {
+// ListByOrg lists projects by orgID with pagination.
+func (r *ProjectRepo) ListByOrg(ctx context.Context, orgID string, pageNum, pageSize int, status *int) ([]*model.Project, int64, error) {
 	var projects []*model.Project
 	var total int64
 
 	db := r.Database().WithContext(ctx).Model(&model.Project{}).
-		Where("org_id = ?", orgId)
+		Where("org_id = ?", orgID)
 
 	if status != nil {
 		db = db.Where("status = ?", *status)
@@ -186,17 +186,19 @@ func (r *ProjectRepo) ListByOrg(ctx context.Context, orgId string, pageNum, page
 	return projects, total, err
 }
 
-// ListByUser lists projects for user by userId with pagination.
-func (r *ProjectRepo) ListByUser(ctx context.Context, userId string, pageNum, pageSize int, orgId, role string) ([]*model.Project, int64, error) {
+// ListByUser lists projects for user by userID with pagination.
+func (r *ProjectRepo) ListByUser(
+	ctx context.Context, userID string, pageNum, pageSize int, orgID, role string,
+) ([]*model.Project, int64, error) {
 	var projects []*model.Project
 	var total int64
 
 	db := r.Database().WithContext(ctx).Table("t_project").
 		Joins("INNER JOIN t_project_member ON t_project.project_id = t_project_member.project_id").
-		Where("t_project_member.user_id = ?", userId)
+		Where("t_project_member.user_id = ?", userID)
 
-	if orgId != "" {
-		db = db.Where("t_project.org_id = ?", orgId)
+	if orgID != "" {
+		db = db.Where("t_project.org_id = ?", orgID)
 	}
 	if role != "" {
 		db = db.Where("t_project_member.role_id = ?", role)
@@ -226,29 +228,29 @@ func (r *ProjectRepo) ListByUser(ctx context.Context, userId string, pageNum, pa
 	return projects, total, err
 }
 
-// Exists checks if project exists by projectId.
-func (r *ProjectRepo) Exists(ctx context.Context, projectId string) (bool, error) {
+// Exists checks if project exists by projectID.
+func (r *ProjectRepo) Exists(ctx context.Context, projectID string) (bool, error) {
 	var count int64
 	err := r.Database().WithContext(ctx).Model(&model.Project{}).
-		Where("project_id = ?", projectId).
+		Where("project_id = ?", projectID).
 		Count(&count).Error
 	return count > 0, err
 }
 
 // NameExists checks if project name exists in org.
-func (r *ProjectRepo) NameExists(ctx context.Context, orgId, name string, excludeProjectId ...string) (bool, error) {
+func (r *ProjectRepo) NameExists(ctx context.Context, orgID, name string, excludeProjectID ...string) (bool, error) {
 	var count int64
 	db := r.Database().WithContext(ctx).Model(&model.Project{}).
-		Where("org_id = ? AND name = ?", orgId, name)
-	if len(excludeProjectId) > 0 && excludeProjectId[0] != "" {
-		db = db.Where("project_id != ?", excludeProjectId[0])
+		Where("org_id = ? AND name = ?", orgID, name)
+	if len(excludeProjectID) > 0 && excludeProjectID[0] != "" {
+		db = db.Where("project_id != ?", excludeProjectID[0])
 	}
 	err := db.Count(&count).Error
 	return count > 0, err
 }
 
 // UpdateStatistics updates project statistics.
-func (r *ProjectRepo) UpdateStatistics(ctx context.Context, projectId string, stats *model.ProjectStatisticsReq) error {
+func (r *ProjectRepo) UpdateStatistics(ctx context.Context, projectID string, stats *model.ProjectStatisticsReq) error {
 	updates := make(map[string]interface{})
 	if stats.TotalPipelines != nil {
 		updates["total_pipelines"] = *stats.TotalPipelines
@@ -266,21 +268,21 @@ func (r *ProjectRepo) UpdateStatistics(ctx context.Context, projectId string, st
 		return nil
 	}
 	return r.Database().WithContext(ctx).Model(&model.Project{}).
-		Where("project_id = ?", projectId).
+		Where("project_id = ?", projectID).
 		Updates(updates).Error
 }
 
-// Enable enables project by projectId.
-func (r *ProjectRepo) Enable(ctx context.Context, projectId string) error {
+// Enable enables project by projectID.
+func (r *ProjectRepo) Enable(ctx context.Context, projectID string) error {
 	return r.Database().WithContext(ctx).Model(&model.Project{}).
-		Where("project_id = ?", projectId).
+		Where("project_id = ?", projectID).
 		Update("is_enabled", 1).Error
 }
 
-// Disable disables project by projectId.
-func (r *ProjectRepo) Disable(ctx context.Context, projectId string) error {
+// Disable disables project by projectID.
+func (r *ProjectRepo) Disable(ctx context.Context, projectID string) error {
 	return r.Database().WithContext(ctx).Model(&model.Project{}).
-		Where("project_id = ?", projectId).
+		Where("project_id = ?", projectID).
 		Update("is_enabled", 0).Error
 }
 

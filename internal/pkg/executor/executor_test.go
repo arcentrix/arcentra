@@ -102,7 +102,7 @@ func TestExecutorManager_Execute(t *testing.T) {
 		canExecute: func(req *ExecutionRequest) bool {
 			return true
 		},
-		executeFunc: func(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
+		executeFunc: func(_ context.Context, _ *ExecutionRequest) (*ExecutionResult, error) {
 			executed = true
 			result := NewExecutionResult("test")
 			result.Complete(true, 0, nil)
@@ -369,7 +369,7 @@ func TestUnifiedExecutor_Execute_NilStep(t *testing.T) {
 
 func TestUnifiedExecutor_ExecuteRemotely(t *testing.T) {
 	mockRemote := &mockRemoteExecutor{
-		executeFunc: func(ctx context.Context, req *RemoteExecutionRequest) (*RemoteExecutionResult, error) {
+		executeFunc: func(_ context.Context, _ *RemoteExecutionRequest) (*RemoteExecutionResult, error) {
 			return &RemoteExecutionResult{
 				Success:   true,
 				ExitCode:  0,
@@ -812,7 +812,7 @@ func TestPipelineAdapter_ExecuteStep(t *testing.T) {
 		canExecute: func(_ *ExecutionRequest) bool {
 			return true
 		},
-		executeFunc: func(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
+		executeFunc: func(_ context.Context, _ *ExecutionRequest) (*ExecutionResult, error) {
 			executed = true
 			result := NewExecutionResult("test")
 			result.Complete(true, 0, nil)
@@ -856,7 +856,7 @@ func TestPipelineAdapter_ExecuteStep_WithOptions(t *testing.T) {
 		canExecute: func(_ *ExecutionRequest) bool {
 			return true
 		},
-		executeFunc: func(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
+		executeFunc: func(_ context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
 			if req.Options == nil {
 				t.Error("expected options to be set")
 			}

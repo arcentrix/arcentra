@@ -24,14 +24,14 @@ import (
 func (rt *Router) scmRouter(r fiber.Router) {
 	scmGroup := r.Group("/scm")
 	{
-		scmGroup.Post("/webhooks/:projectId", rt.handleScmWebhook)
+		scmGroup.Post("/webhooks/:projectID", rt.handleScmWebhook)
 	}
 }
 
 // handleScmWebhook is the handler for the scm webhook
 func (rt *Router) handleScmWebhook(c *fiber.Ctx) error {
-	projectId := c.Params("projectId")
-	if projectId == "" {
+	projectID := c.Params("projectID")
+	if projectID == "" {
 		return http.Err(c, http.BadRequest.Code, "project id is required")
 	}
 
@@ -44,9 +44,9 @@ func (rt *Router) handleScmWebhook(c *fiber.Ctx) error {
 	}
 	body := c.Body()
 
-	events, err := rt.Services.Scm.HandleWebhook(c.Context(), projectId, headers, body)
+	events, err := rt.Services.Scm.HandleWebhook(c.Context(), projectID, headers, body)
 	if err != nil {
-		log.Warnw("scm webhook handle failed", "projectId", projectId, "error", err)
+		log.Warnw("scm webhook handle failed", "projectID", projectID, "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 

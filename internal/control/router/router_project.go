@@ -24,42 +24,42 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func (rt *Router) projectRouter(r fiber.Router, auth fiber.Handler) {
+func (rt *Router) projectRouter(r fiber.Router, authMW fiber.Handler) {
 	projectGroup := r.Group("/project")
 	{
 		// 创建项目
-		projectGroup.Post("/", auth, rt.createProject)
+		projectGroup.Post("/", authMW, rt.createProject)
 
 		// 更新项目
-		projectGroup.Put("/:projectId", auth, rt.updateProject)
+		projectGroup.Put("/:projectID", authMW, rt.updateProject)
 
 		// 删除项目
-		projectGroup.Delete("/:projectId", auth, rt.deleteProject)
+		projectGroup.Delete("/:projectID", authMW, rt.deleteProject)
 
 		// 获取项目详情
-		projectGroup.Get("/:projectId", auth, rt.getProjectById)
+		projectGroup.Get("/:projectID", authMW, rt.getProjectByID)
 
 		// 查询项目列表
-		projectGroup.Get("/", auth, rt.listProjects)
+		projectGroup.Get("/", authMW, rt.listProjects)
 
 		// 获取组织下的所有项目
-		projectGroup.Get("/org/:orgId", auth, rt.getProjectsByOrgId)
+		projectGroup.Get("/org/:orgID", authMW, rt.getProjectsByOrgID)
 
 		// 获取用户的项目列表
-		projectGroup.Get("/user/my-projects", auth, rt.getUserProjects)
+		projectGroup.Get("/user/my-projects", authMW, rt.getUserProjects)
 
 		// 启用/禁用项目
-		projectGroup.Post("/:projectId/enable", auth, rt.enableProject)
-		projectGroup.Post("/:projectId/disable", auth, rt.disableProject)
+		projectGroup.Post("/:projectID/enable", authMW, rt.enableProject)
+		projectGroup.Post("/:projectID/disable", authMW, rt.disableProject)
 
 		// 更新项目统计信息
-		projectGroup.Post("/:projectId/statistics", auth, rt.updateProjectStatistics)
+		projectGroup.Post("/:projectID/statistics", authMW, rt.updateProjectStatistics)
 
 		// 项目成员管理
-		projectGroup.Get("/:projectId/members", auth, rt.getProjectMembers)
-		projectGroup.Post("/:projectId/members", auth, rt.addProjectMember)
-		projectGroup.Put("/:projectId/members/:userId", auth, rt.updateProjectMemberRole)
-		projectGroup.Delete("/:projectId/members/:userId", auth, rt.removeProjectMember)
+		projectGroup.Get("/:projectID/members", authMW, rt.getProjectMembers)
+		projectGroup.Post("/:projectID/members", authMW, rt.addProjectMember)
+		projectGroup.Put("/:projectID/members/:userID", authMW, rt.updateProjectMemberRole)
+		projectGroup.Delete("/:projectID/members/:userID", authMW, rt.removeProjectMember)
 	}
 }
 
@@ -80,7 +80,7 @@ func (rt *Router) createProject(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.CreateProject(c.Context(), &req, claims.UserId)
+	result, err := projectService.CreateProject(c.Context(), &req, claims.UserID)
 	if err != nil {
 		log.Errorw("create project failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
@@ -91,8 +91,8 @@ func (rt *Router) createProject(c *fiber.Ctx) error {
 
 // updateProject 更新项目
 func (rt *Router) updateProject(c *fiber.Ctx) error {
-	projectId := c.Params("projectId")
-	if projectId == "" {
+	projectID := c.Params("projectID")
+	if projectID == "" {
 		return http.Err(c, http.BadRequest.Code, "project id is required")
 	}
 
@@ -104,7 +104,7 @@ func (rt *Router) updateProject(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.UpdateProject(c.Context(), projectId, &req)
+	result, err := projectService.UpdateProject(c.Context(), projectID, &req)
 	if err != nil {
 		log.Errorw("update project failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
@@ -115,14 +115,14 @@ func (rt *Router) updateProject(c *fiber.Ctx) error {
 
 // deleteProject 删除项目
 func (rt *Router) deleteProject(c *fiber.Ctx) error {
-	projectId := c.Params("projectId")
-	if projectId == "" {
+	projectID := c.Params("projectID")
+	if projectID == "" {
 		return http.Err(c, http.BadRequest.Code, "project id is required")
 	}
 
 	projectService := rt.Services.Project
 
-	if err := projectService.DeleteProject(c.Context(), projectId); err != nil {
+	if err := projectService.DeleteProject(c.Context(), projectID); err != nil {
 		log.Errorw("delete project failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -130,16 +130,16 @@ func (rt *Router) deleteProject(c *fiber.Ctx) error {
 	return http.Operation(c)
 }
 
-// getProjectById 获取项目详情
-func (rt *Router) getProjectById(c *fiber.Ctx) error {
-	projectId := c.Params("projectId")
-	if projectId == "" {
+// getProjectByID 获取项目详情
+func (rt *Router) getProjectByID(c *fiber.Ctx) error {
+	projectID := c.Params("projectID")
+	if projectID == "" {
 		return http.Err(c, http.BadRequest.Code, "project id is required")
 	}
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.GetProjectById(c.Context(), projectId)
+	result, err := projectService.GetProjectByID(c.Context(), projectID)
 	if err != nil {
 		log.Errorw("get project by id failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
@@ -153,7 +153,7 @@ func (rt *Router) listProjects(c *fiber.Ctx) error {
 	var query model.ProjectQueryReq
 
 	// 解析查询参数
-	query.OrgId = c.Query("orgId")
+	query.OrgID = c.Query("orgID")
 	query.Name = c.Query("name")
 	query.Language = c.Query("language")
 	query.Tags = c.Query("tags")
@@ -200,10 +200,10 @@ func (rt *Router) listProjects(c *fiber.Ctx) error {
 	return http.Detail(c, response)
 }
 
-// getProjectsByOrgId 获取组织下的所有项目
-func (rt *Router) getProjectsByOrgId(c *fiber.Ctx) error {
-	orgId := c.Params("orgId")
-	if orgId == "" {
+// getProjectsByOrgID 获取组织下的所有项目
+func (rt *Router) getProjectsByOrgID(c *fiber.Ctx) error {
+	orgID := c.Params("orgID")
+	if orgID == "" {
 		return http.Err(c, http.BadRequest.Code, "org id is required")
 	}
 
@@ -219,7 +219,7 @@ func (rt *Router) getProjectsByOrgId(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	projects, total, err := projectService.GetProjectsByOrgId(c.Context(), orgId, pageNum, pageSize, status)
+	projects, total, err := projectService.GetProjectsByOrgID(c.Context(), orgID, pageNum, pageSize, status)
 	if err != nil {
 		log.Errorw("get projects by org id failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
@@ -246,12 +246,12 @@ func (rt *Router) getUserProjects(c *fiber.Ctx) error {
 
 	pageNum, _ := strconv.Atoi(c.Query("pageNum", "1"))
 	pageSize, _ := strconv.Atoi(c.Query("pageSize", "20"))
-	orgId := c.Query("orgId", "")
+	orgID := c.Query("orgID", "")
 	role := c.Query("role", "")
 
 	projectService := rt.Services.Project
 
-	projects, total, err := projectService.GetProjectsByUserId(c.Context(), claims.UserId, pageNum, pageSize, orgId, role)
+	projects, total, err := projectService.GetProjectsByUserId(c.Context(), claims.UserID, pageNum, pageSize, orgID, role)
 	if err != nil {
 		log.Errorw("get projects by user id failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
@@ -269,14 +269,14 @@ func (rt *Router) getUserProjects(c *fiber.Ctx) error {
 
 // enableProject 启用项目
 func (rt *Router) enableProject(c *fiber.Ctx) error {
-	projectId := c.Params("projectId")
-	if projectId == "" {
+	projectID := c.Params("projectID")
+	if projectID == "" {
 		return http.Err(c, http.BadRequest.Code, "project id is required")
 	}
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.EnableProject(c.Context(), projectId)
+	result, err := projectService.EnableProject(c.Context(), projectID)
 	if err != nil {
 		log.Errorw("enable project failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
@@ -287,14 +287,14 @@ func (rt *Router) enableProject(c *fiber.Ctx) error {
 
 // disableProject 禁用项目
 func (rt *Router) disableProject(c *fiber.Ctx) error {
-	projectId := c.Params("projectId")
-	if projectId == "" {
+	projectID := c.Params("projectID")
+	if projectID == "" {
 		return http.Err(c, http.BadRequest.Code, "project id is required")
 	}
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.DisableProject(c.Context(), projectId)
+	result, err := projectService.DisableProject(c.Context(), projectID)
 	if err != nil {
 		log.Errorw("disable project failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
@@ -305,8 +305,8 @@ func (rt *Router) disableProject(c *fiber.Ctx) error {
 
 // updateProjectStatistics 更新项目统计信息
 func (rt *Router) updateProjectStatistics(c *fiber.Ctx) error {
-	projectId := c.Params("projectId")
-	if projectId == "" {
+	projectID := c.Params("projectID")
+	if projectID == "" {
 		return http.Err(c, http.BadRequest.Code, "project id is required")
 	}
 
@@ -318,7 +318,7 @@ func (rt *Router) updateProjectStatistics(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.UpdateProjectStatistics(c.Context(), projectId, &req)
+	result, err := projectService.UpdateProjectStatistics(c.Context(), projectID, &req)
 	if err != nil {
 		log.Errorw("update project statistics failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
@@ -329,15 +329,15 @@ func (rt *Router) updateProjectStatistics(c *fiber.Ctx) error {
 
 // getProjectMembers 获取项目成员列表
 func (rt *Router) getProjectMembers(c *fiber.Ctx) error {
-	projectId := c.Params("projectId")
-	if projectId == "" {
+	projectID := c.Params("projectID")
+	if projectID == "" {
 		return http.Err(c, http.BadRequest.Code, "project id is required")
 	}
 
 	// 通过 repository 访问项目成员
 	// 注意：这里需要通过 Services 获取 repository，或者创建一个 ProjectMemberService
 	// 暂时直接使用 repository，后续可以优化
-	members, err := rt.Services.ProjectMemberRepo.ListProjectMembers(c.Context(), projectId)
+	members, err := rt.Services.ProjectMemberRepo.ListProjectMembers(c.Context(), projectID)
 	if err != nil {
 		log.Errorw("get project members failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
@@ -353,14 +353,14 @@ func (rt *Router) getProjectMembers(c *fiber.Ctx) error {
 
 // addProjectMember 添加项目成员
 func (rt *Router) addProjectMember(c *fiber.Ctx) error {
-	projectId := c.Params("projectId")
-	if projectId == "" {
+	projectID := c.Params("projectID")
+	if projectID == "" {
 		return http.Err(c, http.BadRequest.Code, "project id is required")
 	}
 
 	var req struct {
-		UserId string `json:"userId" validate:"required"`
-		RoleId string `json:"roleId" validate:"required"`
+		UserID string `json:"userID" validate:"required"`
+		RoleID string `json:"roleId" validate:"required"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		log.Errorw("add project member failed", "error", err)
@@ -368,9 +368,9 @@ func (rt *Router) addProjectMember(c *fiber.Ctx) error {
 	}
 
 	member := &model.ProjectMember{
-		ProjectId: projectId,
-		UserId:    req.UserId,
-		RoleId:    req.RoleId,
+		ProjectID: projectID,
+		UserID:    req.UserID,
+		RoleID:    req.RoleID,
 	}
 
 	if err := rt.Services.ProjectMemberRepo.AddProjectMember(c.Context(), member); err != nil {
@@ -383,21 +383,21 @@ func (rt *Router) addProjectMember(c *fiber.Ctx) error {
 
 // updateProjectMemberRole 更新项目成员角色
 func (rt *Router) updateProjectMemberRole(c *fiber.Ctx) error {
-	projectId := c.Params("projectId")
-	userId := c.Params("userId")
-	if projectId == "" || userId == "" {
+	projectID := c.Params("projectID")
+	userID := c.Params("userID")
+	if projectID == "" || userID == "" {
 		return http.Err(c, http.BadRequest.Code, "project id and user id are required")
 	}
 
 	var req struct {
-		RoleId string `json:"roleId" validate:"required"`
+		RoleID string `json:"roleId" validate:"required"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		log.Errorw("update project member role failed", "error", err)
 		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
 
-	if err := rt.Services.ProjectMemberRepo.UpdateProjectMemberRole(c.Context(), projectId, userId, req.RoleId); err != nil {
+	if err := rt.Services.ProjectMemberRepo.UpdateProjectMemberRole(c.Context(), projectID, userID, req.RoleID); err != nil {
 		log.Errorw("update project member role failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -407,13 +407,13 @@ func (rt *Router) updateProjectMemberRole(c *fiber.Ctx) error {
 
 // removeProjectMember 移除项目成员
 func (rt *Router) removeProjectMember(c *fiber.Ctx) error {
-	projectId := c.Params("projectId")
-	userId := c.Params("userId")
-	if projectId == "" || userId == "" {
+	projectID := c.Params("projectID")
+	userID := c.Params("userID")
+	if projectID == "" || userID == "" {
 		return http.Err(c, http.BadRequest.Code, "project id and user id are required")
 	}
 
-	if err := rt.Services.ProjectMemberRepo.RemoveProjectMember(c.Context(), projectId, userId); err != nil {
+	if err := rt.Services.ProjectMemberRepo.RemoveProjectMember(c.Context(), projectID, userID); err != nil {
 		log.Errorw("remove project member failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())
 	}

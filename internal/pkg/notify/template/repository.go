@@ -65,9 +65,9 @@ type DatabaseTemplateRepository struct {
 }
 
 // NewDatabaseTemplateRepository creates a new database template repository
-func NewDatabaseTemplateRepository(repo repo.INotificationTemplateRepository) *DatabaseTemplateRepository {
+func NewDatabaseTemplateRepository(r repo.INotificationTemplateRepository) *DatabaseTemplateRepository {
 	return &DatabaseTemplateRepository{
-		repo: repo,
+		repo: r,
 	}
 }
 

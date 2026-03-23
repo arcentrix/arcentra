@@ -189,15 +189,14 @@ func (sm *StageMetrics) detailRow(labelCols int) string {
 			sm.StageDuration, sm.StageDuration/time.Duration(sm.Items),
 			sm.WorkDuration, sm.WorkDuration/time.Duration(sm.Items),
 		)
-	} else {
-		formatStr := fmt.Sprintf("%%-%ds: %%d items, total %%s, work %%s", labelCols)
-		return fmt.Sprintf(formatStr,
-			sm.label(),
-			sm.Items,
-			sm.StageDuration,
-			sm.WorkDuration,
-		)
 	}
+	formatStr := fmt.Sprintf("%%-%ds: %%d items, total %%s, work %%s", labelCols)
+	return fmt.Sprintf(formatStr,
+		sm.label(),
+		sm.Items,
+		sm.StageDuration,
+		sm.WorkDuration,
+	)
 }
 
 // Metrics defines a set of performance metrics collected for an
@@ -304,7 +303,8 @@ func (cs commonStage[T]) name() string {
 // exhaustInput consumes and discards all input work items on the stage's
 // input channel.
 func (cs commonStage[T]) exhaustInput() {
-	for range cs.inCh {
+	for item := range cs.inCh {
+		_ = item
 	}
 }
 

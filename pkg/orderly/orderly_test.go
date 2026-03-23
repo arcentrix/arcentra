@@ -253,7 +253,7 @@ func TestMap_ForEach(t *testing.T) {
 		m.Set("key3", "value3")
 
 		order := make([]string, 0)
-		m.ForEach(func(k string, v any) {
+		m.ForEach(func(k string, _ any) {
 			order = append(order, k)
 		})
 
@@ -266,7 +266,7 @@ func TestMap_ForEach(t *testing.T) {
 	t.Run("iterate over empty Map", func(t *testing.T) {
 		m := New(10)
 		count := 0
-		m.ForEach(func(k string, v any) {
+		m.ForEach(func(_ string, _ any) {
 			count++
 		})
 
@@ -339,7 +339,7 @@ func TestMap_ToSlice(t *testing.T) {
 		if slice[1] != 42 {
 			t.Errorf("ToSlice()[1] = %v, want 42", slice[1])
 		}
-		if slice[2] != true {
+		if !slice[2].(bool) {
 			t.Errorf("ToSlice()[2] = %v, want true", slice[2])
 		}
 	})
@@ -408,7 +408,7 @@ func TestMap_Concurrent(t *testing.T) {
 		for i := 0; i < workers; i++ {
 			eg.Go(func() error {
 				count := 0
-				m.ForEach(func(k string, v any) {
+				m.ForEach(func(_ string, _ any) {
 					count++
 				})
 

@@ -33,11 +33,11 @@ type NotificationTemplateFilter struct {
 // INotificationTemplateRepository defines notification template persistence with context support.
 type INotificationTemplateRepository interface {
 	Create(ctx context.Context, tmpl *model.NotificationTemplate) error
-	Get(ctx context.Context, templateId string) (*model.NotificationTemplate, error)
+	Get(ctx context.Context, templateID string) (*model.NotificationTemplate, error)
 	GetByNameAndType(ctx context.Context, name string, templateType string) (*model.NotificationTemplate, error)
 	List(ctx context.Context, filter *NotificationTemplateFilter) ([]*model.NotificationTemplate, error)
 	Update(ctx context.Context, tmpl *model.NotificationTemplate) error
-	Delete(ctx context.Context, templateId string) error
+	Delete(ctx context.Context, templateID string) error
 	ListByType(ctx context.Context, templateType string) ([]*model.NotificationTemplate, error)
 	ListByChannel(ctx context.Context, channel string) ([]*model.NotificationTemplate, error)
 }
@@ -58,11 +58,11 @@ func (r *NotificationTemplateRepo) Create(ctx context.Context, tmpl *model.Notif
 }
 
 // Get returns template by templateId.
-func (r *NotificationTemplateRepo) Get(ctx context.Context, templateId string) (*model.NotificationTemplate, error) {
+func (r *NotificationTemplateRepo) Get(ctx context.Context, templateID string) (*model.NotificationTemplate, error) {
 	var tmpl model.NotificationTemplate
 	err := r.Database().WithContext(ctx).
 		Table(tmpl.TableName()).
-		Where("template_id = ? AND is_active = ?", templateId, true).
+		Where("template_id = ? AND is_active = ?", templateID, true).
 		First(&tmpl).Error
 	if err != nil {
 		return nil, err
@@ -125,10 +125,10 @@ func (r *NotificationTemplateRepo) Update(ctx context.Context, tmpl *model.Notif
 }
 
 // Delete soft-deletes template by templateId (sets is_active = false).
-func (r *NotificationTemplateRepo) Delete(ctx context.Context, templateId string) error {
+func (r *NotificationTemplateRepo) Delete(ctx context.Context, templateID string) error {
 	return r.Database().WithContext(ctx).
 		Table((&model.NotificationTemplate{}).TableName()).
-		Where("template_id = ?", templateId).
+		Where("template_id = ?", templateID).
 		Update("is_active", false).Error
 }
 

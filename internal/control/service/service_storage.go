@@ -40,7 +40,7 @@ func (ss *StorageService) CreateStorageConfig(ctx context.Context, req *CreateSt
 	}
 
 	storageConfig := &model.StorageConfig{
-		StorageId:   req.StorageID,
+		StorageID:   req.StorageID,
 		Name:        req.Name,
 		StorageType: req.StorageType,
 		Config:      req.Config,
@@ -69,7 +69,7 @@ func (ss *StorageService) UpdateStorageConfig(ctx context.Context, req *UpdateSt
 	}
 
 	storageConfig := &model.StorageConfig{
-		StorageId:   req.StorageID,
+		StorageID:   req.StorageID,
 		Name:        req.Name,
 		StorageType: req.StorageType,
 		Config:      req.Config,

@@ -54,12 +54,12 @@ const (
 )
 
 // NewAgentTokenVerifier creates a new agent token verifier
-func NewAgentTokenVerifier(agentService *service.AgentService, agentRepo repo.IAgentRepository, generalSettingsService *service.GeneralSettingsService, cache cache.ICache) TokenVerifier {
+func NewAgentTokenVerifier(agentService *service.AgentService, agentRepo repo.IAgentRepository, generalSettingsService *service.GeneralSettingsService, c cache.ICache) TokenVerifier {
 	return &agentTokenVerifier{
 		agentService:           agentService,
 		agentRepo:              agentRepo,
 		generalSettingsService: generalSettingsService,
-		cache:                  cache,
+		cache:                  c,
 	}
 }
 
@@ -111,7 +111,7 @@ func isCacheMiss(err error) bool {
 }
 
 // generateToken generates a token for the given agentId using cached secret config.
-func (v *agentTokenVerifier) generateToken(ctx context.Context, agentId string) (string, error) {
+func (v *agentTokenVerifier) generateToken(ctx context.Context, agentID string) (string, error) {
 	config, err := v.getSecretConfig(ctx)
 	if err != nil {
 		return "", err
@@ -119,21 +119,21 @@ func (v *agentTokenVerifier) generateToken(ctx context.Context, agentId string) 
 
 	// Generate token using HMAC-SHA256
 	h := hmac.New(sha256.New, []byte(config.SecretKey))
-	h.Write([]byte(agentId))
+	h.Write([]byte(agentID))
 	h.Write([]byte(config.Salt))
 	signature := h.Sum(nil)
 
 	signatureStr := base64.URLEncoding.EncodeToString(signature)
-	token := fmt.Sprintf("%s:%s", agentId, signatureStr)
+	token := fmt.Sprintf("%s:%s", agentID, signatureStr)
 	return token, nil
 }
 
-// parseToken extracts agentId and signature from token
-// Token format: agentId:base64(signature)
-func (v *agentTokenVerifier) parseToken(token string) (agentId string, signature string, err error) {
+// parseToken extracts agentID and signature from token
+// Token format: agentID:base64(signature)
+func (v *agentTokenVerifier) parseToken(token string) (agentID string, signature string, err error) {
 	parts := strings.SplitN(token, ":", 2)
 	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid token format: expected agentId:signature")
+		return "", "", fmt.Errorf("invalid token format: expected agentID:signature")
 	}
 	return parts[0], parts[1], nil
 }
@@ -150,24 +150,24 @@ func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string,
 	// Check if token is in new format (contains ':')
 	if strings.Contains(token, ":") {
 		// New format: agentId:signature
-		agentId, _, err := v.parseToken(token)
+		agentID, _, err := v.parseToken(token)
 		if err != nil {
 			return "", fmt.Errorf("failed to parse token: %w", err)
 		}
 
-		if agentId == "" {
-			return "", fmt.Errorf("agentId is empty in token")
+		if agentID == "" {
+			return "", fmt.Errorf("agentID is empty in token")
 		}
 
 		// Verify agent exists
-		_, err = v.agentRepo.Get(ctx, agentId)
+		_, err = v.agentRepo.Get(ctx, agentID)
 		if err != nil {
-			log.Debugw("agent not found", "agentId", agentId, "error", err)
-			return "", fmt.Errorf("agent not found: %s", agentId)
+			log.Debugw("agent not found", "agentId", agentID, "error", err)
+			return "", fmt.Errorf("agent not found: %s", agentID)
 		}
 
-		// Regenerate expected token for this agentId and compare
-		expectedToken, err := v.generateToken(ctx, agentId)
+		// Regenerate expected token for this agentID and compare
+		expectedToken, err := v.generateToken(ctx, agentID)
 		if err != nil {
 			return "", fmt.Errorf("failed to generate expected token: %w", err)
 		}
@@ -177,7 +177,7 @@ func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string,
 			return "", fmt.Errorf("invalid token signature")
 		}
 
-		return agentId, nil
+		return agentID, nil
 	}
 
 	// Legacy format: only signature (base64 encoded), need to find agent by verifying against all agents

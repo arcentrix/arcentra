@@ -27,6 +27,7 @@ import (
 // Type represents the type of notification template
 type Type string
 
+// Supported notification template types.
 const (
 	Build    Type = "build"    // Build-related notifications
 	Approval Type = "approval" // Approval-related notifications

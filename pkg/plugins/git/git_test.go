@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/arcentrix/arcentra/pkg/plugin"
+	pluginpkg "github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/bytedance/sonic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -86,7 +86,7 @@ func TestGitPlugin_Type(t *testing.T) {
 	p := NewGit()
 	typ := p.Type()
 
-	assert.Equal(t, plugin.TypeSource, typ)
+	assert.Equal(t, pluginpkg.TypeSource, typ)
 }
 
 func TestGitPlugin_Init(t *testing.T) {
@@ -149,16 +149,16 @@ func TestGitPlugin_Init(t *testing.T) {
 }
 
 func TestGitPlugin_InitWithEmptyConfig(t *testing.T) {
-	plugin := NewGit()
-	err := plugin.Init(json.RawMessage{})
+	gitPlugin := NewGit()
+	err := gitPlugin.Init(json.RawMessage{})
 
 	assert.NoError(t, err)
-	assert.Equal(t, "git", plugin.cfg.GitPath)
+	assert.Equal(t, "git", gitPlugin.cfg.GitPath)
 }
 
 func TestGitPlugin_Cleanup(t *testing.T) {
-	plugin := NewGit()
-	err := plugin.Cleanup()
+	gitPlugin := NewGit()
+	err := gitPlugin.Cleanup()
 
 	assert.NoError(t, err)
 }
@@ -170,8 +170,8 @@ func TestGitPlugin_Clone(t *testing.T) {
 	}
 	skipIfDotGitNotWritable(t)
 
-	plugin := NewGit()
-	err := plugin.Init(json.RawMessage{})
+	gitPlugin := NewGit()
+	err := gitPlugin.Init(json.RawMessage{})
 	require.NoError(t, err)
 
 	// 创建一个临时目录作为测试仓库
@@ -212,7 +212,7 @@ func TestGitPlugin_Clone(t *testing.T) {
 	paramsJSON, err := sonic.Marshal(params)
 	require.NoError(t, err)
 
-	result, err := plugin.Execute("clone", paramsJSON, nil)
+	result, err := gitPlugin.Execute("clone", paramsJSON, nil)
 
 	assert.NoError(t, err)
 	assert.NotNil(t, result)

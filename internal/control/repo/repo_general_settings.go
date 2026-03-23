@@ -27,7 +27,7 @@ import (
 // IGeneralSettingsRepository defines general settings persistence with context support.
 type IGeneralSettingsRepository interface {
 	Update(ctx context.Context, settings *model.GeneralSettings) error
-	Get(ctx context.Context, settingsId string) (*model.GeneralSettings, error)
+	Get(ctx context.Context, settingsID string) (*model.GeneralSettings, error)
 	GetByName(ctx context.Context, category, name string) (*model.GeneralSettings, error)
 	List(ctx context.Context, pageNum, pageSize int, category string) ([]*model.GeneralSettings, int64, error)
 	GetCategories(ctx context.Context) ([]string, error)
@@ -43,18 +43,18 @@ type GeneralSettingsRepo struct {
 	cache.ICache
 }
 
-func NewGeneralSettingsRepo(db database.IDatabase, cache cache.ICache) IGeneralSettingsRepository {
+func NewGeneralSettingsRepo(db database.IDatabase, ch cache.ICache) IGeneralSettingsRepository {
 	return &GeneralSettingsRepo{
 		IDatabase: db,
-		ICache:    cache,
+		ICache:    ch,
 	}
 }
 
-// Update updates general settings by settingsId.
+// Update updates general settings by settingsID.
 func (gsr *GeneralSettingsRepo) Update(ctx context.Context, settings *model.GeneralSettings) error {
 	err := gsr.Database().WithContext(ctx).Table(settings.TableName()).
 		Omit("id", "settings_id", "category", "name").
-		Where("settings_id = ?", settings.SettingsId).
+		Where("settings_id = ?", settings.SettingsID).
 		Updates(settings).Error
 	if err != nil {
 		return err
@@ -63,17 +63,17 @@ func (gsr *GeneralSettingsRepo) Update(ctx context.Context, settings *model.Gene
 	return nil
 }
 
-// Get returns general settings by settingsId.
-func (gsr *GeneralSettingsRepo) Get(ctx context.Context, settingsId string) (*model.GeneralSettings, error) {
+// Get returns general settings by settingsID.
+func (gsr *GeneralSettingsRepo) Get(ctx context.Context, settingsID string) (*model.GeneralSettings, error) {
 	var tempSettings model.GeneralSettings
 	err := gsr.Database().WithContext(ctx).Table(tempSettings.TableName()).
 		Select("name", "category").
-		Where("settings_id = ?", settingsId).
+		Where("settings_id = ?", settingsID).
 		First(&tempSettings).Error
 	if err != nil {
 		return nil, err
 	}
-	return gsr.getGeneralSettingsByName(ctx, tempSettings.Name, tempSettings.Category, settingsId)
+	return gsr.getGeneralSettingsByName(ctx, tempSettings.Name, tempSettings.Category, settingsID)
 }
 
 // GetByName returns general settings by category and name.
@@ -81,7 +81,9 @@ func (gsr *GeneralSettingsRepo) GetByName(ctx context.Context, category, name st
 	return gsr.getGeneralSettingsByName(ctx, name, category, "")
 }
 
-func (gsr *GeneralSettingsRepo) getGeneralSettingsByName(ctx context.Context, name string, category string, settingsId string) (*model.GeneralSettings, error) {
+func (gsr *GeneralSettingsRepo) getGeneralSettingsByName(
+	ctx context.Context, name, category, settingsID string,
+) (*model.GeneralSettings, error) {
 	keyFunc := func(params ...any) string {
 		return consts.GeneralSettingsKeyByName + params[0].(string)
 	}
@@ -91,8 +93,8 @@ func (gsr *GeneralSettingsRepo) getGeneralSettingsByName(ctx context.Context, na
 		query := gsr.Database().WithContext(ctx).Table(settings.TableName()).
 			Select("id", "settings_id", "category", "name", "display_name", "data", "schema", "description", "created_at", "updated_at")
 
-		if settingsId != "" {
-			query = query.Where("settings_id = ?", settingsId)
+		if settingsID != "" {
+			query = query.Where("settings_id = ?", settingsID)
 		} else {
 			query = query.Where("category = ? AND name = ?", category, name)
 		}

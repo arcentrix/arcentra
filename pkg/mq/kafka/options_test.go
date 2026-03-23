@@ -70,7 +70,7 @@ func TestConsumerOptionsApply(t *testing.T) {
 	if cfg.AutoOffsetReset != "latest" {
 		t.Fatalf("expected AutoOffsetReset to be set, got %s", cfg.AutoOffsetReset)
 	}
-	if cfg.EnableAutoCommit == nil || *cfg.EnableAutoCommit != false {
+	if cfg.EnableAutoCommit == nil || *cfg.EnableAutoCommit {
 		t.Fatalf("expected EnableAutoCommit to be false, got %v", cfg.EnableAutoCommit)
 	}
 	if cfg.SessionTimeoutMs != 15000 {

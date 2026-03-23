@@ -34,7 +34,7 @@ type statusSubscription struct {
 
 var (
 	statusTopic = "EVENT_PIPELINE"
-	clientId    = "arcentra-ws-status"
+	clientID    = "arcentra-ws-status"
 )
 
 func (h *WSHandle) handleStatus(conn ws.Conn, action string, params WSParams) error {
@@ -105,7 +105,7 @@ func (h *WSHandle) consumeStatusEvents() {
 	consumer, err := kafka.NewConsumer(
 		h.kafkaCfg.BootstrapServers,
 		statusTopic,
-		clientId,
+		clientID,
 		kafka.WithConsumerOptions(clientOptions...),
 		kafka.WithConsumerAutoOffsetReset("earliest"),
 	)
@@ -143,7 +143,7 @@ func (h *WSHandle) consumeStatusEvents() {
 
 func (h *WSHandle) dispatchStatusEvent(event map[string]any) {
 	info := parseEventInfo(event)
-	if info.pipelineId == "" {
+	if info.pipelineID == "" {
 		return
 	}
 
@@ -158,9 +158,9 @@ func (h *WSHandle) dispatchStatusEvent(event map[string]any) {
 			continue
 		}
 		payload := map[string]any{
-			"pipelineId": info.pipelineId,
-			"jobId":      info.jobId,
-			"stepRunId":  info.stepRunId,
+			"pipelineId": info.pipelineID,
+			"jobId":      info.jobID,
+			"stepRunId":  info.stepRunID,
 			"eventType":  info.eventType,
 			"status":     info.status,
 			"subject":    info.subject,
@@ -190,11 +190,11 @@ type eventInfo struct {
 	eventType  string
 	subject    string
 	status     string
-	pipelineId string
+	pipelineID string
 	jobName    string
 	stepName   string
-	jobId      string
-	stepRunId  string
+	jobID      string
+	stepRunID  string
 }
 
 func parseEventInfo(event map[string]any) eventInfo {
@@ -206,12 +206,12 @@ func parseEventInfo(event map[string]any) eventInfo {
 		info.subject = value
 	}
 
-	if value, ok := event["pipelineId"].(string); ok {
-		info.pipelineId = value
+	if value, ok := event["pipelineID"].(string); ok {
+		info.pipelineID = value
 	}
-	if info.pipelineId == "" {
+	if info.pipelineID == "" {
 		if value, ok := event["pipelineNamespace"].(string); ok {
-			info.pipelineId = value
+			info.pipelineID = value
 		}
 	}
 	if value, ok := event["stepId"].(string); ok {
@@ -225,9 +225,9 @@ func parseEventInfo(event map[string]any) eventInfo {
 	}
 
 	if info.subject != "" {
-		pipelineId, jobName, stepName := parseSubject(info.subject)
-		if info.pipelineId == "" {
-			info.pipelineId = pipelineId
+		pipelineID, jobName, stepName := parseSubject(info.subject)
+		if info.pipelineID == "" {
+			info.pipelineID = pipelineID
 		}
 		if info.jobName == "" {
 			info.jobName = jobName
@@ -237,21 +237,21 @@ func parseEventInfo(event map[string]any) eventInfo {
 		}
 	}
 
-	if info.pipelineId != "" && info.jobName != "" {
-		info.jobId = info.pipelineId + "-" + info.jobName
+	if info.pipelineID != "" && info.jobName != "" {
+		info.jobID = info.pipelineID + "-" + info.jobName
 	}
-	if info.jobId != "" && info.stepName != "" {
-		info.stepRunId = info.jobId + "-" + info.stepName
+	if info.jobID != "" && info.stepName != "" {
+		info.stepRunID = info.jobID + "-" + info.stepName
 	}
 
 	return info
 }
 
-func parseSubject(subject string) (pipelineId, jobName, stepName string) {
+func parseSubject(subject string) (pipelineID, jobName, stepName string) {
 	if strings.HasPrefix(subject, "pipeline/") {
 		parts := strings.Split(subject, "/")
 		if len(parts) >= 2 {
-			pipelineId = parts[1]
+			pipelineID = parts[1]
 		}
 		if len(parts) >= 4 && parts[2] == "step" {
 			stepName = parts[3]
@@ -267,7 +267,7 @@ func parseSubject(subject string) (pipelineId, jobName, stepName string) {
 	for i := 0; i < len(parts)-1; i++ {
 		switch parts[i] {
 		case "pipeline":
-			pipelineId = parts[i+1]
+			pipelineID = parts[i+1]
 		case "job":
 			jobName = parts[i+1]
 		case "step":
@@ -278,7 +278,7 @@ func parseSubject(subject string) (pipelineId, jobName, stepName string) {
 }
 
 func matchStatusSubscription(params WSParams, info eventInfo) bool {
-	if params.PipelineID != "" && info.pipelineId != "" && params.PipelineID != info.pipelineId {
+	if params.PipelineID != "" && info.pipelineID != "" && params.PipelineID != info.pipelineID {
 		return false
 	}
 
@@ -294,18 +294,18 @@ func matchStatusSubscription(params WSParams, info eventInfo) bool {
 	return true
 }
 
-func deriveJobName(pipelineId, jobId string) string {
-	prefix := pipelineId + "-"
-	if strings.HasPrefix(jobId, prefix) {
-		return strings.TrimPrefix(jobId, prefix)
+func deriveJobName(pipelineID, jobID string) string {
+	prefix := pipelineID + "-"
+	if strings.HasPrefix(jobID, prefix) {
+		return strings.TrimPrefix(jobID, prefix)
 	}
-	return jobId
+	return jobID
 }
 
-func deriveStepName(jobId, stepRunId string) string {
-	prefix := jobId + "-"
-	if strings.HasPrefix(stepRunId, prefix) {
-		return strings.TrimPrefix(stepRunId, prefix)
+func deriveStepName(jobID, stepRunID string) string {
+	prefix := jobID + "-"
+	if strings.HasPrefix(stepRunID, prefix) {
+		return strings.TrimPrefix(stepRunID, prefix)
 	}
-	return stepRunId
+	return stepRunID
 }

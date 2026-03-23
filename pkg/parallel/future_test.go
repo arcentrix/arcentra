@@ -36,7 +36,7 @@ func TestGo(t *testing.T) {
 		{
 			args: args{
 				ctx: context.Background(),
-				fn: func(ctx context.Context) (interface{}, error) {
+				fn: func(_ context.Context) (interface{}, error) {
 					return 1, nil
 				},
 			},
@@ -46,7 +46,7 @@ func TestGo(t *testing.T) {
 		{
 			args: args{
 				ctx: context.Background(),
-				fn: func(ctx context.Context) (interface{}, error) {
+				fn: func(_ context.Context) (interface{}, error) {
 					return nil, context.Canceled
 				},
 			},

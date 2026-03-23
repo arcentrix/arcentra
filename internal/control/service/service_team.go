@@ -38,16 +38,16 @@ func NewTeamService(teamRepo repo.ITeamRepository) *TeamService {
 }
 
 // CreateTeam creates a team.
-func (s *TeamService) CreateTeam(ctx context.Context, req *model.CreateTeamReq, createdBy string) (*model.TeamResp, error) {
+func (s *TeamService) CreateTeam(ctx context.Context, req *model.CreateTeamReq, _ string) (*model.TeamResp, error) {
 	// 1. 验证组织是否存在
-	if req.OrgId == "" {
+	if req.OrgID == "" {
 		return nil, errors.New("organization id cannot be empty")
 	}
 
 	// 2. 检查团队名称是否已存在
-	exists, err := s.teamRepo.NameExists(ctx, req.OrgId, req.Name)
+	exists, err := s.teamRepo.NameExists(ctx, req.OrgID, req.Name)
 	if err != nil {
-		log.Errorw("check team name failed", "orgId", req.OrgId, "name", req.Name, "error", err)
+		log.Errorw("check team name failed", "orgId", req.OrgID, "name", req.Name, "error", err)
 		return nil, fmt.Errorf("check team name failed: %w", err)
 	}
 	if exists {
@@ -55,9 +55,9 @@ func (s *TeamService) CreateTeam(ctx context.Context, req *model.CreateTeamReq, 
 	}
 
 	// 3. 构建团队路径和层级
-	path, level, err := s.teamRepo.BuildPath(ctx, req.ParentTeamId)
+	path, level, err := s.teamRepo.BuildPath(ctx, req.ParentTeamID)
 	if err != nil {
-		log.Errorw("build team path failed", "parentTeamId", req.ParentTeamId, "error", err)
+		log.Errorw("build team path failed", "parentTeamId", req.ParentTeamID, "error", err)
 		return nil, fmt.Errorf("build team path failed: %w", err)
 	}
 
@@ -70,13 +70,13 @@ func (s *TeamService) CreateTeam(ctx context.Context, req *model.CreateTeamReq, 
 
 	// 5. 创建团队实体
 	teamEntity := &model.Team{
-		TeamId:       id.GetUUID(),
-		OrgId:        req.OrgId,
+		TeamID:       id.GetUUID(),
+		OrgID:        req.OrgID,
 		Name:         req.Name,
 		DisplayName:  req.DisplayName,
 		Description:  req.Description,
 		Avatar:       req.Avatar,
-		ParentTeamId: req.ParentTeamId,
+		ParentTeamID: req.ParentTeamID,
 		Path:         path,
 		Level:        level,
 		Settings:     settingsJSON,
@@ -95,15 +95,15 @@ func (s *TeamService) CreateTeam(ctx context.Context, req *model.CreateTeamReq, 
 		return nil, fmt.Errorf("create team failed: %w", err)
 	}
 
-	log.Infow("success create team", "name", teamEntity.Name, "teamId", teamEntity.TeamId)
+	log.Infow("success create team", "name", teamEntity.Name, "teamID", teamEntity.TeamID)
 
 	// 7. 返回响应
 	return model.ToTeamResp(teamEntity), nil
 }
 
 // UpdateTeam updates a team.
-func (s *TeamService) UpdateTeam(ctx context.Context, teamId string, req *model.UpdateTeamReq) (*model.TeamResp, error) {
-	teamEntity, err := s.teamRepo.Get(ctx, teamId)
+func (s *TeamService) UpdateTeam(ctx context.Context, teamID string, req *model.UpdateTeamReq) (*model.TeamResp, error) {
+	teamEntity, err := s.teamRepo.Get(ctx, teamID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("team not found")
@@ -116,7 +116,7 @@ func (s *TeamService) UpdateTeam(ctx context.Context, teamId string, req *model.
 
 	if req.Name != nil && *req.Name != "" {
 		// 检查新名称是否与其他团队冲突
-		exists, checkErr := s.teamRepo.NameExists(ctx, teamEntity.OrgId, *req.Name, teamId)
+		exists, checkErr := s.teamRepo.NameExists(ctx, teamEntity.OrgID, *req.Name, teamID)
 		if checkErr != nil {
 			return nil, fmt.Errorf("check team name failed: %w", checkErr)
 		}
@@ -157,26 +157,26 @@ func (s *TeamService) UpdateTeam(ctx context.Context, teamId string, req *model.
 	// 3. 执行更新
 	if len(updates) > 0 {
 		updates["updated_at"] = time.Now()
-		if err = s.teamRepo.Update(ctx, teamId, updates); err != nil {
-			log.Errorw("update team failed", "teamId", teamId, "error", err)
+		if err = s.teamRepo.Update(ctx, teamID, updates); err != nil {
+			log.Errorw("update team failed", "teamID", teamID, "error", err)
 			return nil, fmt.Errorf("update team failed: %w", err)
 		}
 	}
 
 	// 4. 查询更新后的团队信息
-	updatedTeam, err := s.teamRepo.Get(ctx, teamId)
+	updatedTeam, err := s.teamRepo.Get(ctx, teamID)
 	if err != nil {
 		return nil, fmt.Errorf("get updated team failed: %w", err)
 	}
 
-	log.Infow("success update team", "name", updatedTeam.Name, "teamId", teamId)
+	log.Infow("success update team", "name", updatedTeam.Name, "teamID", teamID)
 
 	return model.ToTeamResp(updatedTeam), nil
 }
 
 // DeleteTeam deletes a team.
-func (s *TeamService) DeleteTeam(ctx context.Context, teamId string) error {
-	teamEntity, err := s.teamRepo.Get(ctx, teamId)
+func (s *TeamService) DeleteTeam(ctx context.Context, teamID string) error {
+	teamEntity, err := s.teamRepo.Get(ctx, teamID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("team not found")
@@ -185,7 +185,7 @@ func (s *TeamService) DeleteTeam(ctx context.Context, teamId string) error {
 	}
 
 	// 2. 检查是否有子团队
-	subTeams, err := s.teamRepo.ListSubTeams(ctx, teamId)
+	subTeams, err := s.teamRepo.ListSubTeams(ctx, teamID)
 	if err != nil {
 		return fmt.Errorf("get sub teams failed: %w", err)
 	}
@@ -204,19 +204,19 @@ func (s *TeamService) DeleteTeam(ctx context.Context, teamId string) error {
 	}
 
 	// 5. 执行删除
-	if err := s.teamRepo.Delete(ctx, teamId); err != nil {
-		log.Errorw("delete team failed", "teamId", teamId, "error", err)
+	if err := s.teamRepo.Delete(ctx, teamID); err != nil {
+		log.Errorw("delete team failed", "teamID", teamID, "error", err)
 		return fmt.Errorf("delete team failed: %w", err)
 	}
 
-	log.Infow("success delete team", "name", teamEntity.Name, "teamId", teamId)
+	log.Infow("success delete team", "name", teamEntity.Name, "teamID", teamID)
 
 	return nil
 }
 
-// GetTeamById returns team by teamId.
-func (s *TeamService) GetTeamById(ctx context.Context, teamId string) (*model.TeamResp, error) {
-	teamEntity, err := s.teamRepo.Get(ctx, teamId)
+// GetTeamByID returns team by teamID.
+func (s *TeamService) GetTeamByID(ctx context.Context, teamID string) (*model.TeamResp, error) {
+	teamEntity, err := s.teamRepo.Get(ctx, teamID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("team not found")
@@ -268,9 +268,9 @@ func (s *TeamService) ListTeams(ctx context.Context, query *model.TeamQueryReq) 
 	}, nil
 }
 
-// GetTeamsByOrgId lists teams by orgId.
-func (s *TeamService) GetTeamsByOrgId(ctx context.Context, orgId string) ([]*model.TeamResp, error) {
-	teams, err := s.teamRepo.ListByOrg(ctx, orgId)
+// GetTeamsByOrgID lists teams by orgID.
+func (s *TeamService) GetTeamsByOrgID(ctx context.Context, orgID string) ([]*model.TeamResp, error) {
+	teams, err := s.teamRepo.ListByOrg(ctx, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("get teams by org id failed: %w", err)
 	}
@@ -283,9 +283,9 @@ func (s *TeamService) GetTeamsByOrgId(ctx context.Context, orgId string) ([]*mod
 	return teamResps, nil
 }
 
-// GetSubTeams lists sub-teams by parentTeamId.
-func (s *TeamService) GetSubTeams(ctx context.Context, parentTeamId string) ([]*model.TeamResp, error) {
-	teams, err := s.teamRepo.ListSubTeams(ctx, parentTeamId)
+// GetSubTeams lists sub-teams by parentTeamID.
+func (s *TeamService) GetSubTeams(ctx context.Context, parentTeamID string) ([]*model.TeamResp, error) {
+	teams, err := s.teamRepo.ListSubTeams(ctx, parentTeamID)
 	if err != nil {
 		return nil, fmt.Errorf("get sub teams failed: %w", err)
 	}
@@ -298,9 +298,9 @@ func (s *TeamService) GetSubTeams(ctx context.Context, parentTeamId string) ([]*
 	return teamResps, nil
 }
 
-// GetTeamsByUserId lists teams for user by userId.
-func (s *TeamService) GetTeamsByUserId(ctx context.Context, userId string) ([]*model.TeamResp, error) {
-	teams, err := s.teamRepo.ListByUser(ctx, userId)
+// GetTeamsByUserID lists teams for user by userID.
+func (s *TeamService) GetTeamsByUserID(ctx context.Context, userID string) ([]*model.TeamResp, error) {
+	teams, err := s.teamRepo.ListByUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get teams by user id failed: %w", err)
 	}
@@ -314,24 +314,24 @@ func (s *TeamService) GetTeamsByUserId(ctx context.Context, userId string) ([]*m
 }
 
 // UpdateTeamStatistics updates team statistics.
-func (s *TeamService) UpdateTeamStatistics(ctx context.Context, teamId string) error {
-	return s.teamRepo.UpdateStatistics(ctx, teamId)
+func (s *TeamService) UpdateTeamStatistics(ctx context.Context, teamID string) error {
+	return s.teamRepo.UpdateStatistics(ctx, teamID)
 }
 
 // EnableTeam enables a team.
-func (s *TeamService) EnableTeam(ctx context.Context, teamId string) error {
+func (s *TeamService) EnableTeam(ctx context.Context, teamID string) error {
 	updates := map[string]interface{}{
 		"is_enabled": 1,
 		"updated_at": time.Now(),
 	}
-	return s.teamRepo.Update(ctx, teamId, updates)
+	return s.teamRepo.Update(ctx, teamID, updates)
 }
 
 // DisableTeam disables a team.
-func (s *TeamService) DisableTeam(ctx context.Context, teamId string) error {
+func (s *TeamService) DisableTeam(ctx context.Context, teamID string) error {
 	updates := map[string]interface{}{
 		"is_enabled": 0,
 		"updated_at": time.Now(),
 	}
-	return s.teamRepo.Update(ctx, teamId, updates)
+	return s.teamRepo.Update(ctx, teamID, updates)
 }

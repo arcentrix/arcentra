@@ -35,37 +35,37 @@ func NewGeneralSettingsService(generalSettingsRepo repo.IGeneralSettingsReposito
 }
 
 // UpdateGeneralSettings updates a general settings.
-func (gss *GeneralSettingsService) UpdateGeneralSettings(ctx context.Context, settingsId string, settings *model.GeneralSettings) error {
-	existing, err := gss.generalSettingsRepo.Get(ctx, settingsId)
+func (gss *GeneralSettingsService) UpdateGeneralSettings(ctx context.Context, settingsID string, settings *model.GeneralSettings) error {
+	existing, err := gss.generalSettingsRepo.Get(ctx, settingsID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("general settings not found")
 		}
-		log.Errorw("failed to get general settings", "settingsId", settingsId, "error", err)
+		log.Errorw("failed to get general settings", "settingsID", settingsID, "error", err)
 		return errors.New("failed to get general settings")
 	}
 
-	settings.SettingsId = settingsId
+	settings.SettingsID = settingsID
 	settings.Category = existing.Category
 	settings.Name = existing.Name
 
 	if err := gss.generalSettingsRepo.Update(ctx, settings); err != nil {
-		log.Errorw("failed to update general settings", "settingsId", settingsId, "error", err)
+		log.Errorw("failed to update general settings", "settingsID", settingsID, "error", err)
 		return errors.New("failed to update general settings")
 	}
 
-	log.Infow("general settings updated successfully", "settingsId", settingsId)
+	log.Infow("general settings updated successfully", "settingsID", settingsID)
 	return nil
 }
 
 // GetGeneralSettingsByID gets a general settings by settings ID.
-func (gss *GeneralSettingsService) GetGeneralSettingsByID(ctx context.Context, settingsId string) (*model.GeneralSettings, error) {
-	settings, err := gss.generalSettingsRepo.Get(ctx, settingsId)
+func (gss *GeneralSettingsService) GetGeneralSettingsByID(ctx context.Context, settingsID string) (*model.GeneralSettings, error) {
+	settings, err := gss.generalSettingsRepo.Get(ctx, settingsID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("general settings not found")
 		}
-		log.Errorw("failed to get general settings", "settingsId", settingsId, "error", err)
+		log.Errorw("failed to get general settings", "settingsID", settingsID, "error", err)
 		return nil, errors.New("failed to get general settings")
 	}
 	return settings, nil

@@ -186,14 +186,14 @@ func (tf *TaskFramework) queue(_ context.Context, task *Task) error {
 			if !step.RunOnAgent {
 				continue
 			}
-			stepRunId := fmt.Sprintf("%s-%s-%s", tf.execCtx.Pipeline.Namespace, task.Job.Name, step.Name)
+			stepRunID := fmt.Sprintf("%s-%s-%s", tf.execCtx.Pipeline.Namespace, task.Job.Name, step.Name)
 			payload := &taskqueue.StepRunTaskPayload{
 				PipelineID: tf.execCtx.Pipeline.Namespace,
 				JobID:      fmt.Sprintf("%s-%s", tf.execCtx.Pipeline.Namespace, task.Job.Name),
 				JobName:    task.Job.Name,
 				StepName:   step.Name,
 				StepIndex:  int32(i),
-				StepRunID:  stepRunId,
+				StepRunID:  stepRunID,
 				Uses:       step.Uses,
 				Action:     step.Action,
 				Args:       spec.StructAsMap(step.Args),

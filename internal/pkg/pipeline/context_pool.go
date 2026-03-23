@@ -39,11 +39,11 @@ var (
 // for cold context data that is evicted from the LRU cache
 type StorageStrategy interface {
 	// Save stores a context to cold storage
-	Save(ctx context.Context, pipelineId string, data []byte) error
+	Save(ctx context.Context, pipelineID string, data []byte) error
 	// Load loads a context from cold storage
-	Load(ctx context.Context, pipelineId string) ([]byte, error)
+	Load(ctx context.Context, pipelineID string) ([]byte, error)
 	// Delete removes a context from cold storage
-	Delete(ctx context.Context, pipelineId string) error
+	Delete(ctx context.Context, pipelineID string) error
 }
 
 // ContextPoolConfig configures the context pool behavior
@@ -301,13 +301,13 @@ func (p *ContextPool) Get(ctx context.Context, pipeline *spec.Pipeline, execCtx 
 		return nil, fmt.Errorf("pipeline cannot be nil")
 	}
 
-	pipelineId := pipeline.Namespace
-	if pipelineId == "" {
+	pipelineID := pipeline.Namespace
+	if pipelineID == "" {
 		return nil, fmt.Errorf("pipeline namespace cannot be empty")
 	}
 
 	// Try to get from LRU cache first
-	if pc, ok := p.lru.get(pipelineId); ok {
+	if pc, ok := p.lru.get(pipelineID); ok {
 		// Reset context for reuse
 		pc.ResetForReuse(ctx, pipeline, execCtx)
 		return pc, nil
@@ -338,7 +338,7 @@ func (p *ContextPool) Get(ctx context.Context, pipeline *spec.Pipeline, execCtx 
 	p.mu.Unlock()
 
 	// Try to add to LRU cache
-	evicted := p.lru.put(pipelineId, pc)
+	evicted := p.lru.put(pipelineID, pc)
 	if evicted != nil {
 		// Handle evicted context (store to cold storage if strategy is set)
 		p.handleEvictedContext(ctx, evicted)
@@ -354,15 +354,15 @@ func (p *ContextPool) Put(pc *Context) {
 		return
 	}
 
-	pipelineId := pc.PipelineId()
-	if pipelineId == "" {
+	pipelineID := pc.PipelineID()
+	if pipelineID == "" {
 		// Return to sync.Pool if no pipeline ID
 		p.returnToSyncPool(pc)
 		return
 	}
 
 	// Try to add to LRU cache
-	evicted := p.lru.put(pipelineId, pc)
+	evicted := p.lru.put(pipelineID, pc)
 	if evicted != nil && evicted != pc {
 		// Handle evicted context
 		p.handleEvictedContext(context.Background(), evicted)
@@ -373,13 +373,13 @@ func (p *ContextPool) Put(pc *Context) {
 }
 
 // Remove removes a context from the pool
-func (p *ContextPool) Remove(pipelineId string) {
-	if pipelineId == "" {
+func (p *ContextPool) Remove(pipelineID string) {
+	if pipelineID == "" {
 		return
 	}
 
 	// Remove from LRU cache
-	if ctx, ok := p.lru.remove(pipelineId); ok {
+	if ctx, ok := p.lru.remove(pipelineID); ok {
 		p.returnToSyncPool(ctx)
 		p.mu.Lock()
 		p.totalCount--
@@ -389,7 +389,7 @@ func (p *ContextPool) Remove(pipelineId string) {
 
 	// Remove from cold storage if strategy is set
 	if p.config.StorageStrategy != nil {
-		_ = p.config.StorageStrategy.Delete(context.Background(), pipelineId)
+		_ = p.config.StorageStrategy.Delete(context.Background(), pipelineID)
 	}
 }
 
@@ -544,10 +544,10 @@ func (p *ContextPool) createNewContext(ctx context.Context, pipeline *spec.Pipel
 	pc.execCtx = execCtx
 	pc.index = -1
 	pc.startTime = time.Now()
-	pc.pipelineId = pipeline.Namespace
-	pc.buildId = ""
-	pc.projectId = ""
-	pc.orgId = ""
+	pc.pipelineID = pipeline.Namespace
+	pc.buildID = ""
+	pc.projectID = ""
+	pc.orgID = ""
 	pc.triggeredBy = ""
 	pc.currentJob = nil
 	pc.currentStep = nil
@@ -597,7 +597,7 @@ func (p *ContextPool) createNewContext(ctx context.Context, pipeline *spec.Pipel
 func (p *ContextPool) registerStateMachineHooks(pc *Context, sm *statemachine.StateMachine[pipelinev1.PipelineStatus]) {
 	sm.OnEnter(
 		pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
-		func(state pipelinev1.PipelineStatus) error {
+		func(_ pipelinev1.PipelineStatus) error {
 			pc.mu.Lock()
 			if pc.endTime == nil {
 				now := time.Now()
@@ -606,7 +606,7 @@ func (p *ContextPool) registerStateMachineHooks(pc *Context, sm *statemachine.St
 			pc.mu.Unlock()
 			return nil
 		})
-	sm.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, func(state pipelinev1.PipelineStatus) error {
+	sm.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, func(_ pipelinev1.PipelineStatus) error {
 		pc.mu.Lock()
 		if pc.endTime == nil {
 			now := time.Now()
@@ -615,7 +615,7 @@ func (p *ContextPool) registerStateMachineHooks(pc *Context, sm *statemachine.St
 		pc.mu.Unlock()
 		return nil
 	})
-	sm.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED, func(state pipelinev1.PipelineStatus) error {
+	sm.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED, func(_ pipelinev1.PipelineStatus) error {
 		pc.mu.Lock()
 		if pc.endTime == nil {
 			now := time.Now()
@@ -639,21 +639,21 @@ func (p *ContextPool) handleEvictedContext(ctx context.Context, pc *Context) {
 	}
 
 	// Serialize and store to cold storage
-	pipelineId := pc.PipelineId()
-	if pipelineId == "" {
+	pipelineID := pc.PipelineID()
+	if pipelineID == "" {
 		p.returnToSyncPool(pc)
 		return
 	}
 
 	// Note: In a real implementation, you would serialize this properly (e.g., JSON, protobuf)
 	// For now, we'll just log and store metadata
-	p.config.Logger.Infow("Evicting context to cold storage", "pipelineId", pipelineId)
+	p.config.Logger.Infow("Evicting context to cold storage", "pipelineId", pipelineID)
 
 	// Store to cold storage (async to avoid blocking)
 	safe.Go(func() {
 		// In a real implementation, serialize pc properly
 		// For now, we'll just mark it as stored
-		_ = p.config.StorageStrategy.Save(ctx, pipelineId, nil)
+		_ = p.config.StorageStrategy.Save(ctx, pipelineID, nil)
 		// After storing, return to sync.Pool
 		p.returnToSyncPool(pc)
 	})
@@ -721,11 +721,11 @@ func (c *Context) ResetForReuse(ctx context.Context, pipeline *spec.Pipeline, ex
 
 	// Reset pipeline ID and execution information
 	if pipeline != nil {
-		c.pipelineId = pipeline.Namespace
+		c.pipelineID = pipeline.Namespace
 	}
-	c.buildId = ""
-	c.projectId = ""
-	c.orgId = ""
+	c.buildID = ""
+	c.projectID = ""
+	c.orgID = ""
 	c.triggeredBy = ""
 
 	// Reset state machine
@@ -750,7 +750,7 @@ func (c *Context) ResetForReuse(ctx context.Context, pipeline *spec.Pipeline, ex
 	}
 
 	// Re-register hooks
-	c.stateMachine.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS, func(state pipelinev1.PipelineStatus) error {
+	c.stateMachine.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS, func(_ pipelinev1.PipelineStatus) error {
 		c.mu.Lock()
 		if c.endTime == nil {
 			now := time.Now()
@@ -759,7 +759,7 @@ func (c *Context) ResetForReuse(ctx context.Context, pipeline *spec.Pipeline, ex
 		c.mu.Unlock()
 		return nil
 	})
-	c.stateMachine.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, func(state pipelinev1.PipelineStatus) error {
+	c.stateMachine.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED, func(_ pipelinev1.PipelineStatus) error {
 		c.mu.Lock()
 		if c.endTime == nil {
 			now := time.Now()
@@ -768,7 +768,7 @@ func (c *Context) ResetForReuse(ctx context.Context, pipeline *spec.Pipeline, ex
 		c.mu.Unlock()
 		return nil
 	})
-	c.stateMachine.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED, func(state pipelinev1.PipelineStatus) error {
+	c.stateMachine.OnEnter(pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED, func(_ pipelinev1.PipelineStatus) error {
 		c.mu.Lock()
 		if c.endTime == nil {
 			now := time.Now()

@@ -24,12 +24,12 @@ import (
 // INotificationChannelRepository defines notification channel persistence with context support.
 type INotificationChannelRepository interface {
 	Create(ctx context.Context, channel *model.NotificationChannel) error
-	Get(ctx context.Context, channelId string) (*model.NotificationChannel, error)
+	Get(ctx context.Context, channelID string) (*model.NotificationChannel, error)
 	GetByName(ctx context.Context, name string) (*model.NotificationChannel, error)
 	List(ctx context.Context) ([]*model.NotificationChannel, error)
 	ListActive(ctx context.Context) ([]*model.NotificationChannel, error)
 	Update(ctx context.Context, channel *model.NotificationChannel) error
-	Delete(ctx context.Context, channelId string) error
+	Delete(ctx context.Context, channelID string) error
 }
 
 type NotificationChannelRepo struct {
@@ -48,11 +48,11 @@ func (r *NotificationChannelRepo) Create(ctx context.Context, channel *model.Not
 }
 
 // Get returns channel by channelId.
-func (r *NotificationChannelRepo) Get(ctx context.Context, channelId string) (*model.NotificationChannel, error) {
+func (r *NotificationChannelRepo) Get(ctx context.Context, channelID string) (*model.NotificationChannel, error) {
 	var channel model.NotificationChannel
 	err := r.Database().WithContext(ctx).
 		Table(channel.TableName()).
-		Where("channel_id = ?", channelId).
+		Where("channel_id = ?", channelID).
 		First(&channel).Error
 	if err != nil {
 		return nil, err
@@ -96,15 +96,15 @@ func (r *NotificationChannelRepo) ListActive(ctx context.Context) ([]*model.Noti
 func (r *NotificationChannelRepo) Update(ctx context.Context, channel *model.NotificationChannel) error {
 	return r.Database().WithContext(ctx).
 		Table(channel.TableName()).
-		Where("channel_id = ?", channel.ChannelId).
+		Where("channel_id = ?", channel.ChannelID).
 		Omit("id", "channel_id", "created_at").
 		Updates(channel).Error
 }
 
 // Delete soft-deletes channel by channelId (sets is_active = false).
-func (r *NotificationChannelRepo) Delete(ctx context.Context, channelId string) error {
+func (r *NotificationChannelRepo) Delete(ctx context.Context, channelID string) error {
 	return r.Database().WithContext(ctx).
 		Table((&model.NotificationChannel{}).TableName()).
-		Where("channel_id = ?", channelId).
+		Where("channel_id = ?", channelID).
 		Update("is_active", false).Error
 }

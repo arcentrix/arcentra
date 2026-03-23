@@ -160,7 +160,7 @@ func TestTimeCountAggregator_Flush(t *testing.T) {
 	}
 }
 
-func TestTimeCountAggregator_SetFlushCallback(t *testing.T) {
+func TestTimeCountAggregator_SetFlushCallback(_ *testing.T) {
 	agg := NewTimeCountAggregator(10, 10*time.Second)
 	defer func() {
 		if agg.flushTimer != nil {
@@ -171,7 +171,7 @@ func TestTimeCountAggregator_SetFlushCallback(t *testing.T) {
 	var callbackCalled bool
 	var mu sync.Mutex
 
-	callback := func(tasks []*Task) {
+	callback := func(_ []*Task) {
 		mu.Lock()
 		defer mu.Unlock()
 		callbackCalled = true

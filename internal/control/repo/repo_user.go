@@ -31,24 +31,24 @@ import (
 
 type IUserRepository interface {
 	AddUser(addUserReq *model.AddUserReq) error
-	UpdateUser(userId string, updates map[string]any) error
+	UpdateUser(userID string, updates map[string]any) error
 	GetUserByUserID(userID string) (*model.User, error)
-	FetchUserInfo(userId string) (*model.UserInfo, error)
+	FetchUserInfo(userID string) (*model.UserInfo, error)
 	GetUserByUsername(username string) (string, error)
 	Login(login *model.Login) (*model.User, error)
 	Register(register *model.Register) error
 	Logout(userKey string) error
 	GetUserList(offset int, pageSize int) ([]UserWithExt, int64, error)
-	GetUsersByRole(roleId string, roleName string, offset int, pageSize int) ([]UserWithExt, int64, error)
-	SetToken(userId, aToken string, auth http.Auth) (string, error)
-	SetRefreshToken(userId, rToken string, auth http.Auth) (string, error)
+	GetUsersByRole(roleID string, roleName string, offset int, pageSize int) ([]UserWithExt, int64, error)
+	SetToken(userID, aToken string, auth http.Auth) (string, error)
+	SetRefreshToken(userID, rToken string, auth http.Auth) (string, error)
 	SetLoginRespInfo(auth http.Auth, loginResp *model.LoginResp) error
 	GetToken(key string) (string, error)
 	DelToken(key string) error
-	GetUserPassword(userId string) (string, error)
-	ResetPassword(userId, newPasswordHash string) error
-	UpdateAvatar(userId, avatarUrl string) error
-	GetUserAvatar(userId string) (string, error)
+	GetUserPassword(userID string) (string, error)
+	ResetPassword(userID, newPasswordHash string) error
+	UpdateAvatar(userID, avatarURL string) error
+	GetUserAvatar(userID string) (string, error)
 }
 
 type UserRepo struct {
@@ -56,10 +56,10 @@ type UserRepo struct {
 	cache.ICache
 }
 
-func NewUserRepo(db database.IDatabase, cache cache.ICache) IUserRepository {
+func NewUserRepo(db database.IDatabase, ch cache.ICache) IUserRepository {
 	return &UserRepo{
 		IDatabase: db,
-		ICache:    cache,
+		ICache:    ch,
 	}
 }
 
@@ -67,7 +67,7 @@ func (ur *UserRepo) AddUser(addUserReq *model.AddUserReq) error {
 	return ur.Database().Create(addUserReq).Error
 }
 
-// GetUserByUserId 根据userId获取用户
+// GetUserByUserID 根据userID获取用户
 func (ur *UserRepo) GetUserByUserID(userID string) (*model.User, error) {
 	var user model.User
 	err := ur.Database().Table(user.TableName()).
@@ -101,7 +101,7 @@ func (ur *UserRepo) FetchUserInfo(userID string) (*model.UserInfo, error) {
 		return consts.UserInfoKey + params[0].(string)
 	}
 
-	queryFunc := func(ctx context.Context) (*model.UserInfo, error) {
+	queryFunc := func(_ context.Context) (*model.UserInfo, error) {
 		var user model.User
 		err := ur.Database().Table(user.TableName()).
 			Select("user_id, username, full_name, avatar, email, phone").
@@ -258,17 +258,17 @@ func (ur *UserRepo) GetUserList(offset int, pageSize int) ([]UserWithExt, int64,
 }
 
 // GetUsersByRole 根据角色ID或角色名称获取用户列表
-func (ur *UserRepo) GetUsersByRole(roleId string, roleName string, offset int, pageSize int) ([]UserWithExt, int64, error) {
+func (ur *UserRepo) GetUsersByRole(roleID string, roleName string, offset int, pageSize int) ([]UserWithExt, int64, error) {
 	var usersExt []UserWithExt
 	var count int64
 
 	selectFields := userWithExtSelectFields
 	userExtJoin := "LEFT JOIN t_user_ext ue ON ue.user_id = u.user_id"
 
-	// 构建角色子查询，根据 roleId 或 roleName 过滤
+	// 构建角色子查询，根据 roleID 或 roleName 过滤
 	var roleSubqueryJoin string
-	if roleId != "" {
-		// 按 roleId 查询：使用 INNER JOIN 确保只返回有该角色的用户
+	if roleID != "" {
+		// 按 roleID 查询：使用 INNER JOIN 确保只返回有该角色的用户
 		roleSubqueryJoin = roleSubqueryJoinByRoleID
 	} else if roleName != "" {
 		// 按 roleName 查询：使用 INNER JOIN 确保只返回有该角色名称的用户
@@ -283,9 +283,9 @@ func (ur *UserRepo) GetUsersByRole(roleId string, roleName string, offset int, p
 		Select(selectFields).
 		Joins(userExtJoin)
 
-	// 根据 roleId 或 roleName 应用不同的 JOIN
-	if roleId != "" {
-		db = db.Joins(roleSubqueryJoin, roleId)
+	// 根据 roleID 或 roleName 应用不同的 JOIN
+	if roleID != "" {
+		db = db.Joins(roleSubqueryJoin, roleID)
 	} else if roleName != "" {
 		db = db.Joins(roleSubqueryJoin, roleName)
 	} else {
@@ -311,7 +311,7 @@ func (ur *UserRepo) GetUsersByRole(roleId string, roleName string, offset int, p
 	return usersExt, count, err
 }
 
-func (ur *UserRepo) SetToken(userId, aToken string, auth http.Auth) (string, error) {
+func (ur *UserRepo) SetToken(userID, aToken string, auth http.Auth) (string, error) {
 	if ur.ICache == nil {
 		return "", fmt.Errorf("cache not available")
 	}
@@ -327,19 +327,19 @@ func (ur *UserRepo) SetToken(userId, aToken string, auth http.Auth) (string, err
 	}
 
 	// 序列化 token 信息为 JSON
-	tokenInfoJson, err := sonic.MarshalString(&tokenInfo)
+	tokenInfoJSON, err := sonic.MarshalString(&tokenInfo)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal token info: %w", err)
 	}
 
-	key := consts.UserTokenKey + userId
-	if err := ur.ICache.Set(ctx, key, tokenInfoJson, auth.AccessExpire).Err(); err != nil {
+	key := consts.UserTokenKey + userID
+	if err := ur.ICache.Set(ctx, key, tokenInfoJSON, auth.AccessExpire).Err(); err != nil {
 		return "", fmt.Errorf("failed to set token in Redis: %w", err)
 	}
 	return key, nil
 }
 
-func (ur *UserRepo) SetRefreshToken(userId, rToken string, auth http.Auth) (string, error) {
+func (ur *UserRepo) SetRefreshToken(userID, rToken string, auth http.Auth) (string, error) {
 	if ur.ICache == nil {
 		return "", fmt.Errorf("cache not available")
 	}
@@ -354,13 +354,13 @@ func (ur *UserRepo) SetRefreshToken(userId, rToken string, auth http.Auth) (stri
 		CreateAt:     now.Unix(),
 	}
 
-	tokenInfoJson, err := sonic.MarshalString(&tokenInfo)
+	tokenInfoJSON, err := sonic.MarshalString(&tokenInfo)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal token info: %w", err)
 	}
 
-	key := consts.UserRefreshTokenKey + userId
-	if err := ur.ICache.Set(ctx, key, tokenInfoJson, auth.RefreshExpire).Err(); err != nil {
+	key := consts.UserRefreshTokenKey + userID
+	if err := ur.ICache.Set(ctx, key, tokenInfoJSON, auth.RefreshExpire).Err(); err != nil {
 		return "", fmt.Errorf("failed to set refresh token in Redis: %w", err)
 	}
 	return key, nil
@@ -381,13 +381,13 @@ func (ur *UserRepo) SetLoginRespInfo(auth http.Auth, loginResp *model.LoginResp)
 		CreateAt:     loginResp.CreateAt,
 	}
 
-	accessTokenInfoJson, err := sonic.Marshal(&accessTokenInfo)
+	accessTokenInfoJSON, err := sonic.Marshal(&accessTokenInfo)
 	if err != nil {
 		return fmt.Errorf("failed to marshal token info: %w", err)
 	}
 
 	tokenKey := consts.UserTokenKey + loginResp.UserInfo.UserID
-	if err = pipe.Set(ctx, tokenKey, accessTokenInfoJson, auth.AccessExpire).Err(); err != nil {
+	if err = pipe.Set(ctx, tokenKey, accessTokenInfoJSON, auth.AccessExpire).Err(); err != nil {
 		return fmt.Errorf("failed to set token in Redis: %w", err)
 	}
 
@@ -397,23 +397,23 @@ func (ur *UserRepo) SetLoginRespInfo(auth http.Auth, loginResp *model.LoginResp)
 		ExpireAt:     time.Now().Add(auth.RefreshExpire).Unix(),
 		CreateAt:     time.Now().Unix(),
 	}
-	refreshTokenInfoJson, err := sonic.Marshal(&refreshTokenInfo)
+	refreshTokenInfoJSON, err := sonic.Marshal(&refreshTokenInfo)
 	if err != nil {
 		return fmt.Errorf("failed to marshal refresh token info: %w", err)
 	}
 
 	refreshTokenKey := consts.UserRefreshTokenKey + loginResp.UserInfo.UserID
-	if err = pipe.Set(ctx, refreshTokenKey, refreshTokenInfoJson, auth.RefreshExpire).Err(); err != nil {
+	if err = pipe.Set(ctx, refreshTokenKey, refreshTokenInfoJSON, auth.RefreshExpire).Err(); err != nil {
 		return fmt.Errorf("failed to set refresh token in Redis: %w", err)
 	}
 
-	userInfoJson, err := sonic.Marshal(&loginResp.UserInfo)
+	userInfoJSON, err := sonic.Marshal(&loginResp.UserInfo)
 	if err != nil {
 		return fmt.Errorf("failed to marshal user info: %w", err)
 	}
 
 	userInfoKey := consts.UserInfoKey + loginResp.UserInfo.UserID
-	if err = pipe.Set(ctx, userInfoKey, userInfoJson, auth.AccessExpire).Err(); err != nil {
+	if err = pipe.Set(ctx, userInfoKey, userInfoJSON, auth.AccessExpire).Err(); err != nil {
 		return fmt.Errorf("failed to set user info in Redis: %w", err)
 	}
 
@@ -460,19 +460,19 @@ func (ur *UserRepo) GetUserPassword(userID string) (string, error) {
 }
 
 // ResetPassword resets user password
-func (ur *UserRepo) ResetPassword(userId, newPasswordHash string) error {
+func (ur *UserRepo) ResetPassword(userID, newPasswordHash string) error {
 	var user model.User
 	return ur.Database().Table(user.TableName()).
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		Update("password", newPasswordHash).Error
 }
 
 // UpdateAvatar updates user avatar URL
-func (ur *UserRepo) UpdateAvatar(userID, avatarUrl string) error {
+func (ur *UserRepo) UpdateAvatar(userID, avatarURL string) error {
 	var user model.User
 	result := ur.Database().Table(user.TableName()).
 		Where("user_id = ?", userID).
-		Update("avatar", avatarUrl)
+		Update("avatar", avatarURL)
 
 	if result.Error != nil {
 		return result.Error
@@ -487,11 +487,11 @@ func (ur *UserRepo) UpdateAvatar(userID, avatarUrl string) error {
 }
 
 // GetUserAvatar gets user avatar URL by user ID
-func (ur *UserRepo) GetUserAvatar(userId string) (string, error) {
+func (ur *UserRepo) GetUserAvatar(userID string) (string, error) {
 	var user model.User
 	err := ur.Database().Table(user.TableName()).
 		Select("avatar").
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		First(&user).Error
 	if err != nil {
 		return "", err

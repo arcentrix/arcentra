@@ -24,12 +24,12 @@ import (
 // Event represents an outbox event for sending.
 type Event struct {
 	Seq        uint64
-	EventId    string
+	EventID    string
 	EventType  string
 	Payload    map[string]any
-	AgentId    string
-	PipelineId string
-	StepId     string
+	AgentID    string
+	PipelineID string
+	StepID     string
 }
 
 // SendResult holds the result of a send operation with continuous ACK semantics.
@@ -50,7 +50,7 @@ type Sender interface {
 }
 
 // RecordToEvent converts a WAL Record to Event for sending.
-func RecordToEvent(r *Record, agentId, pipelineId string) (Event, error) {
+func RecordToEvent(r *Record, agentID, pipelineID string) (Event, error) {
 	var payload map[string]any
 	if r.Codec == CodecJSON {
 		if err := sonic.Unmarshal(r.Payload, &payload); err != nil {
@@ -62,11 +62,11 @@ func RecordToEvent(r *Record, agentId, pipelineId string) (Event, error) {
 	}
 	return Event{
 		Seq:        r.Seq,
-		EventId:    fmt.Sprintf("evt-%d", r.Seq),
+		EventID:    fmt.Sprintf("evt-%d", r.Seq),
 		EventType:  "outbox",
 		Payload:    payload,
-		AgentId:    agentId,
-		PipelineId: pipelineId,
-		StepId:     "",
+		AgentID:    agentID,
+		PipelineID: pipelineID,
+		StepID:     "",
 	}, nil
 }

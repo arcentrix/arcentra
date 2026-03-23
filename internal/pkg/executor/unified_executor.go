@@ -202,7 +202,7 @@ func (e *UnifiedExecutor) executeRemotely(ctx context.Context, req *ExecutionReq
 }
 
 // executeLocally 在本地执行
-func (e *UnifiedExecutor) executeLocally(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
+func (e *UnifiedExecutor) executeLocally(_ context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
 	result := NewExecutionResult(e.Name())
 
 	if e.pluginManager == nil {

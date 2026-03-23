@@ -23,11 +23,11 @@ import (
 
 // IRoleMenuBindingRepository defines role menu binding persistence with context support.
 type IRoleMenuBindingRepository interface {
-	List(ctx context.Context, roleId string) ([]model.RoleMenuBinding, error)
-	ListByResource(ctx context.Context, roleId, resourceId string) ([]model.RoleMenuBinding, error)
-	ListByRoles(ctx context.Context, roleIds []string, resourceId string) ([]model.RoleMenuBinding, error)
+	List(ctx context.Context, roleID string) ([]model.RoleMenuBinding, error)
+	ListByResource(ctx context.Context, roleID, resourceID string) ([]model.RoleMenuBinding, error)
+	ListByRoles(ctx context.Context, roleIDs []string, resourceID string) ([]model.RoleMenuBinding, error)
 	Create(ctx context.Context, binding *model.RoleMenuBinding) error
-	Delete(ctx context.Context, roleMenuId string) error
+	Delete(ctx context.Context, roleMenuID string) error
 }
 
 type RoleMenuBindingRepo struct {
@@ -40,48 +40,48 @@ func NewRoleMenuBindingRepo(db database.IDatabase) IRoleMenuBindingRepository {
 	}
 }
 
-// List returns role menu bindings by roleId.
-func (r *RoleMenuBindingRepo) List(ctx context.Context, roleId string) ([]model.RoleMenuBinding, error) {
+// List returns role menu bindings by roleID.
+func (r *RoleMenuBindingRepo) List(ctx context.Context, roleID string) ([]model.RoleMenuBinding, error) {
 	var bindings []model.RoleMenuBinding
 	err := r.Database().
 		WithContext(ctx).
 		Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
-		Where("role_id = ? AND is_accessible = ?", roleId, model.RoleMenuAccessible).
+		Where("role_id = ? AND is_accessible = ?", roleID, model.RoleMenuAccessible).
 		Find(&bindings).
 		Error
 	return bindings, err
 }
 
-// ListByResource returns role menu bindings by roleId and resourceId.
-func (r *RoleMenuBindingRepo) ListByResource(ctx context.Context, roleId, resourceId string) ([]model.RoleMenuBinding, error) {
+// ListByResource returns role menu bindings by roleID and resourceID.
+func (r *RoleMenuBindingRepo) ListByResource(ctx context.Context, roleID, resourceID string) ([]model.RoleMenuBinding, error) {
 	var bindings []model.RoleMenuBinding
 	query := r.Database().
 		WithContext(ctx).
 		Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
-		Where("role_id = ? AND is_accessible = ?", roleId, model.RoleMenuAccessible)
-	if resourceId == "" {
+		Where("role_id = ? AND is_accessible = ?", roleID, model.RoleMenuAccessible)
+	if resourceID == "" {
 		query = query.Where("resource_id IS NULL OR resource_id = ''")
 	} else {
-		query = query.Where("resource_id = ?", resourceId)
+		query = query.Where("resource_id = ?", resourceID)
 	}
 	err := query.Find(&bindings).Error
 	return bindings, err
 }
 
-// ListByRoles returns role menu bindings by roleIds and resourceId.
-func (r *RoleMenuBindingRepo) ListByRoles(ctx context.Context, roleIds []string, resourceId string) ([]model.RoleMenuBinding, error) {
-	if len(roleIds) == 0 {
+// ListByRoles returns role menu bindings by roleIDs and resourceID.
+func (r *RoleMenuBindingRepo) ListByRoles(ctx context.Context, roleIDs []string, resourceID string) ([]model.RoleMenuBinding, error) {
+	if len(roleIDs) == 0 {
 		return []model.RoleMenuBinding{}, nil
 	}
 	var bindings []model.RoleMenuBinding
 	query := r.Database().
 		WithContext(ctx).
 		Select("id", "role_menu_id", "role_id", "menu_id", "resource_id", "is_visible", "is_accessible", "created_at", "updated_at").
-		Where("role_id IN ? AND is_accessible = ?", roleIds, model.RoleMenuAccessible)
-	if resourceId == "" {
+		Where("role_id IN ? AND is_accessible = ?", roleIDs, model.RoleMenuAccessible)
+	if resourceID == "" {
 		query = query.Where("resource_id IS NULL OR resource_id = ''")
 	} else {
-		query = query.Where("resource_id = ?", resourceId)
+		query = query.Where("resource_id = ?", resourceID)
 	}
 	err := query.Find(&bindings).Error
 	return bindings, err
@@ -92,7 +92,7 @@ func (r *RoleMenuBindingRepo) Create(ctx context.Context, binding *model.RoleMen
 	return r.Database().WithContext(ctx).Create(binding).Error
 }
 
-// Delete deletes role menu binding by roleMenuId.
-func (r *RoleMenuBindingRepo) Delete(ctx context.Context, roleMenuId string) error {
-	return r.Database().WithContext(ctx).Where("role_menu_id = ?", roleMenuId).Delete(&model.RoleMenuBinding{}).Error
+// Delete deletes role menu binding by roleMenuID.
+func (r *RoleMenuBindingRepo) Delete(ctx context.Context, roleMenuID string) error {
+	return r.Database().WithContext(ctx).Where("role_menu_id = ?", roleMenuID).Delete(&model.RoleMenuBinding{}).Error
 }

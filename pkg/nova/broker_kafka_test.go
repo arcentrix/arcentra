@@ -68,7 +68,7 @@ func TestNewKafkaConfig_WithOptions(t *testing.T) {
 	if config.TopicPrefix != testTopicPrefix {
 		t.Errorf("expected TopicPrefix to be '%s', got %s", testTopicPrefix, config.TopicPrefix)
 	}
-	if config.AutoCommit != true {
+	if !config.AutoCommit {
 		t.Errorf("expected AutoCommit to be true, got %v", config.AutoCommit)
 	}
 }
@@ -146,7 +146,7 @@ func TestKafkaConfig_AllFields(t *testing.T) {
 	if config.DelaySlotDuration != 3600000000000 {
 		t.Errorf("expected DelaySlotDuration to be 3600000000000, got %d", config.DelaySlotDuration)
 	}
-	if config.AutoCommit != true {
+	if !config.AutoCommit {
 		t.Errorf("expected AutoCommit to be true, got %v", config.AutoCommit)
 	}
 	if config.SessionTimeout != 30000 {

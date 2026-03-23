@@ -49,7 +49,7 @@ func NewDSLProcessor(logger log.Logger) *Processor {
 // ProcessConfig processes DSL config from database and returns ready-to-execute Pipeline
 // This is the main entry point for processing pipeline DSL
 func (p *Processor) ProcessConfig(
-	ctx context.Context,
+	_ context.Context,
 	dslConfig string,
 	pluginMgr *plugin.Manager,
 	workspace string,

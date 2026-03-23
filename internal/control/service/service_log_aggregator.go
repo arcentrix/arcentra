@@ -60,7 +60,7 @@ type LogEntry struct {
 }
 
 // NewLogAggregator 创建日志聚合器
-func NewLogAggregator(redis *redis.Client, mysql *gorm.DB) *LogAggregator {
+func NewLogAggregator(_ *redis.Client, mysql *gorm.DB) *LogAggregator {
 	la := &LogAggregator{
 		mysql:         mysql,
 		streams:       make(map[string]*LogStream),

@@ -28,9 +28,9 @@ func TestConfig_Validate(t *testing.T) {
 		cfg     Config
 		wantErr bool
 	}{
-		{"valid", Config{AgentId: "agent1"}, false},
+		{"valid", Config{AgentID: "agent1"}, false},
 		{"missing agent", Config{}, true},
-		{"scope too long", Config{AgentId: string(make([]byte, 129))}, true},
+		{"scope too long", Config{AgentID: string(make([]byte, 129))}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -103,7 +103,7 @@ func TestWAL_AppendAndRead(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{
 		WALDir:         dir,
-		AgentId:        "agent1",
+		AgentID:        "agent1",
 		SegmentMaxSeq:  100,
 		FsyncInterval:  10 * time.Millisecond,
 		MaxDiskUsageMB: 100,
@@ -146,7 +146,7 @@ func TestWAL_FlushBoundary(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{
 		WALDir:         dir,
-		AgentId:        "agent1",
+		AgentID:        "agent1",
 		SegmentMaxSeq:  100,
 		FsyncInterval:  5 * time.Millisecond,
 		MaxDiskUsageMB: 100,
@@ -182,7 +182,7 @@ func TestWAL_Recovery(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{
 		WALDir:         dir,
-		AgentId:        "agent1",
+		AgentID:        "agent1",
 		SegmentMaxSeq:  100,
 		FsyncInterval:  5 * time.Millisecond,
 		MaxDiskUsageMB: 100,
@@ -225,7 +225,7 @@ func TestOutbox_AppendAndClose(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{
 		WALDir:         dir,
-		AgentId:        "agent1",
+		AgentID:        "agent1",
 		FsyncInterval:  5 * time.Millisecond,
 		SendInterval:   10 * time.Millisecond,
 		MaxDiskUsageMB: 100,
@@ -254,7 +254,7 @@ func TestOutbox_AppendMap(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{
 		WALDir:         dir,
-		AgentId:        "agent1",
+		AgentID:        "agent1",
 		FsyncInterval:  5 * time.Millisecond,
 		SendInterval:   10 * time.Millisecond,
 		MaxDiskUsageMB: 100,
@@ -283,7 +283,7 @@ func TestOutbox_SendUpdatesCommit(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{
 		WALDir:         dir,
-		AgentId:        "agent1",
+		AgentID:        "agent1",
 		FsyncInterval:  5 * time.Millisecond,
 		SendInterval:   10 * time.Millisecond,
 		MaxDiskUsageMB: 100,
@@ -325,7 +325,7 @@ func TestOutbox_NoCommitOnSendFailure(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{
 		WALDir:         dir,
-		AgentId:        "agent1",
+		AgentID:        "agent1",
 		FsyncInterval:  5 * time.Millisecond,
 		SendInterval:   15 * time.Millisecond,
 		MaxDiskUsageMB: 100,
@@ -376,7 +376,7 @@ type failingThenOKSender struct {
 	lastKnownSeq []uint64
 }
 
-func (m *failingThenOKSender) Send(ctx context.Context, lastKnownSeq uint64, events []Event) (SendResult, error) {
+func (m *failingThenOKSender) Send(_ context.Context, lastKnownSeq uint64, events []Event) (SendResult, error) {
 	m.callCount++
 	if m.lastKnownSeq == nil {
 		m.lastKnownSeq = make([]uint64, 0)
@@ -394,9 +394,9 @@ func (m *failingThenOKSender) Send(ctx context.Context, lastKnownSeq uint64, eve
 func TestPath_Sanitize(t *testing.T) {
 	cfg := Config{
 		WALDir:     "/tmp/outbox",
-		AgentId:    "agent/../evil",
-		ProjectId:  "proj",
-		PipelineId: "pipe",
+		AgentID:    "agent/../evil",
+		ProjectID:  "proj",
+		PipelineID: "pipe",
 	}
 	dir := buildWALDir(&cfg)
 	if filepath.Base(dir) == "evil" {
@@ -409,7 +409,7 @@ type mockSender struct {
 	lastKnownSeq []uint64 // lastKnownSeq passed for each Send call
 }
 
-func (m *mockSender) Send(ctx context.Context, lastKnownSeq uint64, events []Event) (SendResult, error) {
+func (m *mockSender) Send(_ context.Context, lastKnownSeq uint64, events []Event) (SendResult, error) {
 	if m.sent == nil {
 		m.sent = make([][]Event, 0)
 		m.lastKnownSeq = make([]uint64, 0)

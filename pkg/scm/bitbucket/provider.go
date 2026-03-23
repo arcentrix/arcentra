@@ -75,7 +75,7 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 
 	var prResp struct {
 		Values []struct {
-			Id          int       `json:"id"`
+			ID          int       `json:"id"`
 			Title       string    `json:"title"`
 			State       string    `json:"state"`
 			UpdatedOn   time.Time `json:"updated_on"`
@@ -143,7 +143,7 @@ func (p *Provider) PollEvents(ctx context.Context, repo scm.Repo, cursor scm.Cur
 			CommitID:     mergeSha,
 			OccurredAt:   pr.UpdatedOn,
 			Change: &scm.Change{
-				Number:        pr.Id,
+				Number:        pr.ID,
 				Title:         pr.Title,
 				SourceBranch:  pr.Source.Branch.Name,
 				TargetBranch:  pr.Destination.Branch.Name,
@@ -211,7 +211,7 @@ func (p *Provider) CreateChangeRequest(ctx context.Context, req scm.ChangeReques
 	}
 	var out struct {
 		Links struct {
-			Html struct {
+			HTML struct {
 				Href string `json:"href"`
 			} `json:"html"`
 		} `json:"links"`
@@ -258,10 +258,10 @@ func (p *Provider) CreateChangeRequest(ctx context.Context, req scm.ChangeReques
 	if resp == nil || resp.StatusCode() >= 400 {
 		return "", fmt.Errorf("bitbucket create pull request failed: %d", resp.StatusCode())
 	}
-	if strings.TrimSpace(out.Links.Html.Href) == "" {
+	if strings.TrimSpace(out.Links.HTML.Href) == "" {
 		return "", fmt.Errorf("bitbucket create pull request failed: empty html url")
 	}
-	return out.Links.Html.Href, nil
+	return out.Links.HTML.Href, nil
 }
 
 func (p *Provider) apiBaseURL() string {
@@ -275,7 +275,7 @@ func (p *Provider) apiBaseURL() string {
 func (p *Provider) parsePullRequest(body []byte, key string) ([]scm.Event, error) {
 	var payload struct {
 		PullRequest struct {
-			Id          int    `json:"id"`
+			ID          int    `json:"id"`
 			Title       string `json:"title"`
 			State       string `json:"state"`
 			MergeCommit *struct {
@@ -338,7 +338,7 @@ func (p *Provider) parsePullRequest(body []byte, key string) ([]scm.Event, error
 		CommitID:     mergeSha,
 		OccurredAt:   occurred,
 		Change: &scm.Change{
-			Number:        payload.PullRequest.Id,
+			Number:        payload.PullRequest.ID,
 			Title:         payload.PullRequest.Title,
 			SourceBranch:  payload.PullRequest.Source.Branch.Name,
 			TargetBranch:  payload.PullRequest.Destination.Branch.Name,

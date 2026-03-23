@@ -228,8 +228,8 @@ func TestCategoryFallback(t *testing.T) {
 	}
 }
 
-func TestPrintLog(t *testing.T) {
-	Init(SetDefaults())
+func TestPrintLog(_ *testing.T) {
+	_ = Init(SetDefaults())
 	Info("test")
 	Infow("test", "key", "value")
 	Debug("test")

@@ -74,7 +74,7 @@ func AuthorizationMiddleware(secretKey string, store cache.ICache) fiber.Handler
 		}
 
 		// 从 Redis 中获取 Token 信息
-		tokenKey := consts.UserTokenKey + claims.UserId
+		tokenKey := consts.UserTokenKey + claims.UserID
 		tokenInfoStr, err := store.Get(context.Background(), tokenKey).Result()
 		if err != nil {
 			log.Errorw("cache get token failed: ", "error", err, "tokenKey", tokenKey)
@@ -90,7 +90,7 @@ func AuthorizationMiddleware(secretKey string, store cache.ICache) fiber.Handler
 
 		// 验证请求中的 Token 是否与 Redis 中存储的 Token 匹配
 		if tokenInfo.AccessToken != tokenString {
-			log.Errorw("token mismatch for user: ", "user_id", claims.UserId)
+			log.Errorw("token mismatch for user: ", "user_id", claims.UserID)
 			return http.Err(c, http.InvalidToken.Code, http.InvalidToken.Msg)
 		}
 
@@ -126,7 +126,7 @@ func PermissionMiddleware(permissionChecker PermissionChecker, excludedPaths []s
 			return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
 		}
 
-		userID := claims.UserId
+		userID := claims.UserID
 		if userID == "" {
 			log.Errorw("user id is empty", "path", currentPath)
 			return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)

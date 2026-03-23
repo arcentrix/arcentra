@@ -29,16 +29,16 @@ import (
 // GatewayServiceImpl implements outbox.Sender by calling gateway.v1.GatewayServiceImpl.PushEvents.
 type GatewayServiceImpl struct {
 	client     gatewayv1.GatewayServiceClient
-	agentId    string
-	pipelineId string
+	agentID    string
+	pipelineID string
 }
 
 // NewGatewayServiceImpl creates a GatewayServiceClientImpl for the given agent (conn must be non-nil).
-func NewGatewayServiceImpl(cc grpc.ClientConnInterface, agentId, pipelineId string) *GatewayServiceImpl {
+func NewGatewayServiceImpl(cc grpc.ClientConnInterface, agentID, pipelineID string) *GatewayServiceImpl {
 	return &GatewayServiceImpl{
 		client:     gatewayv1.NewGatewayServiceClient(cc),
-		agentId:    agentId,
-		pipelineId: pipelineId,
+		agentID:    agentID,
+		pipelineID: pipelineID,
 	}
 }
 
@@ -46,16 +46,16 @@ func NewGatewayServiceImpl(cc grpc.ClientConnInterface, agentId, pipelineId stri
 // Use this when the gRPC connection may not be ready at construction time (e.g. Wire init).
 type GatewaySenderFromWrapper struct {
 	wrapper    *grpcclient.ClientWrapper
-	agentId    string
-	pipelineId string
+	agentID    string
+	pipelineID string
 }
 
 // NewGatewaySenderFromWrapper creates an outbox.Sender that uses wrapper.GetConn() on each Send.
-func NewGatewaySenderFromWrapper(wrapper *grpcclient.ClientWrapper, agentId, pipelineId string) *GatewaySenderFromWrapper {
+func NewGatewaySenderFromWrapper(wrapper *grpcclient.ClientWrapper, agentID, pipelineID string) *GatewaySenderFromWrapper {
 	return &GatewaySenderFromWrapper{
 		wrapper:    wrapper,
-		agentId:    agentId,
-		pipelineId: pipelineId,
+		agentID:    agentID,
+		pipelineID: pipelineID,
 	}
 }
 
@@ -65,7 +65,12 @@ func (s *GatewayServiceImpl) Send(ctx context.Context, lastKnownSeq uint64, even
 	return s.send(ctx, lastKnownSeq, events, s.client)
 }
 
-func (s *GatewayServiceImpl) send(ctx context.Context, lastKnownSeq uint64, events []outbox.Event, client gatewayv1.GatewayServiceClient) (outbox.SendResult, error) {
+func (s *GatewayServiceImpl) send(
+	ctx context.Context,
+	lastKnownSeq uint64,
+	events []outbox.Event,
+	client gatewayv1.GatewayServiceClient,
+) (outbox.SendResult, error) {
 	if len(events) == 0 {
 		return outbox.SendResult{}, nil
 	}
@@ -79,7 +84,7 @@ func (s *GatewayServiceImpl) send(ctx context.Context, lastKnownSeq uint64, even
 	handshake := &gatewayv1.PushEventsRequest{
 		Payload: &gatewayv1.PushEventsRequest_Handshake{
 			Handshake: &gatewayv1.AgentHandshake{
-				AgentId:      s.agentId,
+				AgentId:      s.agentID,
 				LastKnownSeq: lastKnownSeq,
 			},
 		},
@@ -87,7 +92,7 @@ func (s *GatewayServiceImpl) send(ctx context.Context, lastKnownSeq uint64, even
 	if sendErr := stream.Send(handshake); sendErr != nil {
 		return outbox.SendResult{}, fmt.Errorf("send handshake: %w", sendErr)
 	}
-	batch := buildEventBatch(events, s.agentId, s.pipelineId)
+	batch := buildEventBatch(events, s.agentID, s.pipelineID)
 	req := &gatewayv1.PushEventsRequest{
 		Payload: &gatewayv1.PushEventsRequest_Batch{Batch: batch},
 	}
@@ -114,7 +119,12 @@ func (s *GatewaySenderFromWrapper) Send(ctx context.Context, lastKnownSeq uint64
 	return s.sendWithClient(ctx, lastKnownSeq, events, client)
 }
 
-func (s *GatewaySenderFromWrapper) sendWithClient(ctx context.Context, lastKnownSeq uint64, events []outbox.Event, client gatewayv1.GatewayServiceClient) (outbox.SendResult, error) {
+func (s *GatewaySenderFromWrapper) sendWithClient(
+	ctx context.Context,
+	lastKnownSeq uint64,
+	events []outbox.Event,
+	client gatewayv1.GatewayServiceClient,
+) (outbox.SendResult, error) {
 	if len(events) == 0 {
 		return outbox.SendResult{}, nil
 	}
@@ -125,7 +135,7 @@ func (s *GatewaySenderFromWrapper) sendWithClient(ctx context.Context, lastKnown
 	handshake := &gatewayv1.PushEventsRequest{
 		Payload: &gatewayv1.PushEventsRequest_Handshake{
 			Handshake: &gatewayv1.AgentHandshake{
-				AgentId:      s.agentId,
+				AgentId:      s.agentID,
 				LastKnownSeq: lastKnownSeq,
 			},
 		},
@@ -133,7 +143,7 @@ func (s *GatewaySenderFromWrapper) sendWithClient(ctx context.Context, lastKnown
 	if sendErr := stream.Send(handshake); sendErr != nil {
 		return outbox.SendResult{}, fmt.Errorf("send handshake: %w", sendErr)
 	}
-	batch := buildEventBatch(events, s.agentId, s.pipelineId)
+	batch := buildEventBatch(events, s.agentID, s.pipelineID)
 	req := &gatewayv1.PushEventsRequest{
 		Payload: &gatewayv1.PushEventsRequest_Batch{Batch: batch},
 	}
@@ -147,7 +157,7 @@ func (s *GatewaySenderFromWrapper) sendWithClient(ctx context.Context, lastKnown
 	return parsePushEventsResponse(resp)
 }
 
-func buildEventBatch(events []outbox.Event, agentId, pipelineId string) *gatewayv1.EventBatch {
+func buildEventBatch(events []outbox.Event, agentID, pipelineID string) *gatewayv1.EventBatch {
 	if len(events) == 0 {
 		return nil
 	}
@@ -161,13 +171,13 @@ func buildEventBatch(events []outbox.Event, agentId, pipelineId string) *gateway
 			payload, _ = structpb.NewStruct(map[string]any{})
 		}
 		batch.Events = append(batch.Events, &gatewayv1.Event{
-			EventId:   e.EventId,
+			EventId:   e.EventID,
 			EventType: e.EventType,
 			Payload:   payload,
 			Meta: &gatewayv1.Meta{
-				AgentId:    agentId,
-				PipelineId: pipelineId,
-				StepId:     e.StepId,
+				AgentId:    agentID,
+				PipelineId: pipelineID,
+				StepId:     e.StepID,
 				Timestamp:  timestamppb.Now(),
 				Seq:        e.Seq,
 			},

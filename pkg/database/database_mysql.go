@@ -27,7 +27,7 @@ const (
 )
 
 // newMySQLConnection creates a MySQL connection using GORM (single DSN)
-func newMySQLConnection(mysqlCfg MySQLConfig, opts DatabaseOptions) (*gorm.DB, error) {
+func newMySQLConnection(mysqlCfg MySQLConfig, opts Options) (*gorm.DB, error) {
 	db, err := gorm.Open(mysql.Open(mysqlCfg.DSN), defaultGormConfig(opts))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open MySQL connection: %w", err)

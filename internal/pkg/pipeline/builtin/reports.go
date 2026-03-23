@@ -30,7 +30,7 @@ type ReportsDotenvArgs struct {
 }
 
 // handleReportsDotenv handles dotenv report generation
-func (m *Manager) handleReportsDotenv(ctx context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
+func (m *Manager) handleReportsDotenv(_ context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
 	var dotenvParams ReportsDotenvArgs
 	if err := sonic.Unmarshal(params, &dotenvParams); err != nil {
 		return nil, fmt.Errorf("failed to parse dotenv params: %w", err)

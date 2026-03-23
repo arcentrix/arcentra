@@ -185,10 +185,10 @@ func (s *StreamServiceImpl) StreamStepRunStatus(
 			}
 			data := getMapAny(event, "data")
 			if err := stream.Send(&streamv1.StreamStepRunStatusResponse{
-				StepRunId:      info.stepRunId,
-				PipelineId:     info.pipelineId,
+				StepRunId:      info.stepRunID,
+				PipelineId:     info.pipelineID,
 				PipelineRunId:  getString(event, "pipelineRunId"),
-				JobId:          info.jobId,
+				JobId:          info.jobID,
 				JobName:        info.jobName,
 				StepName:       info.stepName,
 				Status:         toStepRunStatus(info.status, info.eventType),
@@ -239,9 +239,9 @@ func (s *StreamServiceImpl) StreamJobStatus(
 			}
 			data := getMapAny(event, "data")
 			if err := stream.Send(&streamv1.StreamJobStatusResponse{
-				JobId:            info.jobId,
+				JobId:            info.jobID,
 				JobName:          info.jobName,
-				PipelineId:       info.pipelineId,
+				PipelineId:       info.pipelineID,
 				PipelineRunId:    getString(event, "pipelineRunId"),
 				Status:           toPipelineStatus(info.status, info.eventType),
 				PreviousStatus:   pipelinev1.PipelineStatus_PIPELINE_STATUS_UNSPECIFIED,
@@ -287,18 +287,18 @@ func (s *StreamServiceImpl) StreamPipelineStatus(
 				continue
 			}
 			info := parseEventInfo(event)
-			if !matchPipelineStreamRequest(req, info.pipelineId, getString(event, "pipelineRunId")) {
+			if !matchPipelineStreamRequest(req, info.pipelineID, getString(event, "pipelineRunId")) {
 				continue
 			}
 			data := getMapAny(event, "data")
 			runId := getString(event, "pipelineRunId")
 			if runId == "" {
-				runId = info.pipelineId
+				runId = info.pipelineID
 			}
 			if err := stream.Send(&streamv1.StreamPipelineStatusResponse{
-				PipelineId:     info.pipelineId,
+				PipelineId:     info.pipelineID,
 				RunId:          runId,
-				Namespace:      info.pipelineId,
+				Namespace:      info.pipelineID,
 				Status:         toPipelineStatus(info.status, info.eventType),
 				PreviousStatus: pipelinev1.PipelineStatus_PIPELINE_STATUS_UNSPECIFIED,
 				Timestamp:      time.Now().Unix(),
@@ -518,45 +518,45 @@ func matchStepRunStreamRequest(req *streamv1.StreamStepRunStatusRequest, info ev
 	if req == nil {
 		return false
 	}
-	if len(req.StepRunIds) > 0 && !containsOrEmpty(req.StepRunIds, info.stepRunId) {
+	if len(req.StepRunIds) > 0 && !containsOrEmpty(req.StepRunIds, info.stepRunID) {
 		return false
 	}
-	if strings.TrimSpace(req.PipelineId) != "" && req.PipelineId != info.pipelineId {
+	if strings.TrimSpace(req.PipelineId) != "" && req.PipelineId != info.pipelineID {
 		return false
 	}
-	if strings.TrimSpace(req.JobId) != "" && req.JobId != info.jobId {
+	if strings.TrimSpace(req.JobId) != "" && req.JobId != info.jobID {
 		return false
 	}
 	if strings.TrimSpace(req.JobName) != "" && req.JobName != info.jobName {
 		return false
 	}
-	return info.stepRunId != ""
+	return info.stepRunID != ""
 }
 
 func matchJobStreamRequest(req *streamv1.StreamJobStatusRequest, info eventInfo) bool {
 	if req == nil {
 		return false
 	}
-	if len(req.JobIds) > 0 && !containsOrEmpty(req.JobIds, info.jobId) {
+	if len(req.JobIds) > 0 && !containsOrEmpty(req.JobIds, info.jobID) {
 		return false
 	}
-	if strings.TrimSpace(req.PipelineId) != "" && req.PipelineId != info.pipelineId {
+	if strings.TrimSpace(req.PipelineId) != "" && req.PipelineId != info.pipelineID {
 		return false
 	}
-	return info.jobId != ""
+	return info.jobID != ""
 }
 
-func matchPipelineStreamRequest(req *streamv1.StreamPipelineStatusRequest, pipelineId, pipelineRunId string) bool {
+func matchPipelineStreamRequest(req *streamv1.StreamPipelineStatusRequest, pipelineID, pipelineRunId string) bool {
 	if req == nil {
 		return false
 	}
-	if len(req.PipelineIds) > 0 && !containsOrEmpty(req.PipelineIds, pipelineId) {
+	if len(req.PipelineIds) > 0 && !containsOrEmpty(req.PipelineIds, pipelineID) {
 		return false
 	}
 	if len(req.PipelineRunIds) > 0 && !containsOrEmpty(req.PipelineRunIds, pipelineRunId) {
 		return false
 	}
-	return strings.TrimSpace(pipelineId) != ""
+	return strings.TrimSpace(pipelineID) != ""
 }
 
 func containsOrEmpty(list []string, value string) bool {
@@ -748,14 +748,14 @@ func matchEventTypeFilter(filters []streamv1.EventType, eventType streamv1.Event
 
 func detectResource(event map[string]any) (resourceType, resourceId string) {
 	info := parseEventInfo(event)
-	if info.stepRunId != "" {
-		return "step_run", info.stepRunId
+	if info.stepRunID != "" {
+		return "step_run", info.stepRunID
 	}
-	if info.jobId != "" {
-		return "job", info.jobId
+	if info.jobID != "" {
+		return "job", info.jobID
 	}
-	if info.pipelineId != "" {
-		return "pipeline", info.pipelineId
+	if info.pipelineID != "" {
+		return "pipeline", info.pipelineID
 	}
 	if agentId := getString(event, "agentId"); agentId != "" {
 		return "agent", agentId
@@ -763,17 +763,17 @@ func detectResource(event map[string]any) (resourceType, resourceId string) {
 	return "", ""
 }
 
-func (s *StreamServiceImpl) fetchAgentStepRuns(ctx context.Context, agentId string, max int) ([]*agentv1.StepRun, error) {
-	if max <= 0 {
-		max = 1
+func (s *StreamServiceImpl) fetchAgentStepRuns(ctx context.Context, agentID string, maxVal int) ([]*agentv1.StepRun, error) {
+	if maxVal <= 0 {
+		maxVal = 1
 	}
 	var records []model.StepRun
 	query := s.mysql.WithContext(ctx).
 		Table((&model.StepRun{}).TableName()).
-		Where("agent_id = ?", strings.TrimSpace(agentId)).
+		Where("agent_id = ?", strings.TrimSpace(agentID)).
 		Where("status IN ?", []int{1, 2}).
 		Order("created_at ASC").
-		Limit(max)
+		Limit(maxVal)
 	if err := query.Find(&records).Error; err != nil {
 		return nil, err
 	}

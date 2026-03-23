@@ -51,7 +51,7 @@ func NewAgentServiceImpl(agentConf *config.AgentConfig, grpcClient *grpc.ClientW
 
 // Heartbeat handles heartbeat: when req is nil, starts periodic heartbeat to central server and does initial send;
 // otherwise handles incoming heartbeat request from server (returns ack).
-func (s *AgentServiceImpl) Heartbeat(ctx context.Context, req *agentv1.HeartbeatRequest) (*agentv1.HeartbeatResponse, error) {
+func (s *AgentServiceImpl) Heartbeat(_ context.Context, req *agentv1.HeartbeatRequest) (*agentv1.HeartbeatResponse, error) {
 	if req == nil {
 		// Start periodic heartbeat (called from bootstrap after registration)
 		if s == nil || s.agentConf == nil || s.grpcClient == nil || s.grpcClient.AgentClient == nil {
@@ -65,7 +65,7 @@ func (s *AgentServiceImpl) Heartbeat(ctx context.Context, req *agentv1.Heartbeat
 		spec := fmt.Sprintf("@every %ds", interval)
 		err := cron.AddFunc(spec, func() {
 			runningStepRunsCount := getRunningStepRunsCount(s.metricsServer)
-			req := &agentv1.HeartbeatRequest{
+			hbReq := &agentv1.HeartbeatRequest{
 				AgentId:              s.agentConf.Agent.ID,
 				AgentName:            s.agentConf.Agent.Name,
 				Status:               agentv1.AgentStatus_AGENT_STATUS_ONLINE,
@@ -74,7 +74,7 @@ func (s *AgentServiceImpl) Heartbeat(ctx context.Context, req *agentv1.Heartbeat
 			}
 			ctx, cancel := s.grpcClient.WithTimeoutAndAuth(context.Background())
 			defer cancel()
-			resp, err := s.grpcClient.AgentClient.Heartbeat(ctx, req)
+			resp, err := s.grpcClient.AgentClient.Heartbeat(ctx, hbReq)
 			if err != nil || !resp.Success {
 				log.Warnw("Periodic heartbeat failed", "error", err)
 				return
@@ -83,12 +83,12 @@ func (s *AgentServiceImpl) Heartbeat(ctx context.Context, req *agentv1.Heartbeat
 		}, "agent-heartbeat")
 		if err != nil {
 			log.Errorw("Failed to add heartbeat cron job", "error", err)
-			return nil, fmt.Errorf("Failed to add heartbeat cron job: %w", err)
+			return nil, fmt.Errorf("failed to add heartbeat cron job: %w", err)
 		}
 		log.Infow("Added periodic heartbeat to crond", "interval", spec)
 
 		runningStepRunsCount := getRunningStepRunsCount(s.metricsServer)
-		req := &agentv1.HeartbeatRequest{
+		initReq := &agentv1.HeartbeatRequest{
 			AgentId:              s.agentConf.Agent.ID,
 			AgentName:            s.agentConf.Agent.Name,
 			Status:               agentv1.AgentStatus_AGENT_STATUS_ONLINE,
@@ -97,10 +97,10 @@ func (s *AgentServiceImpl) Heartbeat(ctx context.Context, req *agentv1.Heartbeat
 		}
 		ctx, cancel := s.grpcClient.WithTimeoutAndAuth(context.Background())
 		defer cancel()
-		resp, err := s.grpcClient.AgentClient.Heartbeat(ctx, req)
+		resp, err := s.grpcClient.AgentClient.Heartbeat(ctx, initReq)
 		if err != nil || !resp.Success {
 			log.Warnw("Initial heartbeat failed", "error", err)
-			return nil, fmt.Errorf("Initial heartbeat failed: %w", err)
+			return nil, fmt.Errorf("initial heartbeat failed: %w", err)
 		}
 		log.Infow("Initial heartbeat Message", "message", resp.Message)
 		return &agentv1.HeartbeatResponse{Success: true, Timestamp: time.Now().Unix()}, nil
@@ -115,7 +115,7 @@ func (s *AgentServiceImpl) Heartbeat(ctx context.Context, req *agentv1.Heartbeat
 
 // Register registers this agent with the central server via gRPC.
 // Builds request from agentConf, calls server, updates agentConf in-place from response.
-func (s *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
+func (s *AgentServiceImpl) Register(_ context.Context, _ *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
 	if s == nil || s.agentConf == nil || s.grpcClient == nil || s.grpcClient.AgentClient == nil {
 		return nil, fmt.Errorf("agent grpc client is not ready")
 	}
@@ -129,9 +129,9 @@ func (s *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 		MaxConcurrentStepRuns: int32(s.agentConf.Agent.MaxConcurrentJobs),
 		Labels:                s.agentConf.Agent.Labels,
 	}
-	ctx, cancel := s.grpcClient.WithTimeoutAndAuth(ctx)
+	regCtx, cancel := s.grpcClient.WithTimeoutAndAuth(context.Background())
 	defer cancel()
-	resp, err := s.grpcClient.AgentClient.Register(ctx, regReq)
+	resp, err := s.grpcClient.AgentClient.Register(regCtx, regReq)
 	if err != nil {
 		return nil, err
 	}
@@ -151,14 +151,14 @@ func (s *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 }
 
 // Unregister unregisters this agent from the central server via gRPC.
-func (s *AgentServiceImpl) Unregister(ctx context.Context, req *agentv1.UnregisterRequest) (*agentv1.UnregisterResponse, error) {
+func (s *AgentServiceImpl) Unregister(_ context.Context, _ *agentv1.UnregisterRequest) (*agentv1.UnregisterResponse, error) {
 	if s == nil || s.agentConf == nil || s.grpcClient == nil || s.grpcClient.AgentClient == nil {
 		return &agentv1.UnregisterResponse{Success: true}, nil
 	}
 	if s.agentConf.Agent.ID == "" {
 		return &agentv1.UnregisterResponse{Success: true}, nil
 	}
-	ctx, cancel := s.grpcClient.WithTimeoutAndAuth(ctx)
+	ctx, cancel := s.grpcClient.WithTimeoutAndAuth(context.Background())
 	defer cancel()
 	resp, err := s.grpcClient.AgentClient.Unregister(ctx, &agentv1.UnregisterRequest{
 		AgentId: s.agentConf.Agent.ID,
@@ -172,7 +172,7 @@ func (s *AgentServiceImpl) Unregister(ctx context.Context, req *agentv1.Unregist
 }
 
 // FetchStepRun handles step run fetching requests
-func (s *AgentServiceImpl) FetchStepRun(ctx context.Context, req *agentv1.FetchStepRunRequest) (*agentv1.FetchStepRunResponse, error) {
+func (s *AgentServiceImpl) FetchStepRun(_ context.Context, req *agentv1.FetchStepRunRequest) (*agentv1.FetchStepRunResponse, error) {
 	log.Debugw("FetchStepRun request received", "agent_id", req.AgentId, "max_step_runs", req.MaxStepRuns)
 
 	// TODO: Implement step run fetching logic
@@ -186,7 +186,7 @@ func (s *AgentServiceImpl) FetchStepRun(ctx context.Context, req *agentv1.FetchS
 
 // ReportStepRunStatus handles step run status reporting requests
 func (s *AgentServiceImpl) ReportStepRunStatus(
-	ctx context.Context,
+	_ context.Context,
 	req *agentv1.ReportStepRunStatusRequest,
 ) (*agentv1.ReportStepRunStatusResponse, error) {
 	log.Debugw("ReportStepRunStatus request received", "agent_id", req.AgentId, "step_run_id", req.StepRunId, "status", req.Status.String())
@@ -199,7 +199,7 @@ func (s *AgentServiceImpl) ReportStepRunStatus(
 }
 
 // CancelStepRun handles step run cancellation requests from server
-func (s *AgentServiceImpl) CancelStepRun(ctx context.Context, req *agentv1.CancelStepRunRequest) (*agentv1.CancelStepRunResponse, error) {
+func (s *AgentServiceImpl) CancelStepRun(_ context.Context, req *agentv1.CancelStepRunRequest) (*agentv1.CancelStepRunResponse, error) {
 	log.Infow("CancelStepRun request received", "agent_id", req.AgentId, "step_run_id", req.StepRunId, "reason", req.Reason)
 
 	if taskqueue.CancelStepRun(req.StepRunId) {
@@ -213,7 +213,7 @@ func (s *AgentServiceImpl) CancelStepRun(ctx context.Context, req *agentv1.Cance
 }
 
 // UpdateLabels handles agent labels update requests
-func (s *AgentServiceImpl) UpdateLabels(ctx context.Context, req *agentv1.UpdateLabelsRequest) (*agentv1.UpdateLabelsResponse, error) {
+func (s *AgentServiceImpl) UpdateLabels(_ context.Context, req *agentv1.UpdateLabelsRequest) (*agentv1.UpdateLabelsResponse, error) {
 	log.Infow("UpdateLabels request received", "agent_id", req.AgentId, "merge", req.Merge, "labels", req.Labels)
 
 	// TODO: Implement labels update logic

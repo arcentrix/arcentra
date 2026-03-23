@@ -27,8 +27,11 @@ const (
 	Token Type = "token"
 	// OAuth2 indicates OAuth2 authentication.
 	OAuth2 Type = "oauth2"
+	// APIKey indicates API key authentication.
 	APIKey Type = "apikey"
-	Basic  Type = "basic"
+	// Basic indicates HTTP basic authentication.
+	Basic Type = "basic"
+	// Bearer indicates bearer token authentication.
 	Bearer Type = "bearer"
 
 	authHeaderAuthorization = "Authorization"
@@ -167,7 +170,7 @@ func (a *BasicAuth) GetAuthType() Type {
 	return Basic
 }
 
-func (a *BasicAuth) Authenticate(ctx context.Context) (string, error) {
+func (a *BasicAuth) Authenticate(_ context.Context) (string, error) {
 	if a.Username == "" || a.Password == "" {
 		return "", errors.New("username and password cannot be empty")
 	}
@@ -209,7 +212,7 @@ func (a *OAuth2Auth) GetAuthType() Type {
 	return OAuth2
 }
 
-func (a *OAuth2Auth) Authenticate(ctx context.Context) (string, error) {
+func (a *OAuth2Auth) Authenticate(_ context.Context) (string, error) {
 	// Return the access token if already available
 	if a.AccessToken != "" {
 		return a.AccessToken, nil

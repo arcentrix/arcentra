@@ -145,13 +145,13 @@ func buildBaseConfig(conf Config) (*kafka.ConfigMap, error) {
 	return config, nil
 }
 
-func buildClientId(clientId string) (string, error) {
-	if err := mq.RequireNonEmpty("clientId", clientId); err != nil {
+func buildClientID(clientID string) (string, error) {
+	if err := mq.RequireNonEmpty("clientId", clientID); err != nil {
 		return "", err
 	}
 	hostname, err := os.Hostname()
 	if err != nil || strings.TrimSpace(hostname) == "" {
 		hostname = "UNKNOWN"
 	}
-	return strings.ToUpper(fmt.Sprintf("%s_CLIENT_%s", clientId, hostname)), nil
+	return strings.ToUpper(fmt.Sprintf("%s_CLIENT_%s", clientID, hostname)), nil
 }

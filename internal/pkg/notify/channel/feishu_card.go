@@ -186,7 +186,7 @@ func (c *FeishuCardChannel) SendWithTemplate(ctx context.Context, template strin
 }
 
 // Receive receives messages
-func (c *FeishuCardChannel) Receive(ctx context.Context, message string) error {
+func (c *FeishuCardChannel) Receive(_ context.Context, message string) error {
 	return nil
 }
 

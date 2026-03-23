@@ -121,7 +121,7 @@ func (p *Provider) CreateChangeRequest(ctx context.Context, req scm.ChangeReques
 		return "", fmt.Errorf("invalid repository url: %s", req.PipelineRepoURL)
 	}
 	var out struct {
-		HtmlURL string `json:"html_url"`
+		HTMLURL string `json:"html_url"`
 	}
 	apiBase := strings.TrimSpace(p.cfg.APIBaseURL)
 	if apiBase == "" {
@@ -158,7 +158,7 @@ func (p *Provider) CreateChangeRequest(ctx context.Context, req scm.ChangeReques
 	if resp == nil || resp.StatusCode() >= 400 {
 		return "", fmt.Errorf("github create pr failed: %d", resp.StatusCode())
 	}
-	return out.HtmlURL, nil
+	return out.HTMLURL, nil
 }
 
 func (p *Provider) apiBaseURL() string {
@@ -281,7 +281,7 @@ func (p *Provider) parsePullRequest(body []byte) ([]scm.Event, error) {
 	var payload struct {
 		Action     string `json:"action"`
 		Repository struct {
-			HtmlUrl string `json:"html_url"`
+			HTMLURL string `json:"html_url"`
 			Name    string `json:"name"`
 			Owner   struct {
 				Login string `json:"login"`
@@ -315,7 +315,7 @@ func (p *Provider) parsePullRequest(body []byte) ([]scm.Event, error) {
 		Owner:    payload.Repository.Owner.Login,
 		Name:     payload.Repository.Name,
 		FullName: payload.Repository.Owner.Login + "/" + payload.Repository.Name,
-		URL:      payload.Repository.HtmlUrl,
+		URL:      payload.Repository.HTMLURL,
 	}
 
 	occurred := time.Now()
@@ -353,11 +353,11 @@ func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
 	var payload struct {
 		Ref        string `json:"ref"`
 		HeadCommit struct {
-			Id        string    `json:"id"`
+			ID        string    `json:"id"`
 			Timestamp time.Time `json:"timestamp"`
 		} `json:"head_commit"`
 		Repository struct {
-			HtmlUrl string `json:"html_url"`
+			HTMLURL string `json:"html_url"`
 			Name    string `json:"name"`
 			Owner   struct {
 				Name  string `json:"name"`
@@ -380,7 +380,7 @@ func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
 		Owner:    owner,
 		Name:     payload.Repository.Name,
 		FullName: owner + "/" + payload.Repository.Name,
-		URL:      payload.Repository.HtmlUrl,
+		URL:      payload.Repository.HTMLURL,
 	}
 
 	t := scm.EventTypePush
@@ -396,7 +396,7 @@ func (p *Provider) parsePush(body []byte) ([]scm.Event, error) {
 		EventType:    t,
 		Repo:         repo,
 		ActorName:    payload.Pusher.Name,
-		CommitID:     payload.HeadCommit.Id,
+		CommitID:     payload.HeadCommit.ID,
 		Ref:          payload.Ref,
 		OccurredAt:   occurred,
 	}}, nil
@@ -407,7 +407,7 @@ func (p *Provider) parseCreate(body []byte) ([]scm.Event, error) {
 		Ref        string `json:"ref"`
 		RefType    string `json:"ref_type"`
 		Repository struct {
-			HtmlUrl string `json:"html_url"`
+			HTMLURL string `json:"html_url"`
 			Name    string `json:"name"`
 			Owner   struct {
 				Login string `json:"login"`
@@ -428,7 +428,7 @@ func (p *Provider) parseCreate(body []byte) ([]scm.Event, error) {
 		Owner:    payload.Repository.Owner.Login,
 		Name:     payload.Repository.Name,
 		FullName: payload.Repository.Owner.Login + "/" + payload.Repository.Name,
-		URL:      payload.Repository.HtmlUrl,
+		URL:      payload.Repository.HTMLURL,
 	}
 	return []scm.Event{{
 		ProviderKind: scm.ProviderKindGitHub,

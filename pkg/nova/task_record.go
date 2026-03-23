@@ -28,6 +28,7 @@ import (
 // TaskStatus represents the status of a task
 type TaskStatus string
 
+// TaskStatus constants define the lifecycle states of a task.
 const (
 	TaskStatusPending    TaskStatus = "pending"    // Task is pending
 	TaskStatusQueued     TaskStatus = "queued"     // Task is queued

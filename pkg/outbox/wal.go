@@ -283,7 +283,7 @@ func (w *WAL) readSegmentMmap(path string, lastAcked, flushedSeq uint64, limit i
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
 		return nil, err
@@ -295,7 +295,7 @@ func (w *WAL) readSegmentMmap(path string, lastAcked, flushedSeq uint64, limit i
 	if err != nil {
 		return nil, err
 	}
-	defer m.Unmap()
+	defer func() { _ = m.Unmap() }()
 	data := []byte(m)
 	var out []*Record
 	offset := 0
@@ -388,7 +388,7 @@ func (w *WAL) segmentMaxSeqMmap(path string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
 		return 0, err
@@ -400,7 +400,7 @@ func (w *WAL) segmentMaxSeqMmap(path string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer m.Unmap()
+	defer func() { _ = m.Unmap() }()
 	data := []byte(m)
 	var maxSeq uint64
 	offset := 0

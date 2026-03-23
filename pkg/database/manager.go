@@ -141,7 +141,7 @@ func NewManager(cfg Database) (Manager, error) {
 }
 
 // buildGormLogger returns a GORM logger based on options (used by MySQL and SQLite)
-func buildGormLogger(opts DatabaseOptions) gormlogger.Interface {
+func buildGormLogger(opts Options) gormlogger.Interface {
 	logConfig := gormlogger.Config{
 		SlowThreshold:             time.Second,
 		LogLevel:                  gormlogger.Silent,
@@ -156,7 +156,7 @@ func buildGormLogger(opts DatabaseOptions) gormlogger.Interface {
 }
 
 // defaultGormConfig returns common GORM config (logger + naming strategy)
-func defaultGormConfig(opts DatabaseOptions) *gorm.Config {
+func defaultGormConfig(opts Options) *gorm.Config {
 	return &gorm.Config{
 		Logger: buildGormLogger(opts),
 		NamingStrategy: schema.NamingStrategy{
@@ -167,7 +167,7 @@ func defaultGormConfig(opts DatabaseOptions) *gorm.Config {
 }
 
 // applyConnPool applies connection pool settings to the underlying sql.DB
-func applyConnPool(sqlDB *sql.DB, opts DatabaseOptions, defaultMaxOpen, defaultMaxIdle int) {
+func applyConnPool(sqlDB *sql.DB, opts Options, defaultMaxOpen, defaultMaxIdle int) {
 	maxOpen := opts.MaxOpenConns
 	if maxOpen <= 0 {
 		maxOpen = defaultMaxOpen

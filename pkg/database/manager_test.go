@@ -22,7 +22,7 @@ func TestNewManager_SQLiteOnly(t *testing.T) {
 	cfg := Database{
 		Driver:  "sqlite",
 		SQLite:  SQLiteConfig{DSN: "file::memory:?cache=shared"},
-		Options: DatabaseOptions{MaxOpenConns: 1, MaxIdleConns: 1},
+		Options: Options{MaxOpenConns: 1, MaxIdleConns: 1},
 	}
 	m, err := NewManager(cfg)
 	if err != nil {

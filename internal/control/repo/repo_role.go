@@ -24,11 +24,11 @@ import (
 // IRoleRepository defines role persistence with context support for timeout, tracing and cancellation.
 type IRoleRepository interface {
 	Create(ctx context.Context, role *model.Role) error
-	Get(ctx context.Context, roleId string) (*model.Role, error)
+	Get(ctx context.Context, roleID string) (*model.Role, error)
 	BatchGet(ctx context.Context, roleIDs []string) ([]model.Role, error)
 	List(ctx context.Context, pageNum, pageSize int) ([]model.Role, int64, error)
-	Update(ctx context.Context, roleId string, updates map[string]any) error
-	Delete(ctx context.Context, roleId string) error
+	Update(ctx context.Context, roleID string, updates map[string]any) error
+	Delete(ctx context.Context, roleID string) error
 }
 
 type RoleRepo struct {
@@ -48,10 +48,10 @@ func (r *RoleRepo) Create(ctx context.Context, role *model.Role) error {
 }
 
 // Get returns role by roleId.
-func (r *RoleRepo) Get(ctx context.Context, roleId string) (*model.Role, error) {
+func (r *RoleRepo) Get(ctx context.Context, roleID string) (*model.Role, error) {
 	var role model.Role
 	err := r.Database().WithContext(ctx).Select(roleSelectFields).
-		Where("role_id = ? AND is_enabled = ?", roleId, 1).First(&role).Error
+		Where("role_id = ? AND is_enabled = ?", roleID, 1).First(&role).Error
 	if err != nil {
 		return nil, err
 	}
@@ -91,13 +91,13 @@ func (r *RoleRepo) List(ctx context.Context, pageNum, pageSize int) ([]model.Rol
 }
 
 // Update updates role by roleId.
-func (r *RoleRepo) Update(ctx context.Context, roleId string, updates map[string]any) error {
+func (r *RoleRepo) Update(ctx context.Context, roleID string, updates map[string]any) error {
 	return r.Database().WithContext(ctx).Table((&model.Role{}).TableName()).
-		Where("role_id = ?", roleId).Updates(updates).Error
+		Where("role_id = ?", roleID).Updates(updates).Error
 }
 
 // Delete soft-deletes role by roleId (sets is_enabled=0).
-func (r *RoleRepo) Delete(ctx context.Context, roleId string) error {
+func (r *RoleRepo) Delete(ctx context.Context, roleID string) error {
 	return r.Database().WithContext(ctx).Table((&model.Role{}).TableName()).
-		Where("role_id = ?", roleId).Updates(map[string]any{"is_enabled": 0}).Error
+		Where("role_id = ?", roleID).Updates(map[string]any{"is_enabled": 0}).Error
 }

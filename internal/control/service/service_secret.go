@@ -138,7 +138,7 @@ func (ss *SecretService) CreateSecret(ctx context.Context, secretEntity *model.S
 	}
 
 	// generate secret ID
-	secretEntity.SecretId = id.GetUild()
+	secretEntity.SecretID = id.GetUild()
 	secretEntity.SecretValue = encryptedValue
 	secretEntity.CreatedBy = createdBy
 
@@ -147,18 +147,18 @@ func (ss *SecretService) CreateSecret(ctx context.Context, secretEntity *model.S
 		return errors.New("failed to create secret")
 	}
 
-	log.Infow("secret created successfully", "secretId", secretEntity.SecretId)
+	log.Infow("secret created successfully", "secretID", secretEntity.SecretID)
 	return nil
 }
 
 // UpdateSecret updates a secret.
-func (ss *SecretService) UpdateSecret(ctx context.Context, secretId string, secretEntity *model.Secret) error {
-	_, err := ss.secretRepo.Get(ctx, secretId)
+func (ss *SecretService) UpdateSecret(ctx context.Context, secretID string, secretEntity *model.Secret) error {
+	_, err := ss.secretRepo.Get(ctx, secretID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("secret not found")
 		}
-		log.Errorw("failed to get secret", "secretId", secretId, "error", err)
+		log.Errorw("failed to get secret", "secretID", secretID, "error", err)
 		return errors.New("failed to get secret")
 	}
 
@@ -166,31 +166,31 @@ func (ss *SecretService) UpdateSecret(ctx context.Context, secretId string, secr
 	if secretEntity.SecretValue != "" {
 		encryptedValue, err := ss.encrypt(secretEntity.SecretValue)
 		if err != nil {
-			log.Errorw("failed to encrypt secret value", "secretId", secretId, "error", err)
+			log.Errorw("failed to encrypt secret value", "secretID", secretID, "error", err)
 			return errors.New("failed to encrypt secret value")
 		}
 		secretEntity.SecretValue = encryptedValue
 	}
 
-	secretEntity.SecretId = secretId
+	secretEntity.SecretID = secretID
 
 	if err := ss.secretRepo.Update(ctx, secretEntity); err != nil {
-		log.Errorw("failed to update secret", "secretId", secretId, "error", err)
+		log.Errorw("failed to update secret", "secretID", secretID, "error", err)
 		return errors.New("failed to update secret")
 	}
 
-	log.Infow("secret updated successfully", "secretId", secretId)
+	log.Infow("secret updated successfully", "secretID", secretID)
 	return nil
 }
 
 // GetSecretByID gets a secret by ID (without decrypting value).
-func (ss *SecretService) GetSecretByID(ctx context.Context, secretId string) (*model.Secret, error) {
-	secretByID, err := ss.secretRepo.Get(ctx, secretId)
+func (ss *SecretService) GetSecretByID(ctx context.Context, secretID string) (*model.Secret, error) {
+	secretByID, err := ss.secretRepo.Get(ctx, secretID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("secretByID not found")
 		}
-		log.Errorw("failed to get secretByID", "secretId", secretId, "error", err)
+		log.Errorw("failed to get secretByID", "secretID", secretID, "error", err)
 		return nil, errors.New("failed to get secretByID")
 	}
 
@@ -200,20 +200,20 @@ func (ss *SecretService) GetSecretByID(ctx context.Context, secretId string) (*m
 }
 
 // GetSecretValue gets the decrypted secret value (use with caution).
-func (ss *SecretService) GetSecretValue(ctx context.Context, secretId string) (string, error) {
-	encryptedValue, err := ss.secretRepo.GetValue(ctx, secretId)
+func (ss *SecretService) GetSecretValue(ctx context.Context, secretID string) (string, error) {
+	encryptedValue, err := ss.secretRepo.GetValue(ctx, secretID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", errors.New("secret not found")
 		}
-		log.Errorw("failed to get secret value", "secretId", secretId, "error", err)
+		log.Errorw("failed to get secret value", "secretID", secretID, "error", err)
 		return "", errors.New("failed to get secret value")
 	}
 
 	// decrypt secret value
 	plainValue, err := ss.decrypt(encryptedValue)
 	if err != nil {
-		log.Errorw("failed to decrypt secret value", "secretId", secretId, "error", err)
+		log.Errorw("failed to decrypt secret value", "secretID", secretID, "error", err)
 		return "", errors.New("failed to decrypt secret value")
 	}
 
@@ -221,7 +221,9 @@ func (ss *SecretService) GetSecretValue(ctx context.Context, secretId string) (s
 }
 
 // GetSecretList gets secret list with pagination and filters.
-func (ss *SecretService) GetSecretList(ctx context.Context, pageNum, pageSize int, secretType, scope, scopeId, createdBy string) ([]*model.Secret, int64, error) {
+func (ss *SecretService) GetSecretList(
+	ctx context.Context, pageNum, pageSize int, secretType, scope, scopeID, createdBy string,
+) ([]*model.Secret, int64, error) {
 	// set default pagination
 	if pageNum <= 0 {
 		pageNum = 1
@@ -230,7 +232,7 @@ func (ss *SecretService) GetSecretList(ctx context.Context, pageNum, pageSize in
 		pageSize = 20
 	}
 
-	secrets, total, err := ss.secretRepo.List(ctx, pageNum, pageSize, secretType, scope, scopeId, createdBy)
+	secrets, total, err := ss.secretRepo.List(ctx, pageNum, pageSize, secretType, scope, scopeID, createdBy)
 	if err != nil {
 		log.Errorw("failed to get secret list", "error", err)
 		return nil, 0, errors.New("failed to get secret list")
@@ -241,30 +243,30 @@ func (ss *SecretService) GetSecretList(ctx context.Context, pageNum, pageSize in
 }
 
 // DeleteSecret deletes a secret.
-func (ss *SecretService) DeleteSecret(ctx context.Context, secretId string) error {
-	_, err := ss.secretRepo.Get(ctx, secretId)
+func (ss *SecretService) DeleteSecret(ctx context.Context, secretID string) error {
+	_, err := ss.secretRepo.Get(ctx, secretID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("secret not found")
 		}
-		log.Errorw("failed to get secret", "secretId", secretId, "error", err)
+		log.Errorw("failed to get secret", "secretID", secretID, "error", err)
 		return errors.New("failed to get secret")
 	}
 
-	if err := ss.secretRepo.Delete(ctx, secretId); err != nil {
-		log.Errorw("failed to delete secret", "secretId", secretId, "error", err)
+	if err := ss.secretRepo.Delete(ctx, secretID); err != nil {
+		log.Errorw("failed to delete secret", "secretID", secretID, "error", err)
 		return errors.New("failed to delete secret")
 	}
 
-	log.Infow("secret deleted successfully", "secretId", secretId)
+	log.Infow("secret deleted successfully", "secretID", secretID)
 	return nil
 }
 
 // GetSecretsByScope gets secrets by scope and scope_id.
-func (ss *SecretService) GetSecretsByScope(ctx context.Context, scope, scopeId string) ([]*model.Secret, error) {
-	secrets, err := ss.secretRepo.ListByScope(ctx, scope, scopeId)
+func (ss *SecretService) GetSecretsByScope(ctx context.Context, scope, scopeID string) ([]*model.Secret, error) {
+	secrets, err := ss.secretRepo.ListByScope(ctx, scope, scopeID)
 	if err != nil {
-		log.Errorw("failed to get secrets by scope", "scope", scope, "scopeId", scopeId, "error", err)
+		log.Errorw("failed to get secrets by scope", "scope", scope, "scopeID", scopeID, "error", err)
 		return nil, errors.New("failed to get secrets by scope")
 	}
 	return secrets, nil

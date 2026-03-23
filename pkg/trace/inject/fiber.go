@@ -73,12 +73,12 @@ func FiberMiddleware() fiber.Handler {
 		}
 
 		// Set request ID if available (try Locals first, then header)
-		var requestId string
+		var requestID string
 		if id, ok := c.Locals("request_id").(string); ok {
-			requestId = id
+			requestID = id
 		}
-		if requestId != "" {
-			attrs = append(attrs, attribute.String("http.request.id", requestId))
+		if requestID != "" {
+			attrs = append(attrs, attribute.String("http.request.id", requestID))
 		}
 
 		span.SetAttributes(attrs...)

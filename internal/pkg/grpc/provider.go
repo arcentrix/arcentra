@@ -35,20 +35,20 @@ func ProvideGrpcServer(
 	cfg *Conf,
 	services *service.Services,
 	repos *repo.Repositories,
-	cache cache.ICache,
+	c cache.ICache,
 	mysqlDB *gorm.DB,
 	kafkaSettings service.KafkaSettings,
 ) *ServerWrapper {
 	server := NewGrpcServer(*cfg)
 
 	// Set up token verifier for agent authentication
-	tokenVerifier := interceptor.NewAgentTokenVerifier(services.Agent, repos.Agent, services.GeneralSettings, cache)
+	tokenVerifier := interceptor.NewAgentTokenVerifier(services.Agent, repos.Agent, services.GeneralSettings, c)
 	interceptor.SetTokenVerifier(tokenVerifier)
 
 	// 获取 Redis 客户端
 	var redisClient *redis.Client
 	// 使用类型断言获取 RedisCache，然后调用 GetClient()
-	if rc, ok := cache.(interface{ GetClient() *redis.Client }); ok {
+	if rc, ok := c.(interface{ GetClient() *redis.Client }); ok {
 		redisClient = rc.GetClient()
 	}
 

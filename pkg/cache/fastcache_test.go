@@ -446,7 +446,7 @@ func TestCachedQueryWithHybrid(t *testing.T) {
 	}
 
 	queryCount := 0
-	queryFunc := func(ctx context.Context) (User, error) {
+	queryFunc := func(_ context.Context) (User, error) {
 		queryCount++
 		return User{ID: 1, Name: "Alice"}, nil
 	}
@@ -496,7 +496,7 @@ func TestCachedQueryWithHybrid_Invalidate(t *testing.T) {
 	}
 
 	queryCount := 0
-	queryFunc := func(ctx context.Context) (Product, error) {
+	queryFunc := func(_ context.Context) (Product, error) {
 		queryCount++
 		if queryCount == 1 {
 			return Product{ID: 1, Price: 100.0}, nil

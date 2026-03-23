@@ -26,7 +26,7 @@ import (
 type ConsumerConfig struct {
 	Config `json:",inline" mapstructure:",squash"`
 
-	GroupId           string `json:"groupId" mapstructure:"groupId"`
+	GroupID           string `json:"groupId" mapstructure:"groupId"`
 	AutoOffsetReset   string `json:"autoOffsetReset" mapstructure:"autoOffsetReset"`
 	EnableAutoCommit  *bool  `json:"enableAutoCommit" mapstructure:"enableAutoCommit"`
 	SessionTimeoutMs  int    `json:"sessionTimeoutMs" mapstructure:"sessionTimeoutMs"`
@@ -52,9 +52,9 @@ func WithConsumerOptions(opts ...Option) ConsumerOption {
 	})
 }
 
-func WithConsumerGroupId(groupId string) ConsumerOption {
+func WithConsumerGroupID(groupID string) ConsumerOption {
 	return consumerOptionFunc(func(conf *ConsumerConfig) {
-		conf.GroupId = groupId
+		conf.GroupID = groupID
 	})
 }
 
@@ -88,11 +88,11 @@ type Consumer struct {
 }
 
 // NewConsumer creates a new Kafka consumer.
-func NewConsumer(bootstrapServers string, topicName string, clientId string, opts ...ConsumerOption) (*Consumer, error) {
+func NewConsumer(bootstrapServers string, topicName string, clientID string, opts ...ConsumerOption) (*Consumer, error) {
 	if err := mq.RequireNonEmpty("topicName", topicName); err != nil {
 		return nil, err
 	}
-	if err := mq.RequireNonEmpty("clientId", clientId); err != nil {
+	if err := mq.RequireNonEmpty("clientId", clientID); err != nil {
 		return nil, err
 	}
 	conf := ConsumerConfig{
@@ -117,15 +117,15 @@ func NewConsumer(bootstrapServers string, topicName string, clientId string, opt
 	if err != nil {
 		return nil, err
 	}
-	clientID, err := buildClientId(clientId)
+	clientIDStr, err := buildClientID(clientID)
 	if err != nil {
 		return nil, err
 	}
-	if conf.GroupId == "" {
-		return nil, fmt.Errorf("groupId is required, use WithConsumerGroupId to set it")
+	if conf.GroupID == "" {
+		return nil, fmt.Errorf("groupId is required, use WithConsumerGroupID to set it")
 	}
-	_ = config.SetKey("client.id", clientID)
-	_ = config.SetKey("group.id", conf.GroupId)
+	_ = config.SetKey("client.id", clientIDStr)
+	_ = config.SetKey("group.id", conf.GroupID)
 	_ = config.SetKey("auto.offset.reset", conf.AutoOffsetReset)
 	_ = config.SetKey("enable.auto.commit", enableAutoCommit)
 	_ = config.SetKey("session.timeout.ms", conf.SessionTimeoutMs)

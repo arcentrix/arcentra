@@ -221,9 +221,7 @@ func (b *kafkaBroker) Subscribe(ctx context.Context, topics []string, handler Me
 
 			// Manually commit offset
 			if !b.config.AutoCommit {
-				if err := b.consumer.CommitMessage(msg); err != nil {
-					// Log error but continue processing
-				}
+				_ = b.consumer.CommitMessage(msg)
 			}
 		}
 	}

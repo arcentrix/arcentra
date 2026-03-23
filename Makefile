@@ -1,4 +1,4 @@
-SHELL := /bin/sh
+SHELL := /bin/bash
 .ONESHELL:
 .SHELLFLAGS := -eu -o pipefail -c
 
@@ -121,8 +121,8 @@ sqlc: sqlc-install ## generate sql code
 # Lint
 # -----------------------------------------------------------------------------
 .PHONY: golangci-lint-install
-golangci-lint-install: $(LOCALBIN) ## install golangci-lint
-	GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+golangci-lint-install: $(LOCALBIN) ## install golangci-lint v2
+	GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
 .PHONY: lint
 lint: golangci-lint-install ## run lint

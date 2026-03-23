@@ -77,13 +77,13 @@ func (rt *Router) listRole(c *fiber.Ctx) error {
 
 // getRole GET /role/:roleId - get role by roleId
 func (rt *Router) getRole(c *fiber.Ctx) error {
-	roleId := c.Params("roleId")
-	if roleId == "" {
+	roleID := c.Params("roleId")
+	if roleID == "" {
 		return http.Err(c, http.BadRequest.Code, "role id is required")
 	}
 
 	roleLogic := rt.Services.Role
-	role, err := roleLogic.GetRoleByRoleID(c.Context(), roleId)
+	role, err := roleLogic.GetRoleByRoleID(c.Context(), roleID)
 	if err != nil {
 		return http.Err(c, http.NotFound.Code, "role not found")
 	}
@@ -93,8 +93,8 @@ func (rt *Router) getRole(c *fiber.Ctx) error {
 
 // updateRole PUT /role/:roleId - update role
 func (rt *Router) updateRole(c *fiber.Ctx) error {
-	roleId := c.Params("roleId")
-	if roleId == "" {
+	roleID := c.Params("roleId")
+	if roleID == "" {
 		return http.Err(c, http.BadRequest.Code, "role id is required")
 	}
 
@@ -104,12 +104,12 @@ func (rt *Router) updateRole(c *fiber.Ctx) error {
 	}
 
 	roleLogic := rt.Services.Role
-	if err := roleLogic.UpdateRoleByRoleID(c.Context(), roleId, updateReq); err != nil {
+	if err := roleLogic.UpdateRoleByRoleID(c.Context(), roleID, updateReq); err != nil {
 		return http.Err(c, http.NotFound.Code, "role not found")
 	}
 
 	// Get updated role
-	updatedRole, err := roleLogic.GetRoleByRoleID(c.Context(), roleId)
+	updatedRole, err := roleLogic.GetRoleByRoleID(c.Context(), roleID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -119,13 +119,13 @@ func (rt *Router) updateRole(c *fiber.Ctx) error {
 
 // deleteRole DELETE /role/:roleId - delete role
 func (rt *Router) deleteRole(c *fiber.Ctx) error {
-	roleId := c.Params("roleId")
-	if roleId == "" {
+	roleID := c.Params("roleId")
+	if roleID == "" {
 		return http.Err(c, http.BadRequest.Code, "role id is required")
 	}
 
 	roleLogic := rt.Services.Role
-	if err := roleLogic.DeleteRoleByRoleID(c.Context(), roleId); err != nil {
+	if err := roleLogic.DeleteRoleByRoleID(c.Context(), roleID); err != nil {
 		return http.Err(c, http.NotFound.Code, "role not found")
 	}
 

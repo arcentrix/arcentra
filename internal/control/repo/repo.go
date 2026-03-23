@@ -45,14 +45,14 @@ type Repositories struct {
 }
 
 // NewRepositories 初始化所有 repository
-func NewRepositories(db database.IDatabase, cache cache.ICache) *Repositories {
+func NewRepositories(db database.IDatabase, ch cache.ICache) *Repositories {
 	return &Repositories{
-		User:                 NewUserRepo(db, cache),
-		Agent:                NewAgentRepo(db, cache),
-		Storage:              NewStorageRepo(db, cache),
+		User:                 NewUserRepo(db, ch),
+		Agent:                NewAgentRepo(db, ch),
+		Storage:              NewStorageRepo(db, ch),
 		Team:                 NewTeamRepo(db),
 		Identity:             NewIdentityRepo(db),
-		GeneralSettings:      NewGeneralSettingsRepo(db, cache),
+		GeneralSettings:      NewGeneralSettingsRepo(db, ch),
 		Project:              NewProjectRepo(db),
 		ProjectMember:        NewProjectMemberRepo(db),
 		ProjectTeamAccess:    NewProjectTeamAccessRepo(db),

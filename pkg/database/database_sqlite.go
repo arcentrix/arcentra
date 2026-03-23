@@ -27,7 +27,7 @@ const (
 )
 
 // newSQLiteConnection creates a SQLite connection using GORM
-func newSQLiteConnection(sqliteCfg SQLiteConfig, opts DatabaseOptions) (*gorm.DB, error) {
+func newSQLiteConnection(sqliteCfg SQLiteConfig, opts Options) (*gorm.DB, error) {
 	db, err := gorm.Open(sqlite.Open(sqliteCfg.DSN), defaultGormConfig(opts))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open SQLite connection: %w", err)

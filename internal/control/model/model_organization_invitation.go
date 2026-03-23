@@ -17,8 +17,8 @@ package model
 // OrganizationInvitation 组织邀请表
 type OrganizationInvitation struct {
 	BaseModel
-	InvitationId string `gorm:"column:invitation_id" json:"invitationId"` // 邀请唯一标识
-	OrgId        string `gorm:"column:org_id" json:"orgId"`               // 组织ID
+	InvitationID string `gorm:"column:invitation_id" json:"invitationId"` // 邀请唯一标识
+	OrgID        string `gorm:"column:org_id" json:"orgId"`               // 组织ID
 	Email        string `gorm:"column:email" json:"email"`                // 被邀请人邮箱
 	Role         string `gorm:"column:role" json:"role"`                  // 角色
 	Token        string `gorm:"column:token" json:"token"`                // 邀请令牌

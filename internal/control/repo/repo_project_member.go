@@ -23,12 +23,12 @@ import (
 
 // IProjectMemberRepository defines project member persistence with context support.
 type IProjectMemberRepository interface {
-	Get(ctx context.Context, projectId, userId string) (*model.ProjectMember, error)
-	ListProjectMembers(ctx context.Context, projectId string) ([]model.ProjectMember, error)
+	Get(ctx context.Context, projectID, userID string) (*model.ProjectMember, error)
+	ListProjectMembers(ctx context.Context, projectID string) ([]model.ProjectMember, error)
 	AddProjectMember(ctx context.Context, member *model.ProjectMember) error
-	UpdateProjectMemberRole(ctx context.Context, projectId, userId, role string) error
-	RemoveProjectMember(ctx context.Context, projectId, userId string) error
-	GetUserProjects(ctx context.Context, userId string) ([]model.ProjectMember, error)
+	UpdateProjectMemberRole(ctx context.Context, projectID, userID, role string) error
+	RemoveProjectMember(ctx context.Context, projectID, userID string) error
+	GetUserProjects(ctx context.Context, userID string) ([]model.ProjectMember, error)
 }
 
 type ProjectMemberRepo struct {
@@ -39,19 +39,19 @@ func NewProjectMemberRepo(db database.IDatabase) IProjectMemberRepository {
 	return &ProjectMemberRepo{IDatabase: db}
 }
 
-// Get returns project member by projectId and userId.
-func (r *ProjectMemberRepo) Get(ctx context.Context, projectId, userId string) (*model.ProjectMember, error) {
+// Get returns project member by projectID and userID.
+func (r *ProjectMemberRepo) Get(ctx context.Context, projectID, userID string) (*model.ProjectMember, error) {
 	var member model.ProjectMember
 	err := r.Database().WithContext(ctx).Select("id", "project_id", "user_id", "role_id", "created_at", "updated_at").
-		Where("project_id = ? AND user_id = ?", projectId, userId).First(&member).Error
+		Where("project_id = ? AND user_id = ?", projectID, userID).First(&member).Error
 	return &member, err
 }
 
 // ListProjectMembers lists project members.
-func (r *ProjectMemberRepo) ListProjectMembers(ctx context.Context, projectId string) ([]model.ProjectMember, error) {
+func (r *ProjectMemberRepo) ListProjectMembers(ctx context.Context, projectID string) ([]model.ProjectMember, error) {
 	var members []model.ProjectMember
 	err := r.Database().WithContext(ctx).Select("id", "project_id", "user_id", "role_id", "created_at", "updated_at").
-		Where("project_id = ?", projectId).Find(&members).Error
+		Where("project_id = ?", projectID).Find(&members).Error
 	return members, err
 }
 
@@ -61,22 +61,22 @@ func (r *ProjectMemberRepo) AddProjectMember(ctx context.Context, member *model.
 }
 
 // UpdateProjectMemberRole updates project member role.
-func (r *ProjectMemberRepo) UpdateProjectMemberRole(ctx context.Context, projectId, userId, role string) error {
+func (r *ProjectMemberRepo) UpdateProjectMemberRole(ctx context.Context, projectID, userID, role string) error {
 	return r.Database().WithContext(ctx).Model(&model.ProjectMember{}).
-		Where("project_id = ? AND user_id = ?", projectId, userId).
+		Where("project_id = ? AND user_id = ?", projectID, userID).
 		Update("role", role).Error
 }
 
 // RemoveProjectMember removes a project member.
-func (r *ProjectMemberRepo) RemoveProjectMember(ctx context.Context, projectId, userId string) error {
-	return r.Database().WithContext(ctx).Where("project_id = ? AND user_id = ?", projectId, userId).
+func (r *ProjectMemberRepo) RemoveProjectMember(ctx context.Context, projectID, userID string) error {
+	return r.Database().WithContext(ctx).Where("project_id = ? AND user_id = ?", projectID, userID).
 		Delete(&model.ProjectMember{}).Error
 }
 
 // GetUserProjects returns user's projects.
-func (r *ProjectMemberRepo) GetUserProjects(ctx context.Context, userId string) ([]model.ProjectMember, error) {
+func (r *ProjectMemberRepo) GetUserProjects(ctx context.Context, userID string) ([]model.ProjectMember, error) {
 	var members []model.ProjectMember
 	err := r.Database().WithContext(ctx).Select("id", "project_id", "user_id", "role_id", "created_at", "updated_at").
-		Where("user_id = ?", userId).Find(&members).Error
+		Where("user_id = ?", userID).Find(&members).Error
 	return members, err
 }

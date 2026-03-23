@@ -152,7 +152,7 @@ func (c *ExecutionContext) EvalCondition(conditionExpr string) (bool, error) {
 
 // EvalConditionWithContext evaluates condition with additional context
 // This allows expressions to access job/step specific information
-func (c *ExecutionContext) EvalConditionWithContext(conditionExpr string, context map[string]any) (bool, error) {
+func (c *ExecutionContext) EvalConditionWithContext(conditionExpr string, evalContext map[string]any) (bool, error) {
 	conditionExpr = strings.TrimSpace(conditionExpr)
 	if conditionExpr == "" {
 		return true, nil
@@ -175,7 +175,7 @@ func (c *ExecutionContext) EvalConditionWithContext(conditionExpr string, contex
 	}
 
 	// Add additional context (e.g., job, step information)
-	maps.Copy(env, context)
+	maps.Copy(env, evalContext)
 
 	// Compile expression
 	program, err := expr.Compile(conditionExpr, expr.Env(env))
@@ -274,7 +274,7 @@ func (c *ExecutionContext) MarshalParams(params map[string]any) (json.RawMessage
 }
 
 // SendNotification sends notification using notify plugin
-func (c *ExecutionContext) SendNotification(ctx context.Context, item *spec.NotifyItem, success bool) error {
+func (c *ExecutionContext) SendNotification(_ context.Context, item *spec.NotifyItem, success bool) error {
 	if item == nil || item.Plugin == "" {
 		return nil
 	}

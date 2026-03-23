@@ -50,10 +50,10 @@ type Context struct {
 	abortError   error
 
 	// String fields (16 bytes each) - grouped together
-	pipelineId  string
-	buildId     string
-	projectId   string
-	orgId       string
+	pipelineID  string
+	buildID     string
+	projectID   string
+	orgID       string
 	triggeredBy string
 
 	// Maps and slices (24 bytes for slice header, 8 bytes for map pointer)
@@ -116,14 +116,14 @@ func NewContext(ctx context.Context, pipeline *spec.Pipeline, execCtx *Execution
 		handlers:     make([]HandlerFunc, 0),
 		index:        -1,
 		startTime:    time.Now(),
-		pipelineId:   pipeline.Namespace,
+		pipelineID:   pipeline.Namespace,
 		stateMachine: sm,
 	}
 
 	// Register hooks for terminal states to set endTime
 	sm.OnEnter(
 		pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
-		func(state pipelinev1.PipelineStatus) error {
+		func(_ pipelinev1.PipelineStatus) error {
 			pc.mu.Lock()
 			if pc.endTime == nil {
 				now := time.Now()
@@ -135,7 +135,7 @@ func NewContext(ctx context.Context, pipeline *spec.Pipeline, execCtx *Execution
 
 	sm.OnEnter(
 		pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
-		func(state pipelinev1.PipelineStatus) error {
+		func(_ pipelinev1.PipelineStatus) error {
 			pc.mu.Lock()
 			if pc.endTime == nil {
 				now := time.Now()
@@ -147,7 +147,7 @@ func NewContext(ctx context.Context, pipeline *spec.Pipeline, execCtx *Execution
 
 	sm.OnEnter(
 		pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED,
-		func(state pipelinev1.PipelineStatus) error {
+		func(_ pipelinev1.PipelineStatus) error {
 			pc.mu.Lock()
 			if pc.endTime == nil {
 				now := time.Now()
@@ -195,10 +195,10 @@ func (c *Context) WithContext(ctx context.Context) *Context {
 		index:        -1,
 		startTime:    c.startTime,
 		endTime:      c.endTime,
-		pipelineId:   c.pipelineId,
-		buildId:      c.buildId,
-		projectId:    c.projectId,
-		orgId:        c.orgId,
+		pipelineID:   c.pipelineID,
+		buildID:      c.buildID,
+		projectID:    c.projectID,
+		orgID:        c.orgID,
 		triggeredBy:  c.triggeredBy,
 		currentJob:   c.currentJob,
 		currentStep:  c.currentStep,
@@ -212,7 +212,7 @@ func (c *Context) WithContext(ctx context.Context) *Context {
 	// Register hooks for terminal states
 	sm.OnEnter(
 		pipelinev1.PipelineStatus_PIPELINE_STATUS_SUCCESS,
-		func(state pipelinev1.PipelineStatus) error {
+		func(_ pipelinev1.PipelineStatus) error {
 			newCtx.mu.Lock()
 			if newCtx.endTime == nil {
 				now := time.Now()
@@ -224,7 +224,7 @@ func (c *Context) WithContext(ctx context.Context) *Context {
 
 	sm.OnEnter(
 		pipelinev1.PipelineStatus_PIPELINE_STATUS_FAILED,
-		func(state pipelinev1.PipelineStatus) error {
+		func(_ pipelinev1.PipelineStatus) error {
 			newCtx.mu.Lock()
 			if newCtx.endTime == nil {
 				now := time.Now()
@@ -236,7 +236,7 @@ func (c *Context) WithContext(ctx context.Context) *Context {
 
 	sm.OnEnter(
 		pipelinev1.PipelineStatus_PIPELINE_STATUS_CANCELLED,
-		func(state pipelinev1.PipelineStatus) error {
+		func(_ pipelinev1.PipelineStatus) error {
 			newCtx.mu.Lock()
 			if newCtx.endTime == nil {
 				now := time.Now()
@@ -329,44 +329,44 @@ func (c *Context) Retrieve(key string) (value any, exists bool) {
 	return
 }
 
-// PipelineId returns the pipeline ID
-func (c *Context) PipelineId() string {
-	return c.pipelineId
+// PipelineID returns the pipeline ID
+func (c *Context) PipelineID() string {
+	return c.pipelineID
 }
 
-// SetPipelineId sets the pipeline ID
-func (c *Context) SetPipelineId(id string) {
-	c.pipelineId = id
+// SetPipelineID sets the pipeline ID
+func (c *Context) SetPipelineID(id string) {
+	c.pipelineID = id
 }
 
-// BuildId returns the build ID
-func (c *Context) BuildId() string {
-	return c.buildId
+// BuildID returns the build ID
+func (c *Context) BuildID() string {
+	return c.buildID
 }
 
-// SetBuildId sets the build ID
-func (c *Context) SetBuildId(id string) {
-	c.buildId = id
+// SetBuildID sets the build ID
+func (c *Context) SetBuildID(id string) {
+	c.buildID = id
 }
 
-// ProjectId returns the project ID
-func (c *Context) ProjectId() string {
-	return c.projectId
+// ProjectID returns the project ID
+func (c *Context) ProjectID() string {
+	return c.projectID
 }
 
-// SetProjectId sets the project ID
-func (c *Context) SetProjectId(id string) {
-	c.projectId = id
+// SetProjectID sets the project ID
+func (c *Context) SetProjectID(id string) {
+	c.projectID = id
 }
 
-// OrgId returns the organization ID
-func (c *Context) OrgId() string {
-	return c.orgId
+// OrgID returns the organization ID
+func (c *Context) OrgID() string {
+	return c.orgID
 }
 
-// SetOrgId sets the organization ID
-func (c *Context) SetOrgId(id string) {
-	c.orgId = id
+// SetOrgID sets the organization ID
+func (c *Context) SetOrgID(id string) {
+	c.orgID = id
 }
 
 // TriggeredBy returns who triggered the pipeline
@@ -736,10 +736,10 @@ func (c *Context) ToMap() map[string]any {
 	defer c.mu.RUnlock()
 
 	result := make(map[string]any)
-	result["pipelineId"] = c.pipelineId
-	result["buildId"] = c.buildId
-	result["projectId"] = c.projectId
-	result["orgId"] = c.orgId
+	result["pipelineId"] = c.pipelineID
+	result["buildId"] = c.buildID
+	result["projectId"] = c.projectID
+	result["orgId"] = c.orgID
 	result["triggeredBy"] = c.triggeredBy
 	result["startTime"] = c.startTime
 	if c.endTime != nil {

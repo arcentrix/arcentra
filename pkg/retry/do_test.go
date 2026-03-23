@@ -70,7 +70,7 @@ func TestDo_FixedBackoff(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
 	start := time.Now()
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		if attempts < 3 {
 			return errors.New("temporary error")
@@ -96,7 +96,7 @@ func TestDo_ExponentialBackoff(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
 	start := time.Now()
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		if attempts < 3 {
 			return errors.New("temporary error")
@@ -122,7 +122,7 @@ func TestDo_LinearBackoff(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
 	start := time.Now()
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		if attempts < 3 {
 			return errors.New("temporary error")
@@ -148,7 +148,7 @@ func TestDo_ExponentialBackoffWithMax(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
 	start := time.Now()
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		if attempts < 3 {
 			return errors.New("temporary error")
@@ -176,7 +176,7 @@ func TestDo_CustomRetryIf(t *testing.T) {
 	retryableErr := errors.New("retryable")
 	nonRetryableErr := errors.New("non-retryable")
 
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		if attempts == 1 {
 			return retryableErr
@@ -204,7 +204,7 @@ func TestDo_ContextCancellation(t *testing.T) {
 		cancel()
 	})
 
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		return errors.New("error")
 	}, WithMaxAttempts(5), WithBackoff(Fixed(100*time.Millisecond)))
@@ -225,7 +225,7 @@ func TestDo_ContextTimeout(t *testing.T) {
 	defer cancel()
 
 	attempts := 0
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		time.Sleep(50 * time.Millisecond)
 		return errors.New("error")
@@ -243,7 +243,7 @@ func TestDo_MaxElapsedTime(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
 	start := time.Now()
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		return errors.New("error")
 	}, WithMaxAttempts(10), WithBackoff(Fixed(100*time.Millisecond)), WithMaxElapsedTime(150*time.Millisecond))
@@ -264,7 +264,7 @@ func TestDo_MaxElapsedTime(t *testing.T) {
 func TestDo_NilContext(t *testing.T) {
 	// Should handle nil context gracefully
 	attempts := 0
-	err := Do(context.Background(), func(ctx context.Context) error {
+	err := Do(context.Background(), func(_ context.Context) error {
 		attempts++
 		if attempts < 2 {
 			return errors.New("error")
@@ -282,7 +282,7 @@ func TestDo_NilContext(t *testing.T) {
 func TestDo_ZeroMaxAttempts(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		return errors.New("error")
 	}, WithMaxAttempts(0))
@@ -300,7 +300,7 @@ func TestDo_ZeroMaxAttempts(t *testing.T) {
 func TestDo_NegativeMaxAttempts(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		return errors.New("error")
 	}, WithMaxAttempts(-1))
@@ -319,7 +319,7 @@ func TestDo_Jitter(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
 	start := time.Now()
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		if attempts < 3 {
 			return errors.New("temporary error")
@@ -345,7 +345,7 @@ func TestDo_FullJitter(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
 	start := time.Now()
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		if attempts < 3 {
 			return errors.New("temporary error")
@@ -377,7 +377,7 @@ func TestDo_ContextCancellationDuringBackoff(t *testing.T) {
 		cancel()
 	})
 
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		return errors.New("error")
 	}, WithMaxAttempts(5), WithBackoff(Fixed(100*time.Millisecond)))
@@ -396,7 +396,7 @@ func TestDo_ContextCancellationDuringBackoff(t *testing.T) {
 func TestDo_NoRetryOnContextError(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		return context.Canceled
 	}, WithMaxAttempts(3))
@@ -418,7 +418,7 @@ func TestDo_NoRetryOnPreCancelledContext(t *testing.T) {
 	cancel() // Cancel immediately
 
 	attempts := 0
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		return errors.New("should not execute")
 	}, WithMaxAttempts(3))
@@ -602,7 +602,7 @@ func TestJitter_FullJitter(t *testing.T) {
 func TestDo_WithNilBackoff(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		if attempts < 2 {
 			return errors.New("error")
@@ -621,7 +621,7 @@ func TestDo_WithNilBackoff(t *testing.T) {
 func TestDo_WithNilJitter(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		if attempts < 2 {
 			return errors.New("error")
@@ -640,7 +640,7 @@ func TestDo_WithNilJitter(t *testing.T) {
 func TestDo_WithNilRetryIf(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		if attempts < 2 {
 			return errors.New("error")
@@ -660,7 +660,7 @@ func TestDo_ZeroBackoff(t *testing.T) {
 	ctx := context.Background()
 	attempts := 0
 	start := time.Now()
-	err := Do(ctx, func(ctx context.Context) error {
+	err := Do(ctx, func(_ context.Context) error {
 		attempts++
 		if attempts < 3 {
 			return errors.New("error")

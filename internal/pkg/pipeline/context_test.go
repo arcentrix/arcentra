@@ -44,8 +44,8 @@ func TestNewContextContext(t *testing.T) {
 	if ctx == nil {
 		t.Fatal("NewContextContext returned nil")
 	}
-	if ctx.PipelineId() != "test-pipeline" {
-		t.Errorf("expected pipelineId 'test-pipeline', got %q", ctx.PipelineId())
+	if ctx.PipelineID() != "test-pipeline" {
+		t.Errorf("expected pipelineId 'test-pipeline', got %q", ctx.PipelineID())
 	}
 	if ctx.Pipeline() != pipeline {
 		t.Error("pipeline not set correctly")
@@ -71,7 +71,7 @@ func TestSetAndGet(t *testing.T) {
 		t.Errorf("Get(key2) = %v, %v, want 42, true", val, ok)
 	}
 
-	if val, ok := ctx.Get("key3"); !ok || val != true {
+	if val, ok := ctx.Get("key3"); !ok || !val.(bool) {
 		t.Errorf("Get(key3) = %v, %v, want true, true", val, ok)
 	}
 
@@ -134,11 +134,11 @@ func TestGetBool(t *testing.T) {
 	ctx.Set("bool", true)
 	ctx.Set("str", "hello")
 
-	if b := ctx.GetBool("bool"); b != true {
+	if b := ctx.GetBool("bool"); !b {
 		t.Errorf("GetBool(bool) = %v, want true", b)
 	}
 
-	if b := ctx.GetBool("str"); b != false {
+	if b := ctx.GetBool("str"); b {
 		t.Errorf("GetBool(str) = %v, want false", b)
 	}
 }
@@ -198,9 +198,9 @@ func TestError(t *testing.T) {
 	ctx.Error(err1)
 	ctx.Error(err2)
 
-	errors := ctx.Errors()
-	if len(errors) != 2 {
-		t.Errorf("expected 2 errors, got %d", len(errors))
+	errs := ctx.Errors()
+	if len(errs) != 2 {
+		t.Errorf("expected 2 errors, got %d", len(errs))
 	}
 }
 
@@ -323,8 +323,8 @@ func TestToMap(t *testing.T) {
 		Jobs:      []*spec.Job{},
 	}
 	ctx := NewContext(context.Background(), pipeline, nil)
-	ctx.SetBuildId("build-123")
-	ctx.SetProjectId("project-456")
+	ctx.SetBuildID("build-123")
+	ctx.SetProjectID("project-456")
 	ctx.Set("customKey", "customValue")
 
 	m := ctx.ToMap()
@@ -346,7 +346,7 @@ func TestToMap(t *testing.T) {
 func TestWithContext(t *testing.T) {
 	ctx1 := NewContext(context.Background(), &spec.Pipeline{}, nil)
 	ctx1.Set("key1", "value1")
-	ctx1.SetBuildId("build-1")
+	ctx1.SetBuildID("build-1")
 	// Transition to RUNNING state
 	_ = ctx1.TransitionTo(pipelinev1.PipelineStatus_PIPELINE_STATUS_RUNNING)
 
@@ -354,7 +354,7 @@ func TestWithContext(t *testing.T) {
 	ctx2 := context.WithValue(context.Background(), ctxKey, "ctxValue")
 	ctx3 := ctx1.WithContext(ctx2)
 
-	if ctx3.BuildId() != ctx1.BuildId() {
+	if ctx3.BuildID() != ctx1.BuildID() {
 		t.Error("buildId should be preserved")
 	}
 

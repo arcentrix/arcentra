@@ -29,11 +29,11 @@ import (
 // All methods use business identifier agentId; no ByID/ByXXX duplication.
 type IAgentRepository interface {
 	Create(ctx context.Context, agent *model.Agent) error
-	Get(ctx context.Context, agentId string) (*model.Agent, error)
-	GetDetail(ctx context.Context, agentId string) (*model.AgentDetail, error)
+	Get(ctx context.Context, agentID string) (*model.Agent, error)
+	GetDetail(ctx context.Context, agentID string) (*model.AgentDetail, error)
 	Update(ctx context.Context, agent *model.Agent) error
-	Patch(ctx context.Context, agentId string, updates map[string]any) error
-	Delete(ctx context.Context, agentId string) error
+	Patch(ctx context.Context, agentID string, updates map[string]any) error
+	Delete(ctx context.Context, agentID string) error
 	List(ctx context.Context, page, size int) ([]model.Agent, int64, error)
 	Statistics(ctx context.Context) (total, online, offline int64, err error)
 }
@@ -46,27 +46,24 @@ type AgentRepo struct {
 const agentListSelectFields = "id, agent_id, agent_name, address, port, os, arch, version, status, labels, metrics, is_enabled"
 
 // NewAgentRepo creates an agent repository with optional cache.
-func NewAgentRepo(db database.IDatabase, cache cache.ICache) IAgentRepository {
-	if cache == nil {
+func NewAgentRepo(db database.IDatabase, ch cache.ICache) IAgentRepository {
+	if ch == nil {
 		log.Warnw("AgentRepo initialized without cache, caching will be disabled")
 	}
 	return &AgentRepo{
 		IDatabase: db,
-		ICache:    cache,
+		ICache:    ch,
 	}
 }
 
 // Create creates a new agent.
 func (ar *AgentRepo) Create(ctx context.Context, agent *model.Agent) error {
-	if err := ar.Database().WithContext(ctx).Table(agent.TableName()).Create(agent).Error; err != nil {
-		return err
-	}
-	return nil
+	return ar.Database().WithContext(ctx).Table(agent.TableName()).Create(agent).Error
 }
 
 // Get returns agent by agentId.
-func (ar *AgentRepo) Get(ctx context.Context, agentId string) (*model.Agent, error) {
-	detail, err := ar.getAgentDetailCached(ctx, agentId)
+func (ar *AgentRepo) Get(ctx context.Context, agentID string) (*model.Agent, error) {
+	detail, err := ar.getAgentDetailCached(ctx, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -91,17 +88,17 @@ var agentSelectFields = []string{
 }
 
 // GetDetail returns agent detail by agentId.
-func (ar *AgentRepo) GetDetail(ctx context.Context, agentId string) (*model.AgentDetail, error) {
-	return ar.getAgentDetailCached(ctx, agentId)
+func (ar *AgentRepo) GetDetail(ctx context.Context, agentID string) (*model.AgentDetail, error) {
+	return ar.getAgentDetailCached(ctx, agentID)
 }
 
-func (ar *AgentRepo) getAgentDetailCached(ctx context.Context, agentId string) (*model.AgentDetail, error) {
+func (ar *AgentRepo) getAgentDetailCached(ctx context.Context, agentID string) (*model.AgentDetail, error) {
 	keyFunc := func(params ...any) string {
 		return consts.AgentDetailKey + params[0].(string)
 	}
 
 	queryFunc := func(ctx context.Context) (*model.AgentDetail, error) {
-		agent, err := ar.queryAgentByAgentID(ctx, agentId)
+		agent, err := ar.queryAgentByAgentID(ctx, agentID)
 		if err != nil {
 			return nil, err
 		}
@@ -116,16 +113,16 @@ func (ar *AgentRepo) getAgentDetailCached(ctx context.Context, agentId string) (
 		cache.WithLogPrefix[*model.AgentDetail]("[AgentRepo]"),
 	)
 
-	return cq.Get(ctx, agentId)
+	return cq.Get(ctx, agentID)
 }
 
-func (ar *AgentRepo) queryAgentByAgentID(ctx context.Context, agentId string) (*model.Agent, error) {
+func (ar *AgentRepo) queryAgentByAgentID(ctx context.Context, agentID string) (*model.Agent, error) {
 	var agent model.Agent
 	if err := ar.Database().
 		WithContext(ctx).
 		Table(agent.TableName()).
 		Select(agentSelectFields).
-		Where("agent_id = ?", agentId).
+		Where("agent_id = ?", agentID).
 		First(&agent).Error; err != nil {
 		return nil, err
 	}
@@ -141,10 +138,10 @@ func (ar *AgentRepo) Update(ctx context.Context, agent *model.Agent) error {
 	return nil
 }
 
-// Patch patches agent fields by agentId.
-func (ar *AgentRepo) Patch(ctx context.Context, agentId string, updates map[string]any) error {
+// Patch patches agent fields by agentID.
+func (ar *AgentRepo) Patch(ctx context.Context, agentID string, updates map[string]any) error {
 	if err := ar.Database().WithContext(ctx).Table((&model.Agent{}).TableName()).
-		Where("agent_id = ?", agentId).Updates(updates).Error; err != nil {
+		Where("agent_id = ?", agentID).Updates(updates).Error; err != nil {
 		return err
 	}
 
@@ -152,22 +149,22 @@ func (ar *AgentRepo) Patch(ctx context.Context, agentId string, updates map[stri
 	if len(updates) == 2 {
 		if _, hasHeartbeat := updates["last_heartbeat"]; hasHeartbeat {
 			if _, hasStatus := updates["status"]; hasStatus {
-				ar.refreshAgentCache(ctx, agentId)
+				ar.refreshAgentCache(ctx, agentID)
 				return nil
 			}
 		}
 	}
-	ar.invalidateAgentCache(ctx, agentId)
+	ar.invalidateAgentCache(ctx, agentID)
 	return nil
 }
 
-// Delete deletes agent by agentId.
-func (ar *AgentRepo) Delete(ctx context.Context, agentId string) error {
+// Delete deletes agent by agentID.
+func (ar *AgentRepo) Delete(ctx context.Context, agentID string) error {
 	if err := ar.Database().WithContext(ctx).Table((&model.Agent{}).TableName()).
-		Where("agent_id = ?", agentId).Delete(&model.Agent{}).Error; err != nil {
+		Where("agent_id = ?", agentID).Delete(&model.Agent{}).Error; err != nil {
 		return err
 	}
-	ar.invalidateAgentCache(ctx, agentId)
+	ar.invalidateAgentCache(ctx, agentID)
 	return nil
 }
 
@@ -207,24 +204,24 @@ func (ar *AgentRepo) Statistics(ctx context.Context) (total, online, offline int
 }
 
 // invalidateAgentCache clears agent cache.
-func (ar *AgentRepo) invalidateAgentCache(ctx context.Context, agentId string) {
+func (ar *AgentRepo) invalidateAgentCache(ctx context.Context, agentID string) {
 	keyFunc := func(params ...any) string {
 		return consts.AgentDetailKey + params[0].(string)
 	}
 	cq := cache.NewCachedQuery[*model.AgentDetail](ar.ICache, keyFunc, nil)
-	_ = cq.Invalidate(ctx, agentId)
+	_ = cq.Invalidate(ctx, agentID)
 }
 
 // refreshAgentCache refreshes agent cache after heartbeat updates.
-func (ar *AgentRepo) refreshAgentCache(ctx context.Context, agentId string) {
+func (ar *AgentRepo) refreshAgentCache(ctx context.Context, agentID string) {
 	if ar.ICache == nil {
 		return
 	}
-	_, err := ar.getAgentDetailCached(ctx, agentId)
+	_, err := ar.getAgentDetailCached(ctx, agentID)
 	if err == nil {
-		log.Debugw("agent cache refreshed after heartbeat update", "agentId", agentId)
+		log.Debugw("agent cache refreshed after heartbeat update", "agentId", agentID)
 	} else {
-		log.Warnw("failed to refresh agent cache", "agentId", agentId, "error", err)
-		ar.invalidateAgentCache(ctx, agentId)
+		log.Warnw("failed to refresh agent cache", "agentId", agentID, "error", err)
+		ar.invalidateAgentCache(ctx, agentID)
 	}
 }

@@ -61,7 +61,7 @@ func newCOS(s *Storage) (*COSStorage, error) {
 	}, nil
 }
 
-func (c *COSStorage) GetObject(ctx context.Context, objectName string) ([]byte, error) {
+func (c *COSStorage) GetObject(_ context.Context, objectName string) ([]byte, error) {
 	fullPath := getFullPath(c.s.BasePath, objectName)
 	resp, err := c.Client.Object.Get(context.Background(), fullPath, nil)
 	if err != nil {
@@ -76,7 +76,7 @@ func (c *COSStorage) GetObject(ctx context.Context, objectName string) ([]byte, 
 	return buf.Bytes(), nil
 }
 
-func (c *COSStorage) PutObject(ctx context.Context, objectName string, file *multipart.FileHeader, contentType string) (string, error) {
+func (c *COSStorage) PutObject(_ context.Context, objectName string, file *multipart.FileHeader, contentType string) (string, error) {
 	src, err := file.Open()
 	if err != nil {
 		return "", err
@@ -97,7 +97,7 @@ func (c *COSStorage) PutObject(ctx context.Context, objectName string, file *mul
 	return fullPath, nil
 }
 
-func (c *COSStorage) Upload(ctx context.Context, objectName string, file *multipart.FileHeader, contentType string) (string, error) {
+func (c *COSStorage) Upload(_ context.Context, objectName string, file *multipart.FileHeader, contentType string) (string, error) {
 	src, err := file.Open()
 	if err != nil {
 		return "", err
@@ -226,7 +226,7 @@ func (c *COSStorage) Upload(ctx context.Context, objectName string, file *multip
 	return fullPath, err
 }
 
-func (c *COSStorage) Download(ctx context.Context, objectName string) ([]byte, error) {
+func (c *COSStorage) Download(_ context.Context, objectName string) ([]byte, error) {
 	fullPath := getFullPath(c.s.BasePath, objectName)
 	resp, err := c.Client.Object.Get(context.Background(), fullPath, nil)
 	if err != nil {
@@ -237,13 +237,13 @@ func (c *COSStorage) Download(ctx context.Context, objectName string) ([]byte, e
 	return io.ReadAll(resp.Body)
 }
 
-func (c *COSStorage) Delete(ctx context.Context, objectName string) error {
+func (c *COSStorage) Delete(_ context.Context, objectName string) error {
 	fullPath := getFullPath(c.s.BasePath, objectName)
 	_, err := c.Client.Object.Delete(context.Background(), fullPath)
 	return err
 }
 
-func (c *COSStorage) GetPresignedURL(ctx context.Context, objectName string, expiry time.Duration) (string, error) {
+func (c *COSStorage) GetPresignedURL(_ context.Context, objectName string, expiry time.Duration) (string, error) {
 	fullPath := getFullPath(c.s.BasePath, objectName)
 
 	presignedURL, err := c.Client.Object.GetPresignedURL(

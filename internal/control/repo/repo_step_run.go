@@ -28,12 +28,12 @@ import (
 // IStepRunRepository defines step run persistence with context support.
 type IStepRunRepository interface {
 	Create(ctx context.Context, stepRun *model.StepRun) error
-	GetByStepRunId(ctx context.Context, stepRunId string) (*model.StepRun, error)
-	Get(ctx context.Context, pipelineId, jobId, stepRunId string) (*model.StepRun, error)
+	GetByStepRunID(ctx context.Context, stepRunID string) (*model.StepRun, error)
+	Get(ctx context.Context, pipelineID, jobID, stepRunID string) (*model.StepRun, error)
 	List(ctx context.Context, filter StepRunFilter) ([]model.StepRun, int64, error)
-	PatchByStepRunId(ctx context.Context, stepRunId string, updates map[string]any) error
-	DeleteByStepRunId(ctx context.Context, stepRunId string) error
-	ListArtifactsByStepRunId(ctx context.Context, stepRunId string) ([]model.StepRunArtifact, error)
+	PatchByStepRunID(ctx context.Context, stepRunID string, updates map[string]any) error
+	DeleteByStepRunID(ctx context.Context, stepRunID string) error
+	ListArtifactsByStepRunID(ctx context.Context, stepRunID string) ([]model.StepRunArtifact, error)
 }
 
 type StepRunRepo struct {
@@ -41,12 +41,12 @@ type StepRunRepo struct {
 }
 
 type StepRunFilter struct {
-	StepRunIds    []string
-	PipelineId    string
-	PipelineRunId string
-	JobId         string
+	StepRunIDs    []string
+	PipelineID    string
+	PipelineRunID string
+	JobID         string
 	StepName      string
-	AgentId       string
+	AgentID       string
 	Status        int
 	Page          int
 	PageSize      int
@@ -66,12 +66,12 @@ func (r *StepRunRepo) Create(ctx context.Context, stepRun *model.StepRun) error 
 	return r.Database().WithContext(ctx).Table(stepRun.TableName()).Create(stepRun).Error
 }
 
-// GetByStepRunId returns step run by business ID.
-func (r *StepRunRepo) GetByStepRunId(ctx context.Context, stepRunId string) (*model.StepRun, error) {
+// GetByStepRunID returns step run by business ID.
+func (r *StepRunRepo) GetByStepRunID(ctx context.Context, stepRunID string) (*model.StepRun, error) {
 	var stepRun model.StepRun
 	err := r.Database().WithContext(ctx).
 		Table(stepRun.TableName()).
-		Where("step_run_id = ?", stepRunId).
+		Where("step_run_id = ?", stepRunID).
 		First(&stepRun).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -82,12 +82,12 @@ func (r *StepRunRepo) GetByStepRunId(ctx context.Context, stepRunId string) (*mo
 	return &stepRun, nil
 }
 
-// Get returns step run by pipelineId, jobId and stepRunId.
-func (r *StepRunRepo) Get(ctx context.Context, pipelineId, jobId, stepRunId string) (*model.StepRun, error) {
+// Get returns step run by pipelineID, jobID and stepRunID.
+func (r *StepRunRepo) Get(ctx context.Context, pipelineID, jobID, stepRunID string) (*model.StepRun, error) {
 	var stepRun model.StepRun
 	err := r.Database().WithContext(ctx).
 		Table(stepRun.TableName()).
-		Where("pipeline_id = ? AND job_id = ? AND step_run_id = ?", pipelineId, jobId, stepRunId).
+		Where("pipeline_id = ? AND job_id = ? AND step_run_id = ?", pipelineID, jobID, stepRunID).
 		First(&stepRun).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -138,23 +138,23 @@ func (r *StepRunRepo) List(ctx context.Context, filter StepRunFilter) ([]model.S
 }
 
 func applyStepRunFilters(query *gorm.DB, filter StepRunFilter) *gorm.DB {
-	if len(filter.StepRunIds) > 0 {
-		query = query.Where("step_run_id IN ?", filter.StepRunIds)
+	if len(filter.StepRunIDs) > 0 {
+		query = query.Where("step_run_id IN ?", filter.StepRunIDs)
 	}
-	if strings.TrimSpace(filter.PipelineId) != "" {
-		query = query.Where("pipeline_id = ?", strings.TrimSpace(filter.PipelineId))
+	if strings.TrimSpace(filter.PipelineID) != "" {
+		query = query.Where("pipeline_id = ?", strings.TrimSpace(filter.PipelineID))
 	}
-	if strings.TrimSpace(filter.PipelineRunId) != "" {
-		query = query.Where("pipeline_run_id = ?", strings.TrimSpace(filter.PipelineRunId))
+	if strings.TrimSpace(filter.PipelineRunID) != "" {
+		query = query.Where("pipeline_run_id = ?", strings.TrimSpace(filter.PipelineRunID))
 	}
-	if strings.TrimSpace(filter.JobId) != "" {
-		query = query.Where("job_id = ?", strings.TrimSpace(filter.JobId))
+	if strings.TrimSpace(filter.JobID) != "" {
+		query = query.Where("job_id = ?", strings.TrimSpace(filter.JobID))
 	}
 	if strings.TrimSpace(filter.StepName) != "" {
 		query = query.Where("name = ?", strings.TrimSpace(filter.StepName))
 	}
-	if strings.TrimSpace(filter.AgentId) != "" {
-		query = query.Where("agent_id = ?", strings.TrimSpace(filter.AgentId))
+	if strings.TrimSpace(filter.AgentID) != "" {
+		query = query.Where("agent_id = ?", strings.TrimSpace(filter.AgentID))
 	}
 	if filter.Status > 0 {
 		query = query.Where("status = ?", filter.Status)
@@ -162,32 +162,32 @@ func applyStepRunFilters(query *gorm.DB, filter StepRunFilter) *gorm.DB {
 	return query
 }
 
-// PatchByStepRunId patches step run by stepRunId.
-func (r *StepRunRepo) PatchByStepRunId(ctx context.Context, stepRunId string, updates map[string]any) error {
+// PatchByStepRunID patches step run by stepRunID.
+func (r *StepRunRepo) PatchByStepRunID(ctx context.Context, stepRunID string, updates map[string]any) error {
 	if len(updates) == 0 {
 		return nil
 	}
 	updates["updated_at"] = time.Now()
 	return r.Database().WithContext(ctx).
 		Table((&model.StepRun{}).TableName()).
-		Where("step_run_id = ?", stepRunId).
+		Where("step_run_id = ?", stepRunID).
 		Updates(updates).Error
 }
 
-// DeleteByStepRunId deletes a step run by stepRunId.
-func (r *StepRunRepo) DeleteByStepRunId(ctx context.Context, stepRunId string) error {
+// DeleteByStepRunID deletes a step run by stepRunID.
+func (r *StepRunRepo) DeleteByStepRunID(ctx context.Context, stepRunID string) error {
 	return r.Database().WithContext(ctx).
 		Table((&model.StepRun{}).TableName()).
-		Where("step_run_id = ?", stepRunId).
+		Where("step_run_id = ?", stepRunID).
 		Delete(&model.StepRun{}).Error
 }
 
-// ListArtifactsByStepRunId returns artifacts by stepRunId.
-func (r *StepRunRepo) ListArtifactsByStepRunId(ctx context.Context, stepRunId string) ([]model.StepRunArtifact, error) {
+// ListArtifactsByStepRunID returns artifacts by stepRunID.
+func (r *StepRunRepo) ListArtifactsByStepRunID(ctx context.Context, stepRunID string) ([]model.StepRunArtifact, error) {
 	var artifacts []model.StepRunArtifact
 	err := r.Database().WithContext(ctx).
 		Table((&model.StepRunArtifact{}).TableName()).
-		Where("step_run_id = ?", stepRunId).
+		Where("step_run_id = ?", stepRunID).
 		Order("created_at DESC").
 		Find(&artifacts).Error
 	if err != nil {

@@ -26,6 +26,6 @@ var ProviderSet = wire.NewSet(
 )
 
 // ProvideRepositories 提供统一的 Repositories 实例
-func ProvideRepositories(db database.IDatabase, cache cache.ICache) *Repositories {
-	return NewRepositories(db, cache)
+func ProvideRepositories(db database.IDatabase, ch cache.ICache) *Repositories {
+	return NewRepositories(db, ch)
 }

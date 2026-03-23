@@ -153,7 +153,7 @@ func (c *TelegramChannel) sendRequest(ctx context.Context, payload map[string]in
 }
 
 // Receive receives messages (webhook callback)
-func (c *TelegramChannel) Receive(ctx context.Context, message string) error {
+func (c *TelegramChannel) Receive(_ context.Context, _ string) error {
 	return nil
 }
 

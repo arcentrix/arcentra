@@ -37,12 +37,12 @@ const (
 type Config struct {
 	// WALDir is the WAL root directory.
 	WALDir string
-	// AgentId is the agent ID, seq scope (required).
-	AgentId string
-	// ProjectId is optional; when set with PipelineId, path becomes {dir}/{project_id}/{pipeline_id}/{agent_id}/
-	ProjectId string
-	// PipelineId is optional.
-	PipelineId string
+	// AgentID is the agent ID, seq scope (required).
+	AgentID string
+	// ProjectID is optional; when set with PipelineID, path becomes {dir}/{project_id}/{pipeline_id}/{agent_id}/
+	ProjectID string
+	// PipelineID is optional.
+	PipelineID string
 	// SegmentMaxSeq is the max seq count per segment before creating a new one.
 	SegmentMaxSeq int
 	// FsyncInterval is the batch fsync interval.
@@ -79,16 +79,16 @@ func (c *Config) SetDefaults() {
 
 // Validate checks config validity.
 func (c *Config) Validate() error {
-	if c.AgentId == "" {
-		return ErrAgentIdRequired
+	if c.AgentID == "" {
+		return ErrAgentIDRequired
 	}
-	if len(c.AgentId) > MaxScopeLen {
+	if len(c.AgentID) > MaxScopeLen {
 		return ErrScopeTooLong
 	}
-	if c.ProjectId != "" && len(c.ProjectId) > MaxScopeLen {
+	if c.ProjectID != "" && len(c.ProjectID) > MaxScopeLen {
 		return ErrScopeTooLong
 	}
-	if c.PipelineId != "" && len(c.PipelineId) > MaxScopeLen {
+	if c.PipelineID != "" && len(c.PipelineID) > MaxScopeLen {
 		return ErrScopeTooLong
 	}
 	return nil

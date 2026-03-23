@@ -21,13 +21,13 @@ import (
 // Project 项目表
 type Project struct {
 	BaseModel
-	ProjectId     string         `gorm:"column:project_id" json:"projectId"`               // 项目唯一标识
-	OrgId         string         `gorm:"column:org_id" json:"orgId"`                       // 所属组织ID
+	ProjectID     string         `gorm:"column:project_id" json:"projectId"`               // 项目唯一标识
+	OrgID         string         `gorm:"column:org_id" json:"orgId"`                       // 所属组织ID
 	Name          string         `gorm:"column:name" json:"name"`                          // 项目名称
 	DisplayName   string         `gorm:"column:display_name" json:"displayName"`           // 项目显示名称
 	Namespace     string         `gorm:"column:namespace" json:"namespace"`                // 项目命名空间(org_name/project_name)
 	Description   string         `gorm:"column:description" json:"description"`            // 项目描述
-	RepoUrl       string         `gorm:"column:repo_url" json:"repoUrl"`                   // 代码仓库URL
+	RepoURL       string         `gorm:"column:repo_url" json:"repoUrl"`                   // 代码仓库URL
 	RepoType      string         `gorm:"column:repo_type" json:"repoType"`                 // 仓库类型(git/svn/gitlab/github/gitee)
 	DefaultBranch string         `gorm:"column:default_branch" json:"defaultBranch"`       // 默认分支
 	AuthType      int            `gorm:"column:auth_type" json:"authType"`                 // 认证类型: 0-无, 1-用户名密码, 2-Token, 3-SSH密钥
@@ -136,10 +136,10 @@ const (
 // ProjectWebhook 项目Webhook表
 type ProjectWebhook struct {
 	BaseModel
-	WebhookId   string         `gorm:"column:webhook_id" json:"webhookId"`    // Webhook唯一标识
-	ProjectId   string         `gorm:"column:project_id" json:"projectId"`    // 项目ID
+	WebhookID   string         `gorm:"column:webhook_id" json:"webhookId"`    // Webhook唯一标识
+	ProjectID   string         `gorm:"column:project_id" json:"projectId"`    // 项目ID
 	Name        string         `gorm:"column:name" json:"name"`               // Webhook名称
-	Url         string         `gorm:"column:url" json:"url"`                 // Webhook URL
+	URL         string         `gorm:"column:url" json:"url"`                 // Webhook URL
 	Secret      string         `gorm:"column:secret" json:"secret"`           // 密钥
 	Events      datatypes.JSON `gorm:"column:events;type:json" json:"events"` // 触发事件列表
 	IsEnabled   int            `gorm:"column:is_enabled" json:"isEnabled"`    // 是否启用
@@ -153,8 +153,8 @@ func (ProjectWebhook) TableName() string {
 // ProjectVariable 项目变量表
 type ProjectVariable struct {
 	BaseModel
-	VariableId  string `gorm:"column:variable_id" json:"variableId"`  // 变量唯一标识
-	ProjectId   string `gorm:"column:project_id" json:"projectId"`    // 项目ID
+	VariableID  string `gorm:"column:variable_id" json:"variableId"`  // 变量唯一标识
+	ProjectID   string `gorm:"column:project_id" json:"projectId"`    // 项目ID
 	Key         string `gorm:"column:key" json:"key"`                 // 变量键
 	Value       string `gorm:"column:value" json:"value"`             // 变量值(可能加密)
 	Type        string `gorm:"column:type" json:"type"`               // 类型(env/secret/file)
@@ -183,11 +183,11 @@ const (
 
 // CreateProjectReq 创建项目请求
 type CreateProjectReq struct {
-	OrgId         string                 `json:"orgId" validate:"required"`
+	OrgID         string                 `json:"orgId" validate:"required"`
 	Name          string                 `json:"name" validate:"required,min=2,max=128"`
 	DisplayName   string                 `json:"displayName"`
 	Description   string                 `json:"description"`
-	RepoUrl       string                 `json:"repoUrl" validate:"required"`
+	RepoURL       string                 `json:"repoUrl" validate:"required"`
 	RepoType      string                 `json:"repoType" validate:"required"`
 	DefaultBranch string                 `json:"defaultBranch"`
 	AuthType      int                    `json:"authType"`
@@ -211,7 +211,7 @@ type CreateProjectReq struct {
 type UpdateProjectReq struct {
 	DisplayName   *string                `json:"displayName,omitempty"`
 	Description   *string                `json:"description,omitempty"`
-	RepoUrl       *string                `json:"repoUrl,omitempty"`
+	RepoURL       *string                `json:"repoUrl,omitempty"`
 	DefaultBranch *string                `json:"defaultBranch,omitempty"`
 	AuthType      *int                   `json:"authType,omitempty"`
 	Credential    *string                `json:"credential,omitempty"`
@@ -234,7 +234,7 @@ type UpdateProjectReq struct {
 
 // ProjectQueryReq 查询项目请求
 type ProjectQueryReq struct {
-	OrgId      string `json:"orgId" form:"orgId"`
+	OrgID      string `json:"orgId" form:"orgId"`
 	Name       string `json:"name" form:"name"`
 	Language   string `json:"language" form:"language"`
 	Status     *int   `json:"status" form:"status"`

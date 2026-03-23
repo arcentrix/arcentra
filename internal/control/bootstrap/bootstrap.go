@@ -41,7 +41,7 @@ import (
 )
 
 type App struct {
-	HttpApp       *fiber.App
+	HTTPApp       *fiber.App
 	PluginMgr     *plugin.Manager
 	GrpcServer    *grpc.ServerWrapper
 	MetricsServer *metrics.Server
@@ -62,9 +62,9 @@ func NewApp(
 	pluginMgr *plugin.Manager,
 	grpcServer *grpc.ServerWrapper,
 	metricsServer *metrics.Server,
-	storage storage.IStorage,
+	st storage.IStorage,
 	appConf *config.AppConfig,
-	db database.IDatabase,
+	_ database.IDatabase,
 	repos *repo.Repositories,
 	shutdownMgr *shutdown.Manager,
 ) (*App, func(), error) {
@@ -72,12 +72,12 @@ func NewApp(
 
 	// 设置 AppConf
 	app := &App{
-		HttpApp:       httpApp,
+		HTTPApp:       httpApp,
 		PluginMgr:     pluginMgr,
 		GrpcServer:    grpcServer,
 		MetricsServer: metricsServer,
 		Logger:        logger,
-		Storage:       storage,
+		Storage:       st,
 		AppConf:       appConf,
 		Repos:         repos,
 		Services:      rt.Services,
@@ -196,7 +196,7 @@ func Run(app *App, cleanup func()) {
 		log.Infow("HTTP listener started",
 			"address", addr,
 		)
-		if err := app.HttpApp.Listen(addr); err != nil {
+		if err := app.HTTPApp.Listen(addr); err != nil {
 			log.Errorw("HTTP listener failed",
 				"address", addr,
 				zap.Error(err),
@@ -220,7 +220,7 @@ func Run(app *App, cleanup func()) {
 	// close HTTP server
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
-	if err := app.HttpApp.ShutdownWithContext(shutdownCtx); err != nil {
+	if err := app.HTTPApp.ShutdownWithContext(shutdownCtx); err != nil {
 		log.Errorw("HTTP server shutdown error: %v", err)
 	} else {
 		log.Info("HTTP server shut down gracefully")

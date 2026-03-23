@@ -52,7 +52,7 @@ func (a *AgentServiceImpl) Heartbeat(ctx context.Context, req *agentv1.Heartbeat
 			"last_heartbeat": time.Now(),
 		}
 		if err := a.agentService.agentRepo.Patch(ctx, strings.TrimSpace(req.AgentId), updates); err != nil {
-			log.Warnw("failed to update agent from heartbeat", "agentId", req.AgentId, "error", err)
+			log.Warnw("failed to update agent from heartbeat", "agentID", req.AgentId, "error", err)
 		}
 	}
 
@@ -72,48 +72,48 @@ func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 	}
 
 	agentRepo := a.agentService.agentRepo
-	var agentId string
+	var agentID string
 	var err error
 
-	// Extract agentId from token (token format: agentId:signature)
-	// If request provides agentId, use it for validation; otherwise extract from token
+	// Extract agentID from token (token format: agentID:signature)
+	// If request provides agentID, use it for validation; otherwise extract from token
 	tokenParts := strings.SplitN(req.Token, ":", 2)
 	if len(tokenParts) != 2 {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid token format: expected agentId:signature")
+		return nil, status.Errorf(codes.InvalidArgument, "invalid token format: expected agentID:signature")
 	}
-	tokenAgentId := tokenParts[0]
+	tokenAgentID := tokenParts[0]
 
-	// Use agentId from request if provided, otherwise use agentId from token
+	// Use agentID from request if provided, otherwise use agentID from token
 	if req.AgentId != "" {
-		agentId = req.AgentId
-		// Validate that request agentId matches token agentId
-		if agentId != tokenAgentId {
-			log.Warnw("agentId mismatch", "requestAgentId", agentId, "tokenAgentId", tokenAgentId)
-			return nil, status.Errorf(codes.InvalidArgument, "agentId mismatch: request agentId does not match token")
+		agentID = req.AgentId
+		// Validate that request agentID matches token agentID
+		if agentID != tokenAgentID {
+			log.Warnw("agentID mismatch", "requestAgentId", agentID, "tokenAgentID", tokenAgentID)
+			return nil, status.Errorf(codes.InvalidArgument, "agentID mismatch: request agentID does not match token")
 		}
 	} else {
-		agentId = tokenAgentId
+		agentID = tokenAgentID
 	}
 
 	// Verify token by regenerating it and comparing
-	expectedToken, err := a.agentService.GenerateAgentToken(ctx, agentId)
+	expectedToken, err := a.agentService.GenerateAgentToken(ctx, agentID)
 	if err != nil {
-		log.Errorw("failed to generate token for verification", "agentId", agentId, "error", err)
+		log.Errorw("failed to generate token for verification", "agentID", agentID, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to verify token")
 	}
 
 	if req.Token != expectedToken {
-		log.Warnw("token verification failed", "agentId", agentId)
+		log.Warnw("token verification failed", "agentID", agentID)
 		return nil, status.Errorf(codes.Unauthenticated, "invalid token")
 	}
 
 	// Check if agent exists
-	_, err = agentRepo.Get(ctx, agentId)
+	_, err = agentRepo.Get(ctx, agentID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, status.Errorf(codes.NotFound, "agent not found: %s", agentId)
+			return nil, status.Errorf(codes.NotFound, "agent not found: %s", agentID)
 		}
-		log.Errorw("failed to get agent", "agentId", agentId, "error", err)
+		log.Errorw("failed to get agent", "agentID", agentID, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to get agent")
 	}
 
@@ -142,16 +142,16 @@ func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 	updates["last_heartbeat"] = time.Now()
 
 	if len(updates) > 0 {
-		if err = agentRepo.Patch(ctx, agentId, updates); err != nil {
-			log.Errorw("failed to update agent during registration", "agentId", agentId, "error", err)
+		if err = agentRepo.Patch(ctx, agentID, updates); err != nil {
+			log.Errorw("failed to update agent during registration", "agentID", agentID, "error", err)
 			return nil, status.Errorf(codes.Internal, "failed to update agent")
 		}
 	}
 
 	// Get agent detail to return heartbeat interval
-	detail, err := agentRepo.GetDetail(ctx, agentId)
+	detail, err := agentRepo.GetDetail(ctx, agentID)
 	if err != nil {
-		log.Errorw("failed to get agent detail", "agentId", agentId, "error", err)
+		log.Errorw("failed to get agent detail", "agentID", agentID, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to get agent detail")
 	}
 
@@ -161,7 +161,7 @@ func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 	labels := make(map[string]string)
 	if len(detail.Labels) > 0 {
 		if unmarshalErr := sonic.Unmarshal(detail.Labels, &labels); unmarshalErr != nil {
-			log.Warnw("failed to parse labels", "agentId", agentId, "error", unmarshalErr)
+			log.Warnw("failed to parse labels", "agentID", agentID, "error", unmarshalErr)
 			// Continue with empty labels if parsing fails
 		}
 	}
@@ -169,16 +169,16 @@ func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 	return &agentv1.RegisterResponse{
 		Success:           true,
 		Message:           "registration successful",
-		AgentId:           agentId,
+		AgentId:           agentID,
 		HeartbeatInterval: heartbeatInterval,
 		Labels:            labels,
 	}, nil
 }
 
 func (a *AgentServiceImpl) Unregister(ctx context.Context, req *agentv1.UnregisterRequest) (*agentv1.UnregisterResponse, error) {
-	agentId := strings.TrimSpace(req.AgentId)
-	if agentId == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "agentId is required")
+	agentID := strings.TrimSpace(req.AgentId)
+	if agentID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "agentID is required")
 	}
 	if a.agentService == nil || a.agentService.agentRepo == nil {
 		return &agentv1.UnregisterResponse{Success: false, Message: "agent repository unavailable"}, nil
@@ -188,8 +188,8 @@ func (a *AgentServiceImpl) Unregister(ctx context.Context, req *agentv1.Unregist
 		"updated_at":     time.Now(),
 		"last_heartbeat": time.Now(),
 	}
-	if err := a.agentService.agentRepo.Patch(ctx, agentId, updates); err != nil {
-		log.Errorw("failed to unregister agent", "agentId", agentId, "error", err)
+	if err := a.agentService.agentRepo.Patch(ctx, agentID, updates); err != nil {
+		log.Errorw("failed to unregister agent", "agentID", agentID, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to unregister agent")
 	}
 	return &agentv1.UnregisterResponse{
@@ -202,16 +202,16 @@ func (a *AgentServiceImpl) FetchStepRun(ctx context.Context, req *agentv1.FetchS
 	if a.agentService == nil || a.agentService.stepRunRepo == nil {
 		return &agentv1.FetchStepRunResponse{Success: false, Message: "step run repository unavailable"}, nil
 	}
-	agentId := strings.TrimSpace(req.AgentId)
-	if agentId == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "agentId is required")
+	agentID := strings.TrimSpace(req.AgentId)
+	if agentID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "agentID is required")
 	}
 	maxRuns := int(req.MaxStepRuns)
 	if maxRuns <= 0 {
 		maxRuns = 1
 	}
 	filter := repo.StepRunFilter{
-		AgentId:  agentId,
+		AgentID:  agentID,
 		Page:     1,
 		PageSize: maxRuns,
 		SortBy:   "created_at",
@@ -219,7 +219,7 @@ func (a *AgentServiceImpl) FetchStepRun(ctx context.Context, req *agentv1.FetchS
 	}
 	stepRuns, _, err := a.agentService.stepRunRepo.List(ctx, filter)
 	if err != nil {
-		log.Errorw("fetch step runs failed", "agentId", agentId, "error", err)
+		log.Errorw("fetch step runs failed", "agentID", agentID, "error", err)
 		return nil, status.Errorf(codes.Internal, "fetch step runs failed")
 	}
 
@@ -230,7 +230,7 @@ func (a *AgentServiceImpl) FetchStepRun(ctx context.Context, req *agentv1.FetchS
 			// only dispatch pending/queued records for now
 			continue
 		}
-		_ = a.agentService.stepRunRepo.PatchByStepRunId(ctx, item.StepRunID, map[string]any{
+		_ = a.agentService.stepRunRepo.PatchByStepRunID(ctx, item.StepRunID, map[string]any{
 			"status": int(2),
 		})
 		respStepRuns = append(respStepRuns, convertStepRunModelToAgentStepRun(&item))
@@ -250,9 +250,9 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 	if a.agentService == nil || a.agentService.stepRunRepo == nil {
 		return &agentv1.ReportStepRunStatusResponse{Success: false, Message: "step run repository unavailable"}, nil
 	}
-	stepRunId := strings.TrimSpace(req.StepRunId)
-	if stepRunId == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "stepRunId is required")
+	stepRunID := strings.TrimSpace(req.StepRunId)
+	if stepRunID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "stepRunID is required")
 	}
 	updates := map[string]any{
 		"status":        int(req.Status),
@@ -273,8 +273,8 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 			updates["secrets"] = string(encoded)
 		}
 	}
-	if err := a.agentService.stepRunRepo.PatchByStepRunId(ctx, stepRunId, updates); err != nil {
-		log.Errorw("report step run status failed", "stepRunId", stepRunId, "error", err)
+	if err := a.agentService.stepRunRepo.PatchByStepRunID(ctx, stepRunID, updates); err != nil {
+		log.Errorw("report step run status failed", "stepRunID", stepRunID, "error", err)
 		return nil, status.Errorf(codes.Internal, "report step run status failed")
 	}
 	return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "ok"}, nil
@@ -284,17 +284,17 @@ func (a *AgentServiceImpl) CancelStepRun(ctx context.Context, req *agentv1.Cance
 	if a.agentService == nil || a.agentService.stepRunRepo == nil {
 		return &agentv1.CancelStepRunResponse{Success: false, Message: "step run repository unavailable"}, nil
 	}
-	stepRunId := strings.TrimSpace(req.StepRunId)
-	if stepRunId == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "stepRunId is required")
+	stepRunID := strings.TrimSpace(req.StepRunId)
+	if stepRunID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "stepRunID is required")
 	}
 	updates := map[string]any{
 		"status":        6,
 		"error_message": strings.TrimSpace(req.Reason),
 		"end_time":      time.Now(),
 	}
-	if err := a.agentService.stepRunRepo.PatchByStepRunId(ctx, stepRunId, updates); err != nil {
-		log.Errorw("cancel step run failed", "stepRunId", stepRunId, "error", err)
+	if err := a.agentService.stepRunRepo.PatchByStepRunID(ctx, stepRunID, updates); err != nil {
+		log.Errorw("cancel step run failed", "stepRunID", stepRunID, "error", err)
 		return nil, status.Errorf(codes.Internal, "cancel step run failed")
 	}
 	return &agentv1.CancelStepRunResponse{Success: true, Message: "cancelled"}, nil
@@ -304,11 +304,11 @@ func (a *AgentServiceImpl) UpdateLabels(ctx context.Context, req *agentv1.Update
 	if a.agentService == nil || a.agentService.agentRepo == nil {
 		return &agentv1.UpdateLabelsResponse{Success: false, Message: "agent repository unavailable"}, nil
 	}
-	agentId := strings.TrimSpace(req.AgentId)
-	if agentId == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "agentId is required")
+	agentID := strings.TrimSpace(req.AgentId)
+	if agentID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "agentID is required")
 	}
-	detail, err := a.agentService.agentRepo.GetDetail(ctx, agentId)
+	detail, err := a.agentService.agentRepo.GetDetail(ctx, agentID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "load agent detail failed")
 	}
@@ -329,7 +329,7 @@ func (a *AgentServiceImpl) UpdateLabels(ctx context.Context, req *agentv1.Update
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "marshal labels failed")
 	}
-	if err := a.agentService.agentRepo.Patch(ctx, agentId, map[string]any{"labels": string(encoded)}); err != nil {
+	if err := a.agentService.agentRepo.Patch(ctx, agentID, map[string]any{"labels": string(encoded)}); err != nil {
 		return nil, status.Errorf(codes.Internal, "update labels failed")
 	}
 	return &agentv1.UpdateLabelsResponse{Success: true, Message: "updated", Labels: updated}, nil

@@ -31,6 +31,13 @@ const (
 	gormTracerName = "github.com/arcentrix/arcentra/pkg/trace/inject/gorm"
 )
 
+type gormCtxKey int
+
+const (
+	gormSpanKey gormCtxKey = iota
+	gormStartKey
+)
+
 var gormTracer = otel.Tracer(gormTracerName)
 
 // GormPlugin implements gorm.Plugin interface for OpenTelemetry tracing
@@ -94,8 +101,8 @@ func (p *GormPlugin) beforeCallback(db *gorm.DB) {
 	ctx, span := gormTracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindClient))
 
 	// Store span and start time in context
-	db.Statement.Context = context.WithValue(ctx, "opentelemetry.span", span)
-	db.Statement.Context = context.WithValue(db.Statement.Context, "opentelemetry.start", time.Now())
+	db.Statement.Context = context.WithValue(ctx, gormSpanKey, span)
+	db.Statement.Context = context.WithValue(db.Statement.Context, gormStartKey, time.Now())
 
 	// Set database attributes (only set non-empty values to avoid null in trace data)
 	attrs := []attribute.KeyValue{
@@ -124,13 +131,13 @@ func (p *GormPlugin) afterCallback(db *gorm.DB) {
 		return
 	}
 
-	span, ok := db.Statement.Context.Value("opentelemetry.span").(trace.Span)
+	span, ok := db.Statement.Context.Value(gormSpanKey).(trace.Span)
 	if !ok {
 		return
 	}
 	defer span.End()
 
-	start, ok := db.Statement.Context.Value("opentelemetry.start").(time.Time)
+	start, ok := db.Statement.Context.Value(gormStartKey).(time.Time)
 	if ok {
 		duration := time.Since(start)
 		span.SetAttributes(

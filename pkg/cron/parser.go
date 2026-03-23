@@ -28,6 +28,7 @@ import (
 // the order fields are parse in.
 type ParseOption int
 
+// ParseOption constants define which fields to include in the cron spec.
 const (
 	// Second enables the seconds field (default 0).
 	Second      ParseOption = 1 << iota

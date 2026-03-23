@@ -63,7 +63,7 @@ func (NotificationLog) TableName() string {
 // NotificationChannel represents a notification channel configuration in the database
 type NotificationChannel struct {
 	BaseModel
-	ChannelId   string `gorm:"uniqueIndex;type:varchar(100);not null" json:"channel_id"` // Unique channel identifier
+	ChannelID   string `gorm:"uniqueIndex;type:varchar(100);not null" json:"channel_id"` // Unique channel identifier
 	Name        string `gorm:"type:varchar(200);not null" json:"name"`                   // Channel name
 	Type        string `gorm:"type:varchar(50);not null;index" json:"type"`              // Channel type (feishu_app/dingtalk/etc)
 	Config      string `gorm:"type:text;not null" json:"config"`                         // Channel configuration (JSON)

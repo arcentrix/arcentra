@@ -20,7 +20,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/arcentrix/arcentra/pkg/plugin"
+	pluginpkg "github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/bytedance/sonic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -63,7 +63,7 @@ func TestSVNPlugin_Type(t *testing.T) {
 	p := NewSVN()
 	typ := p.Type()
 
-	assert.Equal(t, plugin.TypeSource, typ)
+	assert.Equal(t, pluginpkg.TypeSource, typ)
 }
 
 func TestSVNPlugin_Init(t *testing.T) {
