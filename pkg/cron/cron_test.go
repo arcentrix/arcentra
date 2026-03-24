@@ -29,7 +29,7 @@ func TestNew(t *testing.T) {
 	if c == nil {
 		t.Fatal("New() returned nil")
 	}
-	if c.running {
+	if c.running.Load() {
 		t.Error("New() cron should not be running")
 	}
 	if c.location == nil {
@@ -302,7 +302,7 @@ func TestStart_AlreadyRunning(t *testing.T) {
 	c := New()
 	c.Start()
 
-	if !c.running {
+	if !c.running.Load() {
 		t.Error("Cron should be running after Start()")
 	}
 
@@ -337,7 +337,7 @@ func TestRun(t *testing.T) {
 		// Job executed successfully
 	case <-time.After(500 * time.Millisecond):
 		// Check if cron is running (it should be)
-		if !c.running {
+		if !c.running.Load() {
 			t.Error("Cron should be running")
 		}
 		// Job might not have executed yet due to timing, but Run() should be working
@@ -352,13 +352,13 @@ func TestStop(t *testing.T) {
 	c := New()
 	c.Start()
 
-	if !c.running {
+	if !c.running.Load() {
 		t.Error("Cron should be running after Start()")
 	}
 
 	c.Stop()
 
-	if c.running {
+	if c.running.Load() {
 		t.Error("Cron should not be running after Stop()")
 	}
 }
@@ -373,13 +373,13 @@ func TestClose(t *testing.T) {
 	c := New()
 	c.Start()
 
-	if !c.running {
+	if !c.running.Load() {
 		t.Error("Cron should be running after Start()")
 	}
 
 	c.Close()
 
-	if c.running {
+	if c.running.Load() {
 		t.Error("Cron should not be running after Close()")
 	}
 }

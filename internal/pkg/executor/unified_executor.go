@@ -81,6 +81,10 @@ func NewUnifiedExecutor(
 	remoteExecutor RemoteExecutor,
 	logger log.Logger,
 ) *UnifiedExecutor {
+	if logger.SugaredLogger == nil {
+		logger = log.Logger{SugaredLogger: log.GetLogger()}
+	}
+
 	return &UnifiedExecutor{
 		pluginManager:  pluginManager,
 		remoteExecutor: remoteExecutor,

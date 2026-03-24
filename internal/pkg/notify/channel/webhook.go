@@ -132,7 +132,7 @@ func (c *WebhookChannel) sendRequest(ctx context.Context, payload map[string]int
 }
 
 // Receive receives messages (for processing webhook callbacks)
-func (c *WebhookChannel) Receive(_ context.Context, message string) error {
+func (c *WebhookChannel) Receive(_ context.Context, _ string) error {
 	// Implement webhook receive logic
 	return nil
 }

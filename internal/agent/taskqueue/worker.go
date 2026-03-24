@@ -38,7 +38,12 @@ var runningStepRunCancel sync.Map
 // StartWorker starts the task queue worker. When execManager is non-nil, step run tasks
 // are executed via executor.Manager (events go through Outbox when SetEventPublisher is used);
 // otherwise the legacy executeStepRun (shell only) is used.
-func StartWorker(_ context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper, execManager *executor.Manager) (nova.TaskQueue, error) {
+func StartWorker(
+	_ context.Context,
+	agentConf *config.AgentConfig,
+	grpcClient *grpc.ClientWrapper,
+	execManager *executor.Manager,
+) (nova.TaskQueue, error) {
 	if agentConf == nil {
 		return nil, nil
 	}

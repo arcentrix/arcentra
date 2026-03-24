@@ -415,9 +415,9 @@ func (ul *UserService) ResetPassword(userID string, req *model.ResetPasswordReq)
 }
 
 // UpdateAvatar updates user avatar URL and clears cache
-func (ul *UserService) UpdateAvatar(userID, avatarUrl string) error {
+func (ul *UserService) UpdateAvatar(userID, avatarURL string) error {
 	// update avatar in database
-	if err := ul.userRepo.UpdateAvatar(userID, avatarUrl); err != nil {
+	if err := ul.userRepo.UpdateAvatar(userID, avatarURL); err != nil {
 		log.Errorw("failed to update user avatar", "userID", userID, "error", err)
 		return errors.New("failed to update user avatar")
 	}
@@ -431,7 +431,7 @@ func (ul *UserService) UpdateAvatar(userID, avatarUrl string) error {
 		}
 	}
 
-	log.Infow("user avatar updated successfully", "userID", userID, "avatarUrl", avatarUrl)
+	log.Infow("user avatar updated successfully", "userID", userID, "avatarURL", avatarURL)
 	return nil
 }
 

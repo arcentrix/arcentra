@@ -63,16 +63,11 @@ func (a *TimeAggregator) startTimer() {
 		return
 	}
 
-	// Stop old timer
-	if a.flushTimer != nil {
-		a.flushTimer.Stop()
-	}
-
-	// Create new timer
-	a.flushTimer = time.NewTimer(a.timeWindow)
+	timer := time.NewTimer(a.timeWindow)
+	a.flushTimer = timer
 	safe.Go(func() {
 		select {
-		case <-a.flushTimer.C:
+		case <-timer.C:
 			a.checkTimeWindow()
 		case <-a.stopCh:
 			return
@@ -134,16 +129,15 @@ func (a *TimeAggregator) resetTimerAfterFlush() {
 		return
 	}
 
-	// Stop old timer
 	if a.flushTimer != nil {
 		a.flushTimer.Stop()
 	}
 
-	// Create new timer
-	a.flushTimer = time.NewTimer(a.timeWindow)
+	timer := time.NewTimer(a.timeWindow)
+	a.flushTimer = timer
 	safe.Go(func() {
 		select {
-		case <-a.flushTimer.C:
+		case <-timer.C:
 			a.checkTimeWindow()
 		case <-a.stopCh:
 			return

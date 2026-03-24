@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/arcentrix/arcentra/pkg/log"
@@ -51,7 +52,7 @@ type Cron struct {
 	add      chan *Entry
 	snapshot chan []*Entry
 	remove   chan string
-	running  bool
+	running  atomic.Bool
 	ErrorLog *log.Logger
 	location *time.Location
 	mux      *sync.RWMutex
@@ -133,7 +134,6 @@ func NewWithLocation(location *time.Location, ops ...OpOption) *Cron {
 		stop:        make(chan struct{}),
 		snapshot:    make(chan []*Entry),
 		remove:      make(chan string),
-		running:     false,
 		ErrorLog:    nil,
 		location:    location,
 		mux:         new(sync.RWMutex),
@@ -211,7 +211,7 @@ func (c *Cron) Remove(name string) error {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 
-	if !c.running {
+	if !c.running.Load() {
 		p := c.pos(name)
 		if p == -1 {
 			return fmt.Errorf("no entry name: %s", name)
@@ -256,7 +256,7 @@ func (c *Cron) Schedule(schedule Schedule, cmd Job, names ...string) {
 		Job:      cmd,
 		Name:     name,
 	}
-	if !c.running {
+	if !c.running.Load() {
 		p := c.pos(name)
 		if p != -1 {
 			c.logf("Duplicate names not allowed")
@@ -275,7 +275,7 @@ func (c *Cron) Schedule(schedule Schedule, cmd Job, names ...string) {
 
 // Entries returns a snapshot of the cron entries.
 func (c *Cron) Entries() []*Entry {
-	if c.running {
+	if c.running.Load() {
 		c.snapshot <- nil
 		x := <-c.snapshot
 		return x
@@ -290,19 +290,17 @@ func (c *Cron) Location() *time.Location {
 
 // Start the cron scheduler in its own go-routine, or no-op if already started.
 func (c *Cron) Start() {
-	if c.running {
+	if !c.running.CompareAndSwap(false, true) {
 		return
 	}
-	c.running = true
 	go c.run()
 }
 
 // Run the cron scheduler, or no-op if already running.
 func (c *Cron) Run() {
-	if c.running {
+	if !c.running.CompareAndSwap(false, true) {
 		return
 	}
-	c.running = true
 	c.run()
 }
 
@@ -452,11 +450,10 @@ func (c *Cron) logf(format string, args ...interface{}) {
 
 // Stop stops the cron scheduler if it is running; otherwise it does nothing.
 func (c *Cron) Stop() {
-	if !c.running {
+	if !c.running.CompareAndSwap(true, false) {
 		return
 	}
 	c.stop <- struct{}{}
-	c.running = false
 }
 
 // Close Stop timer and all connection

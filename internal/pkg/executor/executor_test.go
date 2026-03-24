@@ -99,7 +99,7 @@ func TestExecutorManager_Execute(t *testing.T) {
 	executed := false
 	mockExec := &mockExecutor{
 		name: "test",
-		canExecute: func(req *ExecutionRequest) bool {
+		canExecute: func(_ *ExecutionRequest) bool {
 			return true
 		},
 		executeFunc: func(_ context.Context, _ *ExecutionRequest) (*ExecutionResult, error) {
@@ -436,7 +436,7 @@ func TestUnifiedExecutor_ExecuteRemotely_NoRemoteExecutor(t *testing.T) {
 func TestUnifiedExecutor_ExecuteLocally(t *testing.T) {
 	mockPlugin := &mockPlugin{
 		name: "test-plugin",
-		executeFunc: func(_ string, params, opts json.RawMessage) (json.RawMessage, error) {
+		executeFunc: func(_ string, _, _ json.RawMessage) (json.RawMessage, error) {
 			result := map[string]any{
 				"success":   true,
 				"exit_code": 0,
@@ -584,7 +584,7 @@ func TestPluginExecutor_CanExecute(t *testing.T) {
 func TestPluginExecutor_Execute(t *testing.T) {
 	mockPlugin := &mockPlugin{
 		name: "test-plugin",
-		executeFunc: func(_ string, params, opts json.RawMessage) (json.RawMessage, error) {
+		executeFunc: func(_ string, _, _ json.RawMessage) (json.RawMessage, error) {
 			result := map[string]any{
 				"success":   true,
 				"exit_code": 0,
@@ -714,7 +714,7 @@ func TestPluginExecutor_Execute_HTTPExecution(t *testing.T) {
 func TestPluginExecutor_Execute_ShellExecution(t *testing.T) {
 	mockPlugin := &mockPlugin{
 		name: "shell-plugin",
-		executeFunc: func(_ string, params, opts json.RawMessage) (json.RawMessage, error) {
+		executeFunc: func(_ string, _, _ json.RawMessage) (json.RawMessage, error) {
 			result := map[string]any{
 				"success":   true,
 				"exit_code": 0,
@@ -766,7 +766,7 @@ func TestPluginExecutor_Execute_ShellExecution(t *testing.T) {
 func TestPluginExecutor_Execute_HTTPExecution_EmptyURL(t *testing.T) {
 	mockPlugin := &mockPlugin{
 		name: "test-plugin",
-		executeFunc: func(_ string, params, opts json.RawMessage) (json.RawMessage, error) {
+		executeFunc: func(_ string, _, _ json.RawMessage) (json.RawMessage, error) {
 			result := map[string]any{
 				"success":   true,
 				"exit_code": 0,

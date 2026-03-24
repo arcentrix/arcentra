@@ -289,7 +289,12 @@ func (s *ProjectService) ListProjects(ctx context.Context, query *model.ProjectQ
 }
 
 // GetProjectsByOrgID lists projects by orgID.
-func (s *ProjectService) GetProjectsByOrgID(ctx context.Context, orgID string, pageNum, pageSize int, status *int) ([]*model.Project, int64, error) {
+func (s *ProjectService) GetProjectsByOrgID(
+	ctx context.Context,
+	orgID string,
+	pageNum, pageSize int,
+	status *int,
+) ([]*model.Project, int64, error) {
 	projects, total, err := s.projectRepo.ListByOrg(ctx, orgID, pageNum, pageSize, status)
 	if err != nil {
 		log.Errorw("get projects by org id failed", "orgID", orgID, "error", err)
@@ -298,8 +303,13 @@ func (s *ProjectService) GetProjectsByOrgID(ctx context.Context, orgID string, p
 	return projects, total, nil
 }
 
-// GetProjectsByUserId lists projects for user.
-func (s *ProjectService) GetProjectsByUserId(ctx context.Context, userID string, pageNum, pageSize int, orgID, role string) ([]*model.Project, int64, error) {
+// GetProjectsByUserID lists projects for user.
+func (s *ProjectService) GetProjectsByUserID(
+	ctx context.Context,
+	userID string,
+	pageNum, pageSize int,
+	orgID, role string,
+) ([]*model.Project, int64, error) {
 	projects, total, err := s.projectRepo.ListByUser(ctx, userID, pageNum, pageSize, orgID, role)
 	if err != nil {
 		log.Errorw("get projects by user id failed", "userID", userID, "error", err)
@@ -309,7 +319,11 @@ func (s *ProjectService) GetProjectsByUserId(ctx context.Context, userID string,
 }
 
 // UpdateProjectStatistics updates project statistics.
-func (s *ProjectService) UpdateProjectStatistics(ctx context.Context, projectID string, stats *model.ProjectStatisticsReq) (*model.Project, error) {
+func (s *ProjectService) UpdateProjectStatistics(
+	ctx context.Context,
+	projectID string,
+	stats *model.ProjectStatisticsReq,
+) (*model.Project, error) {
 	exists, err := s.projectRepo.Exists(ctx, projectID)
 	if err != nil {
 		log.Errorw("check project exists failed", "projectID", projectID, "error", err)

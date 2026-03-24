@@ -124,7 +124,11 @@ func (us *UploadService) getStorageProvider(ctx context.Context, storageID strin
 }
 
 // uploadToStorage uploads file to storage and returns response
-func (us *UploadService) uploadToStorage(ctx context.Context, file *multipart.FileHeader, storageID, objectPath, contentType string) (*UploadResponse, error) {
+func (us *UploadService) uploadToStorage(
+	ctx context.Context,
+	file *multipart.FileHeader,
+	storageID, objectPath, contentType string,
+) (*UploadResponse, error) {
 	if file == nil {
 		return nil, fmt.Errorf("file is required")
 	}
@@ -164,7 +168,11 @@ func (us *UploadService) uploadToStorage(ctx context.Context, file *multipart.Fi
 // UploadFile uploads a file to object storage
 // storageID: optional, if empty, use default storage
 // customPath: optional custom path, if empty, use default path structure
-func (us *UploadService) UploadFile(ctx context.Context, file *multipart.FileHeader, storageID string, customPath string) (*UploadResponse, error) {
+func (us *UploadService) UploadFile(
+	ctx context.Context,
+	file *multipart.FileHeader,
+	storageID, customPath string,
+) (*UploadResponse, error) {
 	// validate file size (max 100MB for general files)
 	if file.Size > maxFileSize {
 		return nil, fmt.Errorf("file size exceeds maximum limit of %d bytes", maxFileSize)

@@ -23,7 +23,6 @@ import (
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/log"
-	"github.com/arcentrix/arcentra/pkg/safe"
 	"github.com/arcentrix/arcentra/pkg/statemachine"
 	"golang.org/x/sync/errgroup"
 )
@@ -269,6 +268,11 @@ func NewContextPool(config *ContextPoolConfig) *ContextPool {
 		totalCount:      0,
 		activeCountCond: sync.NewCond(&sync.Mutex{}),
 		totalCountCond:  sync.NewCond(&sync.Mutex{}),
+		cleanupEg:       &errgroup.Group{},
+	}
+
+	if pool.config.Logger.SugaredLogger == nil {
+		pool.config.Logger = log.Logger{SugaredLogger: log.GetLogger()}
 	}
 
 	// Initialize sync.Pool for context reuse
@@ -649,14 +653,12 @@ func (p *ContextPool) handleEvictedContext(ctx context.Context, pc *Context) {
 	// For now, we'll just log and store metadata
 	p.config.Logger.Infow("Evicting context to cold storage", "pipelineId", pipelineID)
 
-	// Store to cold storage (async to avoid blocking)
-	safe.Go(func() {
-		// In a real implementation, serialize pc properly
-		// For now, we'll just mark it as stored
-		_ = p.config.StorageStrategy.Save(ctx, pipelineID, nil)
-		// After storing, return to sync.Pool
-		p.returnToSyncPool(pc)
-	})
+	// Store to cold storage and then return to sync.Pool.
+	// Keep this synchronous to avoid concurrent reuse of the same context object.
+	if err := p.config.StorageStrategy.Save(ctx, pipelineID, nil); err != nil {
+		p.config.Logger.Warnw("Failed to save evicted context to cold storage", "pipelineId", pipelineID, "error", err)
+	}
+	p.returnToSyncPool(pc)
 
 	p.mu.Lock()
 	p.totalCount--

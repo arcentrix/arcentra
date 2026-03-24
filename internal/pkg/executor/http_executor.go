@@ -39,6 +39,10 @@ type HTTPExecutor struct {
 
 // NewHTTPExecutor 创建 HTTP 执行器
 func NewHTTPExecutor(logger log.Logger) *HTTPExecutor {
+	if logger.SugaredLogger == nil {
+		logger = log.Logger{SugaredLogger: log.GetLogger()}
+	}
+
 	client := resty.New()
 	client.SetTimeout(30 * time.Second) // 默认超时 30 秒
 	client.SetRedirectPolicy(resty.FlexibleRedirectPolicy(15))

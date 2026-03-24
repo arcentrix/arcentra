@@ -249,21 +249,21 @@ func unmarshalSettings(settings datatypes.JSON) map[string]any {
 }
 
 // baseURLFromRepoURL extracts the base URL from the repository URL
-func baseURLFromRepoURL(repoUrl string) string {
-	repoUrl = strings.TrimSpace(repoUrl)
-	if repoUrl == "" {
+func baseURLFromRepoURL(repoURL string) string {
+	repoURL = strings.TrimSpace(repoURL)
+	if repoURL == "" {
 		return ""
 	}
-	if strings.HasPrefix(repoUrl, "http://") || strings.HasPrefix(repoUrl, "https://") {
-		u, err := url.Parse(repoUrl)
+	if strings.HasPrefix(repoURL, "http://") || strings.HasPrefix(repoURL, "https://") {
+		u, err := url.Parse(repoURL)
 		if err != nil || u.Scheme == "" || u.Host == "" {
 			return ""
 		}
 		return u.Scheme + "://" + u.Host
 	}
 	// git@host:owner/name.git
-	if i := strings.Index(repoUrl, "@"); i >= 0 {
-		rest := repoUrl[i+1:]
+	if i := strings.Index(repoURL, "@"); i >= 0 {
+		rest := repoURL[i+1:]
 		if j := strings.Index(rest, ":"); j >= 0 {
 			host := rest[:j]
 			if host != "" {
@@ -275,13 +275,13 @@ func baseURLFromRepoURL(repoUrl string) string {
 }
 
 // parseRepoFromURL parses the repository from the URL
-func parseRepoFromURL(repoUrl string) (scm.Repo, bool) {
-	repoUrl = strings.TrimSpace(repoUrl)
-	if repoUrl == "" {
+func parseRepoFromURL(repoURL string) (scm.Repo, bool) {
+	repoURL = strings.TrimSpace(repoURL)
+	if repoURL == "" {
 		return scm.Repo{}, false
 	}
-	if strings.HasPrefix(repoUrl, "http://") || strings.HasPrefix(repoUrl, "https://") {
-		u, err := url.Parse(repoUrl)
+	if strings.HasPrefix(repoURL, "http://") || strings.HasPrefix(repoURL, "https://") {
+		u, err := url.Parse(repoURL)
 		if err != nil {
 			return scm.Repo{}, false
 		}
@@ -295,8 +295,8 @@ func parseRepoFromURL(repoUrl string) (scm.Repo, bool) {
 		return scm.Repo{Host: u.Host, Owner: owner, Name: name, FullName: owner + "/" + name}, true
 	}
 	// git@host:owner/name.git
-	if i := strings.Index(repoUrl, "@"); i >= 0 {
-		rest := repoUrl[i+1:]
+	if i := strings.Index(repoURL, "@"); i >= 0 {
+		rest := repoURL[i+1:]
 		host := ""
 		path := ""
 		if j := strings.Index(rest, ":"); j >= 0 {

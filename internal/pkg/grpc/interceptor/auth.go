@@ -157,7 +157,7 @@ type TokenVerifier interface {
 // defaultTokenVerifier default token verifier using hardcoded token
 type defaultTokenVerifier struct{}
 
-func (v *defaultTokenVerifier) VerifyAgentToken(_ context.Context, token string, agentIDHint string) (string, error) {
+func (v *defaultTokenVerifier) VerifyAgentToken(_ context.Context, _ string, _ string) (string, error) {
 	// Default implementation: return empty to indicate token verification not supported
 	return "", fmt.Errorf("agent token verification not implemented")
 }

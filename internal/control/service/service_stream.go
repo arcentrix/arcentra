@@ -291,13 +291,13 @@ func (s *StreamServiceImpl) StreamPipelineStatus(
 				continue
 			}
 			data := getMapAny(event, "data")
-			runId := getString(event, "pipelineRunId")
-			if runId == "" {
-				runId = info.pipelineID
+			runID := getString(event, "pipelineRunId")
+			if runID == "" {
+				runID = info.pipelineID
 			}
 			if err := stream.Send(&streamv1.StreamPipelineStatusResponse{
 				PipelineId:     info.pipelineID,
-				RunId:          runId,
+				RunId:          runID,
 				Namespace:      info.pipelineID,
 				Status:         toPipelineStatus(info.status, info.eventType),
 				PreviousStatus: pipelinev1.PipelineStatus_PIPELINE_STATUS_UNSPECIFIED,
@@ -414,13 +414,13 @@ func (s *StreamServiceImpl) StreamAgentStatus(
 			if !strings.Contains(eventType, "agent") {
 				continue
 			}
-			agentId := getString(event, "agentId")
-			if !containsOrEmpty(req.AgentIds, agentId) {
+			agentID := getString(event, "agentId")
+			if !containsOrEmpty(req.AgentIds, agentID) {
 				continue
 			}
 			data := getMapAny(event, "data")
 			if err := stream.Send(&streamv1.StreamAgentStatusResponse{
-				AgentId:               agentId,
+				AgentId:               agentID,
 				Hostname:              getString(event, "agentName"),
 				Ip:                    getString(event, "ip"),
 				Status:                toAgentStatus(getString(data, "status"), eventType),
@@ -468,18 +468,18 @@ func (s *StreamServiceImpl) StreamEvents(
 			if !matchEventTypeFilter(req.EventTypes, eventType) {
 				continue
 			}
-			resourceType, resourceId := detectResource(event)
+			resourceType, resourceID := detectResource(event)
 			if strings.TrimSpace(req.ResourceType) != "" && req.ResourceType != resourceType {
 				continue
 			}
-			if len(req.ResourceIds) > 0 && !containsOrEmpty(req.ResourceIds, resourceId) {
+			if len(req.ResourceIds) > 0 && !containsOrEmpty(req.ResourceIds, resourceID) {
 				continue
 			}
 			if err := stream.Send(&streamv1.StreamEventsResponse{
 				EventId:      fmt.Sprintf("evt-%d", time.Now().UnixNano()),
 				EventType:    eventType,
 				Timestamp:    time.Now().Unix(),
-				ResourceId:   resourceId,
+				ResourceId:   resourceID,
 				ResourceType: resourceType,
 				Title:        getString(event, "title"),
 				Description:  getString(event, "description"),
@@ -546,14 +546,14 @@ func matchJobStreamRequest(req *streamv1.StreamJobStatusRequest, info eventInfo)
 	return info.jobID != ""
 }
 
-func matchPipelineStreamRequest(req *streamv1.StreamPipelineStatusRequest, pipelineID, pipelineRunId string) bool {
+func matchPipelineStreamRequest(req *streamv1.StreamPipelineStatusRequest, pipelineID, pipelineRunID string) bool {
 	if req == nil {
 		return false
 	}
 	if len(req.PipelineIds) > 0 && !containsOrEmpty(req.PipelineIds, pipelineID) {
 		return false
 	}
-	if len(req.PipelineRunIds) > 0 && !containsOrEmpty(req.PipelineRunIds, pipelineRunId) {
+	if len(req.PipelineRunIds) > 0 && !containsOrEmpty(req.PipelineRunIds, pipelineRunID) {
 		return false
 	}
 	return strings.TrimSpace(pipelineID) != ""
@@ -746,7 +746,7 @@ func matchEventTypeFilter(filters []streamv1.EventType, eventType streamv1.Event
 	return slices.Contains(filters, eventType)
 }
 
-func detectResource(event map[string]any) (resourceType, resourceId string) {
+func detectResource(event map[string]any) (resourceType, resourceID string) {
 	info := parseEventInfo(event)
 	if info.stepRunID != "" {
 		return "step_run", info.stepRunID
@@ -757,8 +757,8 @@ func detectResource(event map[string]any) (resourceType, resourceId string) {
 	if info.pipelineID != "" {
 		return "pipeline", info.pipelineID
 	}
-	if agentId := getString(event, "agentId"); agentId != "" {
-		return "agent", agentId
+	if agentID := getString(event, "agentId"); agentID != "" {
+		return "agent", agentID
 	}
 	return "", ""
 }

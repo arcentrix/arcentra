@@ -121,7 +121,7 @@ func (c *EmailChannel) sendEmail(_ context.Context, subject, body string) error 
 }
 
 // Receive receives email (POP3/IMAP, not implemented here)
-func (c *EmailChannel) Receive(_ context.Context, message string) error {
+func (c *EmailChannel) Receive(_ context.Context, _ string) error {
 	return fmt.Errorf("email receive not implemented")
 }
 

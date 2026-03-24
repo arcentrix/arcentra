@@ -37,6 +37,10 @@ const namePlugin = "plugin"
 
 // NewPluginExecutor 创建插件执行器。
 func NewPluginExecutor(pluginManager *plugin.Manager, logger log.Logger) *PluginExecutor {
+	if logger.SugaredLogger == nil {
+		logger = log.Logger{SugaredLogger: log.GetLogger()}
+	}
+
 	return &PluginExecutor{
 		pluginManager: pluginManager,
 		httpExecutor:  NewHTTPExecutor(logger),

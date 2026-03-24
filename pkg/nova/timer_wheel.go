@@ -88,9 +88,8 @@ func (tw *TimerWheel) Start() {
 // Stop stops the timer wheel
 func (tw *TimerWheel) Stop() {
 	tw.mu.Lock()
-	defer tw.mu.Unlock()
-
 	if tw.ticker == nil {
+		tw.mu.Unlock()
 		return
 	}
 
@@ -104,10 +103,14 @@ func (tw *TimerWheel) Stop() {
 
 	tw.ticker.Stop()
 	tw.ticker = nil
+	tw.mu.Unlock()
+
 	tw.wg.Wait()
 
 	// Create new stopCh for potential restart
+	tw.mu.Lock()
 	tw.stopCh = make(chan struct{})
+	tw.mu.Unlock()
 }
 
 // Add adds a delayed task
@@ -154,11 +157,15 @@ func (tw *TimerWheel) AddAt(task *Task, executeAt time.Time, callback func(*Task
 
 // run is the timer wheel running loop
 func (tw *TimerWheel) run(tickerC <-chan time.Time) {
-	select {
-	case <-tickerC:
-		tw.tick()
-	case <-tw.stopCh:
-		return
+	defer tw.wg.Done()
+
+	for {
+		select {
+		case <-tickerC:
+			tw.tick()
+		case <-tw.stopCh:
+			return
+		}
 	}
 }
 

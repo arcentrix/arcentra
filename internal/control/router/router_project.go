@@ -251,7 +251,7 @@ func (rt *Router) getUserProjects(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	projects, total, err := projectService.GetProjectsByUserId(c.Context(), claims.UserID, pageNum, pageSize, orgID, role)
+	projects, total, err := projectService.GetProjectsByUserID(c.Context(), claims.UserID, pageNum, pageSize, orgID, role)
 	if err != nil {
 		log.Errorw("get projects by user id failed", "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())

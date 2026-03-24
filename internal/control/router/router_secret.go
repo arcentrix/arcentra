@@ -28,13 +28,13 @@ func (rt *Router) secretRouter(r fiber.Router, authMiddleware fiber.Handler) {
 	secretGroup := r.Group("/secrets")
 	{
 		// Secret routes (authentication required)
-		secretGroup.Post("/", authMiddleware, rt.createSecret)                          // POST /secrets - create secret
-		secretGroup.Get("/", authMiddleware, rt.getSecretList)                          // GET /secrets - list secrets
-		secretGroup.Get("/:secretID", authMiddleware, rt.getSecret)                     // GET /secrets/:secretID - get secret (masked)
-		secretGroup.Get("/:secretID/value", authMiddleware, rt.getSecretValue)          // GET /secrets/:secretID/value - get secret value (decrypted)
-		secretGroup.Put("/:secretID", authMiddleware, rt.updateSecret)                  // PUT /secrets/:secretID - update secret
-		secretGroup.Delete("/:secretID", authMiddleware, rt.deleteSecret)               // DELETE /secrets/:secretID - delete secret
-		secretGroup.Get("/scope/:scope/:scopeID", authMiddleware, rt.getSecretsByScope) // GET /secrets/scope/:scope/:scopeID - get secrets by scope
+		secretGroup.Post("/", authMiddleware, rt.createSecret)      // create secret
+		secretGroup.Get("/", authMiddleware, rt.getSecretList)      // list secrets
+		secretGroup.Get("/:secretID", authMiddleware, rt.getSecret) // get secret (masked)
+		secretGroup.Get("/:secretID/value", authMiddleware, rt.getSecretValue)
+		secretGroup.Put("/:secretID", authMiddleware, rt.updateSecret) // update secret
+		secretGroup.Delete("/:secretID", authMiddleware, rt.deleteSecret)
+		secretGroup.Get("/scope/:scope/:scopeID", authMiddleware, rt.getSecretsByScope)
 	}
 }
 

@@ -54,7 +54,12 @@ const (
 )
 
 // NewAgentTokenVerifier creates a new agent token verifier
-func NewAgentTokenVerifier(agentService *service.AgentService, agentRepo repo.IAgentRepository, generalSettingsService *service.GeneralSettingsService, c cache.ICache) TokenVerifier {
+func NewAgentTokenVerifier(
+	agentService *service.AgentService,
+	agentRepo repo.IAgentRepository,
+	generalSettingsService *service.GeneralSettingsService,
+	c cache.ICache,
+) TokenVerifier {
 	return &agentTokenVerifier{
 		agentService:           agentService,
 		agentRepo:              agentRepo,

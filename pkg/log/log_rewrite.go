@@ -104,6 +104,9 @@ func Sync() error {
 		if strings.Contains(err.Error(), "bad file descriptor") {
 			return nil
 		}
+		if strings.Contains(err.Error(), "invalid argument") {
+			return nil
+		}
 		return err
 	}
 	return nil

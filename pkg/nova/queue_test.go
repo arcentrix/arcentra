@@ -154,8 +154,8 @@ func TestNewTaskQueue_DefaultValues(t *testing.T) {
 }
 
 func TestConstants(t *testing.T) {
-	if DefaultGroupID != "TASK_QUEUE_GROUP_%d" {
-		t.Errorf("expected DefaultGroupID to be 'TASK_QUEUE_GROUP_%%d', got %s", DefaultGroupID)
+	if DefaultGroupID != "TASK_QUEUE_GROUP_%s" {
+		t.Errorf("expected DefaultGroupID to be 'TASK_QUEUE_GROUP_%%s', got %s", DefaultGroupID)
 	}
 	if DefaultTopicPrefix != "TASK_QUEUE" {
 		t.Errorf("expected DefaultTopicPrefix to be 'TASK_QUEUE', got %s", DefaultTopicPrefix)

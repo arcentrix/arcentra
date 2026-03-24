@@ -647,9 +647,9 @@ func (c *Context) EvalCondition(conditionExpr string) (bool, error) {
 }
 
 // EvalConditionWithContext evaluates a condition with additional context
-func (c *Context) EvalConditionWithContext(conditionExpr string, context map[string]any) (bool, error) {
+func (c *Context) EvalConditionWithContext(conditionExpr string, ctxData map[string]any) (bool, error) {
 	if c.execCtx != nil {
-		return c.execCtx.EvalConditionWithContext(conditionExpr, context)
+		return c.execCtx.EvalConditionWithContext(conditionExpr, ctxData)
 	}
 	return true, nil
 }

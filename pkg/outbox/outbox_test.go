@@ -331,7 +331,10 @@ func TestOutbox_NoCommitOnSendFailure(t *testing.T) {
 		MaxDiskUsageMB: 100,
 	}
 	cfg.SetDefaults()
-	mock := &failingThenOKSender{}
+	mock := &failingThenOKSender{
+		firstSendFailed: make(chan struct{}),
+		allowRetry:      make(chan struct{}),
+	}
 	o, err := NewOutbox(cfg, mock)
 	if err != nil {
 		t.Fatal(err)
@@ -344,9 +347,13 @@ func TestOutbox_NoCommitOnSendFailure(t *testing.T) {
 	ctx := context.Background()
 	_, _ = o.Append(ctx, []byte(`{"n":1}`))
 	_, _ = o.Append(ctx, []byte(`{"n":2}`))
-	time.Sleep(20 * time.Millisecond) // let flush
-	// First sendBatch: Send fails -> commit must not advance
-	time.Sleep(30 * time.Millisecond) // allow 2 ticker cycles
+	select {
+	case <-mock.firstSendFailed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for first send failure")
+	}
+
+	// First sendBatch failed: commit must not advance.
 	cs := NewCommitStore(filepath.Join(dir, "agent1"))
 	lastAcked, err := cs.Read()
 	if err != nil {
@@ -355,9 +362,18 @@ func TestOutbox_NoCommitOnSendFailure(t *testing.T) {
 	if lastAcked != 0 {
 		t.Errorf("after first Send failure commit must stay 0, got lastAcked=%d", lastAcked)
 	}
-	// Next sendBatch: Send succeeds -> commit advances
-	time.Sleep(30 * time.Millisecond)
-	lastAcked2, _ := cs.Read()
+
+	// Allow retries and wait until commit advances.
+	close(mock.allowRetry)
+	deadline := time.Now().Add(2 * time.Second)
+	var lastAcked2 uint64
+	for time.Now().Before(deadline) {
+		lastAcked2, _ = cs.Read()
+		if lastAcked2 >= 2 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if lastAcked2 < 2 {
 		t.Errorf("after successful Send commit should be >= 2, got lastAcked=%d", lastAcked2)
 	}
@@ -372,8 +388,10 @@ func TestOutbox_NoCommitOnSendFailure(t *testing.T) {
 }
 
 type failingThenOKSender struct {
-	callCount    int
-	lastKnownSeq []uint64
+	callCount       int
+	lastKnownSeq    []uint64
+	firstSendFailed chan struct{}
+	allowRetry      chan struct{}
 }
 
 func (m *failingThenOKSender) Send(_ context.Context, lastKnownSeq uint64, events []Event) (SendResult, error) {
@@ -383,7 +401,13 @@ func (m *failingThenOKSender) Send(_ context.Context, lastKnownSeq uint64, event
 	}
 	m.lastKnownSeq = append(m.lastKnownSeq, lastKnownSeq)
 	if m.callCount == 1 {
+		if m.firstSendFailed != nil {
+			close(m.firstSendFailed)
+		}
 		return SendResult{}, errors.New("network error")
+	}
+	if m.allowRetry != nil {
+		<-m.allowRetry
 	}
 	if len(events) == 0 {
 		return SendResult{}, nil

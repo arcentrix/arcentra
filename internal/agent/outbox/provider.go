@@ -46,7 +46,7 @@ func ProvideOutbox(ac *config.AgentConfig, grpcClient *grpc.ClientWrapper) (*out
 	return outbox.NewOutbox(cfg, sender)
 }
 
-// OutboxConfigFromAgentConfig builds outbox.Config from agent config.
+// ConfigFromAgentConfig builds outbox.Config from agent config.
 // AgentID is taken from ac.Agent.ID; WALDir is 工作目录/data/wal (workspaceDir/data/wal, or "./data/wal" when workspaceDir is empty).
 func ConfigFromAgentConfig(ac *config.AgentConfig) outbox.Config {
 	workDir := ac.Agent.WorkspaceDir
