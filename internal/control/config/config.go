@@ -18,21 +18,51 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/mq/kafka"
-	"github.com/arcentrix/arcentra/pkg/nova"
+	"github.com/arcentrix/arcentra/pkg/message/mq/kafka"
+	"github.com/arcentrix/arcentra/pkg/message/nova"
+	"github.com/arcentrix/arcentra/pkg/store/cache"
+	"github.com/arcentrix/arcentra/pkg/store/database"
+	"github.com/arcentrix/arcentra/pkg/telemetry/log"
+	"github.com/arcentrix/arcentra/pkg/telemetry/metrics"
+	"github.com/arcentrix/arcentra/pkg/telemetry/pprof"
+	"github.com/arcentrix/arcentra/pkg/telemetry/trace"
+	"github.com/arcentrix/arcentra/pkg/transport/http"
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
-
-	"github.com/arcentrix/arcentra/pkg/cache"
-	"github.com/arcentrix/arcentra/pkg/database"
-	"github.com/arcentrix/arcentra/pkg/log"
-	"github.com/arcentrix/arcentra/pkg/metrics"
-	"github.com/arcentrix/arcentra/pkg/pprof"
-	"github.com/arcentrix/arcentra/pkg/trace"
 )
 
+// GrpcConf holds gRPC server/client configuration.
+type GrpcConf struct {
+	Host             string `mapstructure:"host"`
+	Port             int    `mapstructure:"port"`
+	MaxConnections   int    `mapstructure:"maxConnections"`
+	ReadWriteTimeout int    `mapstructure:"readWriteTimeout"`
+}
+
+// KafkaSettings holds Kafka connection settings for consumers/producers.
+type KafkaSettings struct {
+	BootstrapServers string
+	SecurityProtocol string
+	Sasl             SaslSettings
+	Ssl              SslSettings
+}
+
+// SaslSettings holds SASL authentication settings.
+type SaslSettings struct {
+	Mechanism string
+	Username  string
+	Password  string
+}
+
+// SslSettings holds TLS/SSL settings.
+type SslSettings struct {
+	CaFile   string
+	CertFile string
+	KeyFile  string
+	Password string
+}
+
+// EventsConfig holds event sourcing configuration.
 type EventsConfig struct {
 	SourcePrefix string `mapstructure:"sourcePrefix"`
 	Timeout      int    `mapstructure:"timeout"`
@@ -53,9 +83,10 @@ type TaskQueueConfig struct {
 	MessageCodec      string `mapstructure:"messageCodec"`
 }
 
+// AppConfig is the top-level application configuration.
 type AppConfig struct {
 	Log          log.Conf             `mapstructure:"log" json:"Log"`
-	Grpc         grpc.Conf            `mapstructure:"grpc" json:"Grpc"`
+	Grpc         GrpcConf             `mapstructure:"grpc" json:"Grpc"`
 	HTTP         http.HTTP            `mapstructure:"http" json:"Http"`
 	Database     database.Database    `mapstructure:"database" json:"Database"`
 	Redis        cache.Redis          `mapstructure:"redis" json:"Redis"`

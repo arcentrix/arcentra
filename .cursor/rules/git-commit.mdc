@@ -1,0 +1,36 @@
+---
+name: git-commit
+description: Git commit message 规范与生成指南
+---
+
+# Git Commit Message 规范
+
+## 基本要求
+
+- 生成 commit message 时请使用英文
+- commit message 应该简洁明了，使用英文描述修改内容
+- Git commit message 禁止使用动态助词 / 语气助词（如：了、啊、吧、呢、嘛），统一使用：动作动词 + 客体（英文或名词短语）
+
+## 格式规范
+
+格式：`[type] 简短的英文描述`
+
+## Type 类型
+
+- `feat`: new feature
+- `fix`: bug fix
+- `refactor`: code refactoring
+- `chore`: build process or auxiliary tool changes
+- `docs`: document changes
+- `style`: code formatting (no functional changes)
+- `test`: add missing tests or fix existing tests
+
+## 示例
+
+- `feat: add gRPC trace interceptor`
+- `fix: fix gRPC trace interceptor bug`
+- `refactor: refactor gRPC trace interceptor code`
+- `chore: update build process or auxiliary tool`
+- `docs: update document`
+- `style: format code`
+- `test: add missing tests or fix existing tests`

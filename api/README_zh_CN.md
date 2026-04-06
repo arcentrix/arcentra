@@ -227,8 +227,8 @@ buf format -w
 
 ## 相关文档
 
-- [Pipeline DSL 文档](../docs/Pipeline%20DSL.md)
-- [Pipeline Schema 文档](../docs/pipeline_schema.md)
+- [Pipeline DSL 文档](../docs/pipeline/dsl.md)
+- [Pipeline Schema 文档](../docs/pipeline/schema.md)
 - [实现指南](../docs/IMPLEMENTATION_GUIDE.md)
 - [Buf 文档](https://docs.buf.build/)
 - [gRPC 文档](https://grpc.io/docs/)

@@ -15,8 +15,8 @@
 package router
 
 import (
-	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/shutdown"
+	"github.com/arcentrix/arcentra/pkg/lifecycle/shutdown"
+	"github.com/arcentrix/arcentra/pkg/transport/http"
 	"github.com/google/wire"
 )
 

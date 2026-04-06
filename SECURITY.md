@@ -1,4 +1,3 @@
-English | [简体中文](./SECURITY_zh_CN.md)
 
 # Reporting Security Issues
 

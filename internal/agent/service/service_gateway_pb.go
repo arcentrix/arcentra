@@ -19,8 +19,8 @@ import (
 	"fmt"
 
 	gatewayv1 "github.com/arcentrix/arcentra/api/gateway/v1"
-	grpcclient "github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/pkg/outbox"
+	grpcclient "github.com/arcentrix/arcentra/internal/adapter/grpc"
+	"github.com/arcentrix/arcentra/pkg/message/outbox"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"

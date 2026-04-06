@@ -17,13 +17,13 @@
 package main
 
 import (
+	grpc "github.com/arcentrix/arcentra/internal/adapter/grpc"
 	"github.com/arcentrix/arcentra/internal/agent/bootstrap"
 	"github.com/arcentrix/arcentra/internal/agent/config"
-	agentoutbox "github.com/arcentrix/arcentra/internal/agent/outbox"
+	"github.com/arcentrix/arcentra/internal/agent/outbox"
 	"github.com/arcentrix/arcentra/internal/agent/router"
-	"github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/pkg/log"
-	"github.com/arcentrix/arcentra/pkg/metrics"
+	"github.com/arcentrix/arcentra/pkg/telemetry/log"
+	"github.com/arcentrix/arcentra/pkg/telemetry/metrics"
 	"github.com/google/wire"
 )
 
@@ -36,13 +36,13 @@ func initAgent(configPath string) (*bootstrap.Agent, func(), error) {
 		// 指标层（依赖 config）
 		metrics.ProviderSet,
 		// gRPC 客户端层（依赖 config 和 log）
-		grpc.ProviderSet,
+		grpc.ClientProviderSet,
 		// 路由层（依赖 config 和 log）
 		router.ProviderSet,
 		// Outbox（依赖 config 和 grpc）
-		agentoutbox.ProvideOutbox,
+		outbox.ProvideOutbox,
 		// 执行器（依赖 Outbox，ShellExecutor + Publisher）
-		agentoutbox.ProvideExecutorManager,
+		outbox.ProvideExecutorManager,
 		// 应用层
 		bootstrap.NewAgent,
 	))

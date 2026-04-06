@@ -106,24 +106,6 @@ linters:
       - linters:
           - revive
         text: 'should have comment or be unexported'
-      - linters:
-          - dupl
-        path: repo_project_team_access\.go
-      - linters:
-          - dupl
-        path: repo_team_member\.go
-      - linters:
-          - dupl
-        path: router_agent\.go
-      - linters:
-          - dupl
-        path: router_role\.go
-      - linters:
-          - dupl
-        path: router_project\.go
-      - linters:
-          - dupl
-        path: router_user_ext\.go
     paths:
       - third_party$
       - builtin$

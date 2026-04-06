@@ -15,7 +15,7 @@
 package main
 
 import (
-	"github.com/arcentrix/arcentra/pkg/version"
+	"github.com/arcentrix/arcentra/pkg/foundation/version"
 	"github.com/spf13/cobra"
 )
 

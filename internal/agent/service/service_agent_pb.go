@@ -22,14 +22,14 @@ import (
 	"time"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
+	"github.com/arcentrix/arcentra/internal/adapter/grpc"
 	"github.com/arcentrix/arcentra/internal/agent/config"
-	"github.com/arcentrix/arcentra/internal/agent/taskqueue"
-	"github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/pkg/cron"
-	"github.com/arcentrix/arcentra/pkg/log"
-	"github.com/arcentrix/arcentra/pkg/metrics"
-	"github.com/arcentrix/arcentra/pkg/net"
-	"github.com/arcentrix/arcentra/pkg/version"
+	"github.com/arcentrix/arcentra/internal/agent/modules/taskqueue"
+	"github.com/arcentrix/arcentra/pkg/foundation/net"
+	"github.com/arcentrix/arcentra/pkg/foundation/version"
+	"github.com/arcentrix/arcentra/pkg/lifecycle/cron"
+	"github.com/arcentrix/arcentra/pkg/telemetry/log"
+	"github.com/arcentrix/arcentra/pkg/telemetry/metrics"
 )
 
 // AgentServiceImpl implements agent.v1.AgentServiceServer

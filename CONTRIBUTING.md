@@ -1,7 +1,5 @@
 # Contributing Guide
 
-English | [简体中文](./CONTRIBUTING_zh_CN.md)
-
 Thank you for considering contributing to Arcentra. This guide explains how to report issues, propose changes, and contribute code.
 
 ---

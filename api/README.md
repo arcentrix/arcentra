@@ -485,8 +485,8 @@ Agent should:
 
 ## Related Documentation
 
-- [Pipeline DSL Documentation](../docs/Pipeline%20DSL.md)
-- [Pipeline Schema Documentation](../docs/pipeline_schema.md)
+- [Pipeline DSL Documentation](../docs/pipeline/dsl.md)
+- [Pipeline Schema Documentation](../docs/pipeline/schema.md)
 - [Implementation Guide](../docs/IMPLEMENTATION_GUIDE.md)
 - [Buf Documentation](https://docs.buf.build/)
 - [gRPC Documentation](https://grpc.io/docs/)

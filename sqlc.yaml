@@ -19,12 +19,12 @@ version: "2"
 
 sql:
   - engine: "mysql"
-    schema: "internal/db/schema"
-    queries: "internal/db/sql"
+    schema: "internal/dal/schema"
+    queries: "internal/dal/sql"
     gen:
       go:
-        package: "db"
-        out: "internal/db/queries"
+        package: "dal"
+        out: "internal/dal/queries"
         sql_package: "database/sql"
         sql_driver: "github.com/go-sql-driver/mysql"
         emit_interface: true

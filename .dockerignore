@@ -2,3 +2,7 @@ deploy/
 logs/
 docs/
 *.md
+.git
+.idea
+.vscode
+.cursor

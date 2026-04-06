@@ -17,11 +17,11 @@ package router
 import (
 	"time"
 
-	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/http/middleware"
-	"github.com/arcentrix/arcentra/pkg/log"
-	"github.com/arcentrix/arcentra/pkg/shutdown"
-	"github.com/arcentrix/arcentra/pkg/version"
+	"github.com/arcentrix/arcentra/pkg/foundation/version"
+	"github.com/arcentrix/arcentra/pkg/lifecycle/shutdown"
+	"github.com/arcentrix/arcentra/pkg/telemetry/log"
+	"github.com/arcentrix/arcentra/pkg/transport/http"
+	"github.com/arcentrix/arcentra/pkg/transport/http/middleware"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/pprof"
 	"github.com/gofiber/fiber/v2/middleware/recover"

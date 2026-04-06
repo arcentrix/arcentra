@@ -85,7 +85,7 @@ rotateNum = 3
 rotateSize = 256
 
 # ------------------------------------------------------------------------------
-# 多 category 日志（pkg/logger）：使用 logger.InitMulti(multiConf) 时读取本段
+# 多 category 日志（shared/logger）：使用 logger.InitMulti(multiConf) 时读取本段
 # 与 [log] 二选一或并存；若使用本段，需在代码中从 viper 解析 "logger" 得到 logger.MultiConf
 # 使用方式：logger.Category("http").Infow(...) 等
 # ------------------------------------------------------------------------------

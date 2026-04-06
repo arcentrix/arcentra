@@ -18,9 +18,14 @@ import (
 	"flag"
 
 	"github.com/arcentrix/arcentra/internal/control/bootstrap"
-	_ "github.com/arcentrix/arcentra/pkg/plugins/git"
-	_ "github.com/arcentrix/arcentra/pkg/plugins/svn"
+	"github.com/arcentrix/arcentra/pkg/foundation/id"
+	_ "github.com/arcentrix/arcentra/pkg/integration/plugins/git"
+	_ "github.com/arcentrix/arcentra/pkg/integration/plugins/svn"
 )
+
+func ProvideIDGenerator() func() string {
+	return id.ShortID
+}
 
 var (
 	configFile       string

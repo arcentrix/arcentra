@@ -1,4 +1,4 @@
-// Copyright 2025 Arcentra Authors.
+// Copyright 2026 Arcentra Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,46 +17,49 @@
 package main
 
 import (
+	"github.com/arcentrix/arcentra/internal/adapter"
+	"github.com/arcentrix/arcentra/internal/case/agent"
+	"github.com/arcentrix/arcentra/internal/case/execution"
+	"github.com/arcentrix/arcentra/internal/case/identity"
+	"github.com/arcentrix/arcentra/internal/case/pipeline"
+	"github.com/arcentrix/arcentra/internal/case/project"
 	"github.com/arcentrix/arcentra/internal/control/bootstrap"
 	"github.com/arcentrix/arcentra/internal/control/config"
-	"github.com/arcentrix/arcentra/internal/control/repo"
-	"github.com/arcentrix/arcentra/internal/control/router"
-	"github.com/arcentrix/arcentra/internal/control/service"
-	"github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/internal/pkg/storage"
-	"github.com/arcentrix/arcentra/pkg/cache"
-	"github.com/arcentrix/arcentra/pkg/database"
-	"github.com/arcentrix/arcentra/pkg/log"
-	"github.com/arcentrix/arcentra/pkg/metrics"
-	"github.com/arcentrix/arcentra/pkg/plugin"
+	"github.com/arcentrix/arcentra/internal/infra/persistence"
+	infraStorage "github.com/arcentrix/arcentra/internal/infra/storage"
+	"github.com/arcentrix/arcentra/pkg/integration/plugin"
+	"github.com/arcentrix/arcentra/pkg/lifecycle/shutdown"
+	"github.com/arcentrix/arcentra/pkg/store/cache"
+	"github.com/arcentrix/arcentra/pkg/store/database"
+	"github.com/arcentrix/arcentra/pkg/telemetry/log"
+	"github.com/arcentrix/arcentra/pkg/telemetry/metrics"
 	"github.com/google/wire"
 )
 
 func initApp(configPath string, pluginConfigs map[string]any) (*bootstrap.App, func(), error) {
 	panic(wire.Build(
-		// 配置层
+		// control
 		config.ProviderSet,
-		// 日志层（依赖 config）
 		log.ProviderSet,
-		// 数据库层（依赖 config, log, ctx）
-		database.ProviderSet,
-		// 缓存层（依赖 config）
 		cache.ProviderSet,
-		// 指标层（依赖 config）
+		database.ProviderSet,
 		metrics.ProviderSet,
-		// 仓储层（依赖 database）
-		repo.ProviderSet,
-		// 存储层（依赖 repo）
-		storage.ProviderSet,
-		// 插件层（依赖 config, database）
+		shutdown.NewManager,
+		ProvideIDGenerator,
+		// infra
+		persistence.ProviderSet,
+		infraStorage.ProviderSet,
+		// case
+		agent.ProviderSet,
+		identity.ProviderSet,
+		project.ProviderSet,
+		pipeline.ProviderSet,
+		execution.ProviderSet,
+		// adapter
+		adapter.ProviderSet,
+		// plugin
 		plugin.ProviderSet,
-		// 服务层（依赖 repo, storage, plugin, database, cache）
-		service.ProviderSet,
-		// 路由层（依赖 config, repo, service, storage, plugin）
-		router.ProviderSet,
-		// gRPC 服务层
-		grpc.ProviderSet,
-		// 应用层
+		// bootstrap
 		bootstrap.NewApp,
 	))
 }

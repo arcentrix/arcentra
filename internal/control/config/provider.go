@@ -15,18 +15,16 @@
 package config
 
 import (
-	"github.com/arcentrix/arcentra/internal/control/service"
-	"github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/pkg/cache"
-	"github.com/arcentrix/arcentra/pkg/database"
-	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/log"
-	"github.com/arcentrix/arcentra/pkg/metrics"
-	"github.com/arcentrix/arcentra/pkg/pprof"
+	"github.com/arcentrix/arcentra/pkg/store/cache"
+	"github.com/arcentrix/arcentra/pkg/store/database"
+	"github.com/arcentrix/arcentra/pkg/telemetry/log"
+	"github.com/arcentrix/arcentra/pkg/telemetry/metrics"
+	"github.com/arcentrix/arcentra/pkg/telemetry/pprof"
+	"github.com/arcentrix/arcentra/pkg/transport/http"
 	"github.com/google/wire"
 )
 
-// ProviderSet 提供配置层相关的依赖
+// ProviderSet provides all configuration-layer dependencies.
 var ProviderSet = wire.NewSet(
 	ProvideConf,
 	ProvideHTTPConfig,
@@ -39,46 +37,46 @@ var ProviderSet = wire.NewSet(
 	ProvideKafkaSettings,
 )
 
-// ProvideConf 提供应用配置
+// ProvideConf provides the application config.
 func ProvideConf(configPath string) *AppConfig {
 	return NewConf(configPath)
 }
 
-// ProvideHTTPConfig 提供 HTTP 配置
+// ProvideHTTPConfig provides HTTP configuration.
 func ProvideHTTPConfig(appConf *AppConfig) *http.HTTP {
 	httpConfig := &appConf.HTTP
 	httpConfig.SetDefaults()
 	return httpConfig
 }
 
-// ProvideGrpcConfig 提供 gRPC 配置
-func ProvideGrpcConfig(appConf *AppConfig) *grpc.Conf {
+// ProvideGrpcConfig provides gRPC configuration.
+func ProvideGrpcConfig(appConf *AppConfig) *GrpcConf {
 	return &appConf.Grpc
 }
 
-// ProvideLogConfig 提供日志配置
+// ProvideLogConfig provides log configuration.
 func ProvideLogConfig(appConf *AppConfig) *log.Conf {
 	return &appConf.Log
 }
 
-// ProvideDatabaseConfig 提供数据库配置
+// ProvideDatabaseConfig provides database configuration.
 func ProvideDatabaseConfig(appConf *AppConfig) database.Database {
 	return appConf.Database
 }
 
-// ProvideRedisConfig 提供 Redis 配置
+// ProvideRedisConfig provides Redis configuration.
 func ProvideRedisConfig(appConf *AppConfig) cache.Redis {
 	return appConf.Redis
 }
 
-// ProvideMetricsConfig 提供 Metrics 配置
+// ProvideMetricsConfig provides metrics configuration.
 func ProvideMetricsConfig(appConf *AppConfig) metrics.Config {
 	metricsConfig := appConf.Metrics
 	metricsConfig.SetDefaults()
 	return metricsConfig
 }
 
-// ProvidePprofConfig 提供 Pprof 配置
+// ProvidePprofConfig provides pprof configuration.
 func ProvidePprofConfig(appConf *AppConfig) pprof.Config {
 	pprofConfig := appConf.Pprof
 	pprofConfig.SetDefaults()
@@ -86,19 +84,19 @@ func ProvidePprofConfig(appConf *AppConfig) pprof.Config {
 }
 
 // ProvideKafkaSettings provides Kafka settings for log consumption.
-func ProvideKafkaSettings(appConf *AppConfig) service.KafkaSettings {
+func ProvideKafkaSettings(appConf *AppConfig) KafkaSettings {
 	if appConf == nil {
-		return service.KafkaSettings{}
+		return KafkaSettings{}
 	}
-	return service.KafkaSettings{
+	return KafkaSettings{
 		BootstrapServers: appConf.MessageQueue.Kafka.BootstrapServers,
 		SecurityProtocol: appConf.MessageQueue.Kafka.SecurityProtocol,
-		Sasl: service.SaslSettings{
+		Sasl: SaslSettings{
 			Mechanism: appConf.MessageQueue.Kafka.Sasl.Mechanism,
 			Username:  appConf.MessageQueue.Kafka.Sasl.Username,
 			Password:  appConf.MessageQueue.Kafka.Sasl.Password,
 		},
-		Ssl: service.SslSettings{
+		Ssl: SslSettings{
 			CaFile:   appConf.MessageQueue.Kafka.Ssl.CaFile,
 			CertFile: appConf.MessageQueue.Kafka.Ssl.CertFile,
 			KeyFile:  appConf.MessageQueue.Kafka.Ssl.KeyFile,

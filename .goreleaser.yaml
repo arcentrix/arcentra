@@ -32,10 +32,10 @@ builds:
       - -trimpath
     ldflags: &ldflags_common
       - -s -w
-      - -X 'github.com/arcentrix/arcentra/pkg/version.Version={{ .Version }}'
-      - -X 'github.com/arcentrix/arcentra/pkg/version.GitBranch={{ .Branch }}'
-      - -X 'github.com/arcentrix/arcentra/pkg/version.GitCommit={{ .Commit }}'
-      - -X 'github.com/arcentrix/arcentra/pkg/version.BuildTime={{ .Date }}'
+      - -X 'github.com/arcentrix/arcentra/pkg/foundation/version.Version={{ .Version }}'
+      - -X 'github.com/arcentrix/arcentra/pkg/foundation/version.GitBranch={{ .Branch }}'
+      - -X 'github.com/arcentrix/arcentra/pkg/foundation/version.GitCommit={{ .Commit }}'
+      - -X 'github.com/arcentrix/arcentra/pkg/foundation/version.BuildTime={{ .Date }}'
     goos:
       - linux
       - darwin

@@ -17,8 +17,8 @@ package outbox
 import (
 	"context"
 
-	"github.com/arcentrix/arcentra/internal/pkg/executor"
-	"github.com/arcentrix/arcentra/pkg/outbox"
+	"github.com/arcentrix/arcentra/internal/shared/executor"
+	"github.com/arcentrix/arcentra/pkg/message/outbox"
 )
 
 // Publisher implements executor.EventPublisher by appending events to the local outbox.

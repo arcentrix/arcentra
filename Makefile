@@ -26,10 +26,10 @@ GIT_COMMIT := $(shell git rev-parse HEAD)
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS := \
- -X 'github.com/arcentrix/arcentra/pkg/version.Version=$(VERSION)' \
- -X 'github.com/arcentrix/arcentra/pkg/version.GitBranch=$(GIT_BRANCH)' \
- -X 'github.com/arcentrix/arcentra/pkg/version.GitCommit=$(GIT_COMMIT)' \
- -X 'github.com/arcentrix/arcentra/pkg/version.BuildTime=$(BUILD_TIME)'
+ -X 'github.com/arcentrix/arcentra/pkg/foundation/version.Version=$(VERSION)' \
+ -X 'github.com/arcentrix/arcentra/pkg/foundation/version.GitBranch=$(GIT_BRANCH)' \
+ -X 'github.com/arcentrix/arcentra/pkg/foundation/version.GitCommit=$(GIT_COMMIT)' \
+ -X 'github.com/arcentrix/arcentra/pkg/foundation/version.BuildTime=$(BUILD_TIME)'
 
 ifneq ($(RELEASE),1)
   LDFLAGS_STRIP :=

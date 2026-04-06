@@ -15,12 +15,12 @@
 package config
 
 import (
-	grpcclient "github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/pkg/cache"
-	"github.com/arcentrix/arcentra/pkg/http"
-	"github.com/arcentrix/arcentra/pkg/log"
-	"github.com/arcentrix/arcentra/pkg/metrics"
-	"github.com/arcentrix/arcentra/pkg/pprof"
+	"github.com/arcentrix/arcentra/internal/adapter/grpc"
+	"github.com/arcentrix/arcentra/pkg/store/cache"
+	"github.com/arcentrix/arcentra/pkg/telemetry/log"
+	"github.com/arcentrix/arcentra/pkg/telemetry/metrics"
+	"github.com/arcentrix/arcentra/pkg/telemetry/pprof"
+	"github.com/arcentrix/arcentra/pkg/transport/http"
 	"github.com/google/wire"
 )
 
@@ -53,9 +53,9 @@ func ProvideLogConfig(agentConf *AgentConfig) *log.Conf {
 }
 
 // ProvideGrpcClientConfig 提供 gRPC 客户端配置
-func ProvideGrpcClientConfig(agentConf *AgentConfig) *grpcclient.ClientConf {
+func ProvideGrpcClientConfig(agentConf *AgentConfig) *grpc.ClientConf {
 	// build server address from host and port
-	return &grpcclient.ClientConf{
+	return &grpc.ClientConf{
 		ServerAddr:           agentConf.Grpc.ServerAddr,
 		Token:                agentConf.Grpc.Token,
 		ReadWriteTimeout:     agentConf.Grpc.ReadWriteTimeout,

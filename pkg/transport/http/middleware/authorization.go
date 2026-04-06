@@ -1,0 +1,178 @@
+// Copyright 2025 Arcentra Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package middleware
+
+import (
+	"context"
+	"errors"
+	"strings"
+
+	"github.com/arcentrix/arcentra/internal/control/consts"
+	"github.com/arcentrix/arcentra/pkg/store/cache"
+	"github.com/arcentrix/arcentra/pkg/telemetry/log"
+	"github.com/arcentrix/arcentra/pkg/transport/http"
+	"github.com/arcentrix/arcentra/pkg/transport/http/jwt"
+	"github.com/bytedance/sonic"
+	"github.com/gofiber/fiber/v2"
+	goJwt "github.com/golang-jwt/jwt/v5"
+)
+
+// PermissionChecker 权限检查器接口
+type PermissionChecker interface {
+	GetUserRoutes(ctx context.Context, userID string, resourceID string) ([]string, error)
+}
+
+// AuthorizationMiddleware 认证中间件
+// secretKey: 用于验证 JWT 的密钥
+// client: Redis 客户端
+// This function is used as the middleware of fiber.
+func AuthorizationMiddleware(secretKey string, store cache.ICache) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		var tokenString string
+
+		// 优先从 Authorization header 中获取 token
+		aToken := c.Get("Authorization")
+		if aToken != "" {
+			// 按空格分割
+			parts := strings.SplitN(aToken, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenString = parts[1]
+			}
+		}
+
+		// 如果 header 中没有 token，尝试从 cookie 中获取
+		if tokenString == "" {
+			tokenString = c.Cookies("accessToken")
+		}
+
+		// 如果两种方式都没有获取到 token，返回错误
+		if tokenString == "" {
+			return http.Err(c, http.TokenBeEmpty.Code, http.TokenBeEmpty.Msg)
+		}
+
+		claims, err := jwt.ParseToken(tokenString, secretKey)
+		if err != nil {
+			// 检查是否是令牌过期错误
+			if errors.Is(err, goJwt.ErrTokenExpired) {
+				return http.Err(c, http.TokenExpired.Code, http.TokenExpired.Msg)
+			}
+			log.Errorw("parse token failed: ", "error", err)
+			// 其他令牌无效的情况
+			return http.Err(c, http.InvalidToken.Code, http.InvalidToken.Msg)
+		}
+
+		// 从 Redis 中获取 Token 信息
+		tokenKey := consts.UserTokenKey + claims.UserID
+		tokenInfoStr, err := store.Get(context.Background(), tokenKey).Result()
+		if err != nil {
+			log.Errorw("cache get token failed: ", "error", err, "tokenKey", tokenKey)
+			return http.Err(c, http.TokenExpired.Code, http.TokenExpired.Msg)
+		}
+
+		// 解析 Token 信息
+		var tokenInfo http.TokenInfo
+		if err := sonic.UnmarshalString(tokenInfoStr, &tokenInfo); err != nil {
+			log.Errorw("failed to unmarshal token info: ", "error", err)
+			return http.Err(c, http.InvalidToken.Code, http.InvalidToken.Msg)
+		}
+
+		// 验证请求中的 Token 是否与 Redis 中存储的 Token 匹配
+		if tokenInfo.AccessToken != tokenString {
+			log.Errorw("token mismatch for user: ", "user_id", claims.UserID)
+			return http.Err(c, http.InvalidToken.Code, http.InvalidToken.Msg)
+		}
+
+		c.Locals("claims", claims)
+		return c.Next()
+	}
+}
+
+// PermissionMiddleware 权限鉴权中间件
+// permissionChecker: 权限检查器，用于获取用户可访问的路由列表
+// excludedPaths: 排除权限检查的路径列表（如登录接口等）
+// This function is used as the middleware of fiber.
+func PermissionMiddleware(permissionChecker PermissionChecker, excludedPaths []string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		// 检查当前路径是否在排除列表中
+		currentPath := c.Path()
+		for _, excludedPath := range excludedPaths {
+			if currentPath == excludedPath || strings.HasPrefix(currentPath, excludedPath) {
+				return c.Next()
+			}
+		}
+
+		// 从 context 中获取 claims（应该由 AuthorizationMiddleware 设置）
+		claimsValue := c.Locals("claims")
+		if claimsValue == nil {
+			log.Errorw("claims not found in context", "path", currentPath)
+			return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
+		}
+
+		claims, ok := claimsValue.(*jwt.AuthClaims)
+		if !ok || claims == nil {
+			log.Errorw("invalid claims type", "path", currentPath)
+			return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
+		}
+
+		userID := claims.UserID
+		if userID == "" {
+			log.Errorw("user id is empty", "path", currentPath)
+			return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
+		}
+
+		// 获取资源ID（优先从 query 参数获取，其次从 header 获取）
+		resourceID := c.Query("orgId")
+		if resourceID == "" {
+			resourceID = c.Query("teamId")
+		}
+		if resourceID == "" {
+			resourceID = c.Query("projectId")
+		}
+		if resourceID == "" {
+			resourceID = c.Get("X-Resource-Id")
+		}
+		// 如果都没有，则为空字符串，表示平台级权限
+
+		allowedRoutes, err := permissionChecker.GetUserRoutes(c.Context(), userID, resourceID)
+		if err != nil {
+			log.Errorw("failed to get user routes", "userId", userID, "resourceId", resourceID, "error", err)
+			return http.Err(c, http.InternalError.Code, http.InternalError.Msg)
+		}
+
+		// 检查当前路径是否在允许的路由列表中
+		if !isRouteAllowed(currentPath, allowedRoutes) {
+			log.Debugw("permission denied", "userId", userID, "resourceId", resourceID, "path", currentPath, "allowedRoutes", allowedRoutes)
+			return http.Err(c, http.Forbidden.Code, http.Forbidden.Msg)
+		}
+
+		return c.Next()
+	}
+}
+
+// isRouteAllowed 检查路由是否在允许的路由列表中
+// 支持精确匹配和前缀匹配
+func isRouteAllowed(path string, allowedRoutes []string) bool {
+	for _, allowedRoute := range allowedRoutes {
+		// 精确匹配
+		if path == allowedRoute {
+			return true
+		}
+		// 前缀匹配：如果允许的路由是 /api/v1/projects，则 /api/v1/projects/123 也应该被允许
+		if strings.HasPrefix(path, allowedRoute+"/") || strings.HasPrefix(path, allowedRoute+"?") {
+			return true
+		}
+	}
+	return false
+}

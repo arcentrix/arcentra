@@ -1,4 +1,4 @@
-// Copyright 2025 Arcentra Authors.
+// Copyright 2026 Arcentra Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,20 +22,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/arcentrix/arcentra/internal/adapter/grpc"
+	"github.com/arcentrix/arcentra/internal/adapter/http"
 	"github.com/arcentrix/arcentra/internal/control/config"
-	"github.com/arcentrix/arcentra/internal/control/repo"
-	"github.com/arcentrix/arcentra/internal/control/router"
-	"github.com/arcentrix/arcentra/internal/control/service"
-	"github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/internal/pkg/storage"
-	"github.com/arcentrix/arcentra/pkg/cron"
-	"github.com/arcentrix/arcentra/pkg/database"
-	"github.com/arcentrix/arcentra/pkg/log"
-	"github.com/arcentrix/arcentra/pkg/metrics"
-	"github.com/arcentrix/arcentra/pkg/plugin"
-	"github.com/arcentrix/arcentra/pkg/safe"
-	"github.com/arcentrix/arcentra/pkg/shutdown"
-	"github.com/arcentrix/arcentra/pkg/trace"
+	"github.com/arcentrix/arcentra/internal/domain/agent"
+	"github.com/arcentrix/arcentra/pkg/foundation/safe"
+	"github.com/arcentrix/arcentra/pkg/integration/plugin"
+	"github.com/arcentrix/arcentra/pkg/lifecycle/cron"
+	"github.com/arcentrix/arcentra/pkg/lifecycle/shutdown"
+	"github.com/arcentrix/arcentra/pkg/telemetry/log"
+	"github.com/arcentrix/arcentra/pkg/telemetry/metrics"
+	"github.com/arcentrix/arcentra/pkg/telemetry/trace"
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 )
@@ -46,31 +43,25 @@ type App struct {
 	GrpcServer    *grpc.ServerWrapper
 	MetricsServer *metrics.Server
 	Logger        *log.Logger
-	Storage       storage.IStorage
+	Storage       agent.IStorage
 	AppConf       *config.AppConfig
-	Repos         *repo.Repositories
-	Services      *service.Services
 	ShutdownMgr   *shutdown.Manager
 }
 
-// InitAppFunc init app function type
 type InitAppFunc func(configPath string, pluginConfigs map[string]any) (*App, func(), error)
 
 func NewApp(
-	rt *router.Router,
+	rt *http.Router,
 	logger *log.Logger,
 	pluginMgr *plugin.Manager,
 	grpcServer *grpc.ServerWrapper,
 	metricsServer *metrics.Server,
-	st storage.IStorage,
+	st agent.IStorage,
 	appConf *config.AppConfig,
-	_ database.IDatabase,
-	repos *repo.Repositories,
 	shutdownMgr *shutdown.Manager,
 ) (*App, func(), error) {
-	httpApp := rt.Router()
+	httpApp := rt.FiberApp()
 
-	// 设置 AppConf
 	app := &App{
 		HTTPApp:       httpApp,
 		PluginMgr:     pluginMgr,
@@ -79,13 +70,10 @@ func NewApp(
 		Logger:        logger,
 		Storage:       st,
 		AppConf:       appConf,
-		Repos:         repos,
-		Services:      rt.Services,
 		ShutdownMgr:   shutdownMgr,
 	}
 
 	cleanup := func() {
-		// stop metrics server
 		if metricsServer != nil {
 			log.Info("Shutting down metrics server...")
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -95,7 +83,6 @@ func NewApp(
 			}
 		}
 
-		// stop all plugins
 		if pluginMgr != nil {
 			log.Info("Shutting down plugin manager...")
 			if err := pluginMgr.Clear(); err != nil {
@@ -103,16 +90,13 @@ func NewApp(
 			}
 		}
 
-		// stop gRPC server
 		if grpcServer != nil {
 			log.Info("Shutting down gRPC server...")
 			grpcServer.Stop()
 		}
 
-		// stop global cron scheduler
 		cron.Stop()
 
-		// shutdown OpenTelemetry tracing
 		log.Info("Shutting down OpenTelemetry tracing...")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -124,25 +108,20 @@ func NewApp(
 	return app, cleanup, nil
 }
 
-// Bootstrap init app, return App instance and cleanup function
 func Bootstrap(configFile string, pluginConfigFile string, initApp InitAppFunc) (*App, func(), *config.AppConfig, error) {
 	pluginConfigs, err := plugin.LoadPluginConfig(pluginConfigFile)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	// Wire build App (所有依赖都由 wire 自动注入)
 	app, cleanup, err := initApp(configFile, pluginConfigs)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	// 获取配置（从 app 中获取）
 	appConf := app.AppConf
 
-	// Initialize OpenTelemetry Tracing (在 Run 之前，确保拦截器/中间件生效)
 	if err := trace.Init(appConf.Trace); err != nil {
-		// 如果 trace 初始化失败，清理已创建的资源
 		if cleanup != nil {
 			cleanup()
 		}
@@ -152,32 +131,19 @@ func Bootstrap(configFile string, pluginConfigFile string, initApp InitAppFunc) 
 	return app, cleanup, appConf, nil
 }
 
-// Run start app and wait for exit signal, then gracefully shutdown
 func Run(app *App, cleanup func()) {
 	appConf := app.AppConf
 
-	// Initialize and start global cron scheduler
 	cron.Init(app.Logger)
 	cron.Start()
 	log.Info("Cron scheduler started.")
 
-	// SCM polling job (webhook is primary, polling is fallback)
-	if app.Services != nil && app.Services.Scm != nil {
-		_ = cron.AddFunc("*/1 * * * *", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-			defer cancel()
-			_ = app.Services.Scm.PollOnce(ctx)
-		}, "scm-poll")
-	}
-
-	// start metrics server
 	if app.MetricsServer != nil {
 		if err := app.MetricsServer.Start(); err != nil {
 			log.Errorw("Metrics server failed: %v", err)
 		}
 	}
 
-	// start gRPC server
 	if app.GrpcServer != nil && appConf.Grpc.Port > 0 {
 		safe.Go(func() {
 			if err := app.GrpcServer.Start(appConf.Grpc); err != nil {
@@ -186,29 +152,20 @@ func Run(app *App, cleanup func()) {
 		})
 	}
 
-	// set signal listener (graceful shutdown)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
-	// start HTTP server (async)
 	safe.Go(func() {
 		addr := appConf.HTTP.Host + ":" + fmt.Sprintf("%d", appConf.HTTP.Port)
-		log.Infow("HTTP listener started",
-			"address", addr,
-		)
+		log.Infow("HTTP listener started", "address", addr)
 		if err := app.HTTPApp.Listen(addr); err != nil {
-			log.Errorw("HTTP listener failed",
-				"address", addr,
-				zap.Error(err),
-			)
+			log.Errorw("HTTP listener failed", "address", addr, zap.Error(err))
 		}
 	})
 
-	// wait for exit signal (either from OS signal or HTTP shutdown endpoint)
 	select {
 	case sig := <-quit:
 		log.Infow("Received OS signal, shutting down gracefully...", "signal", sig)
-		// mark as shutting down for health check
 		if app.ShutdownMgr != nil {
 			app.ShutdownMgr.Shutdown()
 		}
@@ -216,8 +173,6 @@ func Run(app *App, cleanup func()) {
 		log.Info("Received shutdown request via HTTP endpoint, shutting down gracefully...")
 	}
 
-	// close components in order
-	// close HTTP server
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 	if err := app.HTTPApp.ShutdownWithContext(shutdownCtx); err != nil {
@@ -226,7 +181,6 @@ func Run(app *App, cleanup func()) {
 		log.Info("HTTP server shut down gracefully")
 	}
 
-	// close plugin manager and other resources
 	cleanup()
 
 	log.Info("Server shutdown complete")
