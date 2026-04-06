@@ -25,7 +25,7 @@ import (
 )
 
 type AuthClaims struct {
-	UserId string `json:"userId"`
+	UserID string `json:"userId"`
 	jwt.RegisteredClaims
 }
 
@@ -36,10 +36,10 @@ func (a *AuthClaims) Valid() error {
 var issUser = "arcentra"
 
 // GenToken 生成 access_token 和 refresh_token
-func GenToken(userId string, secretKey []byte, accessExpired, refreshExpired time.Duration) (aToken, rToken string, err error) {
+func GenToken(userID string, secretKey []byte, accessExpired, refreshExpired time.Duration) (aToken, rToken string, err error) {
 	// aToken
 	aClaims := &AuthClaims{
-		UserId: userId,
+		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    issUser, // 签发人
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(accessExpired)),
@@ -92,7 +92,7 @@ func ParseToken(aToken, secretKey string) (claims *AuthClaims, err error) {
 }
 
 // RefreshToken 刷新 access_token
-func RefreshToken(auth *http.Auth, userId, rToken string) (map[string]string, error) {
+func RefreshToken(auth *http.Auth, userID, rToken string) (map[string]string, error) {
 	newToken := make(map[string]string)
 
 	// 解析刷新令牌
@@ -115,7 +115,7 @@ func RefreshToken(auth *http.Auth, userId, rToken string) (map[string]string, er
 	}
 
 	// 生成新的访问令牌和刷新令牌
-	newAToken, newRToken, err := GenToken(userId, []byte(auth.SecretKey), auth.AccessExpire, auth.RefreshExpire)
+	newAToken, newRToken, err := GenToken(userID, []byte(auth.SecretKey), auth.AccessExpire, auth.RefreshExpire)
 	if err != nil {
 		return newToken, err
 	}

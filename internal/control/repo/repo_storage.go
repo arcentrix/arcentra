@@ -44,20 +44,20 @@ const (
 // IStorageRepository defines storage config persistence with context support.
 type IStorageRepository interface {
 	GetDefault(ctx context.Context) (*model.StorageConfig, error)
-	Get(ctx context.Context, storageId string) (*model.StorageConfig, error)
+	Get(ctx context.Context, storageID string) (*model.StorageConfig, error)
 	ListEnabled(ctx context.Context) ([]model.StorageConfig, error)
 	ListByType(ctx context.Context, storageType string) ([]model.StorageConfig, error)
 	Create(ctx context.Context, storageConfig *model.StorageConfig) error
 	Update(ctx context.Context, storageConfig *model.StorageConfig) error
-	Delete(ctx context.Context, storageId string) error
-	SetDefault(ctx context.Context, storageId string) error
+	Delete(ctx context.Context, storageID string) error
+	SetDefault(ctx context.Context, storageID string) error
 	ParseStorageConfig(storageConfig *model.StorageConfig) (interface{}, error)
 }
 
-func NewStorageRepo(db database.IDatabase, cache cache.ICache) IStorageRepository {
+func NewStorageRepo(db database.IDatabase, ch cache.ICache) IStorageRepository {
 	return &StorageRepo{
 		IDatabase: db,
-		ICache:    cache,
+		ICache:    ch,
 	}
 }
 
@@ -68,7 +68,7 @@ func (sr *StorageRepo) GetDB() database.IDatabase {
 
 // GetDefault returns default storage config (with Redis cache).
 func (sr *StorageRepo) GetDefault(ctx context.Context) (*model.StorageConfig, error) {
-	keyFunc := func(params ...any) string {
+	keyFunc := func(_ ...any) string {
 		return storageDefaultConfigCacheKey
 	}
 
@@ -95,8 +95,8 @@ func (sr *StorageRepo) GetDefault(ctx context.Context) (*model.StorageConfig, er
 	return cq.Get(ctx)
 }
 
-// Get returns storage config by storageId (with Redis cache).
-func (sr *StorageRepo) Get(ctx context.Context, storageId string) (*model.StorageConfig, error) {
+// Get returns storage config by storageID (with Redis cache).
+func (sr *StorageRepo) Get(ctx context.Context, storageID string) (*model.StorageConfig, error) {
 	keyFunc := func(params ...any) string {
 		return storageConfigCacheKeyPrefix + params[0].(string)
 	}
@@ -105,10 +105,10 @@ func (sr *StorageRepo) Get(ctx context.Context, storageId string) (*model.Storag
 		var storageConfig model.StorageConfig
 		err := sr.Database().WithContext(ctx).Table(storageConfig.TableName()).
 			Select("id", "storage_id", "name", "storage_type", "config", "description", "is_default", "is_enabled", "created_at", "updated_at").
-			Where("storage_id = ? AND is_enabled = ?", storageId, 1).
+			Where("storage_id = ? AND is_enabled = ?", storageID, 1).
 			First(&storageConfig).Error
 		if err != nil {
-			return nil, fmt.Errorf("failed to get storage config by ID %s: %w", storageId, err)
+			return nil, fmt.Errorf("failed to get storage config by ID %s: %w", storageID, err)
 		}
 		return &storageConfig, nil
 	}
@@ -121,7 +121,7 @@ func (sr *StorageRepo) Get(ctx context.Context, storageId string) (*model.Storag
 		cache.WithLogPrefix[*model.StorageConfig]("[StorageRepo]"),
 	)
 
-	return cq.Get(ctx, storageId)
+	return cq.Get(ctx, storageID)
 }
 
 // ListEnabled returns all enabled storage configs.
@@ -166,13 +166,13 @@ func (sr *StorageRepo) Create(ctx context.Context, storageConfig *model.StorageC
 // Update updates a storage config.
 func (sr *StorageRepo) Update(ctx context.Context, storageConfig *model.StorageConfig) error {
 	err := sr.Database().WithContext(ctx).Table(storageConfig.TableName()).
-		Where("storage_id = ?", storageConfig.StorageId).
+		Where("storage_id = ?", storageConfig.StorageID).
 		Updates(storageConfig).Error
 	if err != nil {
 		return fmt.Errorf("failed to update storage config: %w", err)
 	}
 
-	sr.clearStorageConfigCache(ctx, storageConfig.StorageId)
+	sr.clearStorageConfigCache(ctx, storageConfig.StorageID)
 	if storageConfig.IsDefault == 1 {
 		sr.clearDefaultStorageConfigCache(ctx)
 	}
@@ -180,21 +180,21 @@ func (sr *StorageRepo) Update(ctx context.Context, storageConfig *model.StorageC
 }
 
 // Delete deletes a storage config.
-func (sr *StorageRepo) Delete(ctx context.Context, storageId string) error {
+func (sr *StorageRepo) Delete(ctx context.Context, storageID string) error {
 	var storageConfig model.StorageConfig
 	err := sr.Database().WithContext(ctx).Table(storageConfig.TableName()).
-		Where("storage_id = ?", storageId).
+		Where("storage_id = ?", storageID).
 		Delete(&model.StorageConfig{}).Error
 	if err != nil {
 		return fmt.Errorf("failed to delete storage config: %w", err)
 	}
-	sr.clearStorageConfigCache(ctx, storageId)
+	sr.clearStorageConfigCache(ctx, storageID)
 	sr.clearDefaultStorageConfigCache(ctx)
 	return nil
 }
 
 // SetDefault sets default storage config.
-func (sr *StorageRepo) SetDefault(ctx context.Context, storageId string) error {
+func (sr *StorageRepo) SetDefault(ctx context.Context, storageID string) error {
 	var storageConfig model.StorageConfig
 	err := sr.Database().WithContext(ctx).Table(storageConfig.TableName()).
 		Where("is_default = ?", 1).
@@ -203,26 +203,26 @@ func (sr *StorageRepo) SetDefault(ctx context.Context, storageId string) error {
 		return fmt.Errorf("failed to clear default storage configs: %w", err)
 	}
 	err = sr.Database().WithContext(ctx).Table(storageConfig.TableName()).
-		Where("storage_id = ?", storageId).
+		Where("storage_id = ?", storageID).
 		Update("is_default", 1).Error
 	if err != nil {
 		return fmt.Errorf("failed to set default storage config: %w", err)
 	}
 	sr.clearDefaultStorageConfigCache(ctx)
-	sr.clearStorageConfigCache(ctx, storageId)
+	sr.clearStorageConfigCache(ctx, storageID)
 	return nil
 }
 
-func (sr *StorageRepo) clearStorageConfigCache(ctx context.Context, storageId string) {
+func (sr *StorageRepo) clearStorageConfigCache(ctx context.Context, storageID string) {
 	keyFunc := func(params ...any) string {
 		return storageConfigCacheKeyPrefix + params[0].(string)
 	}
 	cq := cache.NewCachedQuery[*model.StorageConfig](sr.ICache, keyFunc, nil)
-	_ = cq.Invalidate(ctx, storageId)
+	_ = cq.Invalidate(ctx, storageID)
 }
 
 func (sr *StorageRepo) clearDefaultStorageConfigCache(ctx context.Context) {
-	keyFunc := func(params ...any) string {
+	keyFunc := func(_ ...any) string {
 		return storageDefaultConfigCacheKey
 	}
 	cq := cache.NewCachedQuery[*model.StorageConfig](sr.ICache, keyFunc, nil)

@@ -41,7 +41,7 @@ import (
 )
 
 type Agent struct {
-	HttpApp       *fiber.App
+	HTTPApp       *fiber.App
 	GrpcClient    *grpc.ClientWrapper
 	MetricsServer *metrics.Server
 	Logger        *log.Logger
@@ -63,7 +63,7 @@ func NewAgent(
 	logger *log.Logger,
 	agentConf *config.AgentConfig,
 	shutdownMgr *shutdown.Manager,
-	outbox *outbox.Outbox,
+	ob *outbox.Outbox,
 	execManager *executor.Manager,
 ) (*Agent, func(), error) {
 	httpApp := rt.Router()
@@ -101,15 +101,15 @@ func NewAgent(
 				log.Errorw("failed to stop task queue", "error", err)
 			}
 		}
-		if outbox != nil {
-			if err := outbox.Close(); err != nil {
+		if ob != nil {
+			if err := ob.Close(); err != nil {
 				log.Errorw("failed to close outbox", "error", err)
 			}
 		}
 	}
 
 	app := &Agent{
-		HttpApp:       httpApp,
+		HTTPApp:       httpApp,
 		GrpcClient:    grpcClient,
 		MetricsServer: metricsServer,
 		Logger:        logger,
@@ -117,7 +117,7 @@ func NewAgent(
 		AgentService:  agentService,
 		ShutdownMgr:   shutdownMgr,
 		TaskQueue:     taskQueue,
-		Outbox:        outbox,
+		Outbox:        ob,
 		ExecManager:   execManager,
 	}
 	return app, cleanup, nil
@@ -183,7 +183,7 @@ func Run(app *Agent, cleanup func()) {
 		log.Infow("HTTP listener started",
 			"address", addr,
 		)
-		if err := app.HttpApp.Listen(addr); err != nil {
+		if err := app.HTTPApp.Listen(addr); err != nil {
 			log.Errorw("HTTP listener failed",
 				"address", addr,
 				"error", err,
@@ -217,7 +217,7 @@ func Run(app *Agent, cleanup func()) {
 	// close HTTP server
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
-	if err := app.HttpApp.ShutdownWithContext(shutdownCtx); err != nil {
+	if err := app.HTTPApp.ShutdownWithContext(shutdownCtx); err != nil {
 		log.Errorw("HTTP server shutdown error", "error", err)
 	} else {
 		log.Info("HTTP server shut down gracefully")

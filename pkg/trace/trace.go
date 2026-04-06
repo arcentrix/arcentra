@@ -23,7 +23,7 @@ import (
 
 // Go .
 func Go(ctx context.Context, fn func()) {
-	GoWithContext(ctx, func(ctx context.Context) {
+	GoWithContext(ctx, func(_ context.Context) {
 		fn()
 	})
 }

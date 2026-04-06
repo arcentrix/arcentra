@@ -26,7 +26,8 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/pkg/log"
-	"github.com/arcentrix/arcentra/pkg/safe"
+	"github.com/edsrzf/mmap-go"
+	"golang.org/x/sync/errgroup"
 )
 
 const segmentNameFmt = "%016d.wal"
@@ -54,7 +55,7 @@ type WAL struct {
 	mu           sync.Mutex
 	ctx          context.Context
 	cancel       context.CancelFunc
-	eg           sync.WaitGroup
+	eg           *errgroup.Group
 }
 
 // NewWAL creates a WAL with the given config.
@@ -85,13 +86,15 @@ func NewWAL(cfg *Config) (*WAL, error) {
 	w.nextSeq = maxSeq + 1
 	w.writtenSeq = maxSeq
 	w.flushedSeq = maxSeq
-	w.eg.Add(1)
-	safe.Go(w.runWriter)
+	w.eg, _ = errgroup.WithContext(ctx)
+	w.eg.Go(func() error {
+		w.runWriter()
+		return nil
+	})
 	return w, nil
 }
 
 func (w *WAL) runWriter() {
-	defer w.eg.Done()
 	ticker := time.NewTicker(w.cfg.FsyncInterval)
 	defer ticker.Stop()
 	for {
@@ -267,15 +270,56 @@ func (w *WAL) listSegments() ([]string, error) {
 }
 
 func (w *WAL) readSegment(path string, lastAcked, flushedSeq uint64, limit int) ([]*Record, error) {
+	recs, err := w.readSegmentMmap(path, lastAcked, flushedSeq, limit)
+	if err == nil {
+		return recs, nil
+	}
+	return w.readSegmentRead(path, lastAcked, flushedSeq, limit)
+}
+
+// readSegmentMmap reads segment via memory-mapped file for zero-copy scan.
+func (w *WAL) readSegmentMmap(path string, lastAcked, flushedSeq uint64, limit int) ([]*Record, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() == 0 {
+		return nil, fmt.Errorf("empty file")
+	}
+	m, err := mmap.Map(f, mmap.RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = m.Unmap() }()
+	data := []byte(m)
+	var out []*Record
+	offset := 0
+	for len(out) < limit && offset < len(data) {
+		rec, next, ok := ReadNextRecordFromSlice(data, offset)
+		if !ok {
+			break
+		}
+		offset = next
+		if rec.Seq > lastAcked && rec.Seq <= flushedSeq {
+			out = append(out, rec)
+		}
+	}
+	return out, nil
+}
+
+// readSegmentRead reads segment via os.File (fallback when mmap is unavailable).
+func (w *WAL) readSegmentRead(path string, lastAcked, flushedSeq uint64, limit int) ([]*Record, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer func(f *os.File) {
-		err = f.Close()
-		if err != nil {
-			return
-		}
+		_ = f.Close()
 	}(f)
 	var out []*Record
 	var rec *Record
@@ -296,24 +340,18 @@ func (w *WAL) scanMaxSeq() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-
 	var maxSeq uint64
-	var f *os.File
 	for _, path := range segs {
-		f, err = os.Open(path)
+		segMax, err := w.segmentMaxSeqMmap(path)
 		if err != nil {
-			return 0, err
-		}
-		for {
-			rec, err := ReadNextRecord(f)
-			if err != nil || rec == nil {
-				break
-			}
-			if rec.Seq > maxSeq {
-				maxSeq = rec.Seq
+			segMax, err = w.segmentMaxSeqRead(path)
+			if err != nil {
+				return 0, err
 			}
 		}
-		_ = f.Close()
+		if segMax > maxSeq {
+			maxSeq = segMax
+		}
 	}
 	return maxSeq, nil
 }
@@ -337,15 +375,56 @@ func (w *WAL) DeleteSegmentsUpTo(lastAcked uint64) error {
 }
 
 func (w *WAL) segmentMaxSeq(path string) (uint64, error) {
+	maxSeq, err := w.segmentMaxSeqMmap(path)
+	if err == nil {
+		return maxSeq, nil
+	}
+	return w.segmentMaxSeqRead(path)
+}
+
+// segmentMaxSeqMmap scans segment via mmap for max seq.
+func (w *WAL) segmentMaxSeqMmap(path string) (uint64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	if info.Size() == 0 {
+		return 0, nil
+	}
+	m, err := mmap.Map(f, mmap.RDONLY, 0)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = m.Unmap() }()
+	data := []byte(m)
+	var maxSeq uint64
+	offset := 0
+	for offset < len(data) {
+		rec, next, ok := ReadNextRecordFromSlice(data, offset)
+		if !ok {
+			break
+		}
+		offset = next
+		if rec.Seq > maxSeq {
+			maxSeq = rec.Seq
+		}
+	}
+	return maxSeq, nil
+}
+
+// segmentMaxSeqRead scans segment via os.File (fallback).
+func (w *WAL) segmentMaxSeqRead(path string) (uint64, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return 0, err
 	}
 	defer func(f *os.File) {
-		err = f.Close()
-		if err != nil {
-			return
-		}
+		_ = f.Close()
 	}(f)
 	var maxSeq uint64
 	var rec *Record
@@ -369,7 +448,7 @@ func (w *WAL) Commit() *CommitStore {
 // Close stops the writer and waits for cleanup.
 func (w *WAL) Close() error {
 	w.cancel()
-	w.eg.Wait()
+	err := w.eg.Wait()
 	w.mu.Lock()
 	if w.currentFile != nil {
 		_ = w.currentFile.Sync()
@@ -377,5 +456,5 @@ func (w *WAL) Close() error {
 		w.currentFile = nil
 	}
 	w.mu.Unlock()
-	return nil
+	return err
 }

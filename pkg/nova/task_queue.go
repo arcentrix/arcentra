@@ -28,6 +28,7 @@ type Task struct {
 // Priority represents task priority
 type Priority int
 
+// Priority constants define task priority levels.
 const (
 	PriorityHigh   Priority = 3 // High priority
 	PriorityNormal Priority = 2 // Normal priority

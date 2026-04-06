@@ -1,0 +1,39 @@
+# Copyright 2026 Arcentra Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# CI-only Dockerfile — copies pre-built static binaries instead of building
+# from source. Used by the release workflow for multi-arch image publishing.
+#
+# Expected layout (prepared by the CI "docker" job):
+#   dist/linux/amd64/{arcentra,arcentra-agent,conf.d/}
+#   dist/linux/arm64/{arcentra,arcentra-agent,conf.d/}
+
+# ── arcentra (control-plane) ─────────────────────────────────────────
+FROM gcr.io/distroless/base-debian12 AS arcentra
+
+ARG TARGETARCH
+COPY dist/linux/${TARGETARCH}/arcentra /arcentra
+COPY dist/linux/${TARGETARCH}/conf.d/  /conf.d/
+
+EXPOSE 8080
+ENTRYPOINT ["/arcentra", "-conf", "/conf.d/config.toml"]
+
+# ── arcentra-agent ───────────────────────────────────────────────────
+FROM gcr.io/distroless/base-debian12 AS arcentra-agent
+
+ARG TARGETARCH
+COPY dist/linux/${TARGETARCH}/arcentra-agent /arcentra-agent
+COPY dist/linux/${TARGETARCH}/conf.d/        /conf.d/
+
+ENTRYPOINT ["/arcentra-agent"]

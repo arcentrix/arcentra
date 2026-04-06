@@ -62,17 +62,19 @@ func (g *Group) Wait() error {
 // returned by Wait.
 func (g *Group) Go(fn func(ctx context.Context) error) {
 	g.wg.Add(1)
-	trace.GoWithContext(g.ctx, func(ctx context.Context) {
+	go func() {
 		defer g.wg.Done()
-		if err := fn(ctx); err != nil {
-			g.errOnce.Do(func() {
-				g.err = err
-				if g.cancel != nil {
-					g.cancel()
-				}
-			})
-		}
-	})
+		trace.RunWithTrace(g.ctx, func(ctx context.Context) {
+			if err := fn(ctx); err != nil {
+				g.errOnce.Do(func() {
+					g.err = err
+					if g.cancel != nil {
+						g.cancel()
+					}
+				})
+			}
+		})
+	}()
 }
 
 // RunOption .

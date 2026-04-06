@@ -29,6 +29,7 @@ type TimeCountAggregator struct {
 	lastFlush     time.Time     // Last flush time
 	flushTimer    *time.Timer   // Flush timer
 	flushCallback func([]*Task) // Flush callback (optional)
+	stopped       bool
 }
 
 // NewTimeCountAggregator creates a new TimeCountAggregator
@@ -57,6 +58,9 @@ func NewTimeCountAggregator(maxSize int, timeWindow time.Duration) *TimeCountAgg
 func (a *TimeCountAggregator) Add(task *Task) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.stopped {
+		return
+	}
 
 	a.tasks = append(a.tasks, task)
 
@@ -120,6 +124,9 @@ func (a *TimeCountAggregator) flushLocked() []*Task {
 func (a *TimeCountAggregator) checkTimeWindow() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.stopped {
+		return
+	}
 
 	if time.Since(a.lastFlush) >= a.timeWindow && len(a.tasks) > 0 {
 		tasks := a.flushLocked()
@@ -127,7 +134,7 @@ func (a *TimeCountAggregator) checkTimeWindow() {
 			// Call callback outside lock to avoid deadlock
 			go a.flushCallback(tasks)
 		}
-	} else if a.timeWindow > 0 {
+	} else if a.timeWindow > 0 && !a.stopped {
 		// Reset timer
 		a.flushTimer = time.AfterFunc(a.timeWindow, func() {
 			a.checkTimeWindow()
@@ -146,6 +153,9 @@ func (a *TimeCountAggregator) SetFlushCallback(callback func([]*Task)) {
 func (a *TimeCountAggregator) Reset() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.stopped {
+		return
+	}
 
 	a.tasks = a.tasks[:0]
 	a.lastFlush = time.Now()
@@ -157,6 +167,20 @@ func (a *TimeCountAggregator) Reset() {
 				a.checkTimeWindow()
 			})
 		}
+	}
+}
+
+// Stop stops the timer callback loop for aggregator lifecycle cleanup.
+func (a *TimeCountAggregator) Stop() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.stopped {
+		return
+	}
+	a.stopped = true
+	if a.flushTimer != nil {
+		a.flushTimer.Stop()
 	}
 }
 

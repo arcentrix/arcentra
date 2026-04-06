@@ -76,7 +76,7 @@ func (l *GormLoggerAdapter) Error(_ context.Context, msg string, data ...interfa
 	l.getLogger().Errorw(msg, data...)
 }
 
-func (l *GormLoggerAdapter) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
+func (l *GormLoggerAdapter) Trace(_ context.Context, begin time.Time, fc func() (string, int64), err error) {
 	if l.Level <= logger.Silent {
 		return
 	}

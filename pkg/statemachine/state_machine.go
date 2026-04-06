@@ -44,7 +44,8 @@ type StateHook[T comparable] func(state T) error
 type TransitionValidator[T comparable] func(from, to T, event Event) error
 
 // TransitionRecord records a state transition in the FSM history.
-// Error is the error message when the transition or a hook failed; Success is true when the transition committed and hooks ran without error.
+// Error is the error message when the transition or a hook failed;
+// Success is true when the transition committed and hooks ran without error.
 type TransitionRecord[T comparable] struct {
 	From      T
 	To        T
@@ -132,7 +133,6 @@ func ValidateHistorySize(size int) error {
 // Note: New does not set initial/current state. If you rely on Initial()/ToDot() start node,
 // prefer NewWithState.
 func New[T comparable]() *StateMachine[T] {
-
 	return &StateMachine[T]{
 		validTransitions: make(map[T]map[T]struct{}),
 		eventTransitions: make(map[T]map[Event]T),
@@ -418,7 +418,7 @@ type hooksToRun[T comparable] struct {
 
 // transitionLocked validates, updates state, records history, and returns hooks to run after unlock.
 // sm.mu MUST be held by the caller. It does NOT run hooks or onError.
-func (sm *StateMachine[T]) transitionLocked(from, to T, event Event) (err error, hooks hooksToRun[T]) {
+func (sm *StateMachine[T]) transitionLocked(from, to T, event Event) (hooks hooksToRun[T], err error) {
 	startTime := time.Now()
 	var errMsg string
 	defer func() {
@@ -435,16 +435,16 @@ func (sm *StateMachine[T]) transitionLocked(from, to T, event Event) (err error,
 
 	if sm.validTransitions[from] == nil {
 		errMsg = fmt.Sprintf("invalid transition: %v → %v", from, to)
-		return fmt.Errorf("%w: %v → %v", ErrInvalidTransition, from, to), hooksToRun[T]{}
+		return hooksToRun[T]{}, fmt.Errorf("%w: %v → %v", ErrInvalidTransition, from, to)
 	}
 	if _, ok := sm.validTransitions[from][to]; !ok {
 		errMsg = fmt.Sprintf("invalid transition: %v → %v", from, to)
-		return fmt.Errorf("%w: %v → %v", ErrInvalidTransition, from, to), hooksToRun[T]{}
+		return hooksToRun[T]{}, fmt.Errorf("%w: %v → %v", ErrInvalidTransition, from, to)
 	}
 	for _, validator := range sm.validators {
 		if vErr := validator(from, to, event); vErr != nil {
 			errMsg = "validation failed: " + vErr.Error()
-			return fmt.Errorf("validation failed: %w", vErr), hooksToRun[T]{}
+			return hooksToRun[T]{}, fmt.Errorf("validation failed: %w", vErr)
 		}
 	}
 
@@ -458,7 +458,7 @@ func (sm *StateMachine[T]) transitionLocked(from, to T, event Event) (err error,
 	}
 
 	sm.currentState = to
-	return nil, hooks
+	return hooks, nil
 }
 
 // runHooks runs exit, transition, and enter hooks. Used after unlock. On first error calls onError and returns.
@@ -491,7 +491,8 @@ func (sm *StateMachine[T]) runHooks(from, to T, event Event, h hooksToRun[T]) er
 }
 
 // Transition performs a state transition from one state to another.
-// It validates that currentState equals from, then validates the edge and validators, updates state, and runs hooks after releasing the lock.
+// It validates that currentState equals from, then validates the edge and validators,
+// updates state, and runs hooks after releasing the lock.
 //
 // Notes:
 //   - Transition checks that sm.currentState == from to avoid races when multiple goroutines transition.
@@ -506,7 +507,7 @@ func (sm *StateMachine[T]) Transition(from, to T, event Event) error {
 		}
 		return err
 	}
-	err, hooks := sm.transitionLocked(from, to, event)
+	hooks, err := sm.transitionLocked(from, to, event)
 	sm.mu.Unlock()
 
 	if err != nil {
@@ -524,7 +525,7 @@ func (sm *StateMachine[T]) Transition(from, to T, event Event) error {
 func (sm *StateMachine[T]) TransitionTo(to T) error {
 	sm.mu.Lock()
 	from := sm.currentState
-	err, hooks := sm.transitionLocked(from, to, "")
+	hooks, err := sm.transitionLocked(from, to, "")
 	sm.mu.Unlock()
 
 	if err != nil {
@@ -544,7 +545,7 @@ func (sm *StateMachine[T]) TransitionTo(to T) error {
 func (sm *StateMachine[T]) TransitionToWithEvent(to T, event Event) error {
 	sm.mu.Lock()
 	from := sm.currentState
-	err, hooks := sm.transitionLocked(from, to, event)
+	hooks, err := sm.transitionLocked(from, to, event)
 	sm.mu.Unlock()
 
 	if err != nil {
@@ -576,7 +577,7 @@ func (sm *StateMachine[T]) TriggerEvent(event Event) error {
 		}
 		return err
 	}
-	err, hooks := sm.transitionLocked(from, to, event)
+	hooks, err := sm.transitionLocked(from, to, event)
 	sm.mu.Unlock()
 
 	if err != nil {

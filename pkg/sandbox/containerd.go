@@ -476,7 +476,7 @@ func (s *Containerd) getContainer(containerID string) (containerd.Container, err
 
 // withResources configures resource limits
 func (s *Containerd) withResources(resources *Resources) oci.SpecOpts {
-	return func(ctx context.Context, client oci.Client, c *containers.Container, spec *specs.Spec) error {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, spec *specs.Spec) error {
 		if spec.Linux == nil {
 			spec.Linux = &specs.Linux{}
 		}

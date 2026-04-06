@@ -125,7 +125,7 @@ func (am *AgentManager) ExecuteStepOnAgent(ctx context.Context, req *StepExecuti
 }
 
 // SelectAgent selects an available agent based on the selector criteria
-func (am *AgentManager) SelectAgent(ctx context.Context, selector *spec.AgentSelector) (string, error) {
+func (am *AgentManager) SelectAgent(_ context.Context, selector *spec.AgentSelector) (string, error) {
 	// Get all available agents from cache
 	am.statusCacheMu.RLock()
 	availableAgents := make([]*AgentStatus, 0, len(am.agentStatusCache))
@@ -791,7 +791,7 @@ func (am *AgentManager) CancelStepRun(ctx context.Context, agentID, stepRunID, r
 
 // GetAgentStatus gets the status of an agent
 // Agent status is updated from heartbeat reports, so we retrieve from cache
-func (am *AgentManager) GetAgentStatus(ctx context.Context, agentID string) (*AgentStatus, error) {
+func (am *AgentManager) GetAgentStatus(_ context.Context, agentID string) (*AgentStatus, error) {
 	if agentID == "" {
 		return nil, fmt.Errorf("agent ID is required")
 	}

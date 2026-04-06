@@ -45,7 +45,7 @@ type ArtifactsDownloadArgs struct {
 }
 
 // handleArtifactsUpload handles artifact upload
-func (m *Manager) handleArtifactsUpload(ctx context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
+func (m *Manager) handleArtifactsUpload(_ context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
 	var uploadParams ArtifactsUploadArgs
 	if err := sonic.Unmarshal(params, &uploadParams); err != nil {
 		return nil, fmt.Errorf("failed to parse upload params: %w", err)
@@ -101,7 +101,7 @@ func (m *Manager) handleArtifactsUpload(ctx context.Context, params json.RawMess
 }
 
 // handleArtifactsDownload handles artifact download
-func (m *Manager) handleArtifactsDownload(ctx context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
+func (m *Manager) handleArtifactsDownload(_ context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
 	var downloadParams ArtifactsDownloadArgs
 	if err := sonic.Unmarshal(params, &downloadParams); err != nil {
 		return nil, fmt.Errorf("failed to parse download params: %w", err)

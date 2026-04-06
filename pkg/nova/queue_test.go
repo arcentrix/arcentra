@@ -86,8 +86,6 @@ func TestNewTaskQueue_WithKafka(t *testing.T) {
 		}
 		// Connection errors are expected in test environment without actual Kafka/RocketMQ running
 		// So we just verify that config was accepted (error is not about missing broker type)
-	} else {
-		// If no error, that's also fine (Kafka might be running)
 	}
 }
 
@@ -138,7 +136,7 @@ func TestNewTaskQueue_DefaultValues(t *testing.T) {
 	if config.DelaySlotDuration != DefaultDelaySlotDuration {
 		t.Errorf("expected DelaySlotDuration to be %v, got %v", DefaultDelaySlotDuration, config.DelaySlotDuration)
 	}
-	if config.AutoCommit != false {
+	if config.AutoCommit {
 		t.Errorf("expected AutoCommit to be false, got %v", config.AutoCommit)
 	}
 	if config.SessionTimeout != DefaultSessionTimeout {
@@ -156,8 +154,8 @@ func TestNewTaskQueue_DefaultValues(t *testing.T) {
 }
 
 func TestConstants(t *testing.T) {
-	if DefaultGroupID != "TASK_QUEUE_GROUP_%d" {
-		t.Errorf("expected DefaultGroupID to be 'TASK_QUEUE_GROUP_%%d', got %s", DefaultGroupID)
+	if DefaultGroupID != "TASK_QUEUE_GROUP_%s" {
+		t.Errorf("expected DefaultGroupID to be 'TASK_QUEUE_GROUP_%%s', got %s", DefaultGroupID)
 	}
 	if DefaultTopicPrefix != "TASK_QUEUE" {
 		t.Errorf("expected DefaultTopicPrefix to be 'TASK_QUEUE', got %s", DefaultTopicPrefix)
@@ -168,7 +166,7 @@ func TestConstants(t *testing.T) {
 	if DefaultDelaySlotDuration != time.Hour {
 		t.Errorf("expected DefaultDelaySlotDuration to be 1h, got %v", DefaultDelaySlotDuration)
 	}
-	if DefaultAutoCommit != false {
+	if DefaultAutoCommit {
 		t.Errorf("expected DefaultAutoCommit to be false, got %v", DefaultAutoCommit)
 	}
 	if DefaultSessionTimeout != 30000 {

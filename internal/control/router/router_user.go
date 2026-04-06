@@ -23,7 +23,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func (rt *Router) userRouter(r fiber.Router, auth fiber.Handler) {
+func (rt *Router) userRouter(r fiber.Router, authMW fiber.Handler) {
 	userGroup := r.Group("/users")
 	{
 		// Authentication routes (no authentication required)
@@ -31,19 +31,19 @@ func (rt *Router) userRouter(r fiber.Router, auth fiber.Handler) {
 		userGroup.Post("/register", rt.register) // POST /users/register - user registration
 
 		// Session routes (authentication required)
-		userGroup.Post("/logout", auth, rt.logout)   // POST /users/logout - user logout
-		userGroup.Post("/refresh", auth, rt.refresh) // POST /users/refresh - refresh token
+		userGroup.Post("/logout", authMW, rt.logout)   // POST /users/logout - user logout
+		userGroup.Post("/refresh", authMW, rt.refresh) // POST /users/refresh - refresh token
 
 		// User resource routes (authentication required)
-		userGroup.Get("/", auth, rt.getUserList)                   // GET /users - list users with pagination
-		userGroup.Get("/by-role", auth, rt.getUsersByRole)         // GET /users/by-role - get users by roleId or roleName
-		userGroup.Get("/fetch", auth, rt.fetchUserInfo)            // GET /users/fetch - get current user info
-		userGroup.Post("/invite", auth, rt.addUser)                // POST /users/invite - invite user
-		userGroup.Put("/:userId", auth, rt.updateUser)             // PUT /users/:id - update user info
-		userGroup.Put("/:userId/password", auth, rt.resetPassword) // PUT /users/:id/password - reset user password
-		userGroup.Post("/fetch/avatar", auth, rt.uploadAvatar)     // POST /users/me/avatar - upload user avatar
-		// userGroup.Get("/:id", auth, rt.getUser)          // GET /users/:id - get specific user (to be implemented)
-		// userGroup.Delete("/:id", auth, rt.deleteUser)    // DELETE /users/:id - delete user (to be implemented)
+		userGroup.Get("/", authMW, rt.getUserList)                   // GET /users - list users with pagination
+		userGroup.Get("/by-role", authMW, rt.getUsersByRole)         // GET /users/by-role - get users by roleID or roleName
+		userGroup.Get("/fetch", authMW, rt.fetchUserInfo)            // GET /users/fetch - get current user info
+		userGroup.Post("/invite", authMW, rt.addUser)                // POST /users/invite - invite user
+		userGroup.Put("/:userID", authMW, rt.updateUser)             // PUT /users/:id - update user info
+		userGroup.Put("/:userID/password", authMW, rt.resetPassword) // PUT /users/:id/password - reset user password
+		userGroup.Post("/fetch/avatar", authMW, rt.uploadAvatar)     // POST /users/me/avatar - upload user avatar
+		// userGroup.Get("/:id", authMW, rt.getUser)          // GET /users/:id - get specific user (to be implemented)
+		// userGroup.Delete("/:id", authMW, rt.deleteUser)    // DELETE /users/:id - delete user (to be implemented)
 	}
 }
 
@@ -83,10 +83,10 @@ func (rt *Router) register(c *fiber.Ctx) error {
 
 func (rt *Router) refresh(c *fiber.Ctx) error {
 	userLogic := rt.Services.User
-	userId := c.Query("userId")
+	userID := c.Query("userID")
 	refreshToken := c.Query("refreshToken")
 
-	token, err := userLogic.Refresh(userId, refreshToken, &rt.HTTP.Auth)
+	token, err := userLogic.Refresh(userID, refreshToken, &rt.HTTP.Auth)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -102,7 +102,7 @@ func (rt *Router) logout(c *fiber.Ctx) error {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	if err := userLogic.Logout(claims.UserId); err != nil {
+	if err := userLogic.Logout(claims.UserID); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
@@ -130,12 +130,12 @@ func (rt *Router) updateUser(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
-	userId := c.Params("userId")
-	if userId == "" {
+	userID := c.Params("userID")
+	if userID == "" {
 		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
-	if err := userLogic.UpdateUser(userId, updateReq); err != nil {
+	if err := userLogic.UpdateUser(userID, updateReq); err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 
@@ -151,7 +151,7 @@ func (rt *Router) fetchUserInfo(c *fiber.Ctx) error {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	user, err = userLogic.FetchUserInfo(claims.UserId)
+	user, err = userLogic.FetchUserInfo(claims.UserID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -184,7 +184,7 @@ func (rt *Router) getUserList(c *fiber.Ctx) error {
 
 	// build response without created_at and updated_at
 	type UserResponse struct {
-		UserId           string     `json:"userId"`
+		UserID           string     `json:"userID"`
 		Username         string     `json:"username"`
 		FullName         string     `json:"fullName"`
 		Avatar           string     `json:"avatar"`
@@ -200,7 +200,7 @@ func (rt *Router) getUserList(c *fiber.Ctx) error {
 	var response []UserResponse
 	for _, user := range users {
 		response = append(response, UserResponse{
-			UserId:           user.UserID,
+			UserID:           user.UserID,
 			Username:         user.Username,
 			FullName:         user.FullName,
 			Avatar:           user.Avatar,
@@ -223,15 +223,15 @@ func (rt *Router) getUserList(c *fiber.Ctx) error {
 	return http.Detail(c, result)
 }
 
-// getUsersByRole GET /users/by-role - get users by roleId or roleName
+// getUsersByRole GET /users/by-role - get users by roleID or roleName
 func (rt *Router) getUsersByRole(c *fiber.Ctx) error {
 	userLogic := rt.Services.User
 
-	roleId := c.Query("roleId")
+	roleID := c.Query("roleID")
 	roleName := c.Query("roleName")
 
-	if roleId == "" && roleName == "" {
-		return http.Err(c, http.BadRequest.Code, "roleId or roleName is required")
+	if roleID == "" && roleName == "" {
+		return http.Err(c, http.BadRequest.Code, "roleID or roleName is required")
 	}
 
 	// Support both "page" and "pageNum" parameters
@@ -248,14 +248,14 @@ func (rt *Router) getUsersByRole(c *fiber.Ctx) error {
 		pageSize = 10
 	}
 
-	users, count, err := userLogic.GetUsersByRole(roleId, roleName, pageNum, pageSize)
+	users, count, err := userLogic.GetUsersByRole(roleID, roleName, pageNum, pageSize)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// build response without created_at and updated_at
 	type UserResponse struct {
-		UserId           string     `json:"userId"`
+		UserID           string     `json:"userID"`
 		Username         string     `json:"username"`
 		FullName         string     `json:"fullName"`
 		Avatar           string     `json:"avatar"`
@@ -271,7 +271,7 @@ func (rt *Router) getUsersByRole(c *fiber.Ctx) error {
 	var response []UserResponse
 	for _, user := range users {
 		response = append(response, UserResponse{
-			UserId:           user.UserID,
+			UserID:           user.UserID,
 			Username:         user.Username,
 			FullName:         user.FullName,
 			Avatar:           user.Avatar,
@@ -299,8 +299,8 @@ func (rt *Router) resetPassword(c *fiber.Ctx) error {
 	userLogic := rt.Services.User
 
 	// get user ID from path parameter
-	userId := c.Params("userId")
-	if userId == "" {
+	userID := c.Params("userID")
+	if userID == "" {
 		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
@@ -314,7 +314,7 @@ func (rt *Router) resetPassword(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "newPassword is required")
 	}
 
-	if err := userLogic.ResetPassword(userId, &req); err != nil {
+	if err := userLogic.ResetPassword(userID, &req); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
@@ -339,13 +339,13 @@ func (rt *Router) uploadAvatar(c *fiber.Ctx) error {
 	}
 
 	// upload avatar to object storage
-	response, err := uploadService.UploadAvatar(c.Context(), file, claims.UserId)
+	response, err := uploadService.UploadAvatar(c.Context(), file, claims.UserID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// update user avatar in database with complete URL
-	if err := userService.UpdateAvatar(claims.UserId, response.FileURL); err != nil {
+	if err := userService.UpdateAvatar(claims.UserID, response.FileURL); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
@@ -355,7 +355,7 @@ func (rt *Router) uploadAvatar(c *fiber.Ctx) error {
 		"originalName": response.OriginalName,
 		"size":         response.Size,
 		"contentType":  response.ContentType,
-		"storageId":    response.StorageId,
+		"storageId":    response.StorageID,
 		"storageType":  response.StorageType,
 		"uploadTime":   response.UploadTime,
 	}

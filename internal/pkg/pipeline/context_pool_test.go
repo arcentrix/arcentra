@@ -114,8 +114,8 @@ func TestContextPool(t *testing.T) {
 	if ctx1 == nil {
 		t.Fatal("got nil context")
 	}
-	if ctx1.PipelineId() != "pipeline-1" {
-		t.Errorf("expected pipelineId 'pipeline-1', got %q", ctx1.PipelineId())
+	if ctx1.PipelineID() != "pipeline-1" {
+		t.Errorf("expected pipelineId 'pipeline-1', got %q", ctx1.PipelineID())
 	}
 
 	// Test Put returns context to pool
@@ -126,8 +126,8 @@ func TestContextPool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get context from pool: %v", err)
 	}
-	if ctx2.PipelineId() != "pipeline-1" {
-		t.Errorf("expected pipelineId 'pipeline-1', got %q", ctx2.PipelineId())
+	if ctx2.PipelineID() != "pipeline-1" {
+		t.Errorf("expected pipelineId 'pipeline-1', got %q", ctx2.PipelineID())
 	}
 
 	// Test stats
@@ -208,8 +208,8 @@ func TestResetForReuse(t *testing.T) {
 	ctx := NewContext(context.Background(), pipeline1, execCtx)
 
 	// Set some state
-	ctx.SetPipelineId("pipeline-1")
-	ctx.SetBuildId("build-1")
+	ctx.SetPipelineID("pipeline-1")
+	ctx.SetBuildID("build-1")
 	ctx.Set("key1", "value1")
 	ctx.Store("store1", "value1")
 	ctx.Error(fmt.Errorf("test error"))
@@ -220,11 +220,11 @@ func TestResetForReuse(t *testing.T) {
 	ctx.ResetForReuse(context.Background(), pipeline2, execCtx)
 
 	// Verify reset
-	if ctx.PipelineId() != "pipeline-2" {
-		t.Errorf("expected pipelineId 'pipeline-2', got %q", ctx.PipelineId())
+	if ctx.PipelineID() != "pipeline-2" {
+		t.Errorf("expected pipelineId 'pipeline-2', got %q", ctx.PipelineID())
 	}
-	if ctx.BuildId() != "" {
-		t.Errorf("expected empty buildId, got %q", ctx.BuildId())
+	if ctx.BuildID() != "" {
+		t.Errorf("expected empty buildId, got %q", ctx.BuildID())
 	}
 	if _, ok := ctx.Get("key1"); ok {
 		t.Error("expected key1 to be cleared")
@@ -286,7 +286,7 @@ func TestDefaultContextPool(t *testing.T) {
 	}
 }
 
-func TestStorageStrategy(t *testing.T) {
+func TestStorageStrategy(_ *testing.T) {
 	// Mock storage strategy
 	mockStorage := &mockStorageStrategy{
 		storage: make(map[string][]byte),
@@ -433,26 +433,26 @@ type mockStorageStrategy struct {
 	mu      sync.Mutex
 }
 
-func (m *mockStorageStrategy) Save(ctx context.Context, pipelineId string, data []byte) error {
+func (m *mockStorageStrategy) Save(_ context.Context, pipelineID string, data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.storage[pipelineId] = data
+	m.storage[pipelineID] = data
 	return nil
 }
 
-func (m *mockStorageStrategy) Load(ctx context.Context, pipelineId string) ([]byte, error) {
+func (m *mockStorageStrategy) Load(_ context.Context, pipelineID string) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	data, ok := m.storage[pipelineId]
+	data, ok := m.storage[pipelineID]
 	if !ok {
 		return nil, fmt.Errorf("not found")
 	}
 	return data, nil
 }
 
-func (m *mockStorageStrategy) Delete(ctx context.Context, pipelineId string) error {
+func (m *mockStorageStrategy) Delete(_ context.Context, pipelineID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.storage, pipelineId)
+	delete(m.storage, pipelineID)
 	return nil
 }

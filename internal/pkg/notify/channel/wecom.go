@@ -69,7 +69,7 @@ func (c *WeComChannel) Send(ctx context.Context, message string) error {
 }
 
 // SendWithTemplate sends message using template
-func (c *WeComChannel) SendWithTemplate(ctx context.Context, template string, data map[string]interface{}) error {
+func (c *WeComChannel) SendWithTemplate(ctx context.Context, template string, _ map[string]interface{}) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func (c *WeComChannel) sendRequest(ctx context.Context, payload map[string]inter
 }
 
 // Receive receives messages (webhook callback)
-func (c *WeComChannel) Receive(ctx context.Context, message string) error {
+func (c *WeComChannel) Receive(_ context.Context, _ string) error {
 	return nil
 }
 

@@ -36,33 +36,33 @@ type ProducerOption interface {
 
 type producerOptionFunc func(*ProducerConfig)
 
-func (fn producerOptionFunc) apply(cfg *ProducerConfig) {
-	fn(cfg)
+func (fn producerOptionFunc) apply(conf *ProducerConfig) {
+	fn(conf)
 }
 
-func WithProducerClientOptions(opts ...ClientOption) ProducerOption {
-	return producerOptionFunc(func(cfg *ProducerConfig) {
+func WithProducerOptions(opts ...Option) ProducerOption {
+	return producerOptionFunc(func(conf *ProducerConfig) {
 		for _, opt := range opts {
-			opt.apply(&cfg.Config)
+			opt.apply(&conf.Config)
 		}
 	})
 }
 
 func WithProducerAcks(acks string) ProducerOption {
-	return producerOptionFunc(func(cfg *ProducerConfig) {
-		cfg.Acks = acks
+	return producerOptionFunc(func(conf *ProducerConfig) {
+		conf.Acks = acks
 	})
 }
 
 func WithProducerRetries(retries int) ProducerOption {
-	return producerOptionFunc(func(cfg *ProducerConfig) {
-		cfg.Retries = retries
+	return producerOptionFunc(func(conf *ProducerConfig) {
+		conf.Retries = retries
 	})
 }
 
 func WithProducerCompression(compression string) ProducerOption {
-	return producerOptionFunc(func(cfg *ProducerConfig) {
-		cfg.Compression = compression
+	return producerOptionFunc(func(conf *ProducerConfig) {
+		conf.Compression = compression
 	})
 }
 
@@ -72,8 +72,8 @@ type Producer struct {
 }
 
 // NewProducer creates a new Kafka producer.
-func NewProducer(bootstrapServers string, clientId string, opts ...ProducerOption) (*Producer, error) {
-	cfg := ProducerConfig{
+func NewProducer(bootstrapServers string, clientID string, opts ...ProducerOption) (*Producer, error) {
+	conf := ProducerConfig{
 		Config: Config{
 			BootstrapServers: bootstrapServers,
 		},
@@ -82,22 +82,22 @@ func NewProducer(bootstrapServers string, clientId string, opts ...ProducerOptio
 		Compression: "snappy",
 	}
 	for _, opt := range opts {
-		opt.apply(&cfg)
+		opt.apply(&conf)
 	}
-	normalizeProducerConfig(&cfg)
+	normalizeProducerConfig(&conf)
 
-	config, err := buildBaseConfig(cfg.Config)
+	config, err := buildBaseConfig(conf.Config)
 	if err != nil {
 		return nil, err
 	}
-	clientID, err := buildClientId(clientId)
+	clientIDStr, err := buildClientID(clientID)
 	if err != nil {
 		return nil, err
 	}
-	_ = config.SetKey("client.id", clientID)
-	_ = config.SetKey("acks", cfg.Acks)
-	_ = config.SetKey("retries", cfg.Retries)
-	_ = config.SetKey("compression.type", cfg.Compression)
+	_ = config.SetKey("client.id", clientIDStr)
+	_ = config.SetKey("acks", conf.Acks)
+	_ = config.SetKey("retries", conf.Retries)
+	_ = config.SetKey("compression.type", conf.Compression)
 
 	producer, err := kafka.NewProducer(config)
 	if err != nil {
@@ -107,15 +107,15 @@ func NewProducer(bootstrapServers string, clientId string, opts ...ProducerOptio
 	return &Producer{producer: producer}, nil
 }
 
-func normalizeProducerConfig(cfg *ProducerConfig) {
-	if cfg.Acks == "" {
-		cfg.Acks = "all"
+func normalizeProducerConfig(conf *ProducerConfig) {
+	if conf.Acks == "" {
+		conf.Acks = "all"
 	}
-	if cfg.Retries == 0 {
-		cfg.Retries = 3
+	if conf.Retries == 0 {
+		conf.Retries = 3
 	}
-	if cfg.Compression == "" {
-		cfg.Compression = "snappy"
+	if conf.Compression == "" {
+		conf.Compression = "snappy"
 	}
 }
 

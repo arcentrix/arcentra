@@ -18,13 +18,13 @@ import "time"
 
 // TerminalOutputRecord 终端输出记录
 type TerminalOutputRecord struct {
-	SessionId        string                 `gorm:"column:session_id;type:VARCHAR(64);primaryKey" json:"sessionId"`
+	SessionID        string                 `gorm:"column:session_id;type:VARCHAR(64);primaryKey" json:"sessionId"`
 	SessionType      string                 `gorm:"column:session_type;type:VARCHAR(32)" json:"sessionType"`      // build/deploy/release/debug
 	Environment      string                 `gorm:"column:environment;type:VARCHAR(32);index" json:"environment"` // dev/test/staging/prod
-	StepRunId        string                 `gorm:"column:step_run_id;type:VARCHAR(64);index" json:"stepRunId,omitempty"`
-	PipelineId       string                 `gorm:"column:pipeline_id;type:VARCHAR(64)" json:"pipelineId,omitempty"`
-	PipelineRunId    string                 `gorm:"column:pipeline_run_id;type:VARCHAR(64);index" json:"pipelineRunId,omitempty"`
-	UserId           string                 `gorm:"column:user_id;type:VARCHAR(64);index" json:"userId"`
+	StepRunID        string                 `gorm:"column:step_run_id;type:VARCHAR(64);index" json:"stepRunId,omitempty"`
+	PipelineID       string                 `gorm:"column:pipeline_id;type:VARCHAR(64)" json:"pipelineId,omitempty"`
+	PipelineRunID    string                 `gorm:"column:pipeline_run_id;type:VARCHAR(64);index" json:"pipelineRunId,omitempty"`
+	UserID           string                 `gorm:"column:user_id;type:VARCHAR(64);index" json:"userId"`
 	Hostname         string                 `gorm:"column:hostname;type:VARCHAR(255)" json:"hostname"`
 	WorkingDirectory string                 `gorm:"column:working_directory;type:VARCHAR(255)" json:"workingDirectory"`
 	Command          string                 `gorm:"column:command;type:TEXT" json:"command"`

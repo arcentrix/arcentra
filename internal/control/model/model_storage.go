@@ -21,7 +21,7 @@ import (
 // StorageConfig 对象存储配置表
 type StorageConfig struct {
 	BaseModel
-	StorageId   string         `gorm:"column:storage_id" json:"storageId"`
+	StorageID   string         `gorm:"column:storage_id" json:"storageId"`
 	Name        string         `gorm:"column:name" json:"name"`
 	StorageType string         `gorm:"column:storage_type" json:"storageType"` // minio/s3/oss/gcs/cos
 	Config      datatypes.JSON `gorm:"column:config" json:"config"`

@@ -58,9 +58,9 @@ func TestRefreshToken(t *testing.T) {
 }
 
 func TestParseToken(t *testing.T) {
-	userId := "test-user"
+	userID := "test-user"
 	secretKey := "bf284d03-ba65-42d4-a9fe-0d2fbfe61060"
-	aToken, _, err := GenToken(userId, []byte(secretKey), 10*time.Minute, 20*time.Minute)
+	aToken, _, err := GenToken(userID, []byte(secretKey), 10*time.Minute, 20*time.Minute)
 	if err != nil {
 		t.Errorf("GenToken error: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestParseToken(t *testing.T) {
 		t.Errorf("ParseToken error: %v", err)
 	}
 	t.Logf("claims: %v", claims)
-	t.Logf("userId: %s", claims.UserId)
+	t.Logf("userId: %s", claims.UserID)
 	t.Logf("Issuer: %s", claims.Issuer)
 	t.Logf("ExpiresAt: %v", claims.ExpiresAt)
 	t.Logf("NotBefore: %v", claims.NotBefore)

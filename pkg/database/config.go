@@ -22,8 +22,8 @@ const (
 	dataTablePrefix = "t_"
 )
 
-// DatabaseOptions holds common connection pool and logging options
-type DatabaseOptions struct {
+// Options holds common connection pool and logging options
+type Options struct {
 	OutPut       bool `mapstructure:"output"`
 	MaxOpenConns int  `mapstructure:"maxOpenConns"`
 	MaxIdleConns int  `mapstructure:"maxIdleConns"`
@@ -49,7 +49,7 @@ type Database struct {
 	MySQL  MySQLConfig  `mapstructure:"mysql"`
 	SQLite SQLiteConfig `mapstructure:"sqlite"`
 	// Common options for connection pool and logging
-	Options DatabaseOptions `mapstructure:"options"`
+	Options Options `mapstructure:"options"`
 }
 
 // GetConnMaxLifetime returns ConnMaxLifetime as time.Duration from common config

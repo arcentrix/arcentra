@@ -41,7 +41,7 @@ func initAgent(configPath string) (*bootstrap.Agent, func(), error) {
 		router.ProviderSet,
 		// Outbox（依赖 config 和 grpc）
 		agentoutbox.ProvideOutbox,
-		// 执行器（依赖 Outbox，ShellExecutor + OutboxPublisher）
+		// 执行器（依赖 Outbox，ShellExecutor + Publisher）
 		agentoutbox.ProvideExecutorManager,
 		// 应用层
 		bootstrap.NewAgent,

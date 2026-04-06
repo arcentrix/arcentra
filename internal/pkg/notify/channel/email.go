@@ -90,7 +90,7 @@ func (c *EmailChannel) SendWithTemplate(ctx context.Context, template string, da
 }
 
 // sendEmail sends email message
-func (c *EmailChannel) sendEmail(ctx context.Context, subject, body string) error {
+func (c *EmailChannel) sendEmail(_ context.Context, subject, body string) error {
 	if c.authProvider == nil {
 		return fmt.Errorf("auth provider is required for email")
 	}
@@ -121,7 +121,7 @@ func (c *EmailChannel) sendEmail(ctx context.Context, subject, body string) erro
 }
 
 // Receive receives email (POP3/IMAP, not implemented here)
-func (c *EmailChannel) Receive(ctx context.Context, message string) error {
+func (c *EmailChannel) Receive(_ context.Context, _ string) error {
 	return fmt.Errorf("email receive not implemented")
 }
 

@@ -180,7 +180,7 @@ func TestInitMulti(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read http.log: %v", err)
 	}
-	if !strings.Contains(string(httpContent), "category=http") {
+	if !strings.Contains(string(httpContent), "\"category\":\"http\"") {
 		t.Fatalf("expected category=http in http.log: %s", string(httpContent))
 	}
 
@@ -188,7 +188,7 @@ func TestInitMulti(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read plugin.log: %v", err)
 	}
-	if !strings.Contains(string(pluginContent), "category=plugin") {
+	if !strings.Contains(string(pluginContent), "\"category\":\"plugin\"") {
 		t.Fatalf("expected category=plugin in plugin.log: %s", string(pluginContent))
 	}
 
@@ -196,7 +196,7 @@ func TestInitMulti(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read app.log: %v", err)
 	}
-	if !strings.Contains(string(defaultContent), "category=default") {
+	if !strings.Contains(string(defaultContent), "\"category\":\"default\"") {
 		t.Fatalf("expected category=default in app.log: %s", string(defaultContent))
 	}
 }
@@ -223,13 +223,13 @@ func TestCategoryFallback(t *testing.T) {
 		t.Fatalf("failed to read fallback.log: %v", err)
 	}
 	text := string(content)
-	if !strings.Contains(text, "category=default") {
+	if !strings.Contains(text, "\"category\":\"default\"") {
 		t.Fatalf("expected fallback log to include category=default: %s", text)
 	}
 }
 
-func TestPrintLog(t *testing.T) {
-	Init(SetDefaults())
+func TestPrintLog(_ *testing.T) {
+	_ = Init(SetDefaults())
 	Info("test")
 	Infow("test", "key", "value")
 	Debug("test")

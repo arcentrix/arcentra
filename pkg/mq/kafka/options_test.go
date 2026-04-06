@@ -18,7 +18,7 @@ import "testing"
 
 func TestProducerOptionsApply(t *testing.T) {
 	cfg := ProducerConfig{}
-	WithProducerClientOptions(
+	WithProducerOptions(
 		WithSecurityProtocol("SASL_SSL"),
 	).apply(&cfg)
 	WithProducerAcks("1").apply(&cfg)
@@ -56,7 +56,7 @@ func TestNormalizeProducerConfig_Defaults(t *testing.T) {
 
 func TestConsumerOptionsApply(t *testing.T) {
 	cfg := ConsumerConfig{}
-	WithConsumerClientOptions(
+	WithConsumerOptions(
 		WithSecurityProtocol("PLAINTEXT"),
 	).apply(&cfg)
 	WithConsumerAutoOffsetReset("latest").apply(&cfg)
@@ -70,7 +70,7 @@ func TestConsumerOptionsApply(t *testing.T) {
 	if cfg.AutoOffsetReset != "latest" {
 		t.Fatalf("expected AutoOffsetReset to be set, got %s", cfg.AutoOffsetReset)
 	}
-	if cfg.EnableAutoCommit == nil || *cfg.EnableAutoCommit != false {
+	if cfg.EnableAutoCommit == nil || *cfg.EnableAutoCommit {
 		t.Fatalf("expected EnableAutoCommit to be false, got %v", cfg.EnableAutoCommit)
 	}
 	if cfg.SessionTimeoutMs != 15000 {

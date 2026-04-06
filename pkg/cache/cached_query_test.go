@@ -113,7 +113,7 @@ func TestCachedQuery_Get_CacheHit(t *testing.T) {
 		return "test:" + params[0].(string)
 	}
 
-	queryFunc := func(ctx context.Context) (TestData, error) {
+	queryFunc := func(_ context.Context) (TestData, error) {
 		t.Error("queryFunc should not be called on cache hit")
 		return TestData{}, nil
 	}
@@ -139,7 +139,7 @@ func TestCachedQuery_Get_CacheMiss(t *testing.T) {
 	}
 
 	queryCalled := false
-	queryFunc := func(ctx context.Context) (TestData, error) {
+	queryFunc := func(_ context.Context) (TestData, error) {
 		queryCalled = true
 		return TestData{ID: 2, Name: "from_db"}, nil
 	}
@@ -177,7 +177,7 @@ func TestCachedQuery_Get_QueryError(t *testing.T) {
 		return "test:" + params[0].(string)
 	}
 
-	queryFunc := func(ctx context.Context) (TestData, error) {
+	queryFunc := func(_ context.Context) (TestData, error) {
 		return TestData{}, errors.New("database error")
 	}
 
@@ -200,7 +200,7 @@ func TestCachedQuery_Invalidate(t *testing.T) {
 		return "test:" + params[0].(string)
 	}
 
-	queryFunc := func(ctx context.Context) (TestData, error) {
+	queryFunc := func(_ context.Context) (TestData, error) {
 		return TestData{}, nil
 	}
 
@@ -226,7 +226,7 @@ func TestCachedQuery_WithTTL(t *testing.T) {
 		return "test:" + params[0].(string)
 	}
 
-	queryFunc := func(ctx context.Context) (TestData, error) {
+	queryFunc := func(_ context.Context) (TestData, error) {
 		return TestData{ID: 1, Name: "test"}, nil
 	}
 
@@ -251,7 +251,7 @@ func TestCachedQuery_GetOrSet(t *testing.T) {
 		return "test:" + params[0].(string)
 	}
 
-	setFunc := func(ctx context.Context) (TestData, error) {
+	setFunc := func(_ context.Context) (TestData, error) {
 		return TestData{ID: 1, Name: "from_set"}, nil
 	}
 

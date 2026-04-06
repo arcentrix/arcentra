@@ -30,9 +30,9 @@ type ChannelRepositoryAdapter struct {
 }
 
 // NewChannelRepositoryAdapter 创建通知配置仓库适配器
-func NewChannelRepositoryAdapter(repo repo.INotificationChannelRepository) *ChannelRepositoryAdapter {
+func NewChannelRepositoryAdapter(r repo.INotificationChannelRepository) *ChannelRepositoryAdapter {
 	return &ChannelRepositoryAdapter{
-		repo: repo,
+		repo: r,
 	}
 }
 
@@ -72,7 +72,7 @@ func modelToChannelConfig(m *model.NotificationChannel) (*ChannelConfig, error) 
 	}
 
 	return &ChannelConfig{
-		ChannelID:  m.ChannelId,
+		ChannelID:  m.ChannelID,
 		Name:       m.Name,
 		Type:       ChannelType(m.Type),
 		Config:     config,

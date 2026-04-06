@@ -23,12 +23,12 @@ import (
 
 // ITeamMemberRepository defines team member persistence with context support.
 type ITeamMemberRepository interface {
-	Get(ctx context.Context, teamId, userId string) (*model.TeamMember, error)
-	ListTeamMembers(ctx context.Context, teamId string) ([]model.TeamMember, error)
-	ListUserTeams(ctx context.Context, userId string) ([]model.TeamMember, error)
+	Get(ctx context.Context, teamID, userID string) (*model.TeamMember, error)
+	ListTeamMembers(ctx context.Context, teamID string) ([]model.TeamMember, error)
+	ListUserTeams(ctx context.Context, userID string) ([]model.TeamMember, error)
 	AddTeamMember(ctx context.Context, member *model.TeamMember) error
-	UpdateTeamMemberRole(ctx context.Context, teamId, userId, role string) error
-	RemoveTeamMember(ctx context.Context, teamId, userId string) error
+	UpdateTeamMemberRole(ctx context.Context, teamID, userID, role string) error
+	RemoveTeamMember(ctx context.Context, teamID, userID string) error
 }
 
 type TeamMemberRepo struct {
@@ -39,27 +39,27 @@ func NewTeamMemberRepo(db database.IDatabase) ITeamMemberRepository {
 	return &TeamMemberRepo{IDatabase: db}
 }
 
-// Get returns team member by teamId and userId.
-func (r *TeamMemberRepo) Get(ctx context.Context, teamId, userId string) (*model.TeamMember, error) {
+// Get returns team member by teamID and userID.
+func (r *TeamMemberRepo) Get(ctx context.Context, teamID, userID string) (*model.TeamMember, error) {
 	var member model.TeamMember
 	err := r.Database().WithContext(ctx).Select("id", "team_id", "user_id", "role_id", "created_at", "updated_at").
-		Where("team_id = ? AND user_id = ?", teamId, userId).First(&member).Error
+		Where("team_id = ? AND user_id = ?", teamID, userID).First(&member).Error
 	return &member, err
 }
 
 // ListTeamMembers lists team members.
-func (r *TeamMemberRepo) ListTeamMembers(ctx context.Context, teamId string) ([]model.TeamMember, error) {
+func (r *TeamMemberRepo) ListTeamMembers(ctx context.Context, teamID string) ([]model.TeamMember, error) {
 	var members []model.TeamMember
 	err := r.Database().WithContext(ctx).Select("id", "team_id", "user_id", "role_id", "created_at", "updated_at").
-		Where("team_id = ?", teamId).Find(&members).Error
+		Where("team_id = ?", teamID).Find(&members).Error
 	return members, err
 }
 
 // ListUserTeams lists user's teams.
-func (r *TeamMemberRepo) ListUserTeams(ctx context.Context, userId string) ([]model.TeamMember, error) {
+func (r *TeamMemberRepo) ListUserTeams(ctx context.Context, userID string) ([]model.TeamMember, error) {
 	var members []model.TeamMember
 	err := r.Database().WithContext(ctx).Select("id", "team_id", "user_id", "role_id", "created_at", "updated_at").
-		Where("user_id = ?", userId).Find(&members).Error
+		Where("user_id = ?", userID).Find(&members).Error
 	return members, err
 }
 
@@ -69,14 +69,14 @@ func (r *TeamMemberRepo) AddTeamMember(ctx context.Context, member *model.TeamMe
 }
 
 // UpdateTeamMemberRole updates team member role.
-func (r *TeamMemberRepo) UpdateTeamMemberRole(ctx context.Context, teamId, userId, role string) error {
+func (r *TeamMemberRepo) UpdateTeamMemberRole(ctx context.Context, teamID, userID, role string) error {
 	return r.Database().WithContext(ctx).Model(&model.TeamMember{}).
-		Where("team_id = ? AND user_id = ?", teamId, userId).
+		Where("team_id = ? AND user_id = ?", teamID, userID).
 		Update("role", role).Error
 }
 
 // RemoveTeamMember removes a team member.
-func (r *TeamMemberRepo) RemoveTeamMember(ctx context.Context, teamId, userId string) error {
-	return r.Database().WithContext(ctx).Where("team_id = ? AND user_id = ?", teamId, userId).
+func (r *TeamMemberRepo) RemoveTeamMember(ctx context.Context, teamID, userID string) error {
+	return r.Database().WithContext(ctx).Where("team_id = ? AND user_id = ?", teamID, userID).
 		Delete(&model.TeamMember{}).Error
 }

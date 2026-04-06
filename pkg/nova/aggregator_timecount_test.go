@@ -22,11 +22,7 @@ import (
 
 func TestNewTimeCountAggregator(t *testing.T) {
 	agg := NewTimeCountAggregator(10, 5*time.Second)
-	defer func() {
-		if agg.flushTimer != nil {
-			agg.flushTimer.Stop()
-		}
-	}()
+	defer agg.Stop()
 
 	if agg.Size() != 0 {
 		t.Errorf("expected initial Size to be 0, got %d", agg.Size())
@@ -35,11 +31,7 @@ func TestNewTimeCountAggregator(t *testing.T) {
 
 func TestTimeCountAggregator_Add(t *testing.T) {
 	agg := NewTimeCountAggregator(3, 10*time.Second)
-	defer func() {
-		if agg.flushTimer != nil {
-			agg.flushTimer.Stop()
-		}
-	}()
+	defer agg.Stop()
 
 	task1 := &Task{Type: "test1", Payload: []byte("data1")}
 	task2 := &Task{Type: "test2", Payload: []byte("data2")}
@@ -68,11 +60,7 @@ func TestTimeCountAggregator_Add(t *testing.T) {
 
 func TestTimeCountAggregator_ShouldFlush(t *testing.T) {
 	agg := NewTimeCountAggregator(3, 100*time.Millisecond)
-	defer func() {
-		if agg.flushTimer != nil {
-			agg.flushTimer.Stop()
-		}
-	}()
+	defer agg.Stop()
 
 	// Should not flush when below threshold
 	if agg.ShouldFlush() {
@@ -92,11 +80,7 @@ func TestTimeCountAggregator_ShouldFlush(t *testing.T) {
 	// Actually, Add() already flushed, so Size should be 0
 	// Let's test time-based flush instead
 	agg2 := NewTimeCountAggregator(10, 100*time.Millisecond)
-	defer func() {
-		if agg2.flushTimer != nil {
-			agg2.flushTimer.Stop()
-		}
-	}()
+	defer agg2.Stop()
 
 	// Test time-based flush: add a task, flush it, then add another and wait
 	agg2.Add(&Task{Type: "test1", Payload: []byte("data1")})
@@ -109,24 +93,20 @@ func TestTimeCountAggregator_ShouldFlush(t *testing.T) {
 	// timeWindow is 100ms, wait 150ms to be sure
 	time.Sleep(150 * time.Millisecond)
 
-	// ShouldFlush should return true because time.Since(lastFlush) >= timeWindow
-	if !agg2.ShouldFlush() {
-		// If it still fails, the issue might be timing-related
-		// Let's wait a bit more and check again
+	// After the time window, aggregator can be in either valid state:
+	// 1) auto-flushed by timer callback (Size==0), or
+	// 2) pending flush and ShouldFlush()==true.
+	if agg2.Size() > 0 && !agg2.ShouldFlush() {
 		time.Sleep(50 * time.Millisecond)
-		if !agg2.ShouldFlush() {
-			t.Error("expected ShouldFlush to be true after time window")
+		if agg2.Size() > 0 && !agg2.ShouldFlush() {
+			t.Error("expected auto flush or ShouldFlush=true after time window")
 		}
 	}
 }
 
 func TestTimeCountAggregator_Flush(t *testing.T) {
 	agg := NewTimeCountAggregator(10, 10*time.Second)
-	defer func() {
-		if agg.flushTimer != nil {
-			agg.flushTimer.Stop()
-		}
-	}()
+	defer agg.Stop()
 
 	// Flush empty aggregator
 	tasks := agg.Flush()
@@ -160,18 +140,14 @@ func TestTimeCountAggregator_Flush(t *testing.T) {
 	}
 }
 
-func TestTimeCountAggregator_SetFlushCallback(t *testing.T) {
+func TestTimeCountAggregator_SetFlushCallback(_ *testing.T) {
 	agg := NewTimeCountAggregator(10, 10*time.Second)
-	defer func() {
-		if agg.flushTimer != nil {
-			agg.flushTimer.Stop()
-		}
-	}()
+	defer agg.Stop()
 
 	var callbackCalled bool
 	var mu sync.Mutex
 
-	callback := func(tasks []*Task) {
+	callback := func(_ []*Task) {
 		mu.Lock()
 		defer mu.Unlock()
 		callbackCalled = true
@@ -201,11 +177,7 @@ func TestTimeCountAggregator_SetFlushCallback(t *testing.T) {
 
 func TestTimeCountAggregator_Reset(t *testing.T) {
 	agg := NewTimeCountAggregator(10, 10*time.Second)
-	defer func() {
-		if agg.flushTimer != nil {
-			agg.flushTimer.Stop()
-		}
-	}()
+	defer agg.Stop()
 
 	// Add some tasks
 	agg.Add(&Task{Type: "test1", Payload: []byte("data1")})
@@ -223,11 +195,7 @@ func TestTimeCountAggregator_Reset(t *testing.T) {
 
 func TestTimeCountAggregator_Size(t *testing.T) {
 	agg := NewTimeCountAggregator(10, 10*time.Second)
-	defer func() {
-		if agg.flushTimer != nil {
-			agg.flushTimer.Stop()
-		}
-	}()
+	defer agg.Stop()
 
 	if agg.Size() != 0 {
 		t.Errorf("expected initial Size to be 0, got %d", agg.Size())

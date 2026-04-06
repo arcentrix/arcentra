@@ -39,7 +39,7 @@ func NewUserExt(userExtRepo repo.IUserExtRepository) *UserExt {
 func (ues *UserExt) GetUserExt(ctx context.Context, userID string) (*model.UserExt, error) {
 	Ext, err := ues.userExtRepo.Get(ctx, userID)
 	if err != nil {
-		log.Errorw("failed to get user Ext", "userId", userID, "error", err)
+		log.Errorw("failed to get user Ext", "userID", userID, "error", err)
 		return nil, err
 	}
 	return Ext, nil
@@ -49,7 +49,7 @@ func (ues *UserExt) GetUserExt(ctx context.Context, userID string) (*model.UserE
 func (ues *UserExt) CreateUserExt(ctx context.Context, Ext *model.UserExt) error {
 	exists, err := ues.userExtRepo.Exists(ctx, Ext.UserID)
 	if err != nil {
-		log.Errorw("failed to check user Ext exists", "userId", Ext.UserID, "error", err)
+		log.Errorw("failed to check user Ext exists", "userID", Ext.UserID, "error", err)
 		return err
 	}
 	if exists {
@@ -57,7 +57,7 @@ func (ues *UserExt) CreateUserExt(ctx context.Context, Ext *model.UserExt) error
 	}
 
 	if err := ues.userExtRepo.Create(ctx, Ext); err != nil {
-		log.Errorw("failed to create user Ext", "userId", Ext.UserID, "error", err)
+		log.Errorw("failed to create user Ext", "userID", Ext.UserID, "error", err)
 		return err
 	}
 
@@ -68,7 +68,7 @@ func (ues *UserExt) CreateUserExt(ctx context.Context, Ext *model.UserExt) error
 func (ues *UserExt) UpdateUserExt(ctx context.Context, userID string, Ext *model.UserExt) error {
 	exists, err := ues.userExtRepo.Exists(ctx, userID)
 	if err != nil {
-		log.Errorw("failed to check user Ext exists", "userId", userID, "error", err)
+		log.Errorw("failed to check user Ext exists", "userID", userID, "error", err)
 		return err
 	}
 	if !exists {
@@ -76,7 +76,7 @@ func (ues *UserExt) UpdateUserExt(ctx context.Context, userID string, Ext *model
 	}
 
 	if err := ues.userExtRepo.Update(ctx, userID, Ext); err != nil {
-		log.Errorw("failed to update user Ext", "userId", userID, "error", err)
+		log.Errorw("failed to update user Ext", "userID", userID, "error", err)
 		return err
 	}
 
@@ -84,30 +84,30 @@ func (ues *UserExt) UpdateUserExt(ctx context.Context, userID string, Ext *model
 }
 
 // UpdateLastLogin updates user's last login timestamp
-func (ues *UserExt) UpdateLastLogin(ctx context.Context, userId string) error {
-	exists, err := ues.userExtRepo.Exists(ctx, userId)
+func (ues *UserExt) UpdateLastLogin(ctx context.Context, userID string) error {
+	exists, err := ues.userExtRepo.Exists(ctx, userID)
 	if err != nil {
-		log.Errorw("failed to check user Ext exists", "userId", userId, "error", err)
+		log.Errorw("failed to check user Ext exists", "userID", userID, "error", err)
 		return err
 	}
 
 	if !exists {
 		now := time.Now()
 		Ext := &model.UserExt{
-			UserID:           userId,
+			UserID:           userID,
 			Timezone:         "UTC",
 			LastLoginAt:      &now,
 			InvitationStatus: model.UserInvitationStatusAccepted,
 		}
 		if err := ues.userExtRepo.Create(ctx, Ext); err != nil {
-			log.Errorw("failed to create user Ext", "userId", userId, "error", err)
+			log.Errorw("failed to create user Ext", "userID", userID, "error", err)
 			return err
 		}
 		return nil
 	}
 
-	if err := ues.userExtRepo.UpdateLastLogin(ctx, userId); err != nil {
-		log.Errorw("failed to update last login", "userId", userId, "error", err)
+	if err := ues.userExtRepo.UpdateLastLogin(ctx, userID); err != nil {
+		log.Errorw("failed to update last login", "userID", userID, "error", err)
 		return err
 	}
 
@@ -115,16 +115,16 @@ func (ues *UserExt) UpdateLastLogin(ctx context.Context, userId string) error {
 }
 
 // UpdateTimezone updates user timezone
-func (ues *UserExt) UpdateTimezone(ctx context.Context, userId, timezone string) error {
-	if err := ues.userExtRepo.UpdateTimezone(ctx, userId, timezone); err != nil {
-		log.Errorw("failed to update timezone", "userId", userId, "timezone", timezone, "error", err)
+func (ues *UserExt) UpdateTimezone(ctx context.Context, userID, timezone string) error {
+	if err := ues.userExtRepo.UpdateTimezone(ctx, userID, timezone); err != nil {
+		log.Errorw("failed to update timezone", "userID", userID, "timezone", timezone, "error", err)
 		return err
 	}
 	return nil
 }
 
 // UpdateInvitationStatus updates invitation status
-func (ues *UserExt) UpdateInvitationStatus(ctx context.Context, userId, status string) error {
+func (ues *UserExt) UpdateInvitationStatus(ctx context.Context, userID, status string) error {
 	// validate status
 	validStatuses := []string{
 		model.UserInvitationStatusPending,
@@ -138,8 +138,8 @@ func (ues *UserExt) UpdateInvitationStatus(ctx context.Context, userId, status s
 		return fmt.Errorf("invalid invitation status: %s", status)
 	}
 
-	if err := ues.userExtRepo.UpdateInvitationStatus(ctx, userId, status); err != nil {
-		log.Errorw("failed to update invitation status", "userId", userId, "status", status, "error", err)
+	if err := ues.userExtRepo.UpdateInvitationStatus(ctx, userID, status); err != nil {
+		log.Errorw("failed to update invitation status", "userID", userID, "status", status, "error", err)
 		return err
 	}
 

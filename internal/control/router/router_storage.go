@@ -26,7 +26,7 @@ func (rt *Router) storageRouter(r fiber.Router, auth fiber.Handler) {
 	{
 		// File upload routes
 		storageGroup.Post("/upload", rt.uploadFile)                       // POST /storage/upload - upload file to default storage
-		storageGroup.Post("/upload/:storageId", rt.uploadFileWithStorage) // POST /storage/upload/:storageId - upload file to specific storage
+		storageGroup.Post("/upload/:storageID", rt.uploadFileWithStorage) // POST /storage/upload/:storageID - upload file to specific storage
 
 		// Storage configuration routes
 		storageGroup.Post("/configs", rt.createStorageConfig)                 // POST /storage/configs - create storage config
@@ -66,9 +66,9 @@ func (rt *Router) uploadFileWithStorage(c *fiber.Ctx) error {
 	uploadService := rt.Services.Upload
 
 	// get storage ID from path parameter
-	storageId := c.Params("storageId")
-	if storageId == "" {
-		return http.Err(c, http.BadRequest.Code, "storageId is required")
+	storageID := c.Params("storageID")
+	if storageID == "" {
+		return http.Err(c, http.BadRequest.Code, "storageID is required")
 	}
 
 	// get file from form
@@ -81,7 +81,7 @@ func (rt *Router) uploadFileWithStorage(c *fiber.Ctx) error {
 	customPath := c.Query("path")
 
 	// upload file
-	response, err := uploadService.UploadFile(c.Context(), file, storageId, customPath)
+	response, err := uploadService.UploadFile(c.Context(), file, storageID, customPath)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}

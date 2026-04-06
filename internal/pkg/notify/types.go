@@ -17,6 +17,7 @@ package notify
 // ChannelType represents the notification channel type
 type ChannelType string
 
+// Supported notification channel types.
 const (
 	ChannelTypeFeishuApp  ChannelType = "feishu_app"
 	ChannelTypeFeishuCard ChannelType = "feishu_card"

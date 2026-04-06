@@ -24,6 +24,7 @@ import (
 // TaskState represents the state of a task
 type TaskState string
 
+// TaskState constants define the possible states of a task.
 const (
 	TaskStatePending   TaskState = "pending"
 	TaskStatePrepared  TaskState = "prepared"

@@ -17,8 +17,8 @@ package outbox
 import "errors"
 
 var (
-	// ErrAgentIdRequired is returned when AgentId is empty.
-	ErrAgentIdRequired = errors.New("outbox: agent_id is required")
+	// ErrAgentIDRequired is returned when AgentID is empty.
+	ErrAgentIDRequired = errors.New("outbox: agent_id is required")
 	// ErrScopeTooLong is returned when scope id exceeds max length.
 	ErrScopeTooLong = errors.New("outbox: scope id exceeds max length")
 	// ErrClosed is returned when operating on a closed outbox.

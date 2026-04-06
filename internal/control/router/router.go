@@ -52,14 +52,14 @@ var localizeFS embed.FS
 
 func NewRouter(
 	httpConf *http.HTTP,
-	cache cache.ICache,
+	ch cache.ICache,
 	services *service.Services,
 	shutdownMgr *shutdown.Manager,
 	appConf *config.AppConfig,
 ) *Router {
 	return &Router{
 		HTTP:        httpConf,
-		Cache:       cache,
+		Cache:       ch,
 		Services:    services,
 		ShutdownMgr: shutdownMgr,
 		AppConf:     appConf,

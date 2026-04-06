@@ -21,25 +21,25 @@ import (
 )
 
 func (rt *Router) userExtRouter(r fiber.Router, auth fiber.Handler) {
-	userExtGroup := r.Group("/users/:userId/ext", auth)
+	userExtGroup := r.Group("/users/:userID/ext", auth)
 	{
-		userExtGroup.Get("/", rt.getUserExt)                       // GET /users/:userId/ext - get user ext info
-		userExtGroup.Put("/", rt.updateUserExt)                    // PUT /users/:userId/ext - update user ext info
-		userExtGroup.Put("/timezone", rt.updateTimezone)           // PUT /users/:userId/ext/timezone - update timezone
-		userExtGroup.Put("/invitation", rt.updateInvitationStatus) // PUT /users/:userId/ext/invitation - update invitation status
+		userExtGroup.Get("/", rt.getUserExt)                       // GET /users/:userID/ext - get user ext info
+		userExtGroup.Put("/", rt.updateUserExt)                    // PUT /users/:userID/ext - update user ext info
+		userExtGroup.Put("/timezone", rt.updateTimezone)           // PUT /users/:userID/ext/timezone - update timezone
+		userExtGroup.Put("/invitation", rt.updateInvitationStatus) // PUT /users/:userID/ext/invitation - update invitation status
 	}
 }
 
 // getUserExt gets user ext information
 func (rt *Router) getUserExt(c *fiber.Ctx) error {
-	userId := c.Params("userId")
-	if userId == "" {
+	userID := c.Params("userID")
+	if userID == "" {
 		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
 	userExtService := rt.Services.UserExt
 
-	ext, err := userExtService.GetUserExt(c.Context(), userId)
+	ext, err := userExtService.GetUserExt(c.Context(), userID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -49,8 +49,8 @@ func (rt *Router) getUserExt(c *fiber.Ctx) error {
 
 // updateUserExt updates user ext information
 func (rt *Router) updateUserExt(c *fiber.Ctx) error {
-	userId := c.Params("userId")
-	if userId == "" {
+	userID := c.Params("userID")
+	if userID == "" {
 		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
@@ -61,7 +61,7 @@ func (rt *Router) updateUserExt(c *fiber.Ctx) error {
 
 	userExtService := rt.Services.UserExt
 
-	if err := userExtService.UpdateUserExt(c.Context(), userId, &ext); err != nil {
+	if err := userExtService.UpdateUserExt(c.Context(), userID, &ext); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
@@ -70,8 +70,8 @@ func (rt *Router) updateUserExt(c *fiber.Ctx) error {
 
 // updateTimezone updates user timezone
 func (rt *Router) updateTimezone(c *fiber.Ctx) error {
-	userId := c.Params("userId")
-	if userId == "" {
+	userID := c.Params("userID")
+	if userID == "" {
 		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
@@ -90,7 +90,7 @@ func (rt *Router) updateTimezone(c *fiber.Ctx) error {
 
 	userExtService := rt.Services.UserExt
 
-	if err := userExtService.UpdateTimezone(c.Context(), userId, req.Timezone); err != nil {
+	if err := userExtService.UpdateTimezone(c.Context(), userID, req.Timezone); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
@@ -99,8 +99,8 @@ func (rt *Router) updateTimezone(c *fiber.Ctx) error {
 
 // updateInvitationStatus updates invitation status
 func (rt *Router) updateInvitationStatus(c *fiber.Ctx) error {
-	userId := c.Params("userId")
-	if userId == "" {
+	userID := c.Params("userID")
+	if userID == "" {
 		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
@@ -119,7 +119,7 @@ func (rt *Router) updateInvitationStatus(c *fiber.Ctx) error {
 
 	userExtService := rt.Services.UserExt
 
-	if err := userExtService.UpdateInvitationStatus(c.Context(), userId, req.Status); err != nil {
+	if err := userExtService.UpdateInvitationStatus(c.Context(), userID, req.Status); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 

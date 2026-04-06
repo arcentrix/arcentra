@@ -21,6 +21,7 @@ import (
 // QueueProvider represents the message queue provider
 type QueueProvider string
 
+// QueueProvider constants define supported message queue providers.
 const (
 	QueueProviderKafka    QueueProvider = "kafka"
 	QueueProviderRocketMQ QueueProvider = "rocketmq"

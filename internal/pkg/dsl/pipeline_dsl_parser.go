@@ -120,7 +120,7 @@ func (p *Parser) validate(pipeline *spec.Pipeline) error {
 }
 
 // validateJob validates a single job
-func (p *Parser) validateJob(job *spec.Job, index int) error {
+func (p *Parser) validateJob(job *spec.Job, _ int) error {
 	// Job name is required
 	if job.Name == "" {
 		return fmt.Errorf("job name is required")
@@ -170,7 +170,7 @@ func (p *Parser) validateJob(job *spec.Job, index int) error {
 }
 
 // validateStep validates a single step
-func (p *Parser) validateStep(step *spec.Step, index int) error {
+func (p *Parser) validateStep(step *spec.Step, _ int) error {
 	// Step name is required
 	if step.Name == "" {
 		return fmt.Errorf("step name is required")

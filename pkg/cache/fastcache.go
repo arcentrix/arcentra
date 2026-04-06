@@ -52,7 +52,7 @@ func NewFastCache(conf FastCacheConfig) *FastCache {
 }
 
 // Get returns the value for the given key
-func (fc *FastCache) Get(ctx context.Context, key string) *redis.StringCmd {
+func (fc *FastCache) Get(_ context.Context, key string) *redis.StringCmd {
 	fc.mu.RLock()
 	defer fc.mu.RUnlock()
 
@@ -76,7 +76,7 @@ func (fc *FastCache) Get(ctx context.Context, key string) *redis.StringCmd {
 }
 
 // Set sets the value for the given key with expiration
-func (fc *FastCache) Set(ctx context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd {
+func (fc *FastCache) Set(_ context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
@@ -127,7 +127,7 @@ func (fc *FastCache) cleanupExpiredKeyWithDelay(key string, delay time.Duration)
 }
 
 // Del deletes the given keys
-func (fc *FastCache) Del(ctx context.Context, keys ...string) *redis.IntCmd {
+func (fc *FastCache) Del(_ context.Context, keys ...string) *redis.IntCmd {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
@@ -153,7 +153,7 @@ func (fc *FastCache) Pipeline() redis.Pipeliner {
 }
 
 // HSet sets hash fields
-func (fc *FastCache) HSet(ctx context.Context, key string, values ...any) *redis.IntCmd {
+func (fc *FastCache) HSet(_ context.Context, key string, values ...any) *redis.IntCmd {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
@@ -201,7 +201,7 @@ func (fc *FastCache) HSet(ctx context.Context, key string, values ...any) *redis
 }
 
 // HGetAll returns all hash fields and values
-func (fc *FastCache) HGetAll(ctx context.Context, key string) *redis.MapStringStringCmd {
+func (fc *FastCache) HGetAll(_ context.Context, key string) *redis.MapStringStringCmd {
 	fc.mu.RLock()
 	defer fc.mu.RUnlock()
 
@@ -231,7 +231,7 @@ func (fc *FastCache) HGetAll(ctx context.Context, key string) *redis.MapStringSt
 }
 
 // HGet returns the value of a hash field
-func (fc *FastCache) HGet(ctx context.Context, key, field string) *redis.StringCmd {
+func (fc *FastCache) HGet(_ context.Context, key, field string) *redis.StringCmd {
 	fc.mu.RLock()
 	defer fc.mu.RUnlock()
 
@@ -259,7 +259,7 @@ func (fc *FastCache) HGet(ctx context.Context, key, field string) *redis.StringC
 }
 
 // HDel deletes hash fields
-func (fc *FastCache) HDel(ctx context.Context, key string, fields ...string) *redis.IntCmd {
+func (fc *FastCache) HDel(_ context.Context, key string, fields ...string) *redis.IntCmd {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
@@ -290,7 +290,7 @@ func (fc *FastCache) HDel(ctx context.Context, key string, fields ...string) *re
 }
 
 // Expire sets the expiration time for a key
-func (fc *FastCache) Expire(ctx context.Context, key string, expiration time.Duration) *redis.BoolCmd {
+func (fc *FastCache) Expire(_ context.Context, key string, expiration time.Duration) *redis.BoolCmd {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
@@ -330,7 +330,7 @@ func (fc *FastCache) cleanupExpiredKey(key string) {
 }
 
 // Exists checks if a key exists in the cache
-func (fc *FastCache) Exists(ctx context.Context, keys ...string) *redis.IntCmd {
+func (fc *FastCache) Exists(_ context.Context, keys ...string) *redis.IntCmd {
 	fc.mu.RLock()
 	defer fc.mu.RUnlock()
 
@@ -357,7 +357,7 @@ func (fc *FastCache) Exists(ctx context.Context, keys ...string) *redis.IntCmd {
 }
 
 // SetNX sets the value for the given key only if it does not exist
-func (fc *FastCache) SetNX(ctx context.Context, key string, value any, expiration time.Duration) *redis.BoolCmd {
+func (fc *FastCache) SetNX(_ context.Context, key string, value any, expiration time.Duration) *redis.BoolCmd {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
@@ -412,7 +412,7 @@ func (fc *FastCache) SetNX(ctx context.Context, key string, value any, expiratio
 }
 
 // TTL returns the remaining time to live of a key
-func (fc *FastCache) TTL(ctx context.Context, key string) *redis.DurationCmd {
+func (fc *FastCache) TTL(_ context.Context, key string) *redis.DurationCmd {
 	fc.mu.RLock()
 	defer fc.mu.RUnlock()
 

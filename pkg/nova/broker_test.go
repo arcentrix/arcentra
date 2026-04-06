@@ -72,7 +72,7 @@ func TestMessage_EmptyHeaders(t *testing.T) {
 
 func TestMessageHandler(t *testing.T) {
 	var receivedMsg *Message
-	handler := MessageHandler(func(ctx context.Context, msg *Message) error {
+	handler := MessageHandler(func(_ context.Context, msg *Message) error {
 		receivedMsg = msg
 		return nil
 	})

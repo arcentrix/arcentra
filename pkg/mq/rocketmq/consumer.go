@@ -28,7 +28,7 @@ import (
 // ConsumerConfig represents RocketMQ consumer configuration.
 type ConsumerConfig struct {
 	ClientConfig      `json:",inline" mapstructure:",squash"`
-	GroupId           string                `json:"groupId" mapstructure:"groupId"`
+	GroupID           string                `json:"groupId" mapstructure:"groupId"`
 	ConsumerModel     consumer.MessageModel `json:"consumerModel" mapstructure:"consumerModel"`
 	ConsumeTimeout    time.Duration         `json:"consumeTimeout" mapstructure:"consumeTimeout"`
 	MaxReconsumeTimes int32                 `json:"maxReconsumeTimes" mapstructure:"maxReconsumeTimes"`
@@ -87,12 +87,12 @@ type Consumer struct {
 }
 
 // NewConsumer creates a new RocketMQ consumer.
-func NewConsumer(nameServers []string, groupId string, opts ...ConsumerOption) (*Consumer, error) {
+func NewConsumer(nameServers []string, groupID string, opts ...ConsumerOption) (*Consumer, error) {
 	cfg := ConsumerConfig{
 		ClientConfig: ClientConfig{
 			NameServers: nameServers,
 		},
-		GroupId:           groupId,
+		GroupID:           groupID,
 		ConsumerModel:     consumer.Clustering,
 		ConsumeTimeout:    5 * time.Minute,
 		MaxReconsumeTimes: 3,
@@ -103,7 +103,7 @@ func NewConsumer(nameServers []string, groupId string, opts ...ConsumerOption) (
 	if err := mq.RequireNonEmptySlice("nameServers", cfg.NameServers); err != nil {
 		return nil, err
 	}
-	if err := mq.RequireNonEmpty("groupId", cfg.GroupId); err != nil {
+	if err := mq.RequireNonEmpty("groupId", cfg.GroupID); err != nil {
 		return nil, err
 	}
 
@@ -113,7 +113,7 @@ func NewConsumer(nameServers []string, groupId string, opts ...ConsumerOption) (
 	}
 
 	consumerOpts := []consumer.Option{
-		consumer.WithGroupName(cfg.GroupId),
+		consumer.WithGroupName(cfg.GroupID),
 		consumer.WithNsResolver(primitive.NewPassthroughResolver(cfg.NameServers)),
 		consumer.WithConsumerModel(cfg.ConsumerModel),
 		consumer.WithConsumeTimeout(cfg.ConsumeTimeout),

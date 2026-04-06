@@ -37,14 +37,14 @@ func ProvideShutdownManager() *shutdown.Manager {
 // ProvideRouter 提供路由实例
 func ProvideRouter(
 	httpConf *http.HTTP,
-	cache cache.ICache,
+	ch cache.ICache,
 	services *service.Services,
 	shutdownMgr *shutdown.Manager,
 	appConf *config.AppConfig,
 ) *Router {
 	return NewRouter(
 		httpConf,
-		cache,
+		ch,
 		services,
 		shutdownMgr,
 		appConf,

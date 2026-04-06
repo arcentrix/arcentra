@@ -22,13 +22,13 @@ import (
 // Team team entity
 type Team struct {
 	BaseModel
-	TeamId       string         `gorm:"column:team_id" json:"teamId"`              // team unique identifier
-	OrgId        string         `gorm:"column:org_id" json:"orgId"`                // organization id
+	TeamID       string         `gorm:"column:team_id" json:"teamId"`              // team unique identifier
+	OrgID        string         `gorm:"column:org_id" json:"orgId"`                // organization id
 	Name         string         `gorm:"column:name" json:"name"`                   // team name
 	DisplayName  string         `gorm:"column:display_name" json:"displayName"`    // team display name
 	Description  string         `gorm:"column:description" json:"description"`     // team description
 	Avatar       string         `gorm:"column:avatar" json:"avatar"`               // team avatar
-	ParentTeamId string         `gorm:"column:parent_team_id" json:"parentTeamId"` // parent team id(supports nested)
+	ParentTeamID string         `gorm:"column:parent_team_id" json:"parentTeamId"` // parent team id(supports nested)
 	Path         string         `gorm:"column:path" json:"path"`                   // team path(for hierarchical relationship)
 	Level        int            `gorm:"column:level" json:"level"`                 // team level
 	Settings     datatypes.JSON `gorm:"column:settings;type:json" json:"settings"` // team settings
@@ -61,12 +61,12 @@ const (
 
 // CreateTeamReq create team request
 type CreateTeamReq struct {
-	OrgId        string                 `json:"orgId" validate:"required"`
+	OrgID        string                 `json:"orgId" validate:"required"`
 	Name         string                 `json:"name" validate:"required,min=2,max=64"`
 	DisplayName  string                 `json:"displayName"`
 	Description  string                 `json:"description"`
 	Avatar       string                 `json:"avatar"`
-	ParentTeamId string                 `json:"parentTeamId"`
+	ParentTeamID string                 `json:"parentTeamId"`
 	Settings     map[string]interface{} `json:"settings"`
 	Visibility   int                    `json:"visibility"` // 0-private, 1-internal, 2-public
 }
@@ -84,9 +84,9 @@ type UpdateTeamReq struct {
 
 // TeamQueryReq query team request
 type TeamQueryReq struct {
-	OrgId        string `json:"orgId" form:"orgId"`
+	OrgID        string `json:"orgId" form:"orgId"`
 	Name         string `json:"name" form:"name"`
-	ParentTeamId string `json:"parentTeamId" form:"parentTeamId"`
+	ParentTeamID string `json:"parentTeamId" form:"parentTeamId"`
 	Visibility   *int   `json:"visibility" form:"visibility"`
 	IsEnabled    *int   `json:"isEnabled" form:"isEnabled"`
 	Page         int    `json:"page" form:"page"`
@@ -95,13 +95,13 @@ type TeamQueryReq struct {
 
 // TeamResp team response
 type TeamResp struct {
-	TeamId        string                 `json:"teamId"`
-	OrgId         string                 `json:"orgId"`
+	TeamID        string                 `json:"teamId"`
+	OrgID         string                 `json:"orgId"`
 	Name          string                 `json:"name"`
 	DisplayName   string                 `json:"displayName"`
 	Description   string                 `json:"description"`
 	Avatar        string                 `json:"avatar"`
-	ParentTeamId  string                 `json:"parentTeamId"`
+	ParentTeamID  string                 `json:"parentTeamId"`
 	Path          string                 `json:"path"`
 	Level         int                    `json:"level"`
 	Settings      map[string]interface{} `json:"settings"`
@@ -128,13 +128,13 @@ func ToTeamResp(team *Team) *TeamResp {
 	}
 
 	resp := &TeamResp{
-		TeamId:        team.TeamId,
-		OrgId:         team.OrgId,
+		TeamID:        team.TeamID,
+		OrgID:         team.OrgID,
 		Name:          team.Name,
 		DisplayName:   team.DisplayName,
 		Description:   team.Description,
 		Avatar:        team.Avatar,
-		ParentTeamId:  team.ParentTeamId,
+		ParentTeamID:  team.ParentTeamID,
 		Path:          team.Path,
 		Level:         team.Level,
 		Visibility:    team.Visibility,

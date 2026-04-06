@@ -70,7 +70,7 @@ func TestHandlerFunc_ProcessTask(t *testing.T) {
 	var called bool
 	var receivedTask *Task
 
-	handler := HandlerFunc(func(ctx context.Context, task *Task) error {
+	handler := HandlerFunc(func(_ context.Context, task *Task) error {
 		called = true
 		receivedTask = task
 		return nil

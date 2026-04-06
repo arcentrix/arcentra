@@ -51,7 +51,7 @@ type StdoutSendBatchArgs struct {
 }
 
 // handleStdoutSend handles stdout send action
-func (m *Manager) handleStdoutSend(ctx context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
+func (m *Manager) handleStdoutSend(_ context.Context, params json.RawMessage, _ *Options) (json.RawMessage, error) {
 	var sendParams StdoutSendArgs
 	if err := sonic.Unmarshal(params, &sendParams); err != nil {
 		return nil, fmt.Errorf("failed to parse send params: %w", err)
@@ -70,7 +70,7 @@ func (m *Manager) handleStdoutSend(ctx context.Context, params json.RawMessage, 
 }
 
 // handleStdoutSendTemplate handles stdout send.template action
-func (m *Manager) handleStdoutSendTemplate(ctx context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
+func (m *Manager) handleStdoutSendTemplate(_ context.Context, params json.RawMessage, _ *Options) (json.RawMessage, error) {
 	var tplParams StdoutSendTemplateArgs
 	if err := sonic.Unmarshal(params, &tplParams); err != nil {
 		return nil, fmt.Errorf("failed to parse template params: %w", err)
@@ -89,7 +89,7 @@ func (m *Manager) handleStdoutSendTemplate(ctx context.Context, params json.RawM
 }
 
 // handleStdoutSendBatch handles stdout send.batch action
-func (m *Manager) handleStdoutSendBatch(ctx context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
+func (m *Manager) handleStdoutSendBatch(_ context.Context, params json.RawMessage, _ *Options) (json.RawMessage, error) {
 	var batchParams StdoutSendBatchArgs
 	if err := sonic.Unmarshal(params, &batchParams); err != nil {
 		return nil, fmt.Errorf("failed to parse batch params: %w", err)

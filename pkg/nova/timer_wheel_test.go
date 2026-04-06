@@ -76,7 +76,7 @@ func TestNewTimerWheel(t *testing.T) {
 	}
 }
 
-func TestTimerWheel_StartStop(t *testing.T) {
+func TestTimerWheel_StartStop(_ *testing.T) {
 	tw := NewTimerWheel(100, 1000)
 
 	// Start
@@ -139,7 +139,7 @@ func TestTimerWheel_AddAt(t *testing.T) {
 	var mu sync.Mutex
 
 	task := &Task{Type: "test", Payload: []byte("data")}
-	callback := func(t *Task) {
+	callback := func(_ *Task) {
 		mu.Lock()
 		defer mu.Unlock()
 		callbackCalled = true

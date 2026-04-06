@@ -33,6 +33,15 @@ const (
 	redisTracerName = "github.com/arcentrix/arcentra/pkg/trace/inject/redis"
 )
 
+type redisCtxKey string
+
+const (
+	ctxKeyRedisSpan          redisCtxKey = "redis.span"
+	ctxKeyRedisStart         redisCtxKey = "redis.start"
+	ctxKeyRedisPipelineSpan  redisCtxKey = "redis.pipeline.span"
+	ctxKeyRedisPipelineStart redisCtxKey = "redis.pipeline.start"
+)
+
 var redisTracer = otel.Tracer(redisTracerName)
 
 // RedisHook implements redis.Hook interface for OpenTelemetry tracing
@@ -59,8 +68,8 @@ func (h *RedisHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context
 	spanName := "redis." + cmdName
 
 	ctx, span := redisTracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindClient))
-	ctx = context.WithValue(ctx, "redis.span", span)
-	ctx = context.WithValue(ctx, "redis.start", time.Now())
+	ctx = context.WithValue(ctx, ctxKeyRedisSpan, span)
+	ctx = context.WithValue(ctx, ctxKeyRedisStart, time.Now())
 
 	// Set database attributes (only set non-empty values to avoid null in trace data)
 	attrs := []attribute.KeyValue{
@@ -94,14 +103,14 @@ func (h *RedisHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context
 
 // AfterProcess is called after processing a command
 func (h *RedisHook) AfterProcess(ctx context.Context, cmd redis.Cmder) error {
-	span, ok := ctx.Value("redis.span").(trace.Span)
+	span, ok := ctx.Value(ctxKeyRedisSpan).(trace.Span)
 	if !ok {
 		return nil
 	}
 	defer span.End()
 
 	// Calculate duration
-	if start, ok := ctx.Value("redis.start").(time.Time); ok {
+	if start, ok := ctx.Value(ctxKeyRedisStart).(time.Time); ok {
 		duration := time.Since(start)
 		span.SetAttributes(
 			attribute.Int64("db.redis.duration_ms", duration.Milliseconds()),
@@ -139,8 +148,8 @@ func (h *RedisHook) BeforeProcessPipeline(ctx context.Context, cmds []redis.Cmde
 	ctx = tracecontext.WithSpan(ctx)
 
 	ctx, span := redisTracer.Start(ctx, "redis.pipeline", trace.WithSpanKind(trace.SpanKindClient))
-	ctx = context.WithValue(ctx, "redis.pipeline.span", span)
-	ctx = context.WithValue(ctx, "redis.pipeline.start", time.Now())
+	ctx = context.WithValue(ctx, ctxKeyRedisPipelineSpan, span)
+	ctx = context.WithValue(ctx, ctxKeyRedisPipelineStart, time.Now())
 
 	// Set database attributes (only set non-empty values to avoid null in trace data)
 	attrs := []attribute.KeyValue{
@@ -172,14 +181,14 @@ func (h *RedisHook) BeforeProcessPipeline(ctx context.Context, cmds []redis.Cmde
 
 // AfterProcessPipeline is called after processing a pipeline
 func (h *RedisHook) AfterProcessPipeline(ctx context.Context, cmds []redis.Cmder) error {
-	span, ok := ctx.Value("redis.pipeline.span").(trace.Span)
+	span, ok := ctx.Value(ctxKeyRedisPipelineSpan).(trace.Span)
 	if !ok {
 		return nil
 	}
 	defer span.End()
 
 	// Calculate duration
-	if start, ok := ctx.Value("redis.pipeline.start").(time.Time); ok {
+	if start, ok := ctx.Value(ctxKeyRedisPipelineStart).(time.Time); ok {
 		duration := time.Since(start)
 		span.SetAttributes(
 			attribute.Int64("db.redis.pipeline.duration_ms", duration.Milliseconds()),

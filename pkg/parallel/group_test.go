@@ -53,7 +53,7 @@ func ExampleGroup_justErrors() {
 	for _, url := range urls {
 		// Launch a goroutine to fetch the URL.
 		// https://golang.org/doc/faq#closures_and_goroutines
-		g.Go(func(ctx context.Context) error {
+		g.Go(func(_ context.Context) error {
 			// Fetch the URL.
 			resp, err := http.Get(url)
 			if err == nil {
@@ -73,7 +73,7 @@ func ExampleGroup_justErrors() {
 // https://talks.golang.org/2012/concurrency.slide#46, augmented with a Context
 // and error-handling.
 func ExampleGroup_parallel() {
-	Google := func(ctx context.Context, query string) ([]Result, error) {
+	Google := func(_ context.Context, query string) ([]Result, error) {
 		g := GoGroup(context.Background())
 
 		searches := []Search{Web, Image, Video}

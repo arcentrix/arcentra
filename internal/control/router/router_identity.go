@@ -181,7 +181,7 @@ func (rt *Router) listProviders(c *fiber.Ctx) error {
 
 	// build response without timestamps
 	type ProviderResponse struct {
-		ProviderId   string `json:"providerId"`
+		ProviderID   string `json:"providerId"`
 		Name         string `json:"name"`
 		ProviderType string `json:"providerType"`
 		Description  string `json:"description"`
@@ -194,7 +194,7 @@ func (rt *Router) listProviders(c *fiber.Ctx) error {
 	case []model.Identity:
 		for _, integration := range v {
 			response = append(response, ProviderResponse{
-				ProviderId:   integration.ProviderID,
+				ProviderID:   integration.ProviderID,
 				Name:         integration.Name,
 				ProviderType: integration.ProviderType,
 				Description:  integration.Description,

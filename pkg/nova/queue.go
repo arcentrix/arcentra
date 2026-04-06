@@ -355,9 +355,7 @@ func (q *TaskQueueImpl) Stop() error {
 	q.cancel()
 
 	// Stop delay manager
-	if err := q.delayManager.Stop(); err != nil {
-		// Log error but continue shutdown
-	}
+	_ = q.delayManager.Stop()
 
 	// Wait for all goroutines to exit
 	if err := q.eg.Wait(); err != nil {
@@ -494,7 +492,7 @@ func (q *TaskQueueImpl) sendBatchTasks(tasks []*Task, queueName string, priority
 }
 
 // getQueueName gets the queue name based on custom queue and priority
-func (q *TaskQueueImpl) getQueueName(customQueue string, priority Priority) string {
+func (q *TaskQueueImpl) getQueueName(_ string, priority Priority) string {
 	return q.priorityQueues[priority]
 }
 

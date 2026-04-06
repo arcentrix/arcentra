@@ -46,7 +46,7 @@ func NewEventEmitter(publisher EventPublisher, config EventEmitterConfig) *Event
 }
 
 // Emit sends a CloudEvent without blocking execution.
-func (e *EventEmitter) Emit(ctx context.Context, eventType, source, subject string, data map[string]any, extensions map[string]any) {
+func (e *EventEmitter) Emit(_ context.Context, eventType, source, subject string, data map[string]any, extensions map[string]any) {
 	if e == nil || e.publisher == nil {
 		return
 	}

@@ -30,7 +30,7 @@ func ProvideExecutorManager(o *outbox.Outbox) *executor.Manager {
 	m := executor.NewExecutorManager()
 	m.Register(executor.NewShellExecutor())
 	if o != nil {
-		m.SetEventPublisher(NewOutboxPublisher(o), executor.EventEmitterConfig{})
+		m.SetEventPublisher(NewPublisher(o), executor.EventEmitterConfig{})
 	}
 	return m
 }
@@ -41,21 +41,21 @@ func ProvideOutbox(ac *config.AgentConfig, grpcClient *grpc.ClientWrapper) (*out
 	if ac == nil || ac.Agent.ID == "" {
 		return nil, nil
 	}
-	cfg := OutboxConfigFromAgentConfig(ac)
+	cfg := ConfigFromAgentConfig(ac)
 	sender := service.NewGatewaySenderFromWrapper(grpcClient, ac.Agent.ID, "")
 	return outbox.NewOutbox(cfg, sender)
 }
 
-// OutboxConfigFromAgentConfig builds outbox.Config from agent config.
-// AgentId is taken from ac.Agent.ID; WALDir is 工作目录/data/wal (workspaceDir/data/wal, or "./data/wal" when workspaceDir is empty).
-func OutboxConfigFromAgentConfig(ac *config.AgentConfig) outbox.Config {
+// ConfigFromAgentConfig builds outbox.Config from agent config.
+// AgentID is taken from ac.Agent.ID; WALDir is 工作目录/data/wal (workspaceDir/data/wal, or "./data/wal" when workspaceDir is empty).
+func ConfigFromAgentConfig(ac *config.AgentConfig) outbox.Config {
 	workDir := ac.Agent.WorkspaceDir
 	if workDir == "" {
 		workDir = "."
 	}
 	cfg := outbox.Config{
-		AgentId:    ac.Agent.ID,
-		PipelineId: "",
+		AgentID:    ac.Agent.ID,
+		PipelineID: "",
 		WALDir:     workDir + "/data/wal",
 	}
 	if ac.Outbox.SendIntervalMs > 0 {

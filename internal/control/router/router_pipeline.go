@@ -29,31 +29,31 @@ func (rt *Router) pipelineRouter(r fiber.Router, authMiddleware fiber.Handler) {
 	pipeline := r.Group("/pipelines")
 	{
 		pipeline.Post("/", authMiddleware, rt.createPipeline)
-		pipeline.Put("/:pipelineId", authMiddleware, rt.updatePipeline)
-		pipeline.Get("/:pipelineId", authMiddleware, rt.getPipeline)
+		pipeline.Put("/:pipelineID", authMiddleware, rt.updatePipeline)
+		pipeline.Get("/:pipelineID", authMiddleware, rt.getPipeline)
 		pipeline.Get("/", authMiddleware, rt.listPipelines)
-		pipeline.Delete("/:pipelineId", authMiddleware, rt.deletePipeline)
+		pipeline.Delete("/:pipelineID", authMiddleware, rt.deletePipeline)
 
-		pipeline.Get("/:pipelineId/spec", authMiddleware, rt.getPipelineSpec)
-		pipeline.Post("/:pipelineId/spec/validate", authMiddleware, rt.validatePipelineSpec)
-		pipeline.Post("/:pipelineId/spec/save", authMiddleware, rt.savePipelineSpec)
+		pipeline.Get("/:pipelineID/spec", authMiddleware, rt.getPipelineSpec)
+		pipeline.Post("/:pipelineID/spec/validate", authMiddleware, rt.validatePipelineSpec)
+		pipeline.Post("/:pipelineID/spec/save", authMiddleware, rt.savePipelineSpec)
 
-		pipeline.Post("/:pipelineId/trigger", authMiddleware, rt.triggerPipeline)
-		pipeline.Get("/:pipelineId/runs", authMiddleware, rt.listPipelineRuns)
-		pipeline.Get("/runs/:runId", authMiddleware, rt.getPipelineRun)
+		pipeline.Post("/:pipelineID/trigger", authMiddleware, rt.triggerPipeline)
+		pipeline.Get("/:pipelineID/runs", authMiddleware, rt.listPipelineRuns)
+		pipeline.Get("/runs/:runID", authMiddleware, rt.getPipelineRun)
 
-		pipeline.Post("/:pipelineId/runs/:runId/stop", authMiddleware, rt.stopPipeline)
-		pipeline.Post("/:pipelineId/runs/:runId/pause", authMiddleware, rt.pausePipeline)
-		pipeline.Post("/:pipelineId/runs/:runId/resume", authMiddleware, rt.resumePipeline)
+		pipeline.Post("/:pipelineID/runs/:runID/stop", authMiddleware, rt.stopPipeline)
+		pipeline.Post("/:pipelineID/runs/:runID/pause", authMiddleware, rt.pausePipeline)
+		pipeline.Post("/:pipelineID/runs/:runID/resume", authMiddleware, rt.resumePipeline)
 	}
 }
 
 func (rt *Router) createPipeline(c *fiber.Ctx) error {
 	var req struct {
-		ProjectId        string            `json:"projectId"`
+		ProjectID        string            `json:"projectId"`
 		Name             string            `json:"name"`
 		Description      string            `json:"description"`
-		RepoUrl          string            `json:"repoUrl"`
+		RepoURL          string            `json:"repoUrl"`
 		DefaultBranch    string            `json:"defaultBranch"`
 		PipelineFilePath string            `json:"pipelineFilePath"`
 		SaveMode         string            `json:"saveMode"`
@@ -67,14 +67,14 @@ func (rt *Router) createPipeline(c *fiber.Ctx) error {
 
 	createdBy := strings.TrimSpace(req.CreatedBy)
 	if createdBy == "" {
-		createdBy = rt.currentUserId(c)
+		createdBy = rt.currentUserID(c)
 	}
 
 	resp, err := rt.pipelineService().CreatePipeline(c.Context(), &pipelinev1.CreatePipelineRequest{
-		ProjectId:        strings.TrimSpace(req.ProjectId),
+		ProjectId:        strings.TrimSpace(req.ProjectID),
 		Name:             strings.TrimSpace(req.Name),
 		Description:      strings.TrimSpace(req.Description),
-		RepoUrl:          strings.TrimSpace(req.RepoUrl),
+		RepoUrl:          strings.TrimSpace(req.RepoURL),
 		DefaultBranch:    strings.TrimSpace(req.DefaultBranch),
 		PipelineFilePath: strings.TrimSpace(req.PipelineFilePath),
 		SaveMode:         parseSaveMode(req.SaveMode),
@@ -90,21 +90,21 @@ func (rt *Router) createPipeline(c *fiber.Ctx) error {
 	}
 
 	return http.Detail(c, map[string]any{
-		"pipelineId": resp.GetPipelineId(),
+		"pipelineID": resp.GetPipelineId(),
 		"message":    resp.GetMessage(),
 	})
 }
 
 func (rt *Router) updatePipeline(c *fiber.Ctx) error {
-	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
-	if pipelineId == "" {
+	pipelineID := strings.TrimSpace(c.Params("pipelineID"))
+	if pipelineID == "" {
 		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 
 	var req struct {
 		Name             string            `json:"name"`
 		Description      string            `json:"description"`
-		RepoUrl          string            `json:"repoUrl"`
+		RepoURL          string            `json:"repoUrl"`
 		DefaultBranch    string            `json:"defaultBranch"`
 		PipelineFilePath string            `json:"pipelineFilePath"`
 		SaveMode         string            `json:"saveMode"`
@@ -117,10 +117,10 @@ func (rt *Router) updatePipeline(c *fiber.Ctx) error {
 	}
 
 	resp, err := rt.pipelineService().UpdatePipeline(c.Context(), &pipelinev1.UpdatePipelineRequest{
-		PipelineId:       pipelineId,
+		PipelineId:       pipelineID,
 		Name:             req.Name,
 		Description:      req.Description,
-		RepoUrl:          req.RepoUrl,
+		RepoUrl:          req.RepoURL,
 		DefaultBranch:    req.DefaultBranch,
 		PipelineFilePath: req.PipelineFilePath,
 		SaveMode:         parseSaveMode(req.SaveMode),
@@ -139,11 +139,11 @@ func (rt *Router) updatePipeline(c *fiber.Ctx) error {
 }
 
 func (rt *Router) getPipeline(c *fiber.Ctx) error {
-	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
-	if pipelineId == "" {
+	pipelineID := strings.TrimSpace(c.Params("pipelineID"))
+	if pipelineID == "" {
 		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
-	resp, err := rt.pipelineService().GetPipeline(c.Context(), &pipelinev1.GetPipelineRequest{PipelineId: pipelineId})
+	resp, err := rt.pipelineService().GetPipeline(c.Context(), &pipelinev1.GetPipelineRequest{PipelineId: pipelineID})
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -177,11 +177,11 @@ func (rt *Router) listPipelines(c *fiber.Ctx) error {
 }
 
 func (rt *Router) deletePipeline(c *fiber.Ctx) error {
-	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
-	if pipelineId == "" {
+	pipelineID := strings.TrimSpace(c.Params("pipelineID"))
+	if pipelineID == "" {
 		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
-	resp, err := rt.pipelineService().DeletePipeline(c.Context(), &pipelinev1.DeletePipelineRequest{PipelineId: pipelineId})
+	resp, err := rt.pipelineService().DeletePipeline(c.Context(), &pipelinev1.DeletePipelineRequest{PipelineId: pipelineID})
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -192,11 +192,11 @@ func (rt *Router) deletePipeline(c *fiber.Ctx) error {
 }
 
 func (rt *Router) getPipelineSpec(c *fiber.Ctx) error {
-	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
-	if pipelineId == "" {
+	pipelineID := strings.TrimSpace(c.Params("pipelineID"))
+	if pipelineID == "" {
 		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
-	resp, err := rt.pipelineService().GetPipelineSpec(c.Context(), &pipelinev1.GetPipelineSpecRequest{PipelineId: pipelineId})
+	resp, err := rt.pipelineService().GetPipelineSpec(c.Context(), &pipelinev1.GetPipelineSpecRequest{PipelineId: pipelineID})
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -213,8 +213,8 @@ func (rt *Router) getPipelineSpec(c *fiber.Ctx) error {
 }
 
 func (rt *Router) validatePipelineSpec(c *fiber.Ctx) error {
-	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
-	if pipelineId == "" {
+	pipelineID := strings.TrimSpace(c.Params("pipelineID"))
+	if pipelineID == "" {
 		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	var req struct {
@@ -225,7 +225,7 @@ func (rt *Router) validatePipelineSpec(c *fiber.Ctx) error {
 		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
 	resp, err := rt.pipelineService().ValidatePipelineSpec(c.Context(), &pipelinev1.ValidatePipelineSpecRequest{
-		PipelineId: pipelineId,
+		PipelineId: pipelineID,
 		Spec:       req.Spec,
 		Format:     parseSpecFormat(req.Format),
 	})
@@ -242,8 +242,8 @@ func (rt *Router) validatePipelineSpec(c *fiber.Ctx) error {
 }
 
 func (rt *Router) savePipelineSpec(c *fiber.Ctx) error {
-	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
-	if pipelineId == "" {
+	pipelineID := strings.TrimSpace(c.Params("pipelineID"))
+	if pipelineID == "" {
 		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	var req struct {
@@ -251,7 +251,7 @@ func (rt *Router) savePipelineSpec(c *fiber.Ctx) error {
 		Format                string           `json:"format"`
 		ExpectedHeadCommitSha string           `json:"expectedHeadCommitSha"`
 		CommitMessage         string           `json:"commitMessage"`
-		RequestId             string           `json:"requestId"`
+		RequestID             string           `json:"requestId"`
 		Editor                string           `json:"editor"`
 	}
 	if err := c.BodyParser(&req); err != nil {
@@ -259,15 +259,15 @@ func (rt *Router) savePipelineSpec(c *fiber.Ctx) error {
 	}
 	editor := strings.TrimSpace(req.Editor)
 	if editor == "" {
-		editor = rt.currentUserId(c)
+		editor = rt.currentUserID(c)
 	}
 	resp, err := rt.pipelineService().SavePipelineSpec(c.Context(), &pipelinev1.SavePipelineSpecRequest{
-		PipelineId:            pipelineId,
+		PipelineId:            pipelineID,
 		Spec:                  req.Spec,
 		Format:                parseSpecFormat(req.Format),
 		ExpectedHeadCommitSha: req.ExpectedHeadCommitSha,
 		CommitMessage:         req.CommitMessage,
-		RequestId:             req.RequestId,
+		RequestId:             req.RequestID,
 		Editor:                editor,
 	})
 	if err != nil {
@@ -286,27 +286,27 @@ func (rt *Router) savePipelineSpec(c *fiber.Ctx) error {
 }
 
 func (rt *Router) triggerPipeline(c *fiber.Ctx) error {
-	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
-	if pipelineId == "" {
+	pipelineID := strings.TrimSpace(c.Params("pipelineID"))
+	if pipelineID == "" {
 		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	var req struct {
 		Variables   map[string]string `json:"variables"`
 		TriggeredBy string            `json:"triggeredBy"`
-		RequestId   string            `json:"requestId"`
+		RequestID   string            `json:"requestId"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
 	triggeredBy := strings.TrimSpace(req.TriggeredBy)
 	if triggeredBy == "" {
-		triggeredBy = rt.currentUserId(c)
+		triggeredBy = rt.currentUserID(c)
 	}
 	resp, err := rt.pipelineService().TriggerPipeline(c.Context(), &pipelinev1.TriggerPipelineRequest{
-		PipelineId:  pipelineId,
+		PipelineId:  pipelineID,
 		Variables:   req.Variables,
 		TriggeredBy: triggeredBy,
-		RequestId:   req.RequestId,
+		RequestId:   req.RequestID,
 	})
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
@@ -315,18 +315,18 @@ func (rt *Router) triggerPipeline(c *fiber.Ctx) error {
 		return http.Err(c, e.code, e.msg)
 	}
 	return http.Detail(c, map[string]any{
-		"runId":   resp.GetRunId(),
+		"runID":   resp.GetRunId(),
 		"message": resp.GetMessage(),
 	})
 }
 
 func (rt *Router) listPipelineRuns(c *fiber.Ctx) error {
-	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
-	if pipelineId == "" {
+	pipelineID := strings.TrimSpace(c.Params("pipelineID"))
+	if pipelineID == "" {
 		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	resp, err := rt.pipelineService().ListPipelineRuns(c.Context(), &pipelinev1.ListPipelineRunsRequest{
-		PipelineId: pipelineId,
+		PipelineId: pipelineID,
 		Status:     parsePipelineStatus(c.Query("status")),
 		Page:       int32(maxIntWithOne(rt.HTTP.QueryInt(c, "page"))),
 		PageSize:   int32(maxIntWithOne(rt.HTTP.QueryInt(c, "pageSize"))),
@@ -346,11 +346,11 @@ func (rt *Router) listPipelineRuns(c *fiber.Ctx) error {
 }
 
 func (rt *Router) getPipelineRun(c *fiber.Ctx) error {
-	runId := strings.TrimSpace(c.Params("runId"))
-	if runId == "" {
+	runID := strings.TrimSpace(c.Params("runID"))
+	if runID == "" {
 		return http.Err(c, http.BadRequest.Code, "run id is required")
 	}
-	resp, err := rt.pipelineService().GetPipelineRun(c.Context(), &pipelinev1.GetPipelineRunRequest{RunId: runId})
+	resp, err := rt.pipelineService().GetPipelineRun(c.Context(), &pipelinev1.GetPipelineRunRequest{RunId: runID})
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -361,9 +361,9 @@ func (rt *Router) getPipelineRun(c *fiber.Ctx) error {
 }
 
 func (rt *Router) stopPipeline(c *fiber.Ctx) error {
-	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
-	runId := strings.TrimSpace(c.Params("runId"))
-	if pipelineId == "" || runId == "" {
+	pipelineID := strings.TrimSpace(c.Params("pipelineID"))
+	runID := strings.TrimSpace(c.Params("runID"))
+	if pipelineID == "" || runID == "" {
 		return http.Err(c, http.BadRequest.Code, "pipeline id and run id are required")
 	}
 	var req struct {
@@ -373,8 +373,8 @@ func (rt *Router) stopPipeline(c *fiber.Ctx) error {
 		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
 	resp, err := rt.pipelineService().StopPipeline(c.Context(), &pipelinev1.StopPipelineRequest{
-		PipelineId: pipelineId,
-		RunId:      runId,
+		PipelineId: pipelineID,
+		RunId:      runID,
 		Reason:     req.Reason,
 	})
 	if err != nil {
@@ -395,9 +395,9 @@ func (rt *Router) resumePipeline(c *fiber.Ctx) error {
 }
 
 func (rt *Router) changePipelinePauseState(c *fiber.Ctx, pause bool) error {
-	pipelineId := strings.TrimSpace(c.Params("pipelineId"))
-	runId := strings.TrimSpace(c.Params("runId"))
-	if pipelineId == "" || runId == "" {
+	pipelineID := strings.TrimSpace(c.Params("pipelineID"))
+	runID := strings.TrimSpace(c.Params("runID"))
+	if pipelineID == "" || runID == "" {
 		return http.Err(c, http.BadRequest.Code, "pipeline id and run id are required")
 	}
 	var req struct {
@@ -409,9 +409,9 @@ func (rt *Router) changePipelinePauseState(c *fiber.Ctx, pause bool) error {
 	}
 	operator := strings.TrimSpace(req.Operator)
 	if operator == "" {
-		operator = rt.currentUserId(c)
+		operator = rt.currentUserID(c)
 	}
-	if err := rt.applyPauseState(c, pause, pipelineId, runId, req.Reason, operator); err != nil {
+	if err := rt.applyPauseState(c, pause, pipelineID, runID, req.Reason, operator); err != nil {
 		return err
 	}
 	return http.Operation(c)
@@ -457,12 +457,12 @@ func (rt *Router) pipelineService() *service.PipelineServiceImpl {
 	return service.NewPipelineServiceImpl(rt.Services)
 }
 
-func (rt *Router) currentUserId(c *fiber.Ctx) string {
+func (rt *Router) currentUserID(c *fiber.Ctx) string {
 	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
 	if err != nil || claims == nil {
 		return ""
 	}
-	return strings.TrimSpace(claims.UserId)
+	return strings.TrimSpace(claims.UserID)
 }
 
 type pipelineRespErr struct {

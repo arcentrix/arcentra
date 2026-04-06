@@ -21,23 +21,23 @@ import (
 	"github.com/arcentrix/arcentra/pkg/outbox"
 )
 
-// OutboxPublisher implements executor.EventPublisher by appending events to the local outbox.
+// Publisher implements executor.EventPublisher by appending events to the local outbox.
 // Events are written to WAL first and sent by the outbox sender loop (reliable, resume from last_acked+1).
-type OutboxPublisher struct {
+type Publisher struct {
 	o *outbox.Outbox
 }
 
-// NewOutboxPublisher returns an EventPublisher that appends to the given outbox.
+// NewPublisher returns an EventPublisher that appends to the given outbox.
 // Returns nil if o is nil (caller may use this when outbox is disabled).
-func NewOutboxPublisher(o *outbox.Outbox) executor.EventPublisher {
+func NewPublisher(o *outbox.Outbox) executor.EventPublisher {
 	if o == nil {
 		return nil
 	}
-	return &OutboxPublisher{o: o}
+	return &Publisher{o: o}
 }
 
 // Publish appends the event to the local outbox WAL.
-func (p *OutboxPublisher) Publish(ctx context.Context, event map[string]any) error {
+func (p *Publisher) Publish(ctx context.Context, event map[string]any) error {
 	if p == nil || p.o == nil {
 		return nil
 	}
@@ -46,6 +46,6 @@ func (p *OutboxPublisher) Publish(ctx context.Context, event map[string]any) err
 }
 
 // Close is a no-op; the outbox is closed by the agent bootstrap.
-func (p *OutboxPublisher) Close() error {
+func (p *Publisher) Close() error {
 	return nil
 }

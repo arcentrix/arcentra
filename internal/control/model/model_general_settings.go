@@ -21,7 +21,7 @@ import (
 // GeneralSettings 通用配置表
 type GeneralSettings struct {
 	BaseModel
-	SettingsId  string         `gorm:"column:settings_id;type:varchar(128);not null" json:"settingsId"`   // 设置ID
+	SettingsID  string         `gorm:"column:settings_id;type:varchar(128);not null" json:"settingsId"`   // 设置ID
 	Category    string         `gorm:"column:category;type:varchar(64);not null" json:"category"`         // 配置类别，如 system、security、pipeline
 	Name        string         `gorm:"column:name;type:varchar(128);not null" json:"name"`                // 配置名称（业务语义字段）
 	DisplayName string         `gorm:"column:display_name;type:varchar(128);not null" json:"displayName"` // 展示名，如 JWT 密钥

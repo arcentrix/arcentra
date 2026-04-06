@@ -27,7 +27,7 @@ import (
 // ProviderSet is a Wire provider set for configuration
 var ProviderSet = wire.NewSet(
 	NewConf,
-	ProvideHttpConfig,
+	ProvideHTTPConfig,
 	ProvideLogConfig,
 	ProvideGrpcClientConfig,
 	ProvideRedisConfig,
@@ -40,8 +40,8 @@ func ProvideRedisConfig(agentConf *AgentConfig) cache.Redis {
 	return agentConf.Redis
 }
 
-// ProvideHttpConfig 提供 HTTP 配置
-func ProvideHttpConfig(agentConf *AgentConfig) *http.HTTP {
+// ProvideHTTPConfig 提供 HTTP 配置
+func ProvideHTTPConfig(agentConf *AgentConfig) *http.HTTP {
 	httpConfig := &agentConf.HTTP
 	httpConfig.SetDefaults()
 	return httpConfig

@@ -37,7 +37,7 @@ type Pipeline struct {
 	LastSyncedAt      *time.Time `gorm:"column:last_synced_at" json:"lastSyncedAt"`
 	LastEditor        string     `gorm:"column:last_editor" json:"lastEditor"`
 	LastCommitSha     string     `gorm:"column:last_commit_sha" json:"lastCommitSha"`
-	LastSaveRequestId string     `gorm:"column:last_save_request_id" json:"lastSaveRequestId"`
+	LastSaveRequestID string     `gorm:"column:last_save_request_id" json:"lastSaveRequestId"`
 	TotalRuns         int        `gorm:"column:total_runs" json:"totalRuns"`
 	SuccessRuns       int        `gorm:"column:success_runs" json:"successRuns"`
 	FailedRuns        int        `gorm:"column:failed_runs" json:"failedRuns"`
@@ -52,9 +52,9 @@ func (Pipeline) TableName() string {
 // PipelineRun 流水线执行记录表
 type PipelineRun struct {
 	BaseModel
-	RunId               string     `gorm:"column:run_id" json:"runId"`
-	PipelineId          string     `gorm:"column:pipeline_id" json:"pipelineId"`
-	RequestId           string     `gorm:"column:request_id" json:"requestId"`
+	RunID               string     `gorm:"column:run_id" json:"runId"`
+	PipelineID          string     `gorm:"column:pipeline_id" json:"pipelineId"`
+	RequestID           string     `gorm:"column:request_id" json:"requestId"`
 	PipelineName        string     `gorm:"column:pipeline_name" json:"pipelineName"`
 	Branch              string     `gorm:"column:branch" json:"branch"`
 	CommitSha           string     `gorm:"column:commit_sha" json:"commitSha"`
@@ -82,8 +82,8 @@ func (PipelineRun) TableName() string {
 // PipelineStage 流水线阶段表
 type PipelineStage struct {
 	BaseModel
-	StageId    string `gorm:"column:stage_id" json:"stageId"`
-	PipelineId string `gorm:"column:pipeline_id" json:"pipelineId"`
+	StageID    string `gorm:"column:stage_id" json:"stageId"`
+	PipelineID string `gorm:"column:pipeline_id" json:"pipelineId"`
 	Name       string `gorm:"column:name" json:"name"`
 	StageOrder int    `gorm:"column:stage_order" json:"stageOrder"`
 	Parallel   int    `gorm:"column:parallel" json:"parallel"` // 0:否 1:是
@@ -93,6 +93,7 @@ func (PipelineStage) TableName() string {
 	return "t_pipeline_stage"
 }
 
+// PipelineStatusUnknown and related constants enumerate pipeline execution statuses.
 const (
 	PipelineStatusUnknown   = 0
 	PipelineStatusPending   = 1
@@ -103,11 +104,13 @@ const (
 	PipelineStatusPaused    = 6
 )
 
+// PipelineSaveModeDirect and PipelineSaveModePR define how pipeline definitions are saved.
 const (
 	PipelineSaveModeDirect = 1
 	PipelineSaveModePR     = 2
 )
 
+// PipelineSyncStatusUnknown and related constants indicate the last sync result.
 const (
 	PipelineSyncStatusUnknown = 0
 	PipelineSyncStatusSuccess = 1

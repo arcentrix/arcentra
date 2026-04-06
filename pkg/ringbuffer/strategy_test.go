@@ -18,7 +18,7 @@ import (
 	"testing"
 )
 
-func TestYieldingWaitStrategy_Wait(t *testing.T) {
+func TestYieldingWaitStrategy_Wait(_ *testing.T) {
 	y := &YieldingWaitStrategy{}
 	// Should not block indefinitely; just yield
 	for i := 0; i < 3; i++ {
@@ -26,7 +26,7 @@ func TestYieldingWaitStrategy_Wait(t *testing.T) {
 	}
 }
 
-func TestSleepWaitStrategy_Wait(t *testing.T) {
+func TestSleepWaitStrategy_Wait(_ *testing.T) {
 	s := &SleepWaitStrategy{}
 	s.Wait()
 	s.Wait()

@@ -132,7 +132,7 @@ func (c *SlackChannel) sendRequest(ctx context.Context, payload map[string]inter
 }
 
 // Receive receives messages (webhook callback)
-func (c *SlackChannel) Receive(ctx context.Context, message string) error {
+func (c *SlackChannel) Receive(_ context.Context, _ string) error {
 	return nil
 }
 

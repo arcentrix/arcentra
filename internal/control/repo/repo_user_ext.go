@@ -24,14 +24,14 @@ import (
 
 // IUserExtRepository defines user ext persistence with context support.
 type IUserExtRepository interface {
-	Get(ctx context.Context, userId string) (*model.UserExt, error)
+	Get(ctx context.Context, userID string) (*model.UserExt, error)
 	Create(ctx context.Context, ext *model.UserExt) error
-	Update(ctx context.Context, userId string, ext *model.UserExt) error
-	UpdateLastLogin(ctx context.Context, userId string) error
-	UpdateTimezone(ctx context.Context, userId, timezone string) error
-	UpdateInvitationStatus(ctx context.Context, userId, status string) error
-	Delete(ctx context.Context, userId string) error
-	Exists(ctx context.Context, userId string) (bool, error)
+	Update(ctx context.Context, userID string, ext *model.UserExt) error
+	UpdateLastLogin(ctx context.Context, userID string) error
+	UpdateTimezone(ctx context.Context, userID, timezone string) error
+	UpdateInvitationStatus(ctx context.Context, userID, status string) error
+	Delete(ctx context.Context, userID string) error
+	Exists(ctx context.Context, userID string) (bool, error)
 }
 
 type UserExtRepo struct {
@@ -57,12 +57,12 @@ func NewUserExtRepo(db database.IDatabase) IUserExtRepository {
 	}
 }
 
-// Get returns user ext by userId.
-func (uer *UserExtRepo) Get(ctx context.Context, userId string) (*model.UserExt, error) {
+// Get returns user ext by userID.
+func (uer *UserExtRepo) Get(ctx context.Context, userID string) (*model.UserExt, error) {
 	var ext model.UserExt
 	err := uer.Database().WithContext(ctx).Table(ext.TableName()).
 		Select(userExtSelectFields).
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		First(&ext).Error
 	return &ext, err
 }
@@ -73,31 +73,31 @@ func (uer *UserExtRepo) Create(ctx context.Context, ext *model.UserExt) error {
 }
 
 // Update updates user ext information.
-func (uer *UserExtRepo) Update(ctx context.Context, userId string, ext *model.UserExt) error {
+func (uer *UserExtRepo) Update(ctx context.Context, userID string, ext *model.UserExt) error {
 	return uer.Database().WithContext(ctx).Table(ext.TableName()).
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		Updates(ext).Error
 }
 
 // UpdateLastLogin updates the last login timestamp.
-func (uer *UserExtRepo) UpdateLastLogin(ctx context.Context, userId string) error {
+func (uer *UserExtRepo) UpdateLastLogin(ctx context.Context, userID string) error {
 	now := time.Now()
 	var ext model.UserExt
 	return uer.Database().WithContext(ctx).Table(ext.TableName()).
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		Update("last_login_at", now).Error
 }
 
 // UpdateTimezone updates user timezone.
-func (uer *UserExtRepo) UpdateTimezone(ctx context.Context, userId, timezone string) error {
+func (uer *UserExtRepo) UpdateTimezone(ctx context.Context, userID, timezone string) error {
 	var ext model.UserExt
 	return uer.Database().WithContext(ctx).Table(ext.TableName()).
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		Update("timezone", timezone).Error
 }
 
 // UpdateInvitationStatus updates invitation status.
-func (uer *UserExtRepo) UpdateInvitationStatus(ctx context.Context, userId, status string) error {
+func (uer *UserExtRepo) UpdateInvitationStatus(ctx context.Context, userID, status string) error {
 	updates := map[string]interface{}{
 		"invitation_status": status,
 	}
@@ -106,24 +106,24 @@ func (uer *UserExtRepo) UpdateInvitationStatus(ctx context.Context, userId, stat
 	}
 	var ext model.UserExt
 	return uer.Database().WithContext(ctx).Table(ext.TableName()).
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		Updates(updates).Error
 }
 
 // Delete deletes user ext record.
-func (uer *UserExtRepo) Delete(ctx context.Context, userId string) error {
+func (uer *UserExtRepo) Delete(ctx context.Context, userID string) error {
 	var ext model.UserExt
 	return uer.Database().WithContext(ctx).Table(ext.TableName()).
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		Delete(&model.UserExt{}).Error
 }
 
 // Exists checks if user ext exists.
-func (uer *UserExtRepo) Exists(ctx context.Context, userId string) (bool, error) {
+func (uer *UserExtRepo) Exists(ctx context.Context, userID string) (bool, error) {
 	var count int64
 	var ext model.UserExt
 	err := uer.Database().WithContext(ctx).Table(ext.TableName()).
-		Where("user_id = ?", userId).
+		Where("user_id = ?", userID).
 		Count(&count).Error
 	return count > 0, err
 }

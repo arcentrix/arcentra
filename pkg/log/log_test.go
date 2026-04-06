@@ -204,6 +204,7 @@ func TestGlobalLogFunctions(t *testing.T) {
 }
 
 func TestGlobalLogFunctions_Formatted(t *testing.T) {
+	_ = t
 	conf := SetDefaults()
 	_ = Init(conf)
 
@@ -214,6 +215,7 @@ func TestGlobalLogFunctions_Formatted(t *testing.T) {
 }
 
 func TestGlobalLogFunctions_WithFields(t *testing.T) {
+	_ = t
 	conf := SetDefaults()
 	_ = Init(conf)
 
@@ -232,6 +234,7 @@ const (
 )
 
 func TestWithContext(t *testing.T) {
+	_ = t
 	conf := SetDefaults()
 	_ = Init(conf)
 
@@ -245,7 +248,7 @@ func TestWithContext(t *testing.T) {
 	Info("message with context", "request_id", ctx.Value(requestIDKey))
 }
 
-func TestWith(t *testing.T) {
+func TestWith(_ *testing.T) {
 	conf := SetDefaults()
 	_ = Init(conf)
 
@@ -267,7 +270,7 @@ func TestSync(t *testing.T) {
 	}
 }
 
-func TestConcurrentLogging(t *testing.T) {
+func TestConcurrentLogging(_ *testing.T) {
 	conf := SetDefaults()
 	_ = Init(conf)
 

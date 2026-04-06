@@ -25,6 +25,7 @@ import (
 // MessageFormat 消息格式类型
 type MessageFormat string
 
+// MessageFormat constants define supported serialization formats.
 const (
 	MessageFormatJSON     MessageFormat = "json"     // JSON format
 	MessageFormatSonic    MessageFormat = "sonic"    // Sonic format (high-performance JSON)

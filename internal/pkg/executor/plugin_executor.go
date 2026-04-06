@@ -37,6 +37,10 @@ const namePlugin = "plugin"
 
 // NewPluginExecutor 创建插件执行器。
 func NewPluginExecutor(pluginManager *plugin.Manager, logger log.Logger) *PluginExecutor {
+	if logger.SugaredLogger == nil {
+		logger = log.Logger{SugaredLogger: log.GetLogger()}
+	}
+
 	return &PluginExecutor{
 		pluginManager: pluginManager,
 		httpExecutor:  NewHTTPExecutor(logger),
@@ -94,7 +98,7 @@ func (e *PluginExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*E
 
 // executePlugin 通过 plugin 调用执行（Shell 类型）
 // 支持本地执行和远程执行，由 UnifiedExecutor 根据 RunRemotely 字段决定
-func (e *PluginExecutor) executePlugin(ctx context.Context, req *ExecutionRequest, pluginInstance plugin.Plugin) (*ExecutionResult, error) {
+func (e *PluginExecutor) executePlugin(_ context.Context, req *ExecutionRequest, pluginInstance plugin.Plugin) (*ExecutionResult, error) {
 	result := NewExecutionResult(e.Name())
 
 	// 确定 action（默认为 "Execute"）

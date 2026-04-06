@@ -1,4 +1,4 @@
-SHELL := /bin/sh
+SHELL := /bin/bash
 .ONESHELL:
 .SHELLFLAGS := -eu -o pipefail -c
 
@@ -121,12 +121,32 @@ sqlc: sqlc-install ## generate sql code
 # Lint
 # -----------------------------------------------------------------------------
 .PHONY: golangci-lint-install
-golangci-lint-install: $(LOCALBIN) ## install golangci-lint
-	GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+golangci-lint-install: $(LOCALBIN) ## install golangci-lint v2
+	GOBIN=$(LOCALBIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
 .PHONY: lint
 lint: golangci-lint-install ## run lint
 	$(GOLANGCI_LINT) run
+
+# -----------------------------------------------------------------------------
+# Code generation (all-in-one)
+# -----------------------------------------------------------------------------
+.PHONY: codegen
+codegen: buf sqlc ## run all code generators
+	$(MAKE) wire TARGET=arcentra
+	$(MAKE) wire TARGET=arcentra-agent
+
+# -----------------------------------------------------------------------------
+# Formatting / Testing
+# -----------------------------------------------------------------------------
+.PHONY: fmt-check
+fmt-check: ## check Go code formatting
+	@UNFMT=$$(gofmt -l $$(find . -name '*.go' ! -name '*.pb.go' ! -name 'wire_gen.go' ! -path '*/queries/*.go')); \
+	if [ -n "$$UNFMT" ]; then echo "Unformatted files:"; echo "$$UNFMT"; exit 1; fi
+
+.PHONY: test
+test: ## run tests
+	go test -race -count=1 ./...
 
 # -----------------------------------------------------------------------------
 # Build
@@ -135,6 +155,10 @@ lint: golangci-lint-install ## run lint
 build: wire buf sqlc ## build binary (TARGET required)
 	@echo "Building $(TARGET)..."
 	go build -ldflags "$(LDFLAGS)" -o $(TARGET) $(CMD_PATH)
+
+.PHONY: build-target
+build-target: ## build release binary (no codegen, used by CI/Docker)
+	go build -trimpath -ldflags "$(LDFLAGS) -s -w" -o $(TARGET) $(CMD_PATH)
 
 .PHONY: run
 run: wire buf sqlc ## run program

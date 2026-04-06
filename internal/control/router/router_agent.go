@@ -95,13 +95,13 @@ func (rt *Router) getAgentStatistics(c *fiber.Ctx) error {
 
 // getAgent GET /agent/:agentId - get agent by agentId
 func (rt *Router) getAgent(c *fiber.Ctx) error {
-	agentId := c.Params("agentId")
-	if agentId == "" {
+	agentID := c.Params("agentId")
+	if agentID == "" {
 		return http.Err(c, http.BadRequest.Code, "agent id is required")
 	}
 
 	agentLogic := rt.Services.Agent
-	agent, err := agentLogic.GetAgentByagentID(c.Context(), agentId)
+	agent, err := agentLogic.GetAgentByagentID(c.Context(), agentID)
 	if err != nil {
 		return http.Err(c, http.NotFound.Code, "agent not found")
 	}
@@ -111,8 +111,8 @@ func (rt *Router) getAgent(c *fiber.Ctx) error {
 
 // updateAgent PUT /agent/:agentId - update agent
 func (rt *Router) updateAgent(c *fiber.Ctx) error {
-	agentId := c.Params("agentId")
-	if agentId == "" {
+	agentID := c.Params("agentId")
+	if agentID == "" {
 		return http.Err(c, http.BadRequest.Code, "agent id is required")
 	}
 
@@ -122,12 +122,12 @@ func (rt *Router) updateAgent(c *fiber.Ctx) error {
 	}
 
 	agentLogic := rt.Services.Agent
-	if err := agentLogic.UpdateAgentByagentID(c.Context(), agentId, updateReq); err != nil {
+	if err := agentLogic.UpdateAgentByagentID(c.Context(), agentID, updateReq); err != nil {
 		return http.Err(c, http.NotFound.Code, "agent not found")
 	}
 
 	// Get updated agent
-	updatedAgent, err := agentLogic.GetAgentByagentID(c.Context(), agentId)
+	updatedAgent, err := agentLogic.GetAgentByagentID(c.Context(), agentID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -137,13 +137,13 @@ func (rt *Router) updateAgent(c *fiber.Ctx) error {
 
 // deleteAgent DELETE /agent/:agentId - delete agent
 func (rt *Router) deleteAgent(c *fiber.Ctx) error {
-	agentId := c.Params("agentId")
-	if agentId == "" {
+	agentID := c.Params("agentId")
+	if agentID == "" {
 		return http.Err(c, http.BadRequest.Code, "agent id is required")
 	}
 
 	agentLogic := rt.Services.Agent
-	if err := agentLogic.DeleteAgentByagentID(c.Context(), agentId); err != nil {
+	if err := agentLogic.DeleteAgentByagentID(c.Context(), agentID); err != nil {
 		return http.Err(c, http.NotFound.Code, "agent not found")
 	}
 

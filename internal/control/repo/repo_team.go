@@ -29,22 +29,22 @@ import (
 // ITeamRepository defines team persistence with context support.
 type ITeamRepository interface {
 	Create(ctx context.Context, t *model.Team) error
-	Get(ctx context.Context, teamId string) (*model.Team, error)
-	GetByName(ctx context.Context, orgId, name string) (*model.Team, error)
-	Update(ctx context.Context, teamId string, updates map[string]interface{}) error
-	Delete(ctx context.Context, teamId string) error
+	Get(ctx context.Context, teamID string) (*model.Team, error)
+	GetByName(ctx context.Context, orgID, name string) (*model.Team, error)
+	Update(ctx context.Context, teamID string, updates map[string]interface{}) error
+	Delete(ctx context.Context, teamID string) error
 	List(ctx context.Context, query *model.TeamQueryReq) ([]*model.Team, int64, error)
-	ListByOrg(ctx context.Context, orgId string) ([]*model.Team, error)
-	ListSubTeams(ctx context.Context, parentTeamId string) ([]*model.Team, error)
-	Exists(ctx context.Context, teamId string) (bool, error)
-	NameExists(ctx context.Context, orgId, name string, excludeTeamId ...string) (bool, error)
-	UpdatePath(ctx context.Context, teamId, path string, level int) error
-	IncrementMembers(ctx context.Context, teamId string, delta int) error
-	IncrementProjects(ctx context.Context, teamId string, delta int) error
-	UpdateStatistics(ctx context.Context, teamId string) error
-	BuildPath(ctx context.Context, parentTeamId string) (string, int, error)
-	BatchGet(ctx context.Context, teamIds []string) ([]*model.Team, error)
-	ListByUser(ctx context.Context, userId string) ([]*model.Team, error)
+	ListByOrg(ctx context.Context, orgID string) ([]*model.Team, error)
+	ListSubTeams(ctx context.Context, parentTeamID string) ([]*model.Team, error)
+	Exists(ctx context.Context, teamID string) (bool, error)
+	NameExists(ctx context.Context, orgID, name string, excludeTeamID ...string) (bool, error)
+	UpdatePath(ctx context.Context, teamID, path string, level int) error
+	IncrementMembers(ctx context.Context, teamID string, delta int) error
+	IncrementProjects(ctx context.Context, teamID string, delta int) error
+	UpdateStatistics(ctx context.Context, teamID string) error
+	BuildPath(ctx context.Context, parentTeamID string) (string, int, error)
+	BatchGet(ctx context.Context, teamIDs []string) ([]*model.Team, error)
+	ListByUser(ctx context.Context, userID string) ([]*model.Team, error)
 }
 
 type TeamRepo struct {
@@ -114,24 +114,24 @@ func (r *TeamRepo) Create(ctx context.Context, t *model.Team) error {
 	return r.Database().WithContext(ctx).Create(t).Error
 }
 
-// Update updates team by teamId.
-func (r *TeamRepo) Update(ctx context.Context, teamId string, updates map[string]interface{}) error {
+// Update updates team by teamID.
+func (r *TeamRepo) Update(ctx context.Context, teamID string, updates map[string]interface{}) error {
 	return r.Database().WithContext(ctx).Model(&model.Team{}).
-		Where("team_id = ?", teamId).
+		Where("team_id = ?", teamID).
 		Updates(updates).Error
 }
 
-// Delete deletes team by teamId.
-func (r *TeamRepo) Delete(ctx context.Context, teamId string) error {
-	return r.Database().WithContext(ctx).Where("team_id = ?", teamId).Delete(&model.Team{}).Error
+// Delete deletes team by teamID.
+func (r *TeamRepo) Delete(ctx context.Context, teamID string) error {
+	return r.Database().WithContext(ctx).Where("team_id = ?", teamID).Delete(&model.Team{}).Error
 }
 
-// Get returns team by teamId.
-func (r *TeamRepo) Get(ctx context.Context, teamId string) (*model.Team, error) {
+// Get returns team by teamID.
+func (r *TeamRepo) Get(ctx context.Context, teamID string) (*model.Team, error) {
 	var t model.Team
 	err := r.Database().
 		WithContext(ctx).Select(teamSelectFields).
-		Where("team_id = ?", teamId).
+		Where("team_id = ?", teamID).
 		First(&t).
 		Error
 	if err != nil {
@@ -140,12 +140,12 @@ func (r *TeamRepo) Get(ctx context.Context, teamId string) (*model.Team, error) 
 	return &t, nil
 }
 
-// GetByName returns team by orgId and name.
-func (r *TeamRepo) GetByName(ctx context.Context, orgId, name string) (*model.Team, error) {
+// GetByName returns team by orgID and name.
+func (r *TeamRepo) GetByName(ctx context.Context, orgID, name string) (*model.Team, error) {
 	var t model.Team
 	err := r.Database().
 		WithContext(ctx).Select(teamSelectFields).
-		Where("org_id = ? AND name = ?", orgId, name).
+		Where("org_id = ? AND name = ?", orgID, name).
 		First(&t).
 		Error
 	if err != nil {
@@ -162,14 +162,14 @@ func (r *TeamRepo) List(ctx context.Context, query *model.TeamQueryReq) ([]*mode
 	db := r.Database().WithContext(ctx).Model(&model.Team{})
 
 	// 条件查询
-	if query.OrgId != "" {
-		db = db.Where("org_id = ?", query.OrgId)
+	if query.OrgID != "" {
+		db = db.Where("org_id = ?", query.OrgID)
 	}
 	if query.Name != "" {
 		db = db.Where("name LIKE ?", "%"+query.Name+"%")
 	}
-	if query.ParentTeamId != "" {
-		db = db.Where("parent_team_id = ?", query.ParentTeamId)
+	if query.ParentTeamID != "" {
+		db = db.Where("parent_team_id = ?", query.ParentTeamID)
 	}
 	if query.Visibility != nil {
 		db = db.Where("visibility = ?", *query.Visibility)
@@ -200,44 +200,44 @@ func (r *TeamRepo) List(ctx context.Context, query *model.TeamQueryReq) ([]*mode
 	return teams, total, err
 }
 
-// ListByOrg lists teams by orgId.
-func (r *TeamRepo) ListByOrg(ctx context.Context, orgId string) ([]*model.Team, error) {
+// ListByOrg lists teams by orgID.
+func (r *TeamRepo) ListByOrg(ctx context.Context, orgID string) ([]*model.Team, error) {
 	var teams []*model.Team
 	err := r.Database().WithContext(ctx).
 		Select(teamSummaryFields).
-		Where("org_id = ? AND is_enabled = ?", orgId, 1).
+		Where("org_id = ? AND is_enabled = ?", orgID, 1).
 		Order("level ASC, team_id DESC").
 		Find(&teams).Error
 	return teams, err
 }
 
-// ListSubTeams lists sub-teams by parentTeamId.
-func (r *TeamRepo) ListSubTeams(ctx context.Context, parentTeamId string) ([]*model.Team, error) {
+// ListSubTeams lists sub-teams by parentTeamID.
+func (r *TeamRepo) ListSubTeams(ctx context.Context, parentTeamID string) ([]*model.Team, error) {
 	var teams []*model.Team
 	err := r.Database().WithContext(ctx).
 		Select(teamSummaryFields).
-		Where("parent_team_id = ? AND is_enabled = ?", parentTeamId, 1).
+		Where("parent_team_id = ? AND is_enabled = ?", parentTeamID, 1).
 		Order("team_id DESC").
 		Find(&teams).Error
 	return teams, err
 }
 
-// Exists checks if team exists by teamId.
-func (r *TeamRepo) Exists(ctx context.Context, teamId string) (bool, error) {
+// Exists checks if team exists by teamID.
+func (r *TeamRepo) Exists(ctx context.Context, teamID string) (bool, error) {
 	var count int64
 	err := r.Database().WithContext(ctx).Model(&model.Team{}).
-		Where("team_id = ?", teamId).
+		Where("team_id = ?", teamID).
 		Count(&count).Error
 	return count > 0, err
 }
 
 // NameExists checks if team name exists in org.
-func (r *TeamRepo) NameExists(ctx context.Context, orgId, name string, excludeTeamId ...string) (bool, error) {
+func (r *TeamRepo) NameExists(ctx context.Context, orgID, name string, excludeTeamID ...string) (bool, error) {
 	query := r.Database().WithContext(ctx).Model(&model.Team{}).
-		Where("org_id = ? AND name = ?", orgId, name)
+		Where("org_id = ? AND name = ?", orgID, name)
 
-	if len(excludeTeamId) > 0 && excludeTeamId[0] != "" {
-		query = query.Where("team_id != ?", excludeTeamId[0])
+	if len(excludeTeamID) > 0 && excludeTeamID[0] != "" {
+		query = query.Where("team_id != ?", excludeTeamID[0])
 	}
 
 	var count int64
@@ -246,9 +246,9 @@ func (r *TeamRepo) NameExists(ctx context.Context, orgId, name string, excludeTe
 }
 
 // UpdatePath updates team path and level.
-func (r *TeamRepo) UpdatePath(ctx context.Context, teamId, path string, level int) error {
+func (r *TeamRepo) UpdatePath(ctx context.Context, teamID, path string, level int) error {
 	return r.Database().WithContext(ctx).Model(&model.Team{}).
-		Where("team_id = ?", teamId).
+		Where("team_id = ?", teamID).
 		Updates(map[string]interface{}{
 			"path":  path,
 			"level": level,
@@ -256,36 +256,35 @@ func (r *TeamRepo) UpdatePath(ctx context.Context, teamId, path string, level in
 }
 
 // IncrementMembers increments team member count.
-func (r *TeamRepo) IncrementMembers(ctx context.Context, teamId string, delta int) error {
+func (r *TeamRepo) IncrementMembers(ctx context.Context, teamID string, delta int) error {
 	return r.Database().WithContext(ctx).Model(&model.Team{}).
-		Where("team_id = ?", teamId).
+		Where("team_id = ?", teamID).
 		Update("total_members", gorm.Expr("total_members + ?", delta)).Error
 }
 
 // IncrementProjects increments team project count.
-func (r *TeamRepo) IncrementProjects(ctx context.Context, teamId string, delta int) error {
+func (r *TeamRepo) IncrementProjects(ctx context.Context, teamID string, delta int) error {
 	return r.Database().WithContext(ctx).Model(&model.Team{}).
-		Where("team_id = ?", teamId).
+		Where("team_id = ?", teamID).
 		Update("total_projects", gorm.Expr("total_projects + ?", delta)).Error
 }
 
 // UpdateStatistics updates team member and project counts.
-func (r *TeamRepo) UpdateStatistics(ctx context.Context, teamId string) error {
+func (r *TeamRepo) UpdateStatistics(ctx context.Context, teamID string) error {
 	var memberCount int64
 	if err := r.Database().WithContext(ctx).Model(&model.TeamMember{}).
-		Where("team_id = ?", teamId).
+		Where("team_id = ?", teamID).
 		Count(&memberCount).Error; err != nil {
 		return err
 	}
 
-	// 更新项目数量（假设有团队项目关联表）
 	var projectCount int64
 	r.Database().WithContext(ctx).Table("t_project_team_relation").
-		Where("team_id = ?", teamId).
+		Where("team_id = ?", teamID).
 		Count(&projectCount)
 
 	return r.Database().WithContext(ctx).Model(&model.Team{}).
-		Where("team_id = ?", teamId).
+		Where("team_id = ?", teamID).
 		Updates(map[string]interface{}{
 			"total_members":  memberCount,
 			"total_projects": projectCount,
@@ -293,17 +292,17 @@ func (r *TeamRepo) UpdateStatistics(ctx context.Context, teamId string) error {
 }
 
 // BuildPath builds team path from parent.
-func (r *TeamRepo) BuildPath(ctx context.Context, parentTeamId string) (string, int, error) {
-	if parentTeamId == "" {
+func (r *TeamRepo) BuildPath(ctx context.Context, parentTeamID string) (string, int, error) {
+	if parentTeamID == "" {
 		return "/", 0, nil
 	}
 
-	parent, err := r.Get(ctx, parentTeamId)
+	parent, err := r.Get(ctx, parentTeamID)
 	if err != nil {
 		return "", 0, fmt.Errorf("parent team not found: %w", err)
 	}
 
-	path := strings.TrimSuffix(parent.Path, "/") + "/" + parentTeamId + "/"
+	path := strings.TrimSuffix(parent.Path, "/") + "/" + parentTeamID + "/"
 	level := parent.Level + 1
 
 	return path, level, nil
@@ -321,28 +320,28 @@ func ConvertSettingsToJSON(settings map[string]interface{}) (datatypes.JSON, err
 	return data, nil
 }
 
-// BatchGet returns teams by teamIds.
-func (r *TeamRepo) BatchGet(ctx context.Context, teamIds []string) ([]*model.Team, error) {
-	if len(teamIds) == 0 {
+// BatchGet returns teams by teamIDs.
+func (r *TeamRepo) BatchGet(ctx context.Context, teamIDs []string) ([]*model.Team, error) {
+	if len(teamIDs) == 0 {
 		return []*model.Team{}, nil
 	}
 
 	var teams []*model.Team
 	err := r.Database().
 		WithContext(ctx).Select(teamSelectFields).
-		Where("team_id IN ?", teamIds).
+		Where("team_id IN ?", teamIDs).
 		Find(&teams).
 		Error
 	return teams, err
 }
 
-// ListByUser lists teams for user by userId.
-func (r *TeamRepo) ListByUser(ctx context.Context, userId string) ([]*model.Team, error) {
+// ListByUser lists teams for user by userID.
+func (r *TeamRepo) ListByUser(ctx context.Context, userID string) ([]*model.Team, error) {
 	var teams []*model.Team
 	err := r.Database().WithContext(ctx).Table("t_team t").
 		Select(teamUserListFields).
 		Joins("JOIN t_team_member tm ON t.team_id = tm.team_id").
-		Where("tm.user_id = ? AND t.is_enabled = ?", userId, 1).
+		Where("tm.user_id = ? AND t.is_enabled = ?", userID, 1).
 		Order("t.team_id DESC").
 		Find(&teams).Error
 	return teams, err

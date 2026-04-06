@@ -38,7 +38,12 @@ var runningStepRunCancel sync.Map
 // StartWorker starts the task queue worker. When execManager is non-nil, step run tasks
 // are executed via executor.Manager (events go through Outbox when SetEventPublisher is used);
 // otherwise the legacy executeStepRun (shell only) is used.
-func StartWorker(ctx context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper, execManager *executor.Manager) (nova.TaskQueue, error) {
+func StartWorker(
+	_ context.Context,
+	agentConf *config.AgentConfig,
+	grpcClient *grpc.ClientWrapper,
+	execManager *executor.Manager,
+) (nova.TaskQueue, error) {
 	if agentConf == nil {
 		return nil, nil
 	}
@@ -181,8 +186,8 @@ func resultToStepRunStatus(ctx context.Context, result *executor.ExecutionResult
 	return steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, result.ExitCode, result.Error
 }
 
-func CancelStepRun(stepRunId string) bool {
-	value, ok := runningStepRunCancel.Load(stepRunId)
+func CancelStepRun(stepRunID string) bool {
+	value, ok := runningStepRunCancel.Load(stepRunID)
 	if !ok {
 		return false
 	}
@@ -288,7 +293,7 @@ func executeStepRun(
 func reportStepRunStatus(
 	grpcClient *grpc.ClientWrapper,
 	agentConf *config.AgentConfig,
-	stepRunId string,
+	stepRunID string,
 	status steprunv1.StepRunStatus,
 	exitCode int32,
 	errMsg string,
@@ -303,7 +308,7 @@ func reportStepRunStatus(
 	defer cancel()
 	req := &agentv1.ReportStepRunStatusRequest{
 		AgentId:      agentConf.Agent.ID,
-		StepRunId:    stepRunId,
+		StepRunId:    stepRunID,
 		Status:       status,
 		ExitCode:     exitCode,
 		ErrorMessage: errMsg,

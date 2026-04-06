@@ -84,6 +84,31 @@ func DecodeRecord(data []byte) *Record {
 	}
 }
 
+// MaxRecordSize is the maximum allowed record size (length field).
+const MaxRecordSize = 64 * 1024 * 1024
+
+// ReadNextRecordFromSlice reads the next record from data at offset.
+// Returns the record, the next offset after the record, and true if a record was read.
+// Returns nil, offset, false when offset is past end, or record is invalid/corrupt.
+// Used for zero-copy iteration over mmap'd segment data.
+func ReadNextRecordFromSlice(data []byte, offset int) (*Record, int, bool) {
+	if offset+4 > len(data) {
+		return nil, offset, false
+	}
+	totalLen := int(binary.BigEndian.Uint32(data[offset:]))
+	if totalLen < recordHeaderSize+recordCRCSize || totalLen > MaxRecordSize {
+		return nil, offset, false
+	}
+	if offset+totalLen > len(data) {
+		return nil, offset, false
+	}
+	rec := DecodeRecord(data[offset : offset+totalLen])
+	if rec == nil {
+		return nil, offset, false
+	}
+	return rec, offset + totalLen, true
+}
+
 // ReadNextRecord reads the next record from r. Returns nil when no more or error.
 func ReadNextRecord(r io.Reader) (*Record, error) {
 	lenBuf := make([]byte, 4)
@@ -91,7 +116,7 @@ func ReadNextRecord(r io.Reader) (*Record, error) {
 		return nil, err
 	}
 	totalLen := binary.BigEndian.Uint32(lenBuf)
-	if totalLen < recordHeaderSize+recordCRCSize || totalLen > 64*1024*1024 {
+	if totalLen < recordHeaderSize+recordCRCSize || totalLen > MaxRecordSize {
 		return nil, nil
 	}
 	buf := make([]byte, totalLen)

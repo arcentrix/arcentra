@@ -167,22 +167,22 @@ func TestWithMessageCodec_Nil(t *testing.T) {
 // mockTaskRecorder is a mock implementation of TaskRecorder for testing
 type mockTaskRecorder struct{}
 
-func (m *mockTaskRecorder) Record(ctx context.Context, record *TaskRecord) error {
+func (m *mockTaskRecorder) Record(_ context.Context, _ *TaskRecord) error {
 	return nil
 }
 
-func (m *mockTaskRecorder) UpdateStatus(ctx context.Context, taskID string, status TaskStatus, err error) error {
+func (m *mockTaskRecorder) UpdateStatus(_ context.Context, _ string, _ TaskStatus, _ error) error {
 	return nil
 }
 
-func (m *mockTaskRecorder) Get(ctx context.Context, taskID string) (*TaskRecord, error) {
+func (m *mockTaskRecorder) Get(_ context.Context, _ string) (*TaskRecord, error) {
 	return nil, nil
 }
 
-func (m *mockTaskRecorder) ListTaskRecords(ctx context.Context, filter *TaskRecordFilter) ([]*TaskRecord, error) {
+func (m *mockTaskRecorder) ListTaskRecords(_ context.Context, _ *TaskRecordFilter) ([]*TaskRecord, error) {
 	return nil, nil
 }
 
-func (m *mockTaskRecorder) Delete(ctx context.Context, taskID string) error {
+func (m *mockTaskRecorder) Delete(_ context.Context, _ string) error {
 	return nil
 }

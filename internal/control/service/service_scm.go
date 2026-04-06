@@ -25,7 +25,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/scm"
-	_ "github.com/arcentrix/arcentra/pkg/scm/builtin"
+	_ "github.com/arcentrix/arcentra/pkg/scm/builtin" // register builtin SCM providers
 	"github.com/bytedance/sonic"
 	"gorm.io/datatypes"
 )
@@ -42,11 +42,11 @@ func NewScmService(projectRepo repo.IProjectRepository) *ScmService {
 }
 
 // HandleWebhook handles the scm webhook
-func (s *ScmService) HandleWebhook(ctx context.Context, projectId string, headers map[string]string, body []byte) ([]scm.Event, error) {
-	if projectId == "" {
+func (s *ScmService) HandleWebhook(ctx context.Context, projectID string, headers map[string]string, body []byte) ([]scm.Event, error) {
+	if projectID == "" {
 		return nil, fmt.Errorf("project id is required")
 	}
-	project, err := s.projectRepo.Get(ctx, projectId)
+	project, err := s.projectRepo.Get(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (s *ScmService) PollOnce(ctx context.Context) error {
 				continue
 			}
 			if err := s.pollProject(ctx, p); err != nil {
-				log.Warnw("poll project scm events failed", "projectId", p.ProjectId, "error", err)
+				log.Warnw("poll project scm events failed", "projectID", p.ProjectID, "error", err)
 			}
 		}
 		if int64(query.PageNum*query.PageSize) >= total {
@@ -115,9 +115,9 @@ func (s *ScmService) pollProject(ctx context.Context, p *model.Project) error {
 	if kind == "" {
 		return nil
 	}
-	fromUrl, ok := parseRepoFromUrl(p.RepoUrl)
+	fromURL, ok := parseRepoFromURL(p.RepoURL)
 	if ok {
-		fromUrl.URL = p.RepoUrl
+		fromURL.URL = p.RepoURL
 	}
 	cursor, err := s.loadCursor(p, kind)
 	if err != nil {
@@ -128,17 +128,17 @@ func (s *ScmService) pollProject(ctx context.Context, p *model.Project) error {
 	if err != nil {
 		return err
 	}
-	events, next, err := prov.PollEvents(ctx, fromUrl, cursor)
+	events, next, err := prov.PollEvents(ctx, fromURL, cursor)
 	if err != nil {
 		return err
 	}
 	if len(events) == 0 {
 		return nil
 	}
-	if err := s.saveCursor(ctx, p.ProjectId, kind, next); err != nil {
+	if err := s.saveCursor(ctx, p.ProjectID, kind, next); err != nil {
 		return err
 	}
-	log.Infow("polled scm events", "projectId", p.ProjectId, "kind", kind, "count", len(events))
+	log.Infow("polled scm events", "projectID", p.ProjectID, "kind", kind, "count", len(events))
 	return nil
 }
 
@@ -147,7 +147,7 @@ func (s *ScmService) providerConfigFromProject(p *model.Project, kind scm.Provid
 	cfg := scm.ProviderConfig{
 		Kind: kind,
 	}
-	base := baseUrlFromRepoUrl(p.RepoUrl)
+	base := baseURLFromRepoURL(p.RepoURL)
 	if base != "" {
 		cfg.BaseURL = base
 	}
@@ -205,8 +205,8 @@ func (s *ScmService) loadCursor(p *model.Project, kind scm.ProviderKind) (scm.Cu
 }
 
 // saveCursor saves the cursor to the project
-func (s *ScmService) saveCursor(ctx context.Context, projectId string, kind scm.ProviderKind, cursor scm.Cursor) error {
-	p, err := s.projectRepo.Get(ctx, projectId)
+func (s *ScmService) saveCursor(ctx context.Context, projectID string, kind scm.ProviderKind, cursor scm.Cursor) error {
+	p, err := s.projectRepo.Get(ctx, projectID)
 	if err != nil {
 		return err
 	}
@@ -227,7 +227,7 @@ func (s *ScmService) saveCursor(ctx context.Context, projectId string, kind scm.
 	if err != nil {
 		return err
 	}
-	return s.projectRepo.Update(ctx, projectId, map[string]any{
+	return s.projectRepo.Update(ctx, projectID, map[string]any{
 		"settings": datatypes.JSON(b),
 	})
 }
@@ -248,22 +248,22 @@ func unmarshalSettings(settings datatypes.JSON) map[string]any {
 	return out
 }
 
-// baseUrlFromRepoUrl extracts the base URL from the repository URL
-func baseUrlFromRepoUrl(repoUrl string) string {
-	repoUrl = strings.TrimSpace(repoUrl)
-	if repoUrl == "" {
+// baseURLFromRepoURL extracts the base URL from the repository URL
+func baseURLFromRepoURL(repoURL string) string {
+	repoURL = strings.TrimSpace(repoURL)
+	if repoURL == "" {
 		return ""
 	}
-	if strings.HasPrefix(repoUrl, "http://") || strings.HasPrefix(repoUrl, "https://") {
-		u, err := url.Parse(repoUrl)
+	if strings.HasPrefix(repoURL, "http://") || strings.HasPrefix(repoURL, "https://") {
+		u, err := url.Parse(repoURL)
 		if err != nil || u.Scheme == "" || u.Host == "" {
 			return ""
 		}
 		return u.Scheme + "://" + u.Host
 	}
 	// git@host:owner/name.git
-	if i := strings.Index(repoUrl, "@"); i >= 0 {
-		rest := repoUrl[i+1:]
+	if i := strings.Index(repoURL, "@"); i >= 0 {
+		rest := repoURL[i+1:]
 		if j := strings.Index(rest, ":"); j >= 0 {
 			host := rest[:j]
 			if host != "" {
@@ -274,14 +274,14 @@ func baseUrlFromRepoUrl(repoUrl string) string {
 	return ""
 }
 
-// parseRepoFromUrl parses the repository from the URL
-func parseRepoFromUrl(repoUrl string) (scm.Repo, bool) {
-	repoUrl = strings.TrimSpace(repoUrl)
-	if repoUrl == "" {
+// parseRepoFromURL parses the repository from the URL
+func parseRepoFromURL(repoURL string) (scm.Repo, bool) {
+	repoURL = strings.TrimSpace(repoURL)
+	if repoURL == "" {
 		return scm.Repo{}, false
 	}
-	if strings.HasPrefix(repoUrl, "http://") || strings.HasPrefix(repoUrl, "https://") {
-		u, err := url.Parse(repoUrl)
+	if strings.HasPrefix(repoURL, "http://") || strings.HasPrefix(repoURL, "https://") {
+		u, err := url.Parse(repoURL)
 		if err != nil {
 			return scm.Repo{}, false
 		}
@@ -295,8 +295,8 @@ func parseRepoFromUrl(repoUrl string) (scm.Repo, bool) {
 		return scm.Repo{Host: u.Host, Owner: owner, Name: name, FullName: owner + "/" + name}, true
 	}
 	// git@host:owner/name.git
-	if i := strings.Index(repoUrl, "@"); i >= 0 {
-		rest := repoUrl[i+1:]
+	if i := strings.Index(repoURL, "@"); i >= 0 {
+		rest := repoURL[i+1:]
 		host := ""
 		path := ""
 		if j := strings.Index(rest, ":"); j >= 0 {

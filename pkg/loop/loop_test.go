@@ -50,7 +50,7 @@ func TestLoopInterval(t *testing.T) {
 }
 
 func TestLoopRaiot(_ *testing.T) {
-	l := New(WithDeclineRatio(1.5), WithDeclineLimit(time.Second*10))
+	l := New(WithDeclineRatio(1.5), WithDeclineLimit(time.Second*10), WithMaxTimes(6))
 	begin := time.Now()
 	_ = l.Do(func() (bool, error) {
 		executeTime := time.Now()

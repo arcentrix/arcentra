@@ -418,7 +418,7 @@ func (hc *HybridCache) Stop() {
 }
 
 // Clear clears both local and remote caches
-func (hc *HybridCache) Clear(ctx context.Context) {
+func (hc *HybridCache) Clear(_ context.Context) {
 	if hc.config.LocalEnabled && hc.local != nil {
 		hc.local.Clear()
 	}

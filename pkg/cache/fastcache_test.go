@@ -220,7 +220,7 @@ func NewMockICache() *MockICache {
 	}
 }
 
-func (m *MockICache) Get(ctx context.Context, key string) *redis.StringCmd {
+func (m *MockICache) Get(_ context.Context, key string) *redis.StringCmd {
 	cmd := &redis.StringCmd{}
 	if val, ok := m.data[key]; ok {
 		cmd.SetVal(val)
@@ -228,7 +228,7 @@ func (m *MockICache) Get(ctx context.Context, key string) *redis.StringCmd {
 	return cmd
 }
 
-func (m *MockICache) Set(ctx context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd {
+func (m *MockICache) Set(_ context.Context, key string, value any, _ time.Duration) *redis.StatusCmd {
 	switch v := value.(type) {
 	case string:
 		m.data[key] = v
@@ -240,7 +240,7 @@ func (m *MockICache) Set(ctx context.Context, key string, value any, expiration 
 	return cmd
 }
 
-func (m *MockICache) Del(ctx context.Context, keys ...string) *redis.IntCmd {
+func (m *MockICache) Del(_ context.Context, keys ...string) *redis.IntCmd {
 	count := 0
 	for _, key := range keys {
 		if _, ok := m.data[key]; ok {
@@ -257,7 +257,7 @@ func (m *MockICache) Pipeline() redis.Pipeliner {
 	return nil
 }
 
-func (m *MockICache) HSet(ctx context.Context, key string, values ...any) *redis.IntCmd {
+func (m *MockICache) HSet(_ context.Context, key string, values ...any) *redis.IntCmd {
 	if len(values)%2 != 0 {
 		return &redis.IntCmd{}
 	}
@@ -276,7 +276,7 @@ func (m *MockICache) HSet(ctx context.Context, key string, values ...any) *redis
 	return cmd
 }
 
-func (m *MockICache) HGetAll(ctx context.Context, key string) *redis.MapStringStringCmd {
+func (m *MockICache) HGetAll(_ context.Context, key string) *redis.MapStringStringCmd {
 	cmd := &redis.MapStringStringCmd{}
 	if hash, ok := m.hmap[key]; ok {
 		cmd.SetVal(hash)
@@ -286,7 +286,7 @@ func (m *MockICache) HGetAll(ctx context.Context, key string) *redis.MapStringSt
 	return cmd
 }
 
-func (m *MockICache) HDel(ctx context.Context, key string, fields ...string) *redis.IntCmd {
+func (m *MockICache) HDel(_ context.Context, key string, fields ...string) *redis.IntCmd {
 	cmd := &redis.IntCmd{}
 	if hash, ok := m.hmap[key]; ok {
 		count := 0
@@ -301,7 +301,7 @@ func (m *MockICache) HDel(ctx context.Context, key string, fields ...string) *re
 	return cmd
 }
 
-func (m *MockICache) Expire(ctx context.Context, key string, expiration time.Duration) *redis.BoolCmd {
+func (m *MockICache) Expire(_ context.Context, _ string, _ time.Duration) *redis.BoolCmd {
 	cmd := &redis.BoolCmd{}
 	cmd.SetVal(true)
 	return cmd
@@ -446,7 +446,7 @@ func TestCachedQueryWithHybrid(t *testing.T) {
 	}
 
 	queryCount := 0
-	queryFunc := func(ctx context.Context) (User, error) {
+	queryFunc := func(_ context.Context) (User, error) {
 		queryCount++
 		return User{ID: 1, Name: "Alice"}, nil
 	}
@@ -496,7 +496,7 @@ func TestCachedQueryWithHybrid_Invalidate(t *testing.T) {
 	}
 
 	queryCount := 0
-	queryFunc := func(ctx context.Context) (Product, error) {
+	queryFunc := func(_ context.Context) (Product, error) {
 		queryCount++
 		if queryCount == 1 {
 			return Product{ID: 1, Price: 100.0}, nil

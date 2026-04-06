@@ -23,10 +23,10 @@ import (
 
 // IMenuRepository defines menu persistence with context support.
 type IMenuRepository interface {
-	Get(ctx context.Context, menuId string) (*model.Menu, error)
-	BatchGet(ctx context.Context, menuIds []string) ([]model.Menu, error)
+	Get(ctx context.Context, menuID string) (*model.Menu, error)
+	BatchGet(ctx context.Context, menuIDs []string) ([]model.Menu, error)
 	List(ctx context.Context) ([]model.Menu, error)
-	ListByParent(ctx context.Context, parentId string) ([]model.Menu, error)
+	ListByParent(ctx context.Context, parentID string) ([]model.Menu, error)
 }
 
 type MenuRepo struct {
@@ -56,12 +56,12 @@ func NewMenuRepo(db database.IDatabase) IMenuRepository {
 	}
 }
 
-// Get returns menu by menuId.
-func (r *MenuRepo) Get(ctx context.Context, menuId string) (*model.Menu, error) {
+// Get returns menu by menuID.
+func (r *MenuRepo) Get(ctx context.Context, menuID string) (*model.Menu, error) {
 	var menu model.Menu
 	err := r.Database().
 		WithContext(ctx).Select(menuSelectFields).
-		Where("menu_id = ? AND is_enabled = ?", menuId, model.MenuEnabled).
+		Where("menu_id = ? AND is_enabled = ?", menuID, model.MenuEnabled).
 		First(&menu).
 		Error
 	if err != nil {
@@ -70,15 +70,15 @@ func (r *MenuRepo) Get(ctx context.Context, menuId string) (*model.Menu, error) 
 	return &menu, nil
 }
 
-// BatchGet returns menus by menuIds.
-func (r *MenuRepo) BatchGet(ctx context.Context, menuIds []string) ([]model.Menu, error) {
-	if len(menuIds) == 0 {
+// BatchGet returns menus by menuIDs.
+func (r *MenuRepo) BatchGet(ctx context.Context, menuIDs []string) ([]model.Menu, error) {
+	if len(menuIDs) == 0 {
 		return []model.Menu{}, nil
 	}
 	var menus []model.Menu
 	err := r.Database().
 		WithContext(ctx).Select(menuSelectFields).
-		Where("menu_id IN ? AND is_enabled = ?", menuIds, model.MenuEnabled).
+		Where("menu_id IN ? AND is_enabled = ?", menuIDs, model.MenuEnabled).
 		Order("`order` ASC").
 		Find(&menus).
 		Error
@@ -97,12 +97,12 @@ func (r *MenuRepo) List(ctx context.Context) ([]model.Menu, error) {
 	return menus, err
 }
 
-// ListByParent returns child menus by parentId.
-func (r *MenuRepo) ListByParent(ctx context.Context, parentId string) ([]model.Menu, error) {
+// ListByParent returns child menus by parentID.
+func (r *MenuRepo) ListByParent(ctx context.Context, parentID string) ([]model.Menu, error) {
 	var menus []model.Menu
 	err := r.Database().
 		WithContext(ctx).Select(menuSelectFields).
-		Where("parent_id = ? AND is_enabled = ?", parentId, model.MenuEnabled).
+		Where("parent_id = ? AND is_enabled = ?", parentID, model.MenuEnabled).
 		Order("`order` ASC").
 		Find(&menus).
 		Error

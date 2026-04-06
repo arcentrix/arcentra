@@ -29,7 +29,7 @@ import (
 // ProviderSet 提供配置层相关的依赖
 var ProviderSet = wire.NewSet(
 	ProvideConf,
-	ProvideHttpConfig,
+	ProvideHTTPConfig,
 	ProvideGrpcConfig,
 	ProvideLogConfig,
 	ProvideDatabaseConfig,
@@ -44,8 +44,8 @@ func ProvideConf(configPath string) *AppConfig {
 	return NewConf(configPath)
 }
 
-// ProvideHttpConfig 提供 HTTP 配置
-func ProvideHttpConfig(appConf *AppConfig) *http.HTTP {
+// ProvideHTTPConfig 提供 HTTP 配置
+func ProvideHTTPConfig(appConf *AppConfig) *http.HTTP {
 	httpConfig := &appConf.HTTP
 	httpConfig.SetDefaults()
 	return httpConfig

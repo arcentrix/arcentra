@@ -17,8 +17,8 @@ package model
 // ProjectTeamAccess 项目团队访问权限表
 type ProjectTeamAccess struct {
 	BaseModel
-	ProjectId   string `gorm:"column:project_id;not null;index:idx_project_team,unique" json:"projectId"`
-	TeamId      string `gorm:"column:team_id;not null;index:idx_project_team,unique;index:idx_team" json:"teamId"`
+	ProjectID   string `gorm:"column:project_id;not null;index:idx_project_team,unique" json:"projectId"`
+	TeamID      string `gorm:"column:team_id;not null;index:idx_project_team,unique;index:idx_team" json:"teamId"`
 	AccessLevel string `gorm:"column:access_level;not null;type:varchar(32)" json:"accessLevel"` // read/write/admin
 }
 

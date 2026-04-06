@@ -280,8 +280,8 @@ func (sdp *DbProvider) RefreshStorageConfig(ctx context.Context) error {
 }
 
 // GetStorageConfigByID returns storage config by ID.
-func (sdp *DbProvider) GetStorageConfigByID(ctx context.Context, storageId string) (*storagemodel.StorageConfig, error) {
-	return sdp.storageRepo.Get(ctx, storageId)
+func (sdp *DbProvider) GetStorageConfigByID(ctx context.Context, storageID string) (*storagemodel.StorageConfig, error) {
+	return sdp.storageRepo.Get(ctx, storageID)
 }
 
 // GetAllStorageConfigs returns all enabled storage configs.
@@ -290,13 +290,13 @@ func (sdp *DbProvider) GetAllStorageConfigs(ctx context.Context) ([]storagemodel
 }
 
 // SwitchStorageConfig switches to storage config by ID.
-func (sdp *DbProvider) SwitchStorageConfig(ctx context.Context, storageId string) error {
-	storageConfig, err := sdp.storageRepo.Get(ctx, storageId)
+func (sdp *DbProvider) SwitchStorageConfig(ctx context.Context, storageID string) error {
+	storageConfig, err := sdp.storageRepo.Get(ctx, storageID)
 	if err != nil {
-		return fmt.Errorf("failed to get storage config by ID %s: %w", storageId, err)
+		return fmt.Errorf("failed to get storage config by ID %s: %w", storageID, err)
 	}
 
-	err = sdp.storageRepo.SetDefault(ctx, storageId)
+	err = sdp.storageRepo.SetDefault(ctx, storageID)
 	if err != nil {
 		return fmt.Errorf("failed to set default storage config: %w", err)
 	}

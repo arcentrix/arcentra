@@ -30,6 +30,7 @@ import (
 // ApprovalStatus represents the status of an approval
 type ApprovalStatus string
 
+// ApprovalStatus constants define the possible states of an approval.
 const (
 	ApprovalStatusPending  ApprovalStatus = "pending"
 	ApprovalStatusApproved ApprovalStatus = "approved"
@@ -97,7 +98,7 @@ func (am *ApprovalManager) SetPollInterval(interval time.Duration) {
 
 // CreateApproval creates a new approval request
 func (am *ApprovalManager) CreateApproval(
-	ctx context.Context,
+	_ context.Context,
 	jobName, stepName, pluginName string,
 	params map[string]any,
 ) (*ApprovalRequest, error) {

@@ -23,12 +23,12 @@ import (
 
 // IProjectTeamAccessRepository defines project team access persistence with context support.
 type IProjectTeamAccessRepository interface {
-	Get(ctx context.Context, projectId, teamId string) (*model.ProjectTeamAccess, error)
-	ListProjectTeams(ctx context.Context, projectId string) ([]model.ProjectTeamAccess, error)
-	ListTeamProjects(ctx context.Context, teamId string) ([]model.ProjectTeamAccess, error)
+	Get(ctx context.Context, projectID, teamID string) (*model.ProjectTeamAccess, error)
+	ListProjectTeams(ctx context.Context, projectID string) ([]model.ProjectTeamAccess, error)
+	ListTeamProjects(ctx context.Context, teamID string) ([]model.ProjectTeamAccess, error)
 	GrantTeamAccess(ctx context.Context, access *model.ProjectTeamAccess) error
-	UpdateTeamAccessLevel(ctx context.Context, projectId, teamId, accessLevel string) error
-	RevokeTeamAccess(ctx context.Context, projectId, teamId string) error
+	UpdateTeamAccessLevel(ctx context.Context, projectID, teamID, accessLevel string) error
+	RevokeTeamAccess(ctx context.Context, projectID, teamID string) error
 }
 
 type ProjectTeamAccessRepo struct {
@@ -40,26 +40,26 @@ func NewProjectTeamAccessRepo(db database.IDatabase) IProjectTeamAccessRepositor
 }
 
 // Get returns project team access by projectId and teamId.
-func (r *ProjectTeamAccessRepo) Get(ctx context.Context, projectId, teamId string) (*model.ProjectTeamAccess, error) {
+func (r *ProjectTeamAccessRepo) Get(ctx context.Context, projectID, teamID string) (*model.ProjectTeamAccess, error) {
 	var access model.ProjectTeamAccess
 	err := r.Database().WithContext(ctx).Select("id", "project_id", "team_id", "access_level", "created_at", "updated_at").
-		Where("project_id = ? AND team_id = ?", projectId, teamId).First(&access).Error
+		Where("project_id = ? AND team_id = ?", projectID, teamID).First(&access).Error
 	return &access, err
 }
 
 // ListProjectTeams lists project teams.
-func (r *ProjectTeamAccessRepo) ListProjectTeams(ctx context.Context, projectId string) ([]model.ProjectTeamAccess, error) {
+func (r *ProjectTeamAccessRepo) ListProjectTeams(ctx context.Context, projectID string) ([]model.ProjectTeamAccess, error) {
 	var accesses []model.ProjectTeamAccess
 	err := r.Database().WithContext(ctx).Select("id", "project_id", "team_id", "access_level", "created_at", "updated_at").
-		Where("project_id = ?", projectId).Find(&accesses).Error
+		Where("project_id = ?", projectID).Find(&accesses).Error
 	return accesses, err
 }
 
 // ListTeamProjects lists team projects.
-func (r *ProjectTeamAccessRepo) ListTeamProjects(ctx context.Context, teamId string) ([]model.ProjectTeamAccess, error) {
+func (r *ProjectTeamAccessRepo) ListTeamProjects(ctx context.Context, teamID string) ([]model.ProjectTeamAccess, error) {
 	var accesses []model.ProjectTeamAccess
 	err := r.Database().WithContext(ctx).Select("id", "project_id", "team_id", "access_level", "created_at", "updated_at").
-		Where("team_id = ?", teamId).Find(&accesses).Error
+		Where("team_id = ?", teamID).Find(&accesses).Error
 	return accesses, err
 }
 
@@ -69,14 +69,14 @@ func (r *ProjectTeamAccessRepo) GrantTeamAccess(ctx context.Context, access *mod
 }
 
 // UpdateTeamAccessLevel updates team access level.
-func (r *ProjectTeamAccessRepo) UpdateTeamAccessLevel(ctx context.Context, projectId, teamId, accessLevel string) error {
+func (r *ProjectTeamAccessRepo) UpdateTeamAccessLevel(ctx context.Context, projectID, teamID, accessLevel string) error {
 	return r.Database().WithContext(ctx).Model(&model.ProjectTeamAccess{}).
-		Where("project_id = ? AND team_id = ?", projectId, teamId).
+		Where("project_id = ? AND team_id = ?", projectID, teamID).
 		Update("access_level", accessLevel).Error
 }
 
 // RevokeTeamAccess revokes team access.
-func (r *ProjectTeamAccessRepo) RevokeTeamAccess(ctx context.Context, projectId, teamId string) error {
-	return r.Database().WithContext(ctx).Where("project_id = ? AND team_id = ?", projectId, teamId).
+func (r *ProjectTeamAccessRepo) RevokeTeamAccess(ctx context.Context, projectID, teamID string) error {
+	return r.Database().WithContext(ctx).Where("project_id = ? AND team_id = ?", projectID, teamID).
 		Delete(&model.ProjectTeamAccess{}).Error
 }
