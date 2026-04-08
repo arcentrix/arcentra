@@ -30,11 +30,11 @@ const (
 // MessageQueueBroker is the interface for message queue brokers
 // All message queue implementations must implement this interface
 type MessageQueueBroker interface {
-	// SendMessage sends a single message
-	SendMessage(ctx context.Context, topic string, key string, value []byte, headers map[string]string) error
+	// ProducerMessage sends a single message
+	ProducerMessage(ctx context.Context, topic string, key string, value []byte, headers map[string]string) error
 
-	// SendBatchMessages sends multiple messages in batch
-	SendBatchMessages(ctx context.Context, topic string, messages []Message) error
+	// ProducerBatchMessages sends multiple messages in batch
+	ProducerBatchMessages(ctx context.Context, topic string, messages []Message) error
 
 	// Subscribe subscribes to topics and consumes messages
 	Subscribe(ctx context.Context, topics []string, handler MessageHandler) error

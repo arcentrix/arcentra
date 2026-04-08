@@ -28,6 +28,9 @@ message Spec {
   Runtime runtime = 4;
   google.protobuf.Struct meta = 5;
   repeated Job jobs = 6;
+  // Pipeline-level triggers (cron, event, manual). Evaluated by the trigger
+  // layer to decide when a PipelineRun should be created.
+  repeated Trigger triggers = 7;
 }
 
 // Runtime is the runtime specification.

@@ -34,52 +34,44 @@ type ConsumerConfig struct {
 }
 
 // ConsumerOption defines optional configuration for ConsumerConfig.
-type ConsumerOption interface {
-	apply(*ConsumerConfig)
-}
-
-type consumerOptionFunc func(*ConsumerConfig)
-
-func (fn consumerOptionFunc) apply(conf *ConsumerConfig) {
-	fn(conf)
-}
+type ConsumerOption func(*ConsumerConfig)
 
 func WithConsumerOptions(opts ...Option) ConsumerOption {
-	return consumerOptionFunc(func(conf *ConsumerConfig) {
+	return func(conf *ConsumerConfig) {
 		for _, opt := range opts {
-			opt.apply(&conf.Config)
+			opt(&conf.Config)
 		}
-	})
+	}
 }
 
 func WithConsumerGroupID(groupID string) ConsumerOption {
-	return consumerOptionFunc(func(conf *ConsumerConfig) {
+	return func(conf *ConsumerConfig) {
 		conf.GroupID = groupID
-	})
+	}
 }
 
 func WithConsumerAutoOffsetReset(reset string) ConsumerOption {
-	return consumerOptionFunc(func(conf *ConsumerConfig) {
+	return func(conf *ConsumerConfig) {
 		conf.AutoOffsetReset = reset
-	})
+	}
 }
 
 func WithConsumerEnableAutoCommit(enable bool) ConsumerOption {
-	return consumerOptionFunc(func(conf *ConsumerConfig) {
+	return func(conf *ConsumerConfig) {
 		conf.EnableAutoCommit = &enable
-	})
+	}
 }
 
 func WithConsumerSessionTimeoutMs(timeoutMs int) ConsumerOption {
-	return consumerOptionFunc(func(conf *ConsumerConfig) {
+	return func(conf *ConsumerConfig) {
 		conf.SessionTimeoutMs = timeoutMs
-	})
+	}
 }
 
 func WithConsumerMaxPollIntervalMs(intervalMs int) ConsumerOption {
-	return consumerOptionFunc(func(conf *ConsumerConfig) {
+	return func(conf *ConsumerConfig) {
 		conf.MaxPollIntervalMs = intervalMs
-	})
+	}
 }
 
 // Consumer wraps a Kafka consumer instance.
@@ -104,20 +96,19 @@ func NewConsumer(bootstrapServers string, topicName string, clientID string, opt
 		MaxPollIntervalMs: 300000,
 	}
 	for _, opt := range opts {
-		opt.apply(&conf)
+		opt(&conf)
 	}
-	normalizeConsumerConfig(&conf)
 
 	enableAutoCommit := true
 	if conf.EnableAutoCommit != nil {
 		enableAutoCommit = *conf.EnableAutoCommit
 	}
 
-	config, err := buildBaseConfig(conf.Config)
+	config, err := baseConfig(conf.Config)
 	if err != nil {
 		return nil, err
 	}
-	clientIDStr, err := buildClientID(clientID)
+	clientIDStr, err := baseClientID(clientID)
 	if err != nil {
 		return nil, err
 	}
@@ -137,18 +128,6 @@ func NewConsumer(bootstrapServers string, topicName string, clientID string, opt
 	}
 
 	return &Consumer{consumer: consumer}, nil
-}
-
-func normalizeConsumerConfig(conf *ConsumerConfig) {
-	if conf.AutoOffsetReset == "" {
-		conf.AutoOffsetReset = "earliest"
-	}
-	if conf.SessionTimeoutMs == 0 {
-		conf.SessionTimeoutMs = 10000
-	}
-	if conf.MaxPollIntervalMs == 0 {
-		conf.MaxPollIntervalMs = 300000
-	}
 }
 
 // Subscribe subscribes to topics for consumption.

@@ -33,6 +33,7 @@ import (
 type AgentService struct {
 	agentRepo              repo.IAgentRepository
 	stepRunRepo            repo.IStepRunRepository
+	jobRunRepo             repo.IJobRunRepository
 	generalSettingsService *GeneralSettingsService
 }
 
@@ -40,10 +41,12 @@ func NewAgentService(
 	agentRepo repo.IAgentRepository,
 	stepRunRepo repo.IStepRunRepository,
 	generalSettingsService *GeneralSettingsService,
+	jobRunRepo repo.IJobRunRepository,
 ) *AgentService {
 	return &AgentService{
 		agentRepo:              agentRepo,
 		stepRunRepo:            stepRunRepo,
+		jobRunRepo:             jobRunRepo,
 		generalSettingsService: generalSettingsService,
 	}
 }

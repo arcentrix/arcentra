@@ -119,7 +119,7 @@ func NewTaskQueue(opts ...QueueOption) (TaskQueue, error) {
 
 	// Apply options
 	for _, opt := range opts {
-		opt.apply(config)
+		opt(config)
 	}
 
 	// Validate required configuration
@@ -434,7 +434,7 @@ func (q *TaskQueueImpl) sendTask(task *Task, queueName string, priority Priority
 		"task_type": task.Type,
 	}
 
-	if err := q.broker.SendMessage(q.ctx, queueName, taskMsg.TaskID, msgData, headers); err != nil {
+	if err := q.broker.ProducerMessage(q.ctx, queueName, taskMsg.TaskID, msgData, headers); err != nil {
 		return nil, fmt.Errorf("failed to send message: %w", err)
 	}
 
@@ -479,7 +479,7 @@ func (q *TaskQueueImpl) sendBatchTasks(tasks []*Task, queueName string, priority
 		})
 	}
 
-	if err := q.broker.SendBatchMessages(q.ctx, queueName, messages); err != nil {
+	if err := q.broker.ProducerBatchMessages(q.ctx, queueName, messages); err != nil {
 		return nil, fmt.Errorf("failed to send batch messages: %w", err)
 	}
 

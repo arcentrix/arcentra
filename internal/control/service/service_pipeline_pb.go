@@ -36,10 +36,20 @@ import (
 	timepkg "github.com/arcentrix/arcentra/pkg/time"
 )
 
+// IPipelineEngine is an interface for the pipeline execution engine,
+// used to avoid circular dependency between service and engine packages.
+type IPipelineEngine interface {
+	Submit(run *model.PipelineRun, parsedSpec *spec.Pipeline) error
+	CancelRun(runID string) error
+	PauseRun(runID string) error
+	ResumeRun(runID string) error
+}
+
 type PipelineServiceImpl struct {
 	pipelinev1.UnimplementedPipelineServiceServer
 	pipelineRepo repo.IPipelineRepository
 	projectRepo  repo.IProjectRepository
+	engine       IPipelineEngine
 }
 
 // NewPipelineServiceImpl creates pipeline grpc service.
@@ -47,6 +57,7 @@ func NewPipelineServiceImpl(services *Services) *PipelineServiceImpl {
 	return &PipelineServiceImpl{
 		pipelineRepo: services.PipelineRepo,
 		projectRepo:  services.ProjectRepo,
+		engine:       services.PipelineEngine,
 	}
 }
 
@@ -379,6 +390,13 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 		"last_commit_sha":   headSha,
 	})
 
+	if s.engine != nil {
+		if err := s.engine.Submit(run, parsedSpec); err != nil {
+			log.Warnw("engine submit failed, run created but not executing",
+				"runId", run.RunID, "error", err)
+		}
+	}
+
 	return &pipelinev1.TriggerPipelineResponse{
 		Success: true,
 		Message: "pipeline triggered",
@@ -427,6 +445,13 @@ func (s *PipelineServiceImpl) StopPipeline(
 			Error:   s.error(500, err.Error(), "internal", nil),
 		}, nil
 	}
+
+	if s.engine != nil {
+		if cancelErr := s.engine.CancelRun(run.RunID); cancelErr != nil {
+			log.Warnw("engine cancel run failed", "runId", run.RunID, "error", cancelErr)
+		}
+	}
+
 	return &pipelinev1.StopPipelineResponse{Success: true, Message: "pipeline stopped"}, nil
 }
 
@@ -452,6 +477,9 @@ func (s *PipelineServiceImpl) PausePipeline(
 			Error:   errResp,
 		}, nil
 	}
+	if s.engine != nil {
+		_ = s.engine.PauseRun(req.GetRunId())
+	}
 	return &pipelinev1.PausePipelineResponse{Success: true, Message: "pipeline paused"}, nil
 }
 
@@ -476,6 +504,9 @@ func (s *PipelineServiceImpl) ResumePipeline(
 			Message: msg,
 			Error:   errResp,
 		}, nil
+	}
+	if s.engine != nil {
+		_ = s.engine.ResumeRun(req.GetRunId())
 	}
 	return &pipelinev1.ResumePipelineResponse{Success: true, Message: "pipeline resumed"}, nil
 }
@@ -870,33 +901,7 @@ func (s *PipelineServiceImpl) loadDefinitionFromRepo(
 	pipeline *model.Pipeline,
 	project *model.Project,
 ) (string, string, error) {
-	auth := scmAuthFromProject(project)
-	workdir, err := os.MkdirTemp("", "arcentra-pipeline-read-*")
-	if err != nil {
-		return "", "", err
-	}
-	defer func() { _ = os.RemoveAll(workdir) }()
-
-	if cloneErr := scm.Clone(scm.GitCloneRequest{
-		Workdir: workdir,
-		RepoURL: pipeline.RepoURL,
-		Branch:  pipeline.DefaultBranch,
-		Auth:    scm.NewGitAuthFromMap(auth),
-	}); cloneErr != nil {
-		return "", "", cloneErr
-	}
-	headSha, err := scm.HeadSHA(scm.GitHeadSHARequest{Workdir: workdir})
-	if err != nil {
-		return "", "", err
-	}
-	content, err := os.ReadFile(filepath.Join(workdir, normalizePipelinePath(pipeline.PipelineFilePath)))
-	if err != nil {
-		return "", "", err
-	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return "", "", ctxErr
-	}
-	return string(content), headSha, nil
+	return LoadPipelineDefinition(ctx, pipeline, project)
 }
 
 func (s *PipelineServiceImpl) saveFailed(

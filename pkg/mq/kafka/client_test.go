@@ -17,7 +17,7 @@ package kafka
 import "testing"
 
 func TestBuildBaseConfig_Required(t *testing.T) {
-	if _, err := buildBaseConfig(Config{}); err == nil {
+	if _, err := baseConfig(Config{}); err == nil {
 		t.Fatal("expected error when bootstrapServers is empty")
 	}
 }
@@ -39,7 +39,7 @@ func TestBuildBaseConfig_WithAuth(t *testing.T) {
 		},
 	}
 
-	config, err := buildBaseConfig(cfg)
+	config, err := baseConfig(cfg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

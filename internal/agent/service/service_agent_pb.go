@@ -22,6 +22,7 @@ import (
 	"time"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
+	"github.com/arcentrix/arcentra/internal/agent"
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	"github.com/arcentrix/arcentra/internal/agent/taskqueue"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
@@ -38,6 +39,7 @@ type AgentServiceImpl struct {
 	agentConf     *config.AgentConfig
 	grpcClient    *grpc.ClientWrapper
 	metricsServer *metrics.Server // optional, for heartbeat running count
+	storageHolder *agent.StorageHolder
 }
 
 // NewAgentServiceImpl creates a new AgentService instance. metricsServer may be nil (used for heartbeat running count).
@@ -46,7 +48,14 @@ func NewAgentServiceImpl(agentConf *config.AgentConfig, grpcClient *grpc.ClientW
 		agentConf:     agentConf,
 		grpcClient:    grpcClient,
 		metricsServer: metricsServer,
+		storageHolder: agent.NewStorageHolder(),
 	}
+}
+
+// StorageHolder returns the holder that provides the IStorage instance
+// initialized from the control-plane's RegisterResponse.
+func (s *AgentServiceImpl) StorageHolder() *agent.StorageHolder {
+	return s.storageHolder
 }
 
 // Heartbeat handles heartbeat: when req is nil, starts periodic heartbeat to central server and does initial send;
@@ -146,6 +155,9 @@ func (s *AgentServiceImpl) Register(_ context.Context, _ *agentv1.RegisterReques
 	}
 	if len(resp.Labels) > 0 {
 		s.agentConf.Agent.Labels = resp.Labels
+	}
+	if resp.Storage != nil && s.storageHolder != nil {
+		s.storageHolder.SetFromProto(resp.Storage)
 	}
 	return resp, nil
 }

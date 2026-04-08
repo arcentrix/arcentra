@@ -19,9 +19,7 @@ import (
 )
 
 // QueueOption is the interface for queue configuration options
-type QueueOption interface {
-	apply(*queueConfig)
-}
+type QueueOption func(*queueConfig)
 
 type queueConfig struct {
 	Provider          QueueProvider
@@ -42,69 +40,63 @@ type queueConfig struct {
 	taskRecorder TaskRecorder
 }
 
-type queueOptionFunc func(*queueConfig)
-
-func (f queueOptionFunc) apply(c *queueConfig) {
-	f(c)
-}
-
 // WithKafka configures a Kafka broker
 func WithKafka(bootstrapServers string, opts ...KafkaOption) QueueOption {
-	return queueOptionFunc(func(c *queueConfig) {
+	return func(c *queueConfig) {
 		c.Provider = QueueProviderKafka
 		c.BootstrapServers = bootstrapServers
 		c.kafkaConfig = NewKafkaConfig(bootstrapServers, opts...)
-	})
+	}
 }
 
 // WithGroupID sets the consumer group ID
 func WithGroupID(groupID string) QueueOption {
-	return queueOptionFunc(func(c *queueConfig) {
+	return func(c *queueConfig) {
 		c.GroupID = groupID
-	})
+	}
 }
 
 // WithTopicPrefix sets the topic prefix
 func WithTopicPrefix(prefix string) QueueOption {
-	return queueOptionFunc(func(c *queueConfig) {
+	return func(c *queueConfig) {
 		c.TopicPrefix = prefix
-	})
+	}
 }
 
 // WithDelaySlots sets the delay slot configuration
 func WithDelaySlots(count int, duration time.Duration) QueueOption {
-	return queueOptionFunc(func(c *queueConfig) {
+	return func(c *queueConfig) {
 		c.DelaySlotCount = count
 		c.DelaySlotDuration = duration
-	})
+	}
 }
 
 // WithTaskRecorder sets the task recorder
 func WithTaskRecorder(recorder TaskRecorder) QueueOption {
-	return queueOptionFunc(func(c *queueConfig) {
+	return func(c *queueConfig) {
 		c.taskRecorder = recorder
-	})
+	}
 }
 
 // WithMessageFormat sets the message format
 func WithMessageFormat(format MessageFormat) QueueOption {
-	return queueOptionFunc(func(c *queueConfig) {
+	return func(c *queueConfig) {
 		c.messageFormat = format
 		codec, err := NewMessageCodec(format)
 		if err == nil {
 			c.messageCodec = codec
 		}
-	})
+	}
 }
 
 // WithMessageCodec sets the message codec
 func WithMessageCodec(codec MessageCodec) QueueOption {
-	return queueOptionFunc(func(c *queueConfig) {
+	return func(c *queueConfig) {
 		c.messageCodec = codec
 		if codec != nil {
 			c.messageFormat = codec.Format()
 		}
-	})
+	}
 }
 
 // Broker-specific option functions are defined in options_kafka.go and options_rocketmq.go

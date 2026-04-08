@@ -48,84 +48,57 @@ type SslConfig struct {
 }
 
 // Option defines optional configuration for ClientConfig.
-type Option interface {
-	apply(*Config)
-}
-
-type optionFunc func(*Config)
-
-func (fn optionFunc) apply(conf *Config) {
-	fn(conf)
-}
+type Option func(*Config)
 
 func WithSecurityProtocol(securityProtocol string) Option {
-	return optionFunc(func(conf *Config) {
+	return func(conf *Config) {
 		conf.SecurityProtocol = securityProtocol
-	})
+	}
 }
 
 func WithSaslMechanism(mechanism string) Option {
-	return optionFunc(func(conf *Config) {
+	return func(conf *Config) {
 		conf.Sasl.Mechanism = mechanism
-	})
+	}
 }
 
 func WithSaslUsername(username string) Option {
-	return optionFunc(func(conf *Config) {
+	return func(conf *Config) {
 		conf.Sasl.Username = username
-	})
+	}
 }
 
 func WithSaslPassword(password string) Option {
-	return optionFunc(func(conf *Config) {
+	return func(conf *Config) {
 		conf.Sasl.Password = password
-	})
+	}
 }
 
 func WithSslCaFile(path string) Option {
-	return optionFunc(func(conf *Config) {
+	return func(conf *Config) {
 		conf.Ssl.CaFile = path
-	})
+	}
 }
 
 func WithSslCertFile(path string) Option {
-	return optionFunc(func(conf *Config) {
+	return func(conf *Config) {
 		conf.Ssl.CertFile = path
-	})
+	}
 }
 
 func WithSslKeyFile(path string) Option {
-	return optionFunc(func(conf *Config) {
+	return func(conf *Config) {
 		conf.Ssl.KeyFile = path
-	})
+	}
 }
 
 func WithSslPassword(password string) Option {
-	return optionFunc(func(conf *Config) {
+	return func(conf *Config) {
 		conf.Ssl.Password = password
-	})
+	}
 }
 
-// Client holds a base client configuration.
-type Client struct {
-	Config Config
-}
-
-// NewKafkaClient creates a new Client using options.
-func NewKafkaClient(bootstrapServers string, opts ...Option) (*Client, error) {
-	conf := Config{
-		BootstrapServers: bootstrapServers,
-	}
-	for _, opt := range opts {
-		opt.apply(&conf)
-	}
-	if err := mq.RequireNonEmpty("bootstrapServers", conf.BootstrapServers); err != nil {
-		return nil, err
-	}
-	return &Client{Config: conf}, nil
-}
-
-func buildBaseConfig(conf Config) (*kafka.ConfigMap, error) {
+func baseConfig(conf Config) (*kafka.ConfigMap, error) {
 	if err := mq.RequireNonEmpty("bootstrapServers", conf.BootstrapServers); err != nil {
 		return nil, err
 	}
@@ -145,7 +118,7 @@ func buildBaseConfig(conf Config) (*kafka.ConfigMap, error) {
 	return config, nil
 }
 
-func buildClientID(clientID string) (string, error) {
+func baseClientID(clientID string) (string, error) {
 	if err := mq.RequireNonEmpty("clientId", clientID); err != nil {
 		return "", err
 	}

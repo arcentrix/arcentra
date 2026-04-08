@@ -19,6 +19,7 @@ package main
 import (
 	"github.com/arcentrix/arcentra/internal/control/bootstrap"
 	"github.com/arcentrix/arcentra/internal/control/config"
+	"github.com/arcentrix/arcentra/internal/control/engine"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/control/router"
 	"github.com/arcentrix/arcentra/internal/control/service"
@@ -56,6 +57,8 @@ func initApp(configPath string, pluginConfigs map[string]any) (*bootstrap.App, f
 		router.ProviderSet,
 		// gRPC 服务层
 		grpc.ProviderSet,
+		// 流水线执行引擎（依赖 repo, plugin, storage, service, config）
+		engine.ProviderSet,
 		// 应用层
 		bootstrap.NewApp,
 	))

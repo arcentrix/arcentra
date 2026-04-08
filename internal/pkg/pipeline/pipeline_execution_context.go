@@ -33,6 +33,13 @@ import (
 	"github.com/expr-lang/expr"
 )
 
+// IPauseChecker allows the execution engine to check whether the current
+// pipeline run is paused, without importing the engine package.
+type IPauseChecker interface {
+	IsPaused() bool
+	WaitIfPaused(ctx context.Context) error
+}
+
 // ExecutionContext provides execution context for pipeline
 type ExecutionContext struct {
 	Pipeline       *spec.Pipeline
@@ -44,6 +51,22 @@ type ExecutionContext struct {
 	TaskQueue      nova.TaskQueue
 	Logger         log.Logger
 	Env            map[string]string
+
+	// JobRunStore is set by the control-plane engine to let TaskFramework
+	// persist JobRun / StepRun records and poll their status.
+	JobRunStore any // engine.IJobRunStore (avoid circular import)
+
+	// RunCoordinator exposes pause/resume checking to TaskFramework.
+	RunCoordinator IPauseChecker
+
+	// PipelineRunID and PipelineIDRef are set by RunCoordinator so that
+	// TaskFramework can associate DB records with the current run.
+	PipelineRunID string
+	PipelineIDRef string
+
+	// ArtifactURIs stores upstream job artifact URIs keyed by "jobName/artifactName".
+	// Populated after each Job completes; downstream jobs read from here.
+	ArtifactURIs map[string]string
 }
 
 // NewExecutionContext creates a new execution context

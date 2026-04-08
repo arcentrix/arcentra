@@ -32,14 +32,18 @@ import (
 	"gorm.io/gorm"
 )
 
+// AgentServiceImpl implements the gRPC AgentService for control plane.
 type AgentServiceImpl struct {
 	agentv1.UnimplementedAgentServiceServer
 	agentService *AgentService
+	storageRepo  repo.IStorageRepository
 }
 
-func NewAgentServiceImpl(agentService *AgentService) *AgentServiceImpl {
+// NewAgentServiceImpl creates a new agent gRPC service.
+func NewAgentServiceImpl(agentService *AgentService, storageRepo repo.IStorageRepository) *AgentServiceImpl {
 	return &AgentServiceImpl{
 		agentService: agentService,
+		storageRepo:  storageRepo,
 	}
 }
 
@@ -166,13 +170,45 @@ func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 		}
 	}
 
-	return &agentv1.RegisterResponse{
+	resp := &agentv1.RegisterResponse{
 		Success:           true,
 		Message:           "registration successful",
 		AgentId:           agentID,
 		HeartbeatInterval: heartbeatInterval,
 		Labels:            labels,
-	}, nil
+	}
+
+	if a.storageRepo != nil {
+		if sc := a.buildStorageConfig(ctx); sc != nil {
+			resp.Storage = sc
+		}
+	}
+
+	return resp, nil
+}
+
+// buildStorageConfig reads the default storage configuration from DB and
+// converts it to the proto StorageConfig delivered to agents.
+func (a *AgentServiceImpl) buildStorageConfig(ctx context.Context) *agentv1.StorageConfig {
+	sc, err := a.storageRepo.GetDefault(ctx)
+	if err != nil || sc == nil {
+		return nil
+	}
+	var detail model.StorageConfigDetail
+	if err := sonic.Unmarshal(sc.Config, &detail); err != nil {
+		log.Warnw("failed to parse default storage config for agent", "error", err)
+		return nil
+	}
+	return &agentv1.StorageConfig{
+		Provider:  sc.StorageType,
+		Endpoint:  detail.Endpoint,
+		Bucket:    detail.Bucket,
+		Region:    detail.Region,
+		AccessKey: detail.AccessKey,
+		SecretKey: detail.SecretKey,
+		BasePath:  detail.BasePath,
+		UseSsl:    detail.UseTLS,
+	}
 }
 
 func (a *AgentServiceImpl) Unregister(ctx context.Context, req *agentv1.UnregisterRequest) (*agentv1.UnregisterResponse, error) {
@@ -274,9 +310,14 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 		}
 	}
 	if err := a.agentService.stepRunRepo.PatchByStepRunID(ctx, stepRunID, updates); err != nil {
-		log.Errorw("report step run status failed", "stepRunID", stepRunID, "error", err)
-		return nil, status.Errorf(codes.Internal, "report step run status failed")
+		log.Debugw("step run patch miss, trying job run", "id", stepRunID, "error", err)
 	}
+
+	// Also update JobRun table if the ID belongs to a job run.
+	if a.agentService.jobRunRepo != nil {
+		_ = a.agentService.jobRunRepo.UpdateByJobRunID(ctx, stepRunID, updates)
+	}
+
 	return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "ok"}, nil
 }
 

@@ -23,10 +23,12 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/config"
+	"github.com/arcentrix/arcentra/internal/control/engine"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/control/router"
 	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
+	"github.com/arcentrix/arcentra/internal/pkg/pipeline/trigger"
 	"github.com/arcentrix/arcentra/internal/pkg/storage"
 	"github.com/arcentrix/arcentra/pkg/cron"
 	"github.com/arcentrix/arcentra/pkg/database"
@@ -51,6 +53,7 @@ type App struct {
 	Repos         *repo.Repositories
 	Services      *service.Services
 	ShutdownMgr   *shutdown.Manager
+	Engine        *engine.Engine
 }
 
 // InitAppFunc init app function type
@@ -67,10 +70,15 @@ func NewApp(
 	_ database.IDatabase,
 	repos *repo.Repositories,
 	shutdownMgr *shutdown.Manager,
+	pipelineEngine *engine.Engine,
 ) (*App, func(), error) {
 	httpApp := rt.Router()
 
-	// 设置 AppConf
+	// Wire the engine into Services so PipelineServiceImpl can use it.
+	if pipelineEngine != nil {
+		rt.Services.PipelineEngine = pipelineEngine
+	}
+
 	app := &App{
 		HTTPApp:       httpApp,
 		PluginMgr:     pluginMgr,
@@ -82,9 +90,15 @@ func NewApp(
 		Repos:         repos,
 		Services:      rt.Services,
 		ShutdownMgr:   shutdownMgr,
+		Engine:        pipelineEngine,
 	}
 
 	cleanup := func() {
+		// stop pipeline engine (waits for in-progress runs)
+		if pipelineEngine != nil {
+			pipelineEngine.Stop()
+		}
+
 		// stop metrics server
 		if metricsServer != nil {
 			log.Info("Shutting down metrics server...")
@@ -168,6 +182,32 @@ func Run(app *App, cleanup func()) {
 			defer cancel()
 			_ = app.Services.Scm.PollOnce(ctx)
 		}, "scm-poll")
+	}
+
+	// Pipeline cron triggers: dynamically register each pipeline's custom cron
+	// expression with the scheduler. SyncAll on startup, then every 5 minutes.
+	if app.Engine != nil && app.Repos != nil {
+		cronMgr := trigger.NewCronTriggerManager(
+			cron.Get(),
+			app.Engine,
+			app.Repos.Pipeline,
+			app.Repos.Project,
+			service.LoadPipelineDefinition,
+		)
+		syncCtx, syncCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		cronMgr.SyncAll(syncCtx)
+		syncCancel()
+
+		_ = cron.AddFunc("*/5 * * * *", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			cronMgr.SyncAll(ctx)
+		}, "pipeline-cron-sync")
+	}
+
+	// Wire the pipeline engine into ScmService for webhook-triggered runs.
+	if app.Engine != nil && app.Services != nil && app.Services.Scm != nil {
+		app.Services.Scm.SetEngine(app.Engine)
 	}
 
 	// start metrics server

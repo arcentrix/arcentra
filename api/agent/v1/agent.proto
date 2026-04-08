@@ -158,6 +158,19 @@ message RegisterResponse {
   string agent_id = 3;                    // Agent ID assigned or confirmed by Server
   int64 heartbeat_interval = 4;           // Heartbeat interval (seconds)
   map<string, string> labels = 5;        // Agent labels assigned by Server
+  StorageConfig storage = 6;             // Object storage configuration (auto-provisioned)
+}
+
+// StorageConfig carries object-storage credentials delivered from control plane.
+message StorageConfig {
+  string provider = 1;                    // minio / s3 / oss / gcs / cos
+  string endpoint = 2;                    // Storage endpoint URL
+  string bucket = 3;                      // Bucket name
+  string region = 4;                      // Region (optional)
+  string access_key = 5;                  // Access key
+  string secret_key = 6;                  // Secret key
+  string base_path = 7;                   // Object key prefix inside the bucket
+  bool use_ssl = 8;                       // Whether to use TLS
 }
 
 // Agent unregistration request

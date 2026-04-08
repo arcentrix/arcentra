@@ -21,8 +21,12 @@ import (
 	"strings"
 	"time"
 
+	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
+	"github.com/arcentrix/arcentra/internal/pkg/pipeline/trigger"
+	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/scm"
 	_ "github.com/arcentrix/arcentra/pkg/scm/builtin" // register builtin SCM providers
@@ -32,13 +36,21 @@ import (
 
 const settingsScmKey = "scm"
 
+// ScmService handles SCM webhook events and polling.
 type ScmService struct {
-	projectRepo repo.IProjectRepository
+	projectRepo  repo.IProjectRepository
+	pipelineRepo repo.IPipelineRepository
+	engine       IPipelineEngine
 }
 
-// NewScmService creates a new scm service
-func NewScmService(projectRepo repo.IProjectRepository) *ScmService {
-	return &ScmService{projectRepo: projectRepo}
+// NewScmService creates a new scm service.
+func NewScmService(projectRepo repo.IProjectRepository, pipelineRepo repo.IPipelineRepository) *ScmService {
+	return &ScmService{projectRepo: projectRepo, pipelineRepo: pipelineRepo}
+}
+
+// SetEngine injects the pipeline engine after bootstrap initialization.
+func (s *ScmService) SetEngine(engine IPipelineEngine) {
+	s.engine = engine
 }
 
 // HandleWebhook handles the scm webhook
@@ -74,12 +86,107 @@ func (s *ScmService) HandleWebhook(ctx context.Context, projectID string, header
 		if events[i].OccurredAt.IsZero() {
 			events[i].OccurredAt = now
 		}
-		// ensure providerKind is filled
 		if events[i].ProviderKind == "" {
 			events[i].ProviderKind = kind
 		}
 	}
+
+	// Trigger matching pipelines asynchronously.
+	if s.pipelineRepo != nil && len(events) > 0 {
+		s.matchAndTriggerPipelines(ctx, projectID, events)
+	}
+
 	return events, nil
+}
+
+// matchAndTriggerPipelines evaluates pipeline-level event triggers against
+// the incoming SCM events. For each match it creates a PipelineRun and
+// submits it to the engine.
+func (s *ScmService) matchAndTriggerPipelines(ctx context.Context, projectID string, events []scm.Event) {
+	pipelines, _, err := s.pipelineRepo.List(ctx, &repo.PipelineQuery{
+		ProjectID: projectID,
+		Page:      1,
+		PageSize:  100,
+	})
+	if err != nil || len(pipelines) == 0 {
+		return
+	}
+
+	for _, ev := range events {
+		for _, p := range pipelines {
+			if p.IsEnabled != 1 {
+				continue
+			}
+			s.tryTriggerPipeline(ctx, p, ev)
+		}
+	}
+}
+
+// tryTriggerPipeline loads a pipeline's spec and checks if any event trigger
+// matches the given SCM event. On match it creates a run and submits.
+func (s *ScmService) tryTriggerPipeline(ctx context.Context, p *model.Pipeline, ev scm.Event) {
+	if s.engine == nil {
+		log.Infow("webhook event skipped (engine not available)",
+			"pipelineId", p.PipelineID, "eventType", ev.EventType, "ref", ev.Ref)
+		return
+	}
+
+	project, err := s.projectRepo.Get(ctx, p.ProjectID)
+	if err != nil || project == nil {
+		return
+	}
+
+	content, headSha, err := LoadPipelineDefinition(ctx, p, project)
+	if err != nil {
+		log.Debugw("webhook trigger: load definition failed", "pipelineId", p.PipelineID, "error", err)
+		return
+	}
+
+	parsedSpec, err := spec.ParseContentToProto(content, pipelinev1.SpecFormat_SPEC_FORMAT_UNSPECIFIED)
+	if err != nil {
+		log.Debugw("webhook trigger: parse spec failed", "pipelineId", p.PipelineID, "error", err)
+		return
+	}
+
+	if !trigger.MatchAnyEventTrigger(parsedSpec, string(ev.EventType), ev.Ref) {
+		return
+	}
+
+	requestID := fmt.Sprintf("event:%s:%s:%s:%d",
+		p.PipelineID, ev.EventType, ev.CommitID, ev.OccurredAt.Unix())
+
+	existing, _ := s.pipelineRepo.GetRunByRequestID(ctx, p.PipelineID, requestID)
+	if existing != nil {
+		return
+	}
+
+	run := &model.PipelineRun{
+		RunID:               id.GetUild(),
+		PipelineID:          p.PipelineID,
+		RequestID:           requestID,
+		PipelineName:        p.Name,
+		Branch:              trigger.NormalizeBranch(ev.Ref),
+		CommitSha:           ev.CommitID,
+		DefinitionCommitSha: headSha,
+		DefinitionPath:      p.PipelineFilePath,
+		Status:              model.PipelineStatusPending,
+		TriggerType:         int(pipelinev1.TriggerType_TRIGGER_TYPE_EVENT),
+		TriggeredBy:         "webhook",
+	}
+	if err := s.pipelineRepo.CreateRun(ctx, run); err != nil {
+		log.Warnw("webhook trigger: create run failed", "pipelineId", p.PipelineID, "error", err)
+		return
+	}
+
+	if err := s.engine.Submit(run, parsedSpec); err != nil {
+		log.Warnw("webhook trigger: engine submit failed",
+			"pipelineId", p.PipelineID, "runId", run.RunID, "error", err)
+		return
+	}
+
+	log.Infow("webhook trigger fired",
+		"pipelineId", p.PipelineID, "runId", run.RunID,
+		"eventType", ev.EventType, "ref", ev.Ref)
 }
 
 // PollOnce polls the scm events

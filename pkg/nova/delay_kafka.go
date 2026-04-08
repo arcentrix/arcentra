@@ -172,7 +172,7 @@ func (dm *DelayTopicManager) EnqueueDelay(
 		"target_queue": targetQueue,
 		"priority":     strconv.Itoa(int(priority)),
 	}
-	if err := dm.producer.Send(dm.ctx, delayTopic, key, msgData, headers); err != nil {
+	if err := dm.producer.Producer(dm.ctx, delayTopic, key, msgData, headers); err != nil {
 		return fmt.Errorf("failed to produce delay message: %w", err)
 	}
 
@@ -259,7 +259,7 @@ func (dm *DelayTopicManager) sendToTargetTopic(task *Task, queue string, priorit
 		"priority":  strconv.Itoa(int(priority)),
 		"task_type": task.Type,
 	}
-	if err := dm.producer.Send(dm.ctx, dm.targetTopic, taskMsg.TaskID, msgData, headers); err != nil {
+	if err = dm.producer.Producer(dm.ctx, dm.targetTopic, taskMsg.TaskID, msgData, headers); err != nil {
 		return fmt.Errorf("failed to produce task message: %w", err)
 	}
 

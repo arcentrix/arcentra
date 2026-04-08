@@ -87,7 +87,7 @@ func (s *ServerWrapper) Register(services *service.Services,
 	db *gorm.DB,
 	kafkaSettings service.KafkaSettings,
 ) {
-	agentv1.RegisterAgentServiceServer(s.svr, service.NewAgentServiceImpl(services.Agent))
+	agentv1.RegisterAgentServiceServer(s.svr, service.NewAgentServiceImpl(services.Agent, services.StorageRepo))
 	gatewayv1.RegisterGatewayServiceServer(s.svr, service.NewGatewayServiceImpl())
 	steprunv1.RegisterStepRunServiceServer(s.svr, service.NewStepRunServiceImpl(services.StepRunRepo))
 	streamv1.RegisterStreamServiceServer(s.svr, service.NewStreamService(redisClient, db, kafkaSettings))

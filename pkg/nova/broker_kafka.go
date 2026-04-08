@@ -60,7 +60,7 @@ func NewKafkaConfig(bootstrapServers string, opts ...KafkaOption) *KafkaConfig {
 	}
 
 	for _, opt := range opts {
-		opt.apply(config)
+		opt(config)
 	}
 
 	return config
@@ -149,16 +149,16 @@ func newKafkaBroker(config *queueConfig) (MessageQueueBroker, DelayManager, erro
 	return broker, delayManager, nil
 }
 
-// SendMessage sends a single message
-func (b *kafkaBroker) SendMessage(ctx context.Context, topic string, key string, value []byte, headers map[string]string) error {
-	if err := b.producer.Send(ctx, topic, key, value, headers); err != nil {
+// ProducerMessage sends a single message
+func (b *kafkaBroker) ProducerMessage(ctx context.Context, topic string, key string, value []byte, headers map[string]string) error {
+	if err := b.producer.Producer(ctx, topic, key, value, headers); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 	return nil
 }
 
-// SendBatchMessages sends multiple messages in batch
-func (b *kafkaBroker) SendBatchMessages(ctx context.Context, topic string, messages []Message) error {
+// ProducerBatchMessages sends multiple messages in batch
+func (b *kafkaBroker) ProducerBatchMessages(ctx context.Context, topic string, messages []Message) error {
 	if len(messages) == 0 {
 		return nil
 	}
@@ -166,7 +166,7 @@ func (b *kafkaBroker) SendBatchMessages(ctx context.Context, topic string, messa
 	var firstErr error
 
 	for _, msg := range messages {
-		if err := b.producer.Send(ctx, topic, msg.Key, msg.Value, msg.Headers); err != nil {
+		if err := b.producer.Producer(ctx, topic, msg.Key, msg.Value, msg.Headers); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}

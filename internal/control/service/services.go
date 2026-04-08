@@ -41,7 +41,9 @@ type Services struct {
 	StepRunRepo       repo.IStepRunRepository
 	ProjectRepo       repo.IProjectRepository
 	PipelineRepo      repo.IPipelineRepository
+	StorageRepo       repo.IStorageRepository
 	LogAggregator     *LogAggregator
+	PipelineEngine    IPipelineEngine // set after engine initialization
 }
 
 // NewServices 初始化所有 service
@@ -63,7 +65,7 @@ func NewServices(
 		menuService,
 	)
 	generalSettingsService := NewGeneralSettingsService(repos.GeneralSettings)
-	agentService := NewAgentService(repos.Agent, repos.StepRun, generalSettingsService)
+	agentService := NewAgentService(repos.Agent, repos.StepRun, generalSettingsService, repos.JobRun)
 	stateStore := util.NewRedisStateStore(cacheStore)
 	identityService := NewIdentityService(repos.Identity, repos.User, repos.UserExt, stateStore)
 	teamService := NewTeamService(repos.Team)
@@ -71,7 +73,7 @@ func NewServices(
 	uploadService := NewUploadService(repos.Storage)
 	secretService := NewSecretService(repos.Secret)
 	projectService := NewProjectService(repos.Project)
-	scmService := NewScmService(repos.Project)
+	scmService := NewScmService(repos.Project, repos.Pipeline)
 	userExt := NewUserExt(repos.UserExt)
 	roleService := NewRoleService(repos.Role)
 	logAggregator := NewLogAggregator(nil, db.Database())
@@ -94,6 +96,7 @@ func NewServices(
 		StepRunRepo:       repos.StepRun,
 		ProjectRepo:       repos.Project,
 		PipelineRepo:      repos.Pipeline,
+		StorageRepo:       repos.Storage,
 		LogAggregator:     logAggregator,
 	}
 }

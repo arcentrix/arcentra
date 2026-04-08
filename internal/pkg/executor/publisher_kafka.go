@@ -56,7 +56,7 @@ func (p *KafkaPublisher) Publish(ctx context.Context, event map[string]any) erro
 	if value, ok := event["id"].(string); ok {
 		eventID = value
 	}
-	return p.producer.Send(ctx, p.topic, eventID, payload, nil)
+	return p.producer.Producer(ctx, p.topic, eventID, payload, nil)
 }
 
 // Close closes the publisher.
@@ -106,7 +106,7 @@ func (p *KafkaTopicPublisher) Publish(ctx context.Context, event map[string]any)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
 	}
-	return p.producer.Send(ctx, topic, buildEventKey(event), payload, nil)
+	return p.producer.Producer(ctx, topic, buildEventKey(event), payload, nil)
 }
 
 // Close closes the publisher.

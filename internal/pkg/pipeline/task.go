@@ -58,6 +58,26 @@ type Task struct {
 	Error error
 	// RetryCount is the number of retry attempts
 	RetryCount int
+	// Metadata carries arbitrary key-value pairs through the task lifecycle
+	// (e.g. jobRunID set during queue and read during wait).
+	Metadata map[string]any
+}
+
+// Set stores a metadata value on the task.
+func (t *Task) Set(key string, value any) {
+	if t.Metadata == nil {
+		t.Metadata = make(map[string]any)
+	}
+	t.Metadata[key] = value
+}
+
+// Get retrieves a metadata value from the task.
+func (t *Task) Get(key string) (any, bool) {
+	if t.Metadata == nil {
+		return nil, false
+	}
+	v, ok := t.Metadata[key]
+	return v, ok
 }
 
 // TaskNode implements dag.NamedNode for DAG integration

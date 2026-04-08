@@ -94,7 +94,7 @@ func (p *KafkaLogPublisher) Publish(ctx context.Context, msg *logstream.BuildLog
 	if err != nil {
 		return fmt.Errorf("marshal build log message: %w", err)
 	}
-	return p.producer.Send(ctx, buildLogsTopic, msg.BuildLogKey(), payload, nil)
+	return p.producer.Producer(ctx, buildLogsTopic, msg.BuildLogKey(), payload, nil)
 }
 
 // Close closes the Kafka producer.

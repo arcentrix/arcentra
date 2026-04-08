@@ -30,40 +30,32 @@ type ProducerConfig struct {
 }
 
 // ProducerOption defines optional configuration for ProducerConfig.
-type ProducerOption interface {
-	apply(*ProducerConfig)
-}
-
-type producerOptionFunc func(*ProducerConfig)
-
-func (fn producerOptionFunc) apply(conf *ProducerConfig) {
-	fn(conf)
-}
+type ProducerOption func(*ProducerConfig)
 
 func WithProducerOptions(opts ...Option) ProducerOption {
-	return producerOptionFunc(func(conf *ProducerConfig) {
+	return func(conf *ProducerConfig) {
 		for _, opt := range opts {
-			opt.apply(&conf.Config)
+			opt(&conf.Config)
 		}
-	})
+	}
 }
 
 func WithProducerAcks(acks string) ProducerOption {
-	return producerOptionFunc(func(conf *ProducerConfig) {
+	return func(conf *ProducerConfig) {
 		conf.Acks = acks
-	})
+	}
 }
 
 func WithProducerRetries(retries int) ProducerOption {
-	return producerOptionFunc(func(conf *ProducerConfig) {
+	return func(conf *ProducerConfig) {
 		conf.Retries = retries
-	})
+	}
 }
 
 func WithProducerCompression(compression string) ProducerOption {
-	return producerOptionFunc(func(conf *ProducerConfig) {
+	return func(conf *ProducerConfig) {
 		conf.Compression = compression
-	})
+	}
 }
 
 // Producer wraps a Kafka producer instance.
@@ -82,15 +74,14 @@ func NewProducer(bootstrapServers string, clientID string, opts ...ProducerOptio
 		Compression: "snappy",
 	}
 	for _, opt := range opts {
-		opt.apply(&conf)
+		opt(&conf)
 	}
-	normalizeProducerConfig(&conf)
 
-	config, err := buildBaseConfig(conf.Config)
+	config, err := baseConfig(conf.Config)
 	if err != nil {
 		return nil, err
 	}
-	clientIDStr, err := buildClientID(clientID)
+	clientIDStr, err := baseClientID(clientID)
 	if err != nil {
 		return nil, err
 	}
@@ -107,20 +98,8 @@ func NewProducer(bootstrapServers string, clientID string, opts ...ProducerOptio
 	return &Producer{producer: producer}, nil
 }
 
-func normalizeProducerConfig(conf *ProducerConfig) {
-	if conf.Acks == "" {
-		conf.Acks = "all"
-	}
-	if conf.Retries == 0 {
-		conf.Retries = 3
-	}
-	if conf.Compression == "" {
-		conf.Compression = "snappy"
-	}
-}
-
-// Send publishes a message to Kafka.
-func (p *Producer) Send(ctx context.Context, topic string, key string, value []byte, headers map[string]string) error {
+// Producer publishes a message to Kafka.
+func (p *Producer) Producer(ctx context.Context, topic string, key string, value []byte, headers map[string]string) error {
 	if p == nil || p.producer == nil {
 		return fmt.Errorf("producer is not initialized")
 	}

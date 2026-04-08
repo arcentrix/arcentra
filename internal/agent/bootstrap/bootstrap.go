@@ -266,6 +266,9 @@ func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 					log.Warnw("agent registration failed", "error", err)
 					return
 				}
+				if h := app.AgentService.StorageHolder(); h != nil && h.Get() != nil {
+					taskqueue.SetStorage(h.Get())
+				}
 				log.Info("agent registration successful, starting heartbeat")
 				resp, err := app.AgentService.Heartbeat(context.Background(), nil)
 				if err != nil {

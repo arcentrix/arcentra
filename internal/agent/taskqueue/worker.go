@@ -17,7 +17,9 @@ package taskqueue
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -27,13 +29,24 @@ import (
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	"github.com/arcentrix/arcentra/internal/pkg/executor"
 	"github.com/arcentrix/arcentra/internal/pkg/grpc"
+	"github.com/arcentrix/arcentra/internal/pkg/storage"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
 )
 
-var runningStepRunCancel sync.Map
+var (
+	runningStepRunCancel sync.Map
+	runningJobRunCancel  sync.Map
+	storageInstance      storage.IStorage
+)
+
+// SetStorage sets the object-storage client used by job workers for artifact
+// upload/download. Called after the agent registers and receives StorageConfig.
+func SetStorage(st storage.IStorage) {
+	storageInstance = st
+}
 
 // StartWorker starts the task queue worker. When execManager is non-nil, step run tasks
 // are executed via executor.Manager (events go through Outbox when SetEventPublisher is used);
@@ -80,6 +93,17 @@ func StartWorker(
 			return nil
 		}
 		switch task.Type {
+		case taskqueue.TaskTypeJobRun:
+			var payload taskqueue.JobRunTaskPayload
+			if err := sonic.Unmarshal(task.Payload, &payload); err != nil {
+				return fmt.Errorf("unmarshal job run payload: %w", err)
+			}
+			log.Infow("received job run task",
+				"jobRunId", payload.JobRunID,
+				"jobName", payload.JobName,
+				"steps", len(payload.Steps),
+			)
+			return executeJobRun(ctx, agentConf, grpcClient, execManager, &payload)
 		case taskqueue.TaskTypeStepRun:
 			var payload taskqueue.StepRunTaskPayload
 			if err := sonic.Unmarshal(task.Payload, &payload); err != nil {
@@ -197,6 +221,172 @@ func CancelStepRun(stepRunID string) bool {
 	}
 	cancel()
 	return true
+}
+
+// CancelJobRun cancels a running job by its jobRunID.
+func CancelJobRun(jobRunID string) bool {
+	value, ok := runningJobRunCancel.Load(jobRunID)
+	if !ok {
+		return false
+	}
+	cancel, ok := value.(context.CancelFunc)
+	if !ok {
+		return false
+	}
+	cancel()
+	return true
+}
+
+// executeJobRun handles a complete job: executes all steps sequentially,
+// reports per-step status, and reports job-level terminal status.
+func executeJobRun(
+	ctx context.Context,
+	agentConf *config.AgentConfig,
+	grpcClient *grpc.ClientWrapper,
+	execManager *executor.Manager,
+	payload *taskqueue.JobRunTaskPayload,
+) error {
+	if payload == nil {
+		return nil
+	}
+
+	jobCtx, cancel := context.WithCancel(ctx)
+	runningJobRunCancel.Store(payload.JobRunID, cancel)
+	defer func() {
+		runningJobRunCancel.Delete(payload.JobRunID)
+		cancel()
+	}()
+
+	if payload.Timeout != "" {
+		if d, err := time.ParseDuration(payload.Timeout); err == nil && d > 0 {
+			var timeoutCancel context.CancelFunc
+			jobCtx, timeoutCancel = context.WithTimeout(jobCtx, d)
+			defer timeoutCancel()
+		}
+	}
+
+	start := time.Now()
+	reportJobRunStatus(grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_BUSY, int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING), "", start, 0)
+
+	workspace := payload.Workspace
+	if workspace == "" {
+		workspace = "."
+	}
+
+	if err := handleSourceClone(jobCtx, payload.Source, workspace); err != nil {
+		end := time.Now().Unix()
+		reportJobRunStatus(grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_IDLE,
+			int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED), err.Error(), start, end)
+		return fmt.Errorf("source clone failed: %w", err)
+	}
+
+	if err := handleArtifactDownload(jobCtx, payload.ArtifactURIs, workspace, storageInstance); err != nil {
+		log.Warnw("artifact download failed (non-fatal)", "jobRunId", payload.JobRunID, "error", err)
+	}
+
+	var jobErr error
+	for _, step := range payload.Steps {
+		if jobCtx.Err() != nil {
+			break
+		}
+		stepStart := time.Now()
+		_ = reportStepRunStatus(grpcClient, agentConf, step.StepRunID,
+			steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING, 0, "", stepStart, 0, nil)
+
+		stepPayload := &taskqueue.StepRunTaskPayload{
+			PipelineID:    payload.PipelineID,
+			PipelineRunID: payload.PipelineRunID,
+			JobID:         payload.JobRunID,
+			JobName:       payload.JobName,
+			StepName:      step.Name,
+			StepIndex:     step.StepIndex,
+			StepRunID:     step.StepRunID,
+			Uses:          step.Uses,
+			Action:        step.Action,
+			Args:          step.Args,
+			Env:           mergeEnv(payload.Env, step.Env),
+			Workspace:     payload.Workspace,
+			Timeout:       step.Timeout,
+		}
+
+		var stepErr error
+		if execManager != nil {
+			stepErr = executeStepRunViaExecutor(jobCtx, agentConf, grpcClient, execManager, stepPayload)
+		} else {
+			stepErr = executeStepRun(jobCtx, agentConf, grpcClient, stepPayload)
+		}
+
+		if stepErr != nil && !step.ContinueOnError {
+			jobErr = fmt.Errorf("step %s failed: %w", step.Name, stepErr)
+			break
+		}
+	}
+
+	end := time.Now().Unix()
+	status := int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS)
+	errMsg := ""
+	if jobErr != nil {
+		status = int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED)
+		errMsg = jobErr.Error()
+	}
+	if jobCtx.Err() == context.DeadlineExceeded {
+		status = int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_TIMEOUT)
+		errMsg = "job timeout"
+	}
+	if jobCtx.Err() == context.Canceled {
+		status = int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED)
+		errMsg = "job cancelled"
+	}
+
+	reportJobRunStatus(grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_IDLE, status, errMsg, start, end)
+	return jobErr
+}
+
+// reportJobRunStatus reports job run status to the control plane.
+// Reuses the existing ReportStepRunStatus RPC by encoding the jobRunID
+// (the control plane's AgentServiceImpl dispatches to the correct repo based on ID prefix).
+func reportJobRunStatus(
+	grpcClient *grpc.ClientWrapper,
+	agentConf *config.AgentConfig,
+	jobRunID string,
+	_ agentv1.AgentStatus,
+	status int32,
+	errMsg string,
+	start time.Time,
+	endUnix int64,
+) {
+	if grpcClient == nil || grpcClient.AgentClient == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	req := &agentv1.ReportStepRunStatusRequest{
+		StepRunId:    jobRunID,
+		Status:       steprunv1.StepRunStatus(status),
+		StartTime:    start.Unix(),
+		EndTime:      endUnix,
+		ErrorMessage: errMsg,
+	}
+	if _, err := grpcClient.AgentClient.ReportStepRunStatus(ctx, req); err != nil {
+		log.Warnw("report job run status failed", "jobRunId", jobRunID, "error", err)
+	}
+}
+
+// mergeEnv merges job-level and step-level environment variables.
+// Step env takes precedence over job env.
+func mergeEnv(jobEnv, stepEnv map[string]string) map[string]string {
+	if len(jobEnv) == 0 && len(stepEnv) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(jobEnv)+len(stepEnv))
+	for k, v := range jobEnv {
+		merged[k] = v
+	}
+	for k, v := range stepEnv {
+		merged[k] = v
+	}
+	return merged
 }
 
 func executeStepRun(
@@ -355,4 +545,62 @@ func parseTimeout(raw string, defaultSeconds int) time.Duration {
 		return time.Duration(defaultSeconds) * time.Second
 	}
 	return 0
+}
+
+// handleSourceClone clones the source repository into the workspace directory
+// when the job payload contains a SourcePayload with type "git".
+func handleSourceClone(ctx context.Context, src *taskqueue.SourcePayload, workspace string) error {
+	if src == nil || src.Type == "" {
+		return nil
+	}
+	if !strings.EqualFold(src.Type, "git") || src.Repo == "" {
+		return nil
+	}
+
+	_ = os.MkdirAll(workspace, 0o755)
+
+	args := []string{"clone", "--depth", "1"}
+	if src.Branch != "" {
+		args = append(args, "--branch", src.Branch)
+	}
+	args = append(args, src.Repo, workspace)
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = workspace
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git clone failed: %s: %w", string(output), err)
+	}
+	log.Infow("source clone complete", "repo", src.Repo, "branch", src.Branch, "workspace", workspace)
+	return nil
+}
+
+// handleArtifactDownload downloads upstream job artifacts from object storage
+// into the workspace. Each entry in uris maps "jobName/artifactName" to an
+// object key (or URI) in the configured bucket.
+func handleArtifactDownload(ctx context.Context, uris map[string]string, workspace string, st storage.IStorage) error {
+	if len(uris) == 0 || st == nil {
+		return nil
+	}
+
+	artifactsDir := filepath.Join(workspace, ".artifacts")
+	_ = os.MkdirAll(artifactsDir, 0o755)
+
+	for key, objectName := range uris {
+		if objectName == "" {
+			continue
+		}
+		data, err := st.Download(ctx, objectName)
+		if err != nil {
+			log.Warnw("artifact download failed", "key", key, "object", objectName, "error", err)
+			continue
+		}
+		localPath := filepath.Join(artifactsDir, strings.ReplaceAll(key, "/", "_"))
+		if err := os.WriteFile(localPath, data, 0o644); err != nil {
+			log.Warnw("artifact write failed", "key", key, "localPath", localPath, "error", err)
+			continue
+		}
+		log.Infow("artifact downloaded", "key", key, "localPath", localPath)
+	}
+	return nil
 }

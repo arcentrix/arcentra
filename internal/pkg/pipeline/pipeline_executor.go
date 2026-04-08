@@ -62,6 +62,15 @@ func NewPipelineExecutorWithQueue(
 	}
 }
 
+// NewPipelineExecutorFromContext creates an executor from a pre-built ExecutionContext.
+// Used by the control-plane engine which constructs the context with DB-backed stores.
+func NewPipelineExecutorFromContext(execCtx *ExecutionContext, logger log.Logger) *Executor {
+	return &Executor{
+		execCtx: execCtx,
+		logger:  logger,
+	}
+}
+
 // Execute executes the pipeline using DAG-based reconciliation
 func (pe *Executor) Execute(ctx context.Context) error {
 	pe.emitPipelineEvent(plugin.EventTypePipelineStarted, "started")
