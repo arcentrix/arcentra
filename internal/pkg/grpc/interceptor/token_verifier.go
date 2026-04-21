@@ -40,10 +40,10 @@ type agentSecretConfig struct {
 
 // agentTokenVerifier implements TokenVerifier interface for agent token verification
 type agentTokenVerifier struct {
-	agentService           *service.AgentService
-	agentRepo              repo.IAgentRepository
-	generalSettingsService *service.GeneralSettingsService
-	cache                  cache.ICache
+	agentService   *service.AgentService
+	agentRepo      repo.IAgentRepository
+	settingService *service.SettingService
+	cache          cache.ICache
 }
 
 const (
@@ -57,14 +57,14 @@ const (
 func NewAgentTokenVerifier(
 	agentService *service.AgentService,
 	agentRepo repo.IAgentRepository,
-	generalSettingsService *service.GeneralSettingsService,
+	settingService *service.SettingService,
 	c cache.ICache,
 ) TokenVerifier {
 	return &agentTokenVerifier{
-		agentService:           agentService,
-		agentRepo:              agentRepo,
-		generalSettingsService: generalSettingsService,
-		cache:                  c,
+		agentService:   agentService,
+		agentRepo:      agentRepo,
+		settingService: settingService,
+		cache:          c,
 	}
 }
 
@@ -84,14 +84,14 @@ func (v *agentTokenVerifier) getSecretConfig(ctx context.Context) (*agentSecretC
 		}
 	}
 
-	settings, err := v.generalSettingsService.GetGeneralSettingsByName(ctx, "system", "agent_secret_key")
+	setting, err := v.settingService.GetSetting(ctx, "system", "agent_secret_key")
 	if err != nil {
 		log.Errorw("failed to get agent secret key configuration", "error", err)
 		return nil, err
 	}
 
 	var config agentSecretConfig
-	if err := sonic.Unmarshal(settings.Data, &config); err != nil {
+	if err := sonic.Unmarshal(setting.Value, &config); err != nil {
 		log.Errorw("failed to unmarshal agent secret key config", "error", err)
 		return nil, err
 	}

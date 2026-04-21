@@ -87,6 +87,35 @@ func (c *WebhookChannel) SendWithTemplate(ctx context.Context, template string, 
 	return c.sendRequest(ctx, payload)
 }
 
+// SendInteractive sends a JSON payload with action buttons to the webhook endpoint.
+func (c *WebhookChannel) SendInteractive(ctx context.Context, title, content string, actions []InteractiveAction) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+
+	actionList := make([]map[string]interface{}, 0, len(actions))
+	for _, a := range actions {
+		item := map[string]interface{}{
+			"label":        a.Label,
+			"action_id":    a.ActionID,
+			"callback_url": a.CallbackURL,
+			"style":        a.Style,
+		}
+		if len(a.Metadata) > 0 {
+			item["metadata"] = a.Metadata
+		}
+		actionList = append(actionList, item)
+	}
+
+	payload := map[string]interface{}{
+		"title":   title,
+		"content": content,
+		"actions": actionList,
+	}
+
+	return c.sendRequest(ctx, payload)
+}
+
 // sendRequest sends HTTP request
 func (c *WebhookChannel) sendRequest(ctx context.Context, payload map[string]interface{}) error {
 	req := c.client.R().SetContext(ctx)

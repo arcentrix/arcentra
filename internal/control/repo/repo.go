@@ -27,7 +27,7 @@ type Repositories struct {
 	Storage              IStorageRepository
 	Team                 ITeamRepository
 	Identity             IIdentityRepository
-	GeneralSettings      IGeneralSettingsRepository
+	Setting              ISettingRepository
 	Project              IProjectRepository
 	ProjectMember        IProjectMemberRepository
 	ProjectTeamAccess    IProjectTeamAccessRepository
@@ -43,6 +43,8 @@ type Repositories struct {
 	StepRun              IStepRunRepository
 	Pipeline             IPipelineRepository
 	JobRun               IJobRunRepository
+	Approval             IApprovalRepository
+	PipelineTemplate     IPipelineTemplateRepository
 }
 
 // NewRepositories 初始化所有 repository
@@ -53,7 +55,7 @@ func NewRepositories(db database.IDatabase, ch cache.ICache) *Repositories {
 		Storage:              NewStorageRepo(db, ch),
 		Team:                 NewTeamRepo(db),
 		Identity:             NewIdentityRepo(db),
-		GeneralSettings:      NewGeneralSettingsRepo(db, ch),
+		Setting:              NewSettingRepo(db, ch),
 		Project:              NewProjectRepo(db),
 		ProjectMember:        NewProjectMemberRepo(db),
 		ProjectTeamAccess:    NewProjectTeamAccessRepo(db),
@@ -69,6 +71,8 @@ func NewRepositories(db database.IDatabase, ch cache.ICache) *Repositories {
 		StepRun:              NewStepRunRepo(db),
 		Pipeline:             NewPipelineRepo(db),
 		JobRun:               NewJobRunRepo(db),
+		Approval:             NewApprovalRepo(db),
+		PipelineTemplate:     NewPipelineTemplateRepo(db),
 	}
 }
 

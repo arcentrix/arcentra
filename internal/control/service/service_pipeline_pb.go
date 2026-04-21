@@ -26,6 +26,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
+	tmpl "github.com/arcentrix/arcentra/internal/pkg/pipeline/template"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/validation"
 	"github.com/arcentrix/arcentra/pkg/dispatch"
 	"github.com/arcentrix/arcentra/pkg/id"
@@ -47,17 +48,19 @@ type IPipelineEngine interface {
 
 type PipelineServiceImpl struct {
 	pipelinev1.UnimplementedPipelineServiceServer
-	pipelineRepo repo.IPipelineRepository
-	projectRepo  repo.IProjectRepository
-	engine       IPipelineEngine
+	pipelineRepo     repo.IPipelineRepository
+	projectRepo      repo.IProjectRepository
+	engine           IPipelineEngine
+	templateResolver *PipelineTemplateService
 }
 
 // NewPipelineServiceImpl creates pipeline grpc service.
 func NewPipelineServiceImpl(services *Services) *PipelineServiceImpl {
 	return &PipelineServiceImpl{
-		pipelineRepo: services.PipelineRepo,
-		projectRepo:  services.ProjectRepo,
-		engine:       services.PipelineEngine,
+		pipelineRepo:     services.PipelineRepo,
+		projectRepo:      services.ProjectRepo,
+		engine:           services.PipelineEngine,
+		templateResolver: services.PipelineTemplate,
 	}
 }
 
@@ -331,6 +334,14 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 			Success: false,
 			Message: "load definition failed",
 			Error:   s.error(500, err.Error(), "internal", nil),
+		}, nil
+	}
+	content, err = s.resolveIncludes(ctx, content, pipeline.ProjectID)
+	if err != nil {
+		return &pipelinev1.TriggerPipelineResponse{
+			Success: false,
+			Message: "resolve includes failed",
+			Error:   s.error(400, err.Error(), "validation", nil),
 		}, nil
 	}
 	parsedSpec, err := spec.ParseContentToProto(content, pipelinev1.SpecFormat_SPEC_FORMAT_UNSPECIFIED)
@@ -652,12 +663,20 @@ func (s *PipelineServiceImpl) ValidatePipelineSpec(
 	var def *pipelinev1.Spec
 	var err error
 	if req.GetSpec() == nil && strings.TrimSpace(req.GetPipelineId()) != "" {
-		_, _, loaded, _, readErr := s.readDefinition(ctx, req.GetPipelineId())
+		pipeline, _, loaded, _, readErr := s.readDefinition(ctx, req.GetPipelineId())
 		if readErr != nil {
 			return &pipelinev1.ValidatePipelineSpecResponse{
 				Success: false,
 				Message: "load spec failed",
 				Error:   s.error(500, readErr.Error(), "internal", nil),
+			}, nil
+		}
+		loaded, err = s.resolveIncludes(ctx, loaded, pipeline.ProjectID)
+		if err != nil {
+			return &pipelinev1.ValidatePipelineSpecResponse{
+				Success: false,
+				Message: "resolve includes failed",
+				Error:   s.error(400, err.Error(), "validation", nil),
 			}, nil
 		}
 		def, err = spec.ParseContentToProto(loaded, req.GetFormat())
@@ -1063,4 +1082,14 @@ func isDuplicateEntryError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "duplicate entry") || strings.Contains(msg, "unique constraint")
+}
+
+// resolveIncludes expands include directives in pipeline spec content
+// by delegating to the template resolver. If no template resolver is
+// configured the content is returned unchanged.
+func (s *PipelineServiceImpl) resolveIncludes(ctx context.Context, content, projectID string) (string, error) {
+	if s.templateResolver == nil {
+		return content, nil
+	}
+	return tmpl.ResolveIncludes(ctx, content, s.templateResolver, model.TemplateScopeProject, projectID)
 }

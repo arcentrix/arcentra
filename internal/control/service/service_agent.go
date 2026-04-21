@@ -31,23 +31,24 @@ import (
 )
 
 type AgentService struct {
-	agentRepo              repo.IAgentRepository
-	stepRunRepo            repo.IStepRunRepository
-	jobRunRepo             repo.IJobRunRepository
-	generalSettingsService *GeneralSettingsService
+	agentRepo      repo.IAgentRepository
+	stepRunRepo    repo.IStepRunRepository
+	jobRunRepo     repo.IJobRunRepository
+	settingService *SettingService
 }
 
+// NewAgentService creates a new AgentService.
 func NewAgentService(
 	agentRepo repo.IAgentRepository,
 	stepRunRepo repo.IStepRunRepository,
-	generalSettingsService *GeneralSettingsService,
+	settingService *SettingService,
 	jobRunRepo repo.IJobRunRepository,
 ) *AgentService {
 	return &AgentService{
-		agentRepo:              agentRepo,
-		stepRunRepo:            stepRunRepo,
-		jobRunRepo:             jobRunRepo,
-		generalSettingsService: generalSettingsService,
+		agentRepo:      agentRepo,
+		stepRunRepo:    stepRunRepo,
+		jobRunRepo:     jobRunRepo,
+		settingService: settingService,
 	}
 }
 
@@ -96,15 +97,14 @@ type agentSecretConfig struct {
 
 // GenerateAgentToken generates a token based on agentID for agent communication.
 func (al *AgentService) GenerateAgentToken(ctx context.Context, agentID string) (string, error) {
-	settings, err := al.generalSettingsService.GetGeneralSettingsByName(ctx, "system", "agent_secret_key")
+	setting, err := al.settingService.GetSetting(ctx, "system", "agent_secret_key")
 	if err != nil {
 		log.Errorw("failed to get agent secret key configuration", "error", err)
 		return "", err
 	}
 
-	// Parse JSON data
 	var config agentSecretConfig
-	if err := sonic.Unmarshal(settings.Data, &config); err != nil {
+	if err := sonic.Unmarshal(setting.Value, &config); err != nil {
 		log.Errorw("failed to parse agent secret key configuration", "error", err)
 		return "", err
 	}

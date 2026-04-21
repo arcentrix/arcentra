@@ -117,7 +117,13 @@ func (rc *RunCoordinator) WaitIfPaused(ctx context.Context) error {
 // Execute runs the full pipeline lifecycle.
 func (rc *RunCoordinator) Execute(ctx context.Context) error {
 	pipelineRepo := rc.engine.repos.Pipeline
+	auditWriter := rc.engine.auditWriter
 	now := time.Now()
+
+	// Audit: pipeline run started.
+	if auditWriter != nil {
+		auditWriter.Write(ctx, PipelineAudit("pipeline_run.started", "", rc.run.RunID, rc.run.PipelineID))
+	}
 
 	totalJobs := len(rc.spec.Jobs)
 	if err := pipelineRepo.UpdateRun(ctx, rc.run.RunID, map[string]any{
@@ -138,21 +144,38 @@ func (rc *RunCoordinator) Execute(ctx context.Context) error {
 		"duration": duration,
 	}
 
+	var auditAction string
 	if execErr != nil {
 		if ctx.Err() != nil {
 			updates["status"] = model.PipelineStatusCancelled
+			auditAction = "pipeline_run.cancelled"
 		} else {
 			updates["status"] = model.PipelineStatusFailed
+			auditAction = "pipeline_run.failed"
 		}
 	} else {
 		updates["status"] = model.PipelineStatusSuccess
+		auditAction = "pipeline_run.completed"
 	}
 
 	if err := pipelineRepo.UpdateRun(ctx, rc.run.RunID, updates); err != nil {
 		log.Errorw("failed to update run terminal status", "runId", rc.run.RunID, "error", err)
 	}
 
+	// Audit: pipeline run terminal state.
+	if auditWriter != nil {
+		auditWriter.Write(ctx, PipelineAudit(auditAction, "", rc.run.RunID, rc.run.PipelineID))
+	}
+
 	rc.updatePipelineStats(ctx, updates["status"].(int))
+
+	// Workspace cleanup: remove the run working directory unless kept for debugging.
+	if !rc.engine.appConf.Pipeline.KeepWorkspace {
+		workspace := rc.resolveWorkspace()
+		if err := os.RemoveAll(workspace); err != nil {
+			log.Warnw("failed to clean up workspace", "runId", rc.run.RunID, "path", workspace, "error", err)
+		}
+	}
 
 	return execErr
 }
@@ -174,6 +197,7 @@ func (rc *RunCoordinator) executeDAG(ctx context.Context) error {
 
 	rc.loadSecrets(ctx, execCtx)
 	rc.setupEventEmitter(execCtx)
+	rc.setupLogPublisher(execCtx)
 
 	jobRunStore := NewJobRunStore(
 		rc.engine.repos.JobRun,
@@ -193,8 +217,15 @@ func (rc *RunCoordinator) executeDAG(ctx context.Context) error {
 // TaskFramework job/step events are actually published (to Kafka when
 // configured, otherwise silently dropped).
 func (rc *RunCoordinator) setupEventEmitter(execCtx *pipeline.ExecutionContext) {
+	cfg := executor.EventEmitterConfig{
+		SourcePrefix:   "urn:arcentra:control",
+		PublishTimeout: 5 * time.Second,
+	}
+
 	kafkaCfg := rc.engine.appConf.MessageQueue.Kafka
 	if kafkaCfg.BootstrapServers == "" {
+		// Fallback: log events instead of silently dropping them.
+		execCtx.SetEventEmitter(executor.NewEventEmitter(&executor.LogEventPublisher{}, cfg))
 		return
 	}
 	publisher, err := executor.NewKafkaPublisher(
@@ -203,15 +234,28 @@ func (rc *RunCoordinator) setupEventEmitter(execCtx *pipeline.ExecutionContext) 
 		"EVENT_PIPELINE",
 	)
 	if err != nil {
-		log.Warnw("failed to create event publisher", "error", err)
+		log.Warnw("failed to create event publisher, falling back to log", "error", err)
+		execCtx.SetEventEmitter(executor.NewEventEmitter(&executor.LogEventPublisher{}, cfg))
 		return
 	}
 
-	emitter := executor.NewEventEmitter(publisher, executor.EventEmitterConfig{
-		SourcePrefix:   "urn:arcentra:control",
-		PublishTimeout: 5 * time.Second,
-	})
-	execCtx.SetEventEmitter(emitter)
+	execCtx.SetEventEmitter(executor.NewEventEmitter(publisher, cfg))
+}
+
+// setupLogPublisher initialises a KafkaLogPublisher so that local steps
+// executed on the control plane publish their logs to the BUILD_LOGS topic,
+// making them visible through the WebSocket log stream.
+func (rc *RunCoordinator) setupLogPublisher(execCtx *pipeline.ExecutionContext) {
+	kafkaCfg := rc.engine.appConf.MessageQueue.Kafka
+	if kafkaCfg.BootstrapServers == "" {
+		return
+	}
+	pub, err := executor.NewKafkaLogPublisher(kafkaCfg, "arcentra-control-logs")
+	if err != nil {
+		log.Warnw("failed to create log publisher for control-plane steps", "error", err)
+		return
+	}
+	execCtx.LogPublisher = pub
 }
 
 // loadSecrets fetches project-scoped secrets and injects them into the

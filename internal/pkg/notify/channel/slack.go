@@ -96,6 +96,53 @@ func (c *SlackChannel) SendWithTemplate(ctx context.Context, template string, da
 	return c.sendRequest(ctx, payload)
 }
 
+// SendInteractive sends a Block Kit message with action buttons to Slack.
+func (c *SlackChannel) SendInteractive(ctx context.Context, title, content string, actions []InteractiveAction) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+
+	buttons := make([]map[string]interface{}, 0, len(actions))
+	for _, a := range actions {
+		style := ""
+		switch a.Style {
+		case "primary":
+			style = "primary"
+		case "danger":
+			style = "danger"
+		}
+		btn := map[string]interface{}{
+			"type":      "button",
+			"text":      map[string]interface{}{"type": "plain_text", "text": a.Label},
+			"url":       a.CallbackURL,
+			"action_id": a.ActionID,
+		}
+		if style != "" {
+			btn["style"] = style
+		}
+		buttons = append(buttons, btn)
+	}
+
+	payload := map[string]interface{}{
+		"blocks": []map[string]interface{}{
+			{
+				"type": "header",
+				"text": map[string]interface{}{"type": "plain_text", "text": title},
+			},
+			{
+				"type": "section",
+				"text": map[string]interface{}{"type": "mrkdwn", "text": content},
+			},
+			{
+				"type":     "actions",
+				"elements": buttons,
+			},
+		},
+	}
+
+	return c.sendRequest(ctx, payload)
+}
+
 // sendRequest sends HTTP request
 func (c *SlackChannel) sendRequest(ctx context.Context, payload map[string]interface{}) error {
 	req := c.client.R().SetContext(ctx)

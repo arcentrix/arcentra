@@ -38,8 +38,14 @@ service AgentService {
   // Report step run status - Agent reports status changes during step run execution
   rpc ReportStepRunStatus(ReportStepRunStatusRequest) returns (ReportStepRunStatusResponse) {}
 
+  // Report job run status - Agent reports job-level status (dedicated RPC instead of reusing step-level)
+  rpc ReportJobRunStatus(ReportJobRunStatusRequest) returns (ReportJobRunStatusResponse) {}
+
   // Cancel step run - Server notifies Agent to cancel a running step run
   rpc CancelStepRun(CancelStepRunRequest) returns (CancelStepRunResponse) {}
+
+  // Cancel job run - Server notifies Agent to cancel a running job run
+  rpc CancelJobRun(CancelJobRunRequest) returns (CancelJobRunResponse) {}
 
   // Update labels - Dynamically update Agent's labels
   rpc UpdateLabels(UpdateLabelsRequest) returns (UpdateLabelsResponse) {}
@@ -290,6 +296,35 @@ message UpdateLabelsResponse {
   bool success = 1;
   string message = 2;
   map<string, string> labels = 3;        // Updated labels
+}
+
+// Report job run status request
+message ReportJobRunStatusRequest {
+  string agent_id = 1;                    // Agent ID (required)
+  string job_run_id = 2;                  // Job run ID (required)
+  int32 status = 3;                       // Job run status
+  string error_message = 4;               // Error message
+  int64 start_time = 5;                   // Start time (Unix timestamp in seconds)
+  int64 end_time = 6;                     // End time (Unix timestamp in seconds)
+  map<string, string> artifact_uris = 7;  // Artifact URIs produced by the job
+}
+
+// Report job run status response
+message ReportJobRunStatusResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Cancel job run request
+message CancelJobRunRequest {
+  string job_run_id = 1;                  // Job run ID (required)
+  string reason = 2;                      // Cancellation reason
+}
+
+// Cancel job run response
+message CancelJobRunResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 // ============ Agent Selector ============

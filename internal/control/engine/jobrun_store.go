@@ -26,6 +26,7 @@ import (
 // the full repo layer directly.
 type IJobRunStore interface {
 	CreateJobRun(ctx context.Context, jr *model.JobRun) error
+	GetJobRun(ctx context.Context, jobRunID string) (*model.JobRun, error)
 	GetJobRunStatus(ctx context.Context, jobRunID string) (int, error)
 	UpdateJobRun(ctx context.Context, jobRunID string, updates map[string]any) error
 	CreateStepRun(ctx context.Context, sr *model.StepRun) error
@@ -46,6 +47,11 @@ func NewJobRunStore(jr repo.IJobRunRepository, sr repo.IStepRunRepository) *JobR
 // CreateJobRun persists a new job run record.
 func (s *JobRunStore) CreateJobRun(ctx context.Context, jr *model.JobRun) error {
 	return s.jobRunRepo.Create(ctx, jr)
+}
+
+// GetJobRun returns the full job run record by business ID.
+func (s *JobRunStore) GetJobRun(ctx context.Context, jobRunID string) (*model.JobRun, error) {
+	return s.jobRunRepo.GetByJobRunID(ctx, jobRunID)
 }
 
 // GetJobRunStatus returns the current status of a job run (lightweight).

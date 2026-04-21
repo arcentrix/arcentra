@@ -194,24 +194,16 @@ type TAuditLog struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// 系统配置（结构化设置表）
-type TGeneralSetting struct {
+// Workspace-scoped setting (PK: id, unique: workspace + name)
+type TSetting struct {
 	// 主键ID
 	ID uint64 `json:"id"`
-	// 设置ID
-	SettingsID string `json:"settings_id"`
-	// 配置类别
-	Category string `json:"category"`
-	// 配置名称（业务语义字段）
+	// Setting name
 	Name string `json:"name"`
-	// 展示名，如 JWT 密钥
-	DisplayName string `json:"display_name"`
-	// 配置内容，结构化 JSON
-	Data datatypes.JSON `json:"data"`
-	// 配置的结构定义（JSON Schema 格式，用于前端渲染与校验）
-	Schema json.RawMessage `json:"schema"`
-	// 配置说明
-	Description sql.NullString `json:"description"`
+	// Workspace identifier
+	Workspace string `json:"workspace"`
+	// Setting value (JSON)
+	Value datatypes.JSON `json:"value"`
 	// 创建时间
 	CreatedAt time.Time `json:"created_at"`
 	// 更新时间

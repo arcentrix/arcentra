@@ -24,15 +24,16 @@ import (
 	"github.com/arcentrix/arcentra/pkg/safe"
 )
 
-// Reconciler reconciles pipeline execution state based on DAG
-// It calculates which tasks can be scheduled and coordinates task execution
+// Reconciler reconciles pipeline execution state based on DAG.
+// It calculates which tasks can be scheduled, tracks per-task terminal
+// states (succeeded / failed / skipped), and coordinates task execution.
 type Reconciler struct {
 	dag           *dag.DAG
 	tasks         map[string]*Task
 	taskFramework *TaskFramework
 	logger        log.Logger
 	mu            sync.RWMutex
-	completed     map[string]bool
+	completed     map[string]TaskState
 	onCompleted   func() // Callback when task completes to trigger next reconcile
 }
 
@@ -48,7 +49,7 @@ func NewReconciler(
 		tasks:         tasks,
 		taskFramework: taskFramework,
 		logger:        logger,
-		completed:     make(map[string]bool),
+		completed:     make(map[string]TaskState),
 	}
 }
 
@@ -65,10 +66,13 @@ func (r *Reconciler) Reconcile(ctx context.Context) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Get completed task names
+	// Only succeeded/skipped tasks unlock downstream dependencies; failed tasks
+	// do NOT appear in completedNames so their dependents are never scheduled.
 	completedNames := make([]string, 0, len(r.completed))
-	for name := range r.completed {
-		completedNames = append(completedNames, name)
+	for name, state := range r.completed {
+		if state == TaskStateSucceeded || state == TaskStateSkipped {
+			completedNames = append(completedNames, name)
+		}
 	}
 
 	// Get schedulable tasks from DAG
@@ -96,7 +100,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) (bool, error) {
 		}
 
 		// Skip if already processing or completed
-		if r.completed[taskName] {
+		if _, done := r.completed[taskName]; done {
 			continue
 		}
 
@@ -109,17 +113,17 @@ func (r *Reconciler) Reconcile(ctx context.Context) (bool, error) {
 			if err := r.taskFramework.Execute(ctx, currentTask); err != nil {
 				r.logger.Errorw("task execution failed", "task", currentTaskName, "error", err)
 			}
-			r.markCompleted(currentTaskName)
+			r.markCompleted(currentTaskName, currentTask.State)
 		})
 	}
 
 	return true, nil
 }
 
-// markCompleted marks a task as completed
-func (r *Reconciler) markCompleted(taskName string) {
+// markCompleted records the terminal state of a task.
+func (r *Reconciler) markCompleted(taskName string, state TaskState) {
 	r.mu.Lock()
-	r.completed[taskName] = true
+	r.completed[taskName] = state
 	callback := r.onCompleted
 	r.mu.Unlock()
 
@@ -129,14 +133,63 @@ func (r *Reconciler) markCompleted(taskName string) {
 	}
 }
 
-// IsCompleted checks if the pipeline is fully completed
+// IsCompleted returns true when no further progress is possible: every task
+// either ran to a terminal state or is blocked behind a failed dependency.
 func (r *Reconciler) IsCompleted() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return len(r.completed) == len(r.tasks)
+
+	if len(r.completed) == len(r.tasks) {
+		return true
+	}
+
+	// Check whether every unfinished task is blocked by a failed ancestor.
+	successSet := make([]string, 0, len(r.completed))
+	for name, state := range r.completed {
+		if state == TaskStateSucceeded || state == TaskStateSkipped {
+			successSet = append(successSet, name)
+		}
+	}
+	schedulable, err := r.dag.GetSchedulable(successSet...)
+	if err != nil {
+		return false
+	}
+	// Filter out already-completed tasks from schedulable set.
+	pending := 0
+	for name := range schedulable {
+		if _, done := r.completed[name]; !done {
+			pending++
+		}
+	}
+	return pending == 0
 }
 
-// GetCompletedTasks returns the list of completed task names
+// HasFailures returns true if any task finished with a failed state.
+func (r *Reconciler) HasFailures() bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, state := range r.completed {
+		if state == TaskStateFailed {
+			return true
+		}
+	}
+	return false
+}
+
+// GetFailedTasks returns the names of all tasks that ended in a failed state.
+func (r *Reconciler) GetFailedTasks() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var failed []string
+	for name, state := range r.completed {
+		if state == TaskStateFailed {
+			failed = append(failed, name)
+		}
+	}
+	return failed
+}
+
+// GetCompletedTasks returns the names of all tasks that reached a terminal state.
 func (r *Reconciler) GetCompletedTasks() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

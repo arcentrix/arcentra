@@ -121,6 +121,33 @@ func (c *DingTalkChannel) SendWithTemplate(ctx context.Context, template string,
 	return c.sendRequest(ctx, payload)
 }
 
+// SendInteractive sends an ActionCard message with action buttons to DingTalk.
+func (c *DingTalkChannel) SendInteractive(ctx context.Context, title, content string, actions []InteractiveAction) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+
+	btns := make([]map[string]string, 0, len(actions))
+	for _, a := range actions {
+		btns = append(btns, map[string]string{
+			"title":     a.Label,
+			"actionURL": a.CallbackURL,
+		})
+	}
+
+	payload := map[string]interface{}{
+		"msgtype": "actionCard",
+		"actionCard": map[string]interface{}{
+			"title":          title,
+			"text":           content,
+			"btnOrientation": "0",
+			"btns":           btns,
+		},
+	}
+
+	return c.sendRequest(ctx, payload)
+}
+
 // sendRequest sends HTTP request
 func (c *DingTalkChannel) sendRequest(ctx context.Context, payload map[string]interface{}) error {
 	req := c.client.R().SetContext(ctx)

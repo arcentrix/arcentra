@@ -60,6 +60,11 @@ func (c *LarkAppChannel) SendWithTemplate(ctx context.Context, template string, 
 	return c.FeishuAppChannel.SendWithTemplate(ctx, template, data)
 }
 
+// SendInteractive sends an interactive card message with action buttons via Lark.
+func (c *LarkAppChannel) SendInteractive(ctx context.Context, title, content string, actions []InteractiveAction) error {
+	return c.FeishuAppChannel.SendInteractive(ctx, title, content, actions)
+}
+
 // Receive receives messages
 func (c *LarkAppChannel) Receive(ctx context.Context, message string) error {
 	return c.FeishuAppChannel.Receive(ctx, message)

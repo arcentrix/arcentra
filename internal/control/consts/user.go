@@ -16,10 +16,8 @@ package consts
 
 // UserInfoKey and related constants define Redis cache key prefixes.
 const (
-	UserInfoKey              = "user:info:"
-	UserTokenKey             = "user:token:"
-	UserRefreshTokenKey      = "user:refresh_token:"
-	UserRolesRoutesKey       = "user:roles_routes:"
-	AgentDetailKey           = "agent:detail:"
-	GeneralSettingsKeyByName = "general:settings:"
+	UserInfoKey         = "user:info:"
+	UserTokenKey        = "user:token:"
+	UserRefreshTokenKey = "user:refresh_token:"
+	UserRolesRoutesKey  = "user:roles_routes:"
 )

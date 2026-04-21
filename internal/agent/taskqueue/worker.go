@@ -342,9 +342,8 @@ func executeJobRun(
 	return jobErr
 }
 
-// reportJobRunStatus reports job run status to the control plane.
-// Reuses the existing ReportStepRunStatus RPC by encoding the jobRunID
-// (the control plane's AgentServiceImpl dispatches to the correct repo based on ID prefix).
+// reportJobRunStatus reports job run status to the control plane using the
+// dedicated ReportJobRunStatus RPC.
 func reportJobRunStatus(
 	grpcClient *grpc.ClientWrapper,
 	agentConf *config.AgentConfig,
@@ -361,14 +360,19 @@ func reportJobRunStatus(
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	req := &agentv1.ReportStepRunStatusRequest{
-		StepRunId:    jobRunID,
-		Status:       steprunv1.StepRunStatus(status),
+	agentID := ""
+	if agentConf != nil {
+		agentID = agentConf.Agent.ID
+	}
+	req := &agentv1.ReportJobRunStatusRequest{
+		AgentId:      agentID,
+		JobRunId:     jobRunID,
+		Status:       status,
+		ErrorMessage: errMsg,
 		StartTime:    start.Unix(),
 		EndTime:      endUnix,
-		ErrorMessage: errMsg,
 	}
-	if _, err := grpcClient.AgentClient.ReportStepRunStatus(ctx, req); err != nil {
+	if _, err := grpcClient.AgentClient.ReportJobRunStatus(ctx, req); err != nil {
 		log.Warnw("report job run status failed", "jobRunId", jobRunID, "error", err)
 	}
 }

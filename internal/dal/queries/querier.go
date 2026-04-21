@@ -40,31 +40,14 @@ type Querier interface {
 	AgentPatchByAgentId(ctx context.Context, arg AgentPatchByAgentIdParams) error
 	// AgentUpdateByAgentId 按 agent_id 全量更新 Agent
 	AgentUpdateByAgentId(ctx context.Context, arg AgentUpdateByAgentIdParams) error
-	// GeneralSettingsGetByCategoryAndName 按 category 与 name 获取完整配置
-	GeneralSettingsGetByCategoryAndName(ctx context.Context, arg GeneralSettingsGetByCategoryAndNameParams) (TGeneralSetting, error)
-	// GeneralSettingsGetBySettingsId 按 settings_id 仅取 name, category（用于再查 GetByName）
-	GeneralSettingsGetBySettingsId(ctx context.Context, arg GeneralSettingsGetBySettingsIdParams) (GeneralSettingsGetBySettingsIdRow, error)
-	// GeneralSettingsGetCategories 获取所有不重复的 category
-	GeneralSettingsGetCategories(ctx context.Context) ([]string, error)
-	// GeneralSettingsList 配置列表分页
-	GeneralSettingsList(ctx context.Context, arg GeneralSettingsListParams) ([]GeneralSettingsListRow, error)
-	// GeneralSettingsListCount 配置列表总数（可选 category）
-	GeneralSettingsListCount(ctx context.Context, arg GeneralSettingsListCountParams) (int64, error)
-	// Copyright 2026 Arcentra Authors.
-	//
-	// Licensed under the Apache License, Version 2.0 (the "License");
-	// you may not use this file except in compliance with the License.
-	// You may obtain a copy of the License at
-	//
-	//      http://www.apache.org/licenses/LICENSE-2.0
-	//
-	// Unless required by applicable law or agreed to in writing, software
-	// distributed under the License is distributed on an "AS IS" BASIS,
-	// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-	// See the License for the specific language governing permissions and
-	// limitations under the License.
-	// GeneralSettingsUpdateBySettingsId 按 settings_id 更新（不含 id, settings_id, category, name）
-	GeneralSettingsUpdateBySettingsId(ctx context.Context, arg GeneralSettingsUpdateBySettingsIdParams) error
+	// SettingGet 按 workspace 与 name 获取配置
+	SettingGet(ctx context.Context, arg SettingGetParams) (TSetting, error)
+	// SettingUpsert 创建或更新配置 (ON CONFLICT DO UPDATE)
+	SettingUpsert(ctx context.Context, arg SettingUpsertParams) error
+	// SettingList 按 workspace 列出所有配置
+	SettingList(ctx context.Context, workspace string) ([]TSetting, error)
+	// SettingDelete 按 workspace 与 name 删除配置
+	SettingDelete(ctx context.Context, arg SettingDeleteParams) error
 	// IdentityCreate 创建身份提供商
 	IdentityCreate(ctx context.Context, arg IdentityCreateParams) error
 	// IdentityDeleteByName 按 name 删除

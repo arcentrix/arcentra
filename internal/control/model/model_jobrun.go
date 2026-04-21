@@ -38,6 +38,7 @@ type JobRun struct {
 	CompletedSteps int        `gorm:"column:completed_steps" json:"completedSteps"`
 	FailedSteps    int        `gorm:"column:failed_steps" json:"failedSteps"`
 	ErrorMessage   string     `gorm:"column:error_message;type:text" json:"errorMessage"`
+	ArtifactURIs   string     `gorm:"column:artifact_uris;type:json" json:"artifactUris"`
 	StartTime      *time.Time `gorm:"column:start_time" json:"startTime"`
 	EndTime        *time.Time `gorm:"column:end_time" json:"endTime"`
 	Duration       int64      `gorm:"column:duration" json:"duration"`
@@ -59,10 +60,15 @@ const (
 	JobRunStatusTimeout   = 7
 )
 
-// IsTerminal returns true when the status represents a final state.
+// IsJobRunTerminal returns true when the status represents a final state.
 func IsJobRunTerminal(status int) bool {
 	return status == JobRunStatusSuccess ||
 		status == JobRunStatusFailed ||
 		status == JobRunStatusCancelled ||
 		status == JobRunStatusTimeout
+}
+
+// IsJobRunRunning returns true when the job is actively executing.
+func IsJobRunRunning(status int) bool {
+	return status == JobRunStatusRunning
 }

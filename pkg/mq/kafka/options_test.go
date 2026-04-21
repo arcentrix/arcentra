@@ -20,10 +20,10 @@ func TestProducerOptionsApply(t *testing.T) {
 	cfg := ProducerConfig{}
 	WithProducerOptions(
 		WithSecurityProtocol("SASL_SSL"),
-	).apply(&cfg)
-	WithProducerAcks("1").apply(&cfg)
-	WithProducerRetries(5).apply(&cfg)
-	WithProducerCompression("gzip").apply(&cfg)
+	)(&cfg)
+	WithProducerAcks("1")(&cfg)
+	WithProducerRetries(5)(&cfg)
+	WithProducerCompression("gzip")(&cfg)
 
 	if cfg.SecurityProtocol != "SASL_SSL" {
 		t.Fatalf("expected SecurityProtocol to be set, got %s", cfg.SecurityProtocol)
@@ -41,7 +41,6 @@ func TestProducerOptionsApply(t *testing.T) {
 
 func TestNormalizeProducerConfig_Defaults(t *testing.T) {
 	cfg := ProducerConfig{}
-	normalizeProducerConfig(&cfg)
 
 	if cfg.Acks != "all" {
 		t.Fatalf("expected default Acks to be all, got %s", cfg.Acks)
@@ -58,11 +57,11 @@ func TestConsumerOptionsApply(t *testing.T) {
 	cfg := ConsumerConfig{}
 	WithConsumerOptions(
 		WithSecurityProtocol("PLAINTEXT"),
-	).apply(&cfg)
-	WithConsumerAutoOffsetReset("latest").apply(&cfg)
-	WithConsumerEnableAutoCommit(false).apply(&cfg)
-	WithConsumerSessionTimeoutMs(15000).apply(&cfg)
-	WithConsumerMaxPollIntervalMs(600000).apply(&cfg)
+	)(&cfg)
+	WithConsumerAutoOffsetReset("latest")(&cfg)
+	WithConsumerEnableAutoCommit(false)(&cfg)
+	WithConsumerSessionTimeoutMs(15000)(&cfg)
+	WithConsumerMaxPollIntervalMs(600000)(&cfg)
 
 	if cfg.SecurityProtocol != "PLAINTEXT" {
 		t.Fatalf("expected SecurityProtocol to be set, got %s", cfg.SecurityProtocol)
@@ -83,7 +82,6 @@ func TestConsumerOptionsApply(t *testing.T) {
 
 func TestNormalizeConsumerConfig_Defaults(t *testing.T) {
 	cfg := ConsumerConfig{}
-	normalizeConsumerConfig(&cfg)
 
 	if cfg.AutoOffsetReset != "earliest" {
 		t.Fatalf("expected default AutoOffsetReset to be earliest, got %s", cfg.AutoOffsetReset)

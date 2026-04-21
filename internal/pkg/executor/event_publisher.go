@@ -17,6 +17,8 @@ package executor
 import (
 	"context"
 	"errors"
+
+	"github.com/arcentrix/arcentra/pkg/log"
 )
 
 // EventPublisher publishes CloudEvents to a transport.
@@ -24,6 +26,19 @@ type EventPublisher interface {
 	Publish(ctx context.Context, event map[string]any) error
 	Close() error
 }
+
+// LogEventPublisher is a fallback publisher that writes events to structured
+// logs when Kafka (or other transport) is not configured.
+type LogEventPublisher struct{}
+
+// Publish logs the event at debug level.
+func (l *LogEventPublisher) Publish(_ context.Context, event map[string]any) error {
+	log.Debugw("cloud event (no transport)", "event", event)
+	return nil
+}
+
+// Close is a no-op.
+func (l *LogEventPublisher) Close() error { return nil }
 
 // MultiPublisher publishes events to multiple publishers.
 type MultiPublisher struct {

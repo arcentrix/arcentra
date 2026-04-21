@@ -36,13 +36,14 @@ const defaultMaxConcurrentRuns = 10
 // Engine manages pipeline run orchestration. It bridges the trigger layer
 // (HTTP/gRPC/Cron/Webhook) with the execution engine (Executor DAG).
 type Engine struct {
-	repos     *repo.Repositories
-	pluginMgr *plugin.Manager
-	taskQueue nova.TaskQueue
-	storage   storage.IStorage
-	logger    *log.Logger
-	appConf   *config.AppConfig
-	secretSvc *service.SecretService
+	repos       *repo.Repositories
+	pluginMgr   *plugin.Manager
+	taskQueue   nova.TaskQueue
+	storage     storage.IStorage
+	logger      *log.Logger
+	appConf     *config.AppConfig
+	secretSvc   *service.SecretService
+	auditWriter *AuditWriter
 
 	runs   sync.Map      // runID -> *RunCoordinator
 	sem    chan struct{} // concurrency limiter
@@ -75,6 +76,12 @@ func NewEngine(
 		ctx:       ctx,
 		cancel:    cancel,
 	}
+}
+
+// SetAuditWriter injects the audit writer into the engine. Called during
+// bootstrap after DB initialization.
+func (e *Engine) SetAuditWriter(aw *AuditWriter) {
+	e.auditWriter = aw
 }
 
 // Submit asynchronously starts a pipeline run. It returns immediately;
@@ -127,7 +134,40 @@ func (e *Engine) CancelRun(runID string) error {
 	}
 	rc := val.(*RunCoordinator)
 	rc.Cancel()
+
+	// Propagate cancellation to remote Agents for any running JobRuns.
+	e.cancelRemoteJobRuns(runID)
+
 	return nil
+}
+
+// cancelRemoteJobRuns queries running JobRuns for a pipeline run and sends
+// CancelJobRun gRPC calls to the corresponding Agents.
+func (e *Engine) cancelRemoteJobRuns(runID string) {
+	if e.repos.JobRun == nil {
+		return
+	}
+	ctx := context.Background()
+	jobRuns, err := e.repos.JobRun.ListByPipelineRunID(ctx, runID)
+	if err != nil {
+		log.Warnw("failed to list job runs for cancel propagation", "runId", runID, "error", err)
+		return
+	}
+	for _, jr := range jobRuns {
+		if !model.IsJobRunRunning(jr.Status) || jr.AgentID == "" {
+			continue
+		}
+		agent, err := e.repos.Agent.Get(ctx, jr.AgentID)
+		if err != nil || agent == nil || agent.Address == "" {
+			log.Warnw("skip cancel: agent not reachable", "agentId", jr.AgentID, "jobRunId", jr.JobRunID)
+			continue
+		}
+		safe.Go(func() {
+			if err := cancelJobRunOnAgent(agent.Address, jr.JobRunID, "pipeline run cancelled"); err != nil {
+				log.Warnw("cancel job run on agent failed", "agentId", jr.AgentID, "jobRunId", jr.JobRunID, "error", err)
+			}
+		})
+	}
 }
 
 // PauseRun pauses a running pipeline. Already dispatched Agent jobs continue

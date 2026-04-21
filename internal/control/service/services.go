@@ -31,7 +31,7 @@ type Services struct {
 	Storage           *StorageService
 	Upload            *UploadService
 	Secret            *SecretService
-	GeneralSettings   *GeneralSettingsService
+	Setting           *SettingService
 	Project           *ProjectService
 	Scm               *ScmService
 	UserExt           *UserExt
@@ -43,6 +43,8 @@ type Services struct {
 	PipelineRepo      repo.IPipelineRepository
 	StorageRepo       repo.IStorageRepository
 	LogAggregator     *LogAggregator
+	Approval          *ApprovalService
+	PipelineTemplate  *PipelineTemplateService
 	PipelineEngine    IPipelineEngine // set after engine initialization
 }
 
@@ -64,8 +66,8 @@ func NewServices(
 		repos.Role,
 		menuService,
 	)
-	generalSettingsService := NewGeneralSettingsService(repos.GeneralSettings)
-	agentService := NewAgentService(repos.Agent, repos.StepRun, generalSettingsService, repos.JobRun)
+	settingService := NewSettingService(repos.Setting)
+	agentService := NewAgentService(repos.Agent, repos.StepRun, settingService, repos.JobRun)
 	stateStore := util.NewRedisStateStore(cacheStore)
 	identityService := NewIdentityService(repos.Identity, repos.User, repos.UserExt, stateStore)
 	teamService := NewTeamService(repos.Team)
@@ -77,6 +79,8 @@ func NewServices(
 	userExt := NewUserExt(repos.UserExt)
 	roleService := NewRoleService(repos.Role)
 	logAggregator := NewLogAggregator(nil, db.Database())
+	approvalService := NewApprovalService(repos.Approval)
+	pipelineTemplateService := NewPipelineTemplateService(repos.PipelineTemplate, repos.Secret)
 
 	return &Services{
 		User:              userService,
@@ -86,7 +90,7 @@ func NewServices(
 		Storage:           storageService,
 		Upload:            uploadService,
 		Secret:            secretService,
-		GeneralSettings:   generalSettingsService,
+		Setting:           settingService,
 		Project:           projectService,
 		Scm:               scmService,
 		UserExt:           userExt,
@@ -98,6 +102,8 @@ func NewServices(
 		PipelineRepo:      repos.Pipeline,
 		StorageRepo:       repos.Storage,
 		LogAggregator:     logAggregator,
+		Approval:          approvalService,
+		PipelineTemplate:  pipelineTemplateService,
 	}
 }
 

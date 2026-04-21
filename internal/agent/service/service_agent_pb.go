@@ -224,6 +224,30 @@ func (s *AgentServiceImpl) CancelStepRun(_ context.Context, req *agentv1.CancelS
 	}, nil
 }
 
+// CancelJobRun handles job run cancellation requests from the control plane.
+func (s *AgentServiceImpl) CancelJobRun(_ context.Context, req *agentv1.CancelJobRunRequest) (*agentv1.CancelJobRunResponse, error) {
+	log.Infow("CancelJobRun request received", "job_run_id", req.JobRunId, "reason", req.Reason)
+
+	if taskqueue.CancelJobRun(req.JobRunId) {
+		log.Infow("job run cancel signal sent", "job_run_id", req.JobRunId)
+	}
+
+	return &agentv1.CancelJobRunResponse{
+		Success: true,
+		Message: "job run cancellation request received",
+	}, nil
+}
+
+// ReportJobRunStatus is a no-op on the Agent side; the Agent uses the
+// control plane client to report status, not this server handler.
+func (s *AgentServiceImpl) ReportJobRunStatus(
+	_ context.Context,
+	req *agentv1.ReportJobRunStatusRequest,
+) (*agentv1.ReportJobRunStatusResponse, error) {
+	log.Debugw("ReportJobRunStatus received (agent-side stub)", "job_run_id", req.JobRunId)
+	return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "ok"}, nil
+}
+
 // UpdateLabels handles agent labels update requests
 func (s *AgentServiceImpl) UpdateLabels(_ context.Context, req *agentv1.UpdateLabelsRequest) (*agentv1.UpdateLabelsResponse, error) {
 	log.Infow("UpdateLabels request received", "agent_id", req.AgentId, "merge", req.Merge, "labels", req.Labels)

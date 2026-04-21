@@ -321,6 +321,64 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 	return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "ok"}, nil
 }
 
+// ReportJobRunStatus handles dedicated job-level status reports from Agent.
+func (a *AgentServiceImpl) ReportJobRunStatus(
+	ctx context.Context,
+	req *agentv1.ReportJobRunStatusRequest,
+) (*agentv1.ReportJobRunStatusResponse, error) {
+	if a.agentService == nil || a.agentService.jobRunRepo == nil {
+		return &agentv1.ReportJobRunStatusResponse{Success: false, Message: "job run repository unavailable"}, nil
+	}
+	jobRunID := strings.TrimSpace(req.JobRunId)
+	if jobRunID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "jobRunID is required")
+	}
+	updates := map[string]any{
+		"status":        int(req.Status),
+		"error_message": strings.TrimSpace(req.ErrorMessage),
+	}
+	if req.StartTime > 0 {
+		updates["start_time"] = time.Unix(req.StartTime, 0)
+	}
+	if req.EndTime > 0 {
+		updates["end_time"] = time.Unix(req.EndTime, 0)
+	}
+	if len(req.ArtifactUris) > 0 {
+		if encoded, err := sonic.Marshal(req.ArtifactUris); err == nil {
+			updates["artifact_uris"] = string(encoded)
+		}
+	}
+	if req.AgentId != "" {
+		updates["agent_id"] = strings.TrimSpace(req.AgentId)
+	}
+	if err := a.agentService.jobRunRepo.UpdateByJobRunID(ctx, jobRunID, updates); err != nil {
+		log.Errorw("report job run status failed", "jobRunId", jobRunID, "error", err)
+		return nil, status.Errorf(codes.Internal, "update job run failed")
+	}
+	return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "ok"}, nil
+}
+
+// CancelJobRun cancels a running job on the Agent side. The control plane
+// calls this RPC on the Agent gRPC server to propagate cancellation.
+func (a *AgentServiceImpl) CancelJobRun(_ context.Context, req *agentv1.CancelJobRunRequest) (*agentv1.CancelJobRunResponse, error) {
+	jobRunID := strings.TrimSpace(req.JobRunId)
+	if jobRunID == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "jobRunID is required")
+	}
+	if a.agentService == nil || a.agentService.jobRunRepo == nil {
+		return &agentv1.CancelJobRunResponse{Success: false, Message: "job run repository unavailable"}, nil
+	}
+	updates := map[string]any{
+		"status":        6,
+		"error_message": strings.TrimSpace(req.Reason),
+		"end_time":      time.Now(),
+	}
+	if err := a.agentService.jobRunRepo.UpdateByJobRunID(context.Background(), jobRunID, updates); err != nil {
+		log.Warnw("cancel job run DB update failed", "jobRunId", jobRunID, "error", err)
+	}
+	return &agentv1.CancelJobRunResponse{Success: true, Message: "cancelled"}, nil
+}
+
 func (a *AgentServiceImpl) CancelStepRun(ctx context.Context, req *agentv1.CancelStepRunRequest) (*agentv1.CancelStepRunResponse, error) {
 	if a.agentService == nil || a.agentService.stepRunRepo == nil {
 		return &agentv1.CancelStepRunResponse{Success: false, Message: "step run repository unavailable"}, nil

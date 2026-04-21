@@ -25,6 +25,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
+	tmpl "github.com/arcentrix/arcentra/internal/pkg/pipeline/template"
 	"github.com/arcentrix/arcentra/internal/pkg/pipeline/trigger"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
@@ -38,9 +39,10 @@ const settingsScmKey = "scm"
 
 // ScmService handles SCM webhook events and polling.
 type ScmService struct {
-	projectRepo  repo.IProjectRepository
-	pipelineRepo repo.IPipelineRepository
-	engine       IPipelineEngine
+	projectRepo      repo.IProjectRepository
+	pipelineRepo     repo.IPipelineRepository
+	engine           IPipelineEngine
+	templateResolver *PipelineTemplateService
 }
 
 // NewScmService creates a new scm service.
@@ -51,6 +53,11 @@ func NewScmService(projectRepo repo.IProjectRepository, pipelineRepo repo.IPipel
 // SetEngine injects the pipeline engine after bootstrap initialization.
 func (s *ScmService) SetEngine(engine IPipelineEngine) {
 	s.engine = engine
+}
+
+// SetTemplateResolver injects the template resolver for include expansion.
+func (s *ScmService) SetTemplateResolver(resolver *PipelineTemplateService) {
+	s.templateResolver = resolver
 }
 
 // HandleWebhook handles the scm webhook
@@ -140,6 +147,15 @@ func (s *ScmService) tryTriggerPipeline(ctx context.Context, p *model.Pipeline, 
 	if err != nil {
 		log.Debugw("webhook trigger: load definition failed", "pipelineId", p.PipelineID, "error", err)
 		return
+	}
+
+	if s.templateResolver != nil {
+		expanded, inclErr := tmpl.ResolveIncludes(ctx, content, s.templateResolver, model.TemplateScopeProject, p.ProjectID)
+		if inclErr != nil {
+			log.Debugw("webhook trigger: resolve includes failed", "pipelineId", p.PipelineID, "error", inclErr)
+			return
+		}
+		content = expanded
 	}
 
 	parsedSpec, err := spec.ParseContentToProto(content, pipelinev1.SpecFormat_SPEC_FORMAT_UNSPECIFIED)

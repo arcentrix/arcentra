@@ -18,7 +18,9 @@ import (
 	"flag"
 
 	"github.com/arcentrix/arcentra/internal/control/bootstrap"
+	_ "github.com/arcentrix/arcentra/pkg/plugins/apollo"
 	_ "github.com/arcentrix/arcentra/pkg/plugins/git"
+	_ "github.com/arcentrix/arcentra/pkg/plugins/nacos"
 	_ "github.com/arcentrix/arcentra/pkg/plugins/svn"
 )
 

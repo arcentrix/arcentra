@@ -67,6 +67,10 @@ type ExecutionContext struct {
 	// ArtifactURIs stores upstream job artifact URIs keyed by "jobName/artifactName".
 	// Populated after each Job completes; downstream jobs read from here.
 	ArtifactURIs map[string]string
+
+	// LogPublisher publishes build log messages to the BUILD_LOGS topic.
+	// Set by the control-plane engine for local step log visibility.
+	LogPublisher executor.LogPublisher
 }
 
 // NewExecutionContext creates a new execution context

@@ -65,6 +65,12 @@ type AppConfig struct {
 	Pprof        pprof.Config         `mapstructure:"pprof" json:"Pprof"`
 	Trace        trace.Config         `mapstructure:"trace" json:"Trace"`
 	TaskQueue    nova.TaskQueueConfig `mapstructure:"taskQueue" json:"TaskQueue"`
+	Pipeline     PipelineConfig       `mapstructure:"pipeline" json:"Pipeline"`
+}
+
+// PipelineConfig holds pipeline engine settings.
+type PipelineConfig struct {
+	KeepWorkspace bool `mapstructure:"keepWorkspace" json:"keepWorkspace"`
 }
 
 var (

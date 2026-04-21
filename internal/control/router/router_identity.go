@@ -352,54 +352,50 @@ func (rt *Router) deleteProvider(c *fiber.Ctx) error {
 	return http.Operation(c)
 }
 
-// getCookiePath gets cookie path from database configuration
-// Returns the configured cookie path, or "/" as default if not found or error occurs
+// getCookiePath gets cookie path from database configuration.
+// Returns the configured cookie path, or "/" as default if not found or error occurs.
 func (rt *Router) getCookiePath() string {
 	const (
 		defaultCookiePath = "/"
-		category          = "system"
+		workspace         = "system"
 		name              = "base_path"
 	)
 
-	settings, err := rt.Services.GeneralSettings.GetGeneralSettingsByName(context.Background(), category, name)
+	setting, err := rt.Services.Setting.GetSetting(context.Background(), workspace, name)
 	if err != nil {
-		log.Debugw("failed to get cookie path from database, using default", "category", category, "name", name, "error", err)
+		log.Debugw("failed to get cookie path from database, using default", "workspace", workspace, "name", name, "error", err)
 		return defaultCookiePath
 	}
 
-	// Parse JSON data to extract cookie path
-	if len(settings.Data) == 0 {
-		log.Debugw("cookie path configuration data is empty, using default", "category", category, "name", name)
+	if len(setting.Value) == 0 {
+		log.Debugw("cookie path configuration data is empty, using default", "workspace", workspace, "name", name)
 		return defaultCookiePath
 	}
 
 	var configData map[string]any
-	if err = sonic.Unmarshal(settings.Data, &configData); err != nil {
-		log.Warnw("failed to unmarshal cookie path configuration, using default", "category", category, "name", name, "error", err)
+	if err = sonic.Unmarshal(setting.Value, &configData); err != nil {
+		log.Warnw("failed to unmarshal cookie path configuration, using default", "workspace", workspace, "name", name, "error", err)
 		return defaultCookiePath
 	}
 
-	// Extract base_path value from config data
 	basePathValue, ok := configData["base_path"]
 	if !ok {
-		log.Debugw("base_path not found in configuration data, using default", "category", category, "name", name)
+		log.Debugw("base_path not found in configuration data, using default", "workspace", workspace, "name", name)
 		return defaultCookiePath
 	}
 
 	basePathStr, ok := basePathValue.(string)
 	if !ok || basePathStr == "" {
-		log.Debugw("base_path is not a valid string, using default", "category", category, "name", name)
+		log.Debugw("base_path is not a valid string, using default", "workspace", workspace, "name", name)
 		return defaultCookiePath
 	}
 
-	// Parse URL to extract path component
 	parsedURL, err := url.Parse(basePathStr)
 	if err != nil {
 		log.Warnw("failed to parse base_path as URL, using default", "base_path", basePathStr, "error", err)
 		return defaultCookiePath
 	}
 
-	// Use the path from URL, or "/" if path is empty
 	cookiePath := parsedURL.Path
 	if cookiePath == "" {
 		cookiePath = defaultCookiePath
@@ -409,54 +405,50 @@ func (rt *Router) getCookiePath() string {
 	return cookiePath
 }
 
-// getBaseURL gets frontend base URL from database configuration
-// Returns the configured frontend URL, or "http://localhost:5173" as default if not found or error occurs
+// getBaseURL gets frontend base URL from database configuration.
+// Returns the configured frontend URL, or "/" as default if not found or error occurs.
 func (rt *Router) getBaseURL() string {
 	const (
 		defaultBaseURL = "/"
-		category       = "system"
+		workspace      = "system"
 		name           = "base_path"
 	)
 
-	settings, err := rt.Services.GeneralSettings.GetGeneralSettingsByName(context.Background(), category, name)
+	setting, err := rt.Services.Setting.GetSetting(context.Background(), workspace, name)
 	if err != nil {
-		log.Debugw("failed to get frontend base URL from database, using default", "category", category, "name", name, "error", err)
+		log.Debugw("failed to get frontend base URL from database, using default", "workspace", workspace, "name", name, "error", err)
 		return defaultBaseURL
 	}
 
-	// Parse JSON data to extract frontend URL
-	if len(settings.Data) == 0 {
-		log.Debugw("frontend base URL configuration data is empty, using default", "category", category, "name", name)
+	if len(setting.Value) == 0 {
+		log.Debugw("frontend base URL configuration data is empty, using default", "workspace", workspace, "name", name)
 		return defaultBaseURL
 	}
 
 	var configData map[string]any
-	if err = sonic.Unmarshal(settings.Data, &configData); err != nil {
-		log.Warnw("failed to unmarshal frontend base URL configuration, using default", "category", category, "name", name, "error", err)
+	if err = sonic.Unmarshal(setting.Value, &configData); err != nil {
+		log.Warnw("failed to unmarshal frontend base URL configuration, using default", "workspace", workspace, "name", name, "error", err)
 		return defaultBaseURL
 	}
 
-	// Extract base_path value from config data
 	basePathValue, ok := configData["base_path"]
 	if !ok {
-		log.Debugw("base_path not found in configuration data, using default", "category", category, "name", name)
+		log.Debugw("base_path not found in configuration data, using default", "workspace", workspace, "name", name)
 		return defaultBaseURL
 	}
 
 	basePathStr, ok := basePathValue.(string)
 	if !ok || basePathStr == "" {
-		log.Debugw("base_path is not a valid string, using default", "category", category, "name", name)
+		log.Debugw("base_path is not a valid string, using default", "workspace", workspace, "name", name)
 		return defaultBaseURL
 	}
 
-	// Validate URL format
 	parsedURL, err := url.Parse(basePathStr)
 	if err != nil {
 		log.Warnw("failed to parse base_path as URL, using default", "base_path", basePathStr, "error", err)
 		return defaultBaseURL
 	}
 
-	// Return the full URL (scheme + host + path)
 	frontendURL := fmt.Sprintf("%s://%s%s", parsedURL.Scheme, parsedURL.Host, parsedURL.Path)
 	if parsedURL.Path == "" {
 		frontendURL = fmt.Sprintf("%s://%s/", parsedURL.Scheme, parsedURL.Host)

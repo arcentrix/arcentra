@@ -186,8 +186,8 @@ func (rt *Router) routerGroup(r fiber.Router) {
 	// storag
 	rt.storageRouter(r, auth)
 
-	// general settings
-	rt.generalSettingsRouter(r, auth)
+	// settings
+	rt.settingRouter(r, auth)
 
 	// project
 	rt.projectRouter(r, auth)
@@ -200,4 +200,10 @@ func (rt *Router) routerGroup(r fiber.Router) {
 
 	// role
 	rt.roleRouter(r, auth)
+
+	// approval
+	rt.approvalRouter(r, auth)
+
+	// pipeline templates
+	rt.pipelineTemplateRouter(r, auth)
 }

@@ -59,6 +59,16 @@ func (tf *TaskFramework) Execute(ctx context.Context, task *Task) error {
 		return fmt.Errorf("prepare task %s: %w", task.Name, err)
 	}
 
+	// Short-circuit when the job's `when` condition evaluated to false.
+	if task.State == TaskStateSkipped {
+		task.MarkCompleted(TaskStateSkipped, nil)
+		tf.emitJobEvent(plugin.EventTypeJobCompleted, task, map[string]any{
+			"status": "skipped",
+		})
+		tf.logger.Infow("task skipped", "task", task.Name)
+		return nil
+	}
+
 	// Create: create task execution context
 	if err := tf.create(ctx, task); err != nil {
 		task.MarkCompleted(TaskStateFailed, err)
@@ -96,13 +106,23 @@ func (tf *TaskFramework) Execute(ctx context.Context, task *Task) error {
 
 	// Wait: wait for task completion
 	if err := tf.wait(waitCtx, task); err != nil {
-		task.MarkCompleted(TaskStateFailed, err)
-		tf.emitJobEvent(plugin.EventTypeJobFailed, task, map[string]any{
-			"status": "failed",
-			"error":  err.Error(),
-		})
+		if waitCtx.Err() == context.Canceled {
+			task.MarkCompleted(TaskStateFailed, err)
+			tf.emitJobEvent(plugin.EventTypeJobCancelled, task, map[string]any{
+				"status": "cancelled",
+			})
+		} else {
+			task.MarkCompleted(TaskStateFailed, err)
+			tf.emitJobEvent(plugin.EventTypeJobFailed, task, map[string]any{
+				"status": "failed",
+				"error":  err.Error(),
+			})
+		}
 		return fmt.Errorf("wait task %s: %w", task.Name, err)
 	}
+
+	// Backflow artifact URIs so downstream jobs can reference them.
+	tf.backflowArtifactURIs(ctx, task)
 
 	task.MarkCompleted(TaskStateSucceeded, nil)
 	tf.emitJobEvent(plugin.EventTypeJobCompleted, task, map[string]any{
@@ -260,7 +280,9 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 				sr.Env = raw
 			}
 		}
-		_ = store.CreateStepRun(ctx, sr)
+		if err := store.CreateStepRun(ctx, sr); err != nil {
+			return fmt.Errorf("create step run %s: %w", step.Name, err)
+		}
 
 		stepPayloads = append(stepPayloads, taskqueue.StepPayload{
 			Name:            step.Name,
@@ -531,40 +553,96 @@ func (tf *TaskFramework) handleSource(_ context.Context, task *Task) error {
 	return nil
 }
 
-// getJobRunStore extracts the IJobRunStore from ExecutionContext.
-// Returns nil when the engine layer did not inject one (e.g. standalone library usage).
-func (tf *TaskFramework) getJobRunStore() interface {
+// jobRunStoreIface is the subset of IJobRunStore that TaskFramework needs.
+type jobRunStoreIface interface {
 	CreateJobRun(ctx context.Context, jr *model.JobRun) error
+	GetJobRun(ctx context.Context, jobRunID string) (*model.JobRun, error)
 	GetJobRunStatus(ctx context.Context, jobRunID string) (int, error)
 	UpdateJobRun(ctx context.Context, jobRunID string, updates map[string]any) error
 	CreateStepRun(ctx context.Context, sr *model.StepRun) error
 	UpdateStepRun(ctx context.Context, stepRunID string, updates map[string]any) error
-} {
+}
+
+// getJobRunStore extracts the IJobRunStore from ExecutionContext.
+// Returns nil when the engine layer did not inject one (e.g. standalone library usage).
+func (tf *TaskFramework) getJobRunStore() jobRunStoreIface {
 	if tf.execCtx.JobRunStore == nil {
 		return nil
 	}
-	store, ok := tf.execCtx.JobRunStore.(interface {
-		CreateJobRun(ctx context.Context, jr *model.JobRun) error
-		GetJobRunStatus(ctx context.Context, jobRunID string) (int, error)
-		UpdateJobRun(ctx context.Context, jobRunID string, updates map[string]any) error
-		CreateStepRun(ctx context.Context, sr *model.StepRun) error
-		UpdateStepRun(ctx context.Context, stepRunID string, updates map[string]any) error
-	})
+	store, ok := tf.execCtx.JobRunStore.(jobRunStoreIface)
 	if !ok {
 		return nil
 	}
 	return store
 }
 
-// handleApproval handles approval configuration.
-//
-// TODO(V2): Wire to ApprovalManager (internal/pkg/pipeline/approval_manager.go):
-//   - Call ApprovalManager.CreateApproval → sends approval request via plugin (e.g. Slack, DingTalk).
-//   - Block via ApprovalManager.WaitForApproval (polls in-memory status until approved/rejected/expired).
-//   - External API (Web UI / IM callback) calls ApprovalManager.Approve or Reject to resolve the gate.
-//   - Alternatively switch to Engine.PauseRun for the waiting phase so this goroutine is not blocked.
-//   - Needs a persistent approval request model (DB) for HA; current ApprovalManager is in-memory only.
-func (tf *TaskFramework) handleApproval(_ context.Context, _ *Task) error {
+// backflowArtifactURIs reads the completed job's artifact URIs from the DB
+// and writes them into execCtx.ArtifactURIs so downstream jobs can consume them.
+func (tf *TaskFramework) backflowArtifactURIs(ctx context.Context, task *Task) {
+	jobRunIDVal, ok := task.Get("jobRunID")
+	if !ok {
+		return
+	}
+	jrID, ok := jobRunIDVal.(string)
+	if !ok || jrID == "" {
+		return
+	}
+	store := tf.getJobRunStore()
+	if store == nil {
+		return
+	}
+	jr, err := store.GetJobRun(ctx, jrID)
+	if err != nil || jr == nil {
+		tf.logger.Warnw("failed to read job run for artifact backflow", "jobRunId", jrID, "error", err)
+		return
+	}
+	if jr.ArtifactURIs == "" {
+		return
+	}
+	var uris map[string]string
+	if err := sonic.UnmarshalString(jr.ArtifactURIs, &uris); err != nil {
+		tf.logger.Warnw("failed to unmarshal artifact_uris", "jobRunId", jrID, "error", err)
+		return
+	}
+	for key, uri := range uris {
+		tf.execCtx.ArtifactURIs[task.Job.Name+"/"+key] = uri
+	}
+}
+
+// handleApproval handles approval configuration by creating an approval request
+// via ApprovalManager, then blocking until the request is approved/rejected/expired.
+func (tf *TaskFramework) handleApproval(ctx context.Context, task *Task) error {
+	approval := task.Job.Approval
+	if approval == nil {
+		return nil
+	}
+
+	am := NewApprovalManager(tf.pluginManager, tf.logger)
+	if tf.execCtx.EventEmitter != nil {
+		am.SetEventEmitter(tf.execCtx.EventEmitter)
+	}
+
+	params := make(map[string]any)
+	if approval.Params != nil {
+		params = spec.StructAsMap(approval.Params)
+	}
+
+	req, err := am.CreateApproval(ctx, task.Job.Name, "", approval.Plugin, params)
+	if err != nil {
+		return fmt.Errorf("create approval: %w", err)
+	}
+
+	tf.logger.Infow("waiting for approval", "task", task.Name, "approvalId", req.ID)
+
+	approved, err := am.WaitForApproval(ctx, req.ID)
+	if err != nil {
+		return fmt.Errorf("wait for approval: %w", err)
+	}
+	if !approved {
+		return fmt.Errorf("approval rejected for job %s", task.Job.Name)
+	}
+
+	tf.logger.Infow("approval granted", "task", task.Name, "approvalId", req.ID)
 	return nil
 }
 

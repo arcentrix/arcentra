@@ -23,7 +23,7 @@ func TestWithKafkaGroupID(t *testing.T) {
 	groupID := "test-group-id"
 	opt := WithKafkaGroupID(groupID)
 	config := &KafkaConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.GroupID != groupID {
 		t.Errorf("expected GroupID to be '%s', got %s", groupID, config.GroupID)
@@ -34,7 +34,7 @@ func TestWithKafkaTopicPrefix(t *testing.T) {
 	prefix := "test-prefix"
 	opt := WithKafkaTopicPrefix(prefix)
 	config := &KafkaConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.TopicPrefix != prefix {
 		t.Errorf("expected TopicPrefix to be '%s', got %s", prefix, config.TopicPrefix)
@@ -63,7 +63,7 @@ func TestWithKafkaAutoCommit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			opt := WithKafkaAutoCommit(tt.autoCommit)
 			config := &KafkaConfig{}
-			opt.apply(config)
+			opt(config)
 
 			if config.AutoCommit != tt.expected {
 				t.Errorf("expected AutoCommit to be %v, got %v", tt.expected, config.AutoCommit)
@@ -76,7 +76,7 @@ func TestWithKafkaSessionTimeout(t *testing.T) {
 	timeout := 60000
 	opt := WithKafkaSessionTimeout(timeout)
 	config := &KafkaConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.SessionTimeout != timeout {
 		t.Errorf("expected SessionTimeout to be %d, got %d", timeout, config.SessionTimeout)
@@ -87,7 +87,7 @@ func TestWithKafkaMaxPollInterval(t *testing.T) {
 	interval := 600000
 	opt := WithKafkaMaxPollInterval(interval)
 	config := &KafkaConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.MaxPollInterval != interval {
 		t.Errorf("expected MaxPollInterval to be %d, got %d", interval, config.MaxPollInterval)
@@ -99,7 +99,7 @@ func TestWithKafkaDelaySlots(t *testing.T) {
 	duration := 30 * time.Minute
 	opt := WithKafkaDelaySlots(count, duration)
 	config := &KafkaConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.DelaySlotCount != count {
 		t.Errorf("expected DelaySlotCount to be %d, got %d", count, config.DelaySlotCount)
@@ -117,7 +117,7 @@ func TestWithKafkaAuth(t *testing.T) {
 
 	opt := WithKafkaAuth(securityProtocol, saslMechanism, username, password)
 	config := &KafkaConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.SecurityProtocol != securityProtocol {
 		t.Errorf("expected SecurityProtocol to be '%s', got %s", securityProtocol, config.SecurityProtocol)
@@ -141,7 +141,7 @@ func TestWithKafkaSSL(t *testing.T) {
 
 	opt := WithKafkaSSL(caFile, certFile, keyFile, password)
 	config := &KafkaConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.SSLCAFile != caFile {
 		t.Errorf("expected SSLCAFile to be '%s', got %s", caFile, config.SSLCAFile)

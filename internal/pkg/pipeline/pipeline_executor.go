@@ -108,7 +108,11 @@ func (pe *Executor) Execute(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			pe.emitPipelineEvent(plugin.EventTypePipelineFailed, "failed")
+			if ctx.Err() == context.Canceled {
+				pe.emitPipelineEvent(plugin.EventTypePipelineCancelled, "cancelled")
+			} else {
+				pe.emitPipelineEvent(plugin.EventTypePipelineFailed, "failed")
+			}
 			return ctx.Err()
 		case <-reconcileCh:
 			// Triggered by task completion
@@ -118,6 +122,10 @@ func (pe *Executor) Execute(ctx context.Context) error {
 				return fmt.Errorf("reconcile: %w", err)
 			}
 			if !hasMore && reconciler.IsCompleted() {
+				if reconciler.HasFailures() {
+					pe.emitPipelineEvent(plugin.EventTypePipelineFailed, "failed")
+					return fmt.Errorf("pipeline failed: jobs %v failed", reconciler.GetFailedTasks())
+				}
 				pe.logger.Infow("pipeline execution completed", "namespace", pe.execCtx.Pipeline.Namespace)
 				pe.emitPipelineEvent(plugin.EventTypePipelineCompleted, "completed")
 				return nil
@@ -125,6 +133,10 @@ func (pe *Executor) Execute(ctx context.Context) error {
 		case <-ticker.C:
 			// Fallback: periodic check
 			if reconciler.IsCompleted() {
+				if reconciler.HasFailures() {
+					pe.emitPipelineEvent(plugin.EventTypePipelineFailed, "failed")
+					return fmt.Errorf("pipeline failed: jobs %v failed", reconciler.GetFailedTasks())
+				}
 				pe.logger.Infow("pipeline execution completed", "namespace", pe.execCtx.Pipeline.Namespace)
 				pe.emitPipelineEvent(plugin.EventTypePipelineCompleted, "completed")
 				return nil

@@ -161,6 +161,45 @@ func (c *FeishuAppChannel) SendWithTemplate(ctx context.Context, template string
 	return c.sendRequest(ctx, payload)
 }
 
+// SendInteractive sends an interactive card message with action buttons to Feishu.
+func (c *FeishuAppChannel) SendInteractive(ctx context.Context, title, content string, actions []InteractiveAction) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+
+	// Build action button elements
+	buttons := make([]map[string]interface{}, 0, len(actions))
+	for _, a := range actions {
+		btn := map[string]interface{}{
+			"tag":  "button",
+			"text": map[string]interface{}{"tag": "plain_text", "content": a.Label},
+			"type": a.Style,
+			"url":  a.CallbackURL,
+		}
+		buttons = append(buttons, btn)
+	}
+
+	payload := map[string]interface{}{
+		"msg_type": "interactive",
+		"card": map[string]interface{}{
+			"header": map[string]interface{}{
+				"title": map[string]interface{}{"tag": "plain_text", "content": title},
+			},
+			"elements": []map[string]interface{}{
+				{"tag": "div", "text": map[string]interface{}{"tag": "lark_md", "content": content}},
+				{"tag": "action", "actions": buttons},
+			},
+		},
+	}
+
+	if signData := c.generateSign(); signData != nil {
+		payload["timestamp"] = signData["timestamp"]
+		payload["sign"] = signData["sign"]
+	}
+
+	return c.sendRequest(ctx, payload)
+}
+
 func (c *FeishuAppChannel) sendRequest(ctx context.Context, payload map[string]interface{}) error {
 	return sendWebhookRequest(ctx, c.client, c.webhookURL, c.authProvider, payload, webhookErrorConfig{
 		codeKey: "code", msgKey: "msg", logPrefix: "feishu",

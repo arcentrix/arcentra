@@ -38,6 +38,23 @@ type INotifyChannel interface {
 	Close() error
 }
 
+// InteractiveAction represents a button action in an interactive message (e.g. Approve/Reject).
+type InteractiveAction struct {
+	Label       string            // Button text, e.g. "Approve" / "Reject"
+	ActionID    string            // Action identifier, e.g. "approve" / "reject"
+	CallbackURL string            // Callback URL triggered when button is clicked
+	Style       string            // "primary" / "danger" / "default"
+	Metadata    map[string]string // Additional data
+}
+
+// IInteractiveChannel extends INotifyChannel with interactive message support
+// (messages with action buttons, e.g. approval cards).
+type IInteractiveChannel interface {
+	INotifyChannel
+	// SendInteractive sends a message with action buttons.
+	SendInteractive(ctx context.Context, title, content string, actions []InteractiveAction) error
+}
+
 // NotifyChannel wraps the notification channel implementation
 type NotifyChannel struct {
 	channel      INotifyChannel

@@ -23,7 +23,7 @@ import (
 func TestWithKafka(t *testing.T) {
 	opt := WithKafka("localhost:9092")
 	config := &queueConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.Provider != QueueProviderKafka {
 		t.Errorf("expected Provider to be QueueProviderKafka, got %v", config.Provider)
@@ -40,7 +40,7 @@ func TestWithGroupID(t *testing.T) {
 	groupID := "test-group"
 	opt := WithGroupID(groupID)
 	config := &queueConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.GroupID != groupID {
 		t.Errorf("expected GroupID to be '%s', got %s", groupID, config.GroupID)
@@ -51,7 +51,7 @@ func TestWithTopicPrefix(t *testing.T) {
 	prefix := "test-prefix"
 	opt := WithTopicPrefix(prefix)
 	config := &queueConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.TopicPrefix != prefix {
 		t.Errorf("expected TopicPrefix to be '%s', got %s", prefix, config.TopicPrefix)
@@ -63,7 +63,7 @@ func TestWithDelaySlots(t *testing.T) {
 	duration := 30 * time.Minute
 	opt := WithDelaySlots(count, duration)
 	config := &queueConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.DelaySlotCount != count {
 		t.Errorf("expected DelaySlotCount to be %d, got %d", count, config.DelaySlotCount)
@@ -77,7 +77,7 @@ func TestWithTaskRecorder(t *testing.T) {
 	recorder := &mockTaskRecorder{}
 	opt := WithTaskRecorder(recorder)
 	config := &queueConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.taskRecorder == nil {
 		t.Error("expected taskRecorder to be set")
@@ -125,7 +125,7 @@ func TestWithMessageFormat(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			opt := WithMessageFormat(tt.format)
 			config := &queueConfig{}
-			opt.apply(config)
+			opt(config)
 
 			if config.messageFormat != tt.expectedFormat {
 				t.Errorf("expected messageFormat to be %s, got %s", tt.expectedFormat, config.messageFormat)
@@ -144,7 +144,7 @@ func TestWithMessageCodec(t *testing.T) {
 	codec := NewJSONCodec()
 	opt := WithMessageCodec(codec)
 	config := &queueConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.messageCodec != codec {
 		t.Error("expected messageCodec to be set")
@@ -157,7 +157,7 @@ func TestWithMessageCodec(t *testing.T) {
 func TestWithMessageCodec_Nil(t *testing.T) {
 	opt := WithMessageCodec(nil)
 	config := &queueConfig{}
-	opt.apply(config)
+	opt(config)
 
 	if config.messageCodec != nil {
 		t.Error("expected messageCodec to be nil")
