@@ -18,9 +18,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/arcentrix/arcentra/internal/pkg/notify"
-	"github.com/arcentrix/arcentra/internal/pkg/notify/channel"
-	"github.com/arcentrix/arcentra/internal/pkg/notify/template"
+	"github.com/arcentrix/arcentra/internal/shared/notify"
+	"github.com/arcentrix/arcentra/internal/shared/notify/channel"
+	"github.com/arcentrix/arcentra/internal/shared/notify/template"
 )
 
 // NotificationService provides high-level notification functionality with template support

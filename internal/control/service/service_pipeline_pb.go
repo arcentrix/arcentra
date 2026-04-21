@@ -25,9 +25,9 @@ import (
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
-	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
-	tmpl "github.com/arcentrix/arcentra/internal/pkg/pipeline/template"
-	"github.com/arcentrix/arcentra/internal/pkg/pipeline/validation"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	tmpl "github.com/arcentrix/arcentra/internal/shared/pipeline/template"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/validation"
 	"github.com/arcentrix/arcentra/pkg/dispatch"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
@@ -37,8 +37,8 @@ import (
 	timepkg "github.com/arcentrix/arcentra/pkg/time"
 )
 
-// IPipelineEngine is an interface for the pipeline execution engine,
-// used to avoid circular dependency between service and engine packages.
+// IPipelineEngine is an interface for the pipeline execution process,
+// used to avoid circular dependency between service and process packages.
 type IPipelineEngine interface {
 	Submit(run *model.PipelineRun, parsedSpec *spec.Pipeline) error
 	CancelRun(runID string) error
@@ -403,7 +403,7 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 
 	if s.engine != nil {
 		if err := s.engine.Submit(run, parsedSpec); err != nil {
-			log.Warnw("engine submit failed, run created but not executing",
+			log.Warnw("process submit failed, run created but not executing",
 				"runId", run.RunID, "error", err)
 		}
 	}
@@ -459,7 +459,7 @@ func (s *PipelineServiceImpl) StopPipeline(
 
 	if s.engine != nil {
 		if cancelErr := s.engine.CancelRun(run.RunID); cancelErr != nil {
-			log.Warnw("engine cancel run failed", "runId", run.RunID, "error", cancelErr)
+			log.Warnw("process cancel run failed", "runId", run.RunID, "error", cancelErr)
 		}
 	}
 

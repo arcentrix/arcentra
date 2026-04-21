@@ -20,7 +20,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/control/service"
-	tmpl "github.com/arcentrix/arcentra/internal/pkg/pipeline/template"
+	tmpl "github.com/arcentrix/arcentra/internal/shared/pipeline/template"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/gofiber/fiber/v2"
 )

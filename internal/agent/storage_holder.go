@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
-	"github.com/arcentrix/arcentra/internal/pkg/storage"
+	"github.com/arcentrix/arcentra/internal/shared/storage"
 	"github.com/arcentrix/arcentra/pkg/log"
 )
 

@@ -24,9 +24,9 @@ import (
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
-	"github.com/arcentrix/arcentra/internal/pkg/pipeline/spec"
-	tmpl "github.com/arcentrix/arcentra/internal/pkg/pipeline/template"
-	"github.com/arcentrix/arcentra/internal/pkg/pipeline/trigger"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	tmpl "github.com/arcentrix/arcentra/internal/shared/pipeline/template"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/trigger"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/scm"
@@ -50,7 +50,7 @@ func NewScmService(projectRepo repo.IProjectRepository, pipelineRepo repo.IPipel
 	return &ScmService{projectRepo: projectRepo, pipelineRepo: pipelineRepo}
 }
 
-// SetEngine injects the pipeline engine after bootstrap initialization.
+// SetEngine injects the pipeline process after bootstrap initialization.
 func (s *ScmService) SetEngine(engine IPipelineEngine) {
 	s.engine = engine
 }
@@ -133,7 +133,7 @@ func (s *ScmService) matchAndTriggerPipelines(ctx context.Context, projectID str
 // matches the given SCM event. On match it creates a run and submits.
 func (s *ScmService) tryTriggerPipeline(ctx context.Context, p *model.Pipeline, ev scm.Event) {
 	if s.engine == nil {
-		log.Infow("webhook event skipped (engine not available)",
+		log.Infow("webhook event skipped (process not available)",
 			"pipelineId", p.PipelineID, "eventType", ev.EventType, "ref", ev.Ref)
 		return
 	}
@@ -195,7 +195,7 @@ func (s *ScmService) tryTriggerPipeline(ctx context.Context, p *model.Pipeline, 
 	}
 
 	if err := s.engine.Submit(run, parsedSpec); err != nil {
-		log.Warnw("webhook trigger: engine submit failed",
+		log.Warnw("webhook trigger: process submit failed",
 			"pipelineId", p.PipelineID, "runId", run.RunID, "error", err)
 		return
 	}

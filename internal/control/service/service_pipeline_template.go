@@ -24,7 +24,7 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
-	tmpl "github.com/arcentrix/arcentra/internal/pkg/pipeline/template"
+	tmpl "github.com/arcentrix/arcentra/internal/shared/pipeline/template"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/scm"

@@ -25,7 +25,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/agent"
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	"github.com/arcentrix/arcentra/internal/agent/taskqueue"
-	"github.com/arcentrix/arcentra/internal/pkg/grpc"
+	"github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/pkg/cron"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/metrics"

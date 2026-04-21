@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/arcentrix/arcentra/internal/pkg/grpc"
+	"github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/nova"
@@ -68,7 +68,7 @@ type AppConfig struct {
 	Pipeline     PipelineConfig       `mapstructure:"pipeline" json:"Pipeline"`
 }
 
-// PipelineConfig holds pipeline engine settings.
+// PipelineConfig holds pipeline process settings.
 type PipelineConfig struct {
 	KeepWorkspace bool `mapstructure:"keepWorkspace" json:"keepWorkspace"`
 }

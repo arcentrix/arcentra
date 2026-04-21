@@ -19,8 +19,8 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	"github.com/arcentrix/arcentra/internal/agent/service"
-	"github.com/arcentrix/arcentra/internal/pkg/executor"
-	"github.com/arcentrix/arcentra/internal/pkg/grpc"
+	"github.com/arcentrix/arcentra/internal/shared/executor"
+	"github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/pkg/outbox"
 )
 

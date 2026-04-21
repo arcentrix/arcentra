@@ -19,12 +19,12 @@ package main
 import (
 	"github.com/arcentrix/arcentra/internal/control/bootstrap"
 	"github.com/arcentrix/arcentra/internal/control/config"
-	"github.com/arcentrix/arcentra/internal/control/engine"
+	"github.com/arcentrix/arcentra/internal/control/process"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/control/router"
 	"github.com/arcentrix/arcentra/internal/control/service"
-	"github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/internal/pkg/storage"
+	"github.com/arcentrix/arcentra/internal/shared/grpc"
+	"github.com/arcentrix/arcentra/internal/shared/storage"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
 	"github.com/arcentrix/arcentra/pkg/log"
@@ -58,7 +58,7 @@ func initApp(configPath string, pluginConfigs map[string]any) (*bootstrap.App, f
 		// gRPC 服务层
 		grpc.ProviderSet,
 		// 流水线执行引擎（依赖 repo, plugin, storage, service, config）
-		engine.ProviderSet,
+		process.ProviderSet,
 		// 应用层
 		bootstrap.NewApp,
 	))

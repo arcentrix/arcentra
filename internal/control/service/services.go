@@ -45,7 +45,7 @@ type Services struct {
 	LogAggregator     *LogAggregator
 	Approval          *ApprovalService
 	PipelineTemplate  *PipelineTemplateService
-	PipelineEngine    IPipelineEngine // set after engine initialization
+	PipelineEngine    IPipelineEngine // set after process initialization
 }
 
 // NewServices 初始化所有 service

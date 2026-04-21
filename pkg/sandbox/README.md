@@ -35,8 +35,8 @@ type Sandbox interface {
 ```go
 import (
     "github.com/arcentrix/arcentra/internal/agent/config"
-    "github.com/arcentrix/arcentra/pkg/sandbox"
-    "github.com/arcentrix/arcentra/pkg/log"
+    "github.com/arcentrix/arcentra/shared/sandbox"
+    "github.com/arcentrix/arcentra/shared/log"
 )
 
 cfg := config.NewConf("conf.d/agent.toml")
@@ -53,8 +53,8 @@ defer sb.Close()
 
 ```go
 import (
-    "github.com/arcentrix/arcentra/pkg/sandbox"
-    "github.com/arcentrix/arcentra/pkg/log"
+    "github.com/arcentrix/arcentra/shared/sandbox"
+    "github.com/arcentrix/arcentra/shared/log"
 )
 
 config := &sandbox.ContainerdConfig{
@@ -247,10 +247,10 @@ io.Copy(os.Stdout, logs)
 
 ```bash
 # 运行所有测试
-go test ./pkg/sandbox/... -v
+go test ./shared/sandbox/... -v
 
 # 运行集成测试（需要 containerd）
-go test ./pkg/sandbox/... -v -run TestContainerdSandbox
+go test ./shared/sandbox/... -v -run TestContainerdSandbox
 ```
 
 注意：集成测试需要运行中的 containerd daemon。

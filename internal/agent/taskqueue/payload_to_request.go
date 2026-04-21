@@ -15,7 +15,7 @@
 package taskqueue
 
 import (
-	"github.com/arcentrix/arcentra/internal/pkg/executor"
+	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 

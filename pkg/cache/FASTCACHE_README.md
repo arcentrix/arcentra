@@ -65,7 +65,7 @@ go get github.com/VictoriaMetrics/fastcache
 ### 2. 基础使用
 
 ```go
-import "github.com/arcentrix/arcentra/pkg/cache"
+import "github.com/arcentrix/arcentra/shared/cache"
 
 // 创建本地缓存
 fc := cache.NewFastCache(cache.FastCacheConfig{

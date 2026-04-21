@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	gormTracerName = "github.com/arcentrix/arcentra/pkg/trace/inject/gorm"
+	gormTracerName = "github.com/arcentrix/arcentra/shared/trace/inject/gorm"
 )
 
 type gormCtxKey int

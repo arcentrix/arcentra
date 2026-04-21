@@ -23,13 +23,13 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/config"
-	"github.com/arcentrix/arcentra/internal/control/engine"
+	"github.com/arcentrix/arcentra/internal/control/process"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/control/router"
 	"github.com/arcentrix/arcentra/internal/control/service"
-	"github.com/arcentrix/arcentra/internal/pkg/grpc"
-	"github.com/arcentrix/arcentra/internal/pkg/pipeline/trigger"
-	"github.com/arcentrix/arcentra/internal/pkg/storage"
+	"github.com/arcentrix/arcentra/internal/shared/grpc"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/trigger"
+	"github.com/arcentrix/arcentra/internal/shared/storage"
 	"github.com/arcentrix/arcentra/pkg/cron"
 	"github.com/arcentrix/arcentra/pkg/database"
 	"github.com/arcentrix/arcentra/pkg/log"
@@ -53,7 +53,7 @@ type App struct {
 	Repos         *repo.Repositories
 	Services      *service.Services
 	ShutdownMgr   *shutdown.Manager
-	Engine        *engine.Engine
+	Engine        *process.Process
 }
 
 // InitAppFunc init app function type
@@ -70,11 +70,11 @@ func NewApp(
 	_ database.IDatabase,
 	repos *repo.Repositories,
 	shutdownMgr *shutdown.Manager,
-	pipelineEngine *engine.Engine,
+	pipelineEngine *process.Process,
 ) (*App, func(), error) {
 	httpApp := rt.Router()
 
-	// Wire the engine into Services so PipelineServiceImpl can use it.
+	// Wire the process into Services so PipelineServiceImpl can use it.
 	if pipelineEngine != nil {
 		rt.Services.PipelineEngine = pipelineEngine
 	}
@@ -94,7 +94,7 @@ func NewApp(
 	}
 
 	cleanup := func() {
-		// stop pipeline engine (waits for in-progress runs)
+		// stop pipeline process (waits for in-progress runs)
 		if pipelineEngine != nil {
 			pipelineEngine.Stop()
 		}
@@ -205,7 +205,7 @@ func Run(app *App, cleanup func()) {
 		}, "pipeline-cron-sync")
 	}
 
-	// Wire the pipeline engine into ScmService for webhook-triggered runs.
+	// Wire the pipeline process into ScmService for webhook-triggered runs.
 	if app.Engine != nil && app.Services != nil && app.Services.Scm != nil {
 		app.Services.Scm.SetEngine(app.Engine)
 	}

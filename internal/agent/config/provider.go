@@ -15,7 +15,7 @@
 package config
 
 import (
-	grpcclient "github.com/arcentrix/arcentra/internal/pkg/grpc"
+	grpcclient "github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/log"

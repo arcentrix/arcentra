@@ -27,7 +27,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const fiberTracerName = "github.com/arcentrix/arcentra/pkg/trace/inject/fiber"
+const fiberTracerName = "github.com/arcentrix/arcentra/shared/trace/inject/fiber"
 
 var (
 	fiberTracer     = otel.Tracer(fiberTracerName)

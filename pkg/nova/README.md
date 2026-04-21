@@ -21,7 +21,7 @@ Nova is a flexible and high-performance task queue library for Go that supports 
 ## Installation
 
 ```bash
-go get github.com/arcentrix/arcentra/pkg/nova
+go get github.com/arcentrix/arcentra/shared/nova
 ```
 
 ## Quick Start

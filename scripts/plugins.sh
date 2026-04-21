@@ -289,7 +289,7 @@ EOF
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             echo -e "${BLUE}[INFO]${NC} Compiling example plugin..."
             if [ -f "pkg/plugins/notify/stdout/stdout.go" ]; then
-                cd pkg/plugins/notify/stdout
+                cd shared/plugins/notify/stdout
                 go build -buildmode=plugin -o ../../../../plugins/stdout.so stdout.go
                 cd - > /dev/null
                 echo -e "${GREEN}[SUCCESS]${NC} Plugin compiled: plugins/stdout.so"

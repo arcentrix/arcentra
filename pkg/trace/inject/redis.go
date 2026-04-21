@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	redisTracerName = "github.com/arcentrix/arcentra/pkg/trace/inject/redis"
+	redisTracerName = "github.com/arcentrix/arcentra/shared/trace/inject/redis"
 )
 
 type redisCtxKey string

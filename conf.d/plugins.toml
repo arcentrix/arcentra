@@ -2,7 +2,7 @@
 # Each plugin's configuration will be passed to the corresponding plugin's Init method
 
 # Builtin configuration file
-# Builtins are pipeline core features implemented in `internal/pkg/pipeline/builtin`.
+# Builtins are pipeline core features implemented in `internal/shared/pipeline/builtin`.
 # Builtin configs are applied as default `args.config` for builtin steps; step-level config overrides these defaults.
 
 # Shell builtin configuration (preferred)

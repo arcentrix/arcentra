@@ -21,7 +21,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	agentoutbox "github.com/arcentrix/arcentra/internal/agent/outbox"
 	"github.com/arcentrix/arcentra/internal/agent/router"
-	"github.com/arcentrix/arcentra/internal/pkg/grpc"
+	"github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/metrics"
 	"github.com/google/wire"

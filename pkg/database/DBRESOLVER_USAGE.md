@@ -78,7 +78,7 @@ db.Exec("UPDATE users SET name = ?", "jinzhu") // 原生 SQL 写操作
 ### 使用辅助函数
 
 ```go
-import "github.com/arcentrix/arcentra/pkg/database"
+import "github.com/arcentrix/arcentra/shared/database"
 
 // 强制使用主库（primary）
 db.Clauses(database.Write()).First(&user)
