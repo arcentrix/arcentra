@@ -109,14 +109,6 @@ wire: wire-install ## generate dependency injection code
 	test -d $(CMD_PATH)
 	cd $(CMD_PATH) && wire
 
-.PHONY: sqlc-install
-sqlc-install: ## install sqlc
-	@command -v sqlc >/dev/null 2>&1 || go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-
-.PHONY: sqlc
-sqlc: sqlc-install ## generate sql code
-	sqlc generate
-
 # -----------------------------------------------------------------------------
 # Lint
 # -----------------------------------------------------------------------------
@@ -132,7 +124,7 @@ lint: golangci-lint-install ## run lint
 # Code generation (all-in-one)
 # -----------------------------------------------------------------------------
 .PHONY: codegen
-codegen: buf sqlc ## run all code generators
+codegen: buf ## run all code generators
 	$(MAKE) wire TARGET=arcentra
 	$(MAKE) wire TARGET=arcentra-agent
 
@@ -152,7 +144,7 @@ test: ## run tests
 # Build
 # -----------------------------------------------------------------------------
 .PHONY: build
-build: wire buf sqlc ## build binary (TARGET required)
+build: wire buf ## build binary (TARGET required)
 	@echo "Building $(TARGET)..."
 	go build -ldflags "$(LDFLAGS)" -o $(TARGET) $(CMD_PATH)
 
@@ -161,7 +153,7 @@ build-target: ## build release binary (no codegen, used by CI/Docker)
 	go build -trimpath -ldflags "$(LDFLAGS) -s -w" -o $(TARGET) $(CMD_PATH)
 
 .PHONY: run
-run: wire buf sqlc ## run program
+run: wire buf ## run program
 	go run -ldflags "$(LDFLAGS)" $(CMD_PATH)
 
 # -----------------------------------------------------------------------------
