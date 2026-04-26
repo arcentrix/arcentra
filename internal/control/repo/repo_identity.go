@@ -26,6 +26,7 @@ type IIdentityRepository interface {
 	GetProvider(ctx context.Context, name string) (*model.Identity, error)
 	GetProviderByType(ctx context.Context, providerType string) ([]model.Identity, error)
 	GetProviderList(ctx context.Context) ([]model.Identity, error)
+	GetEnabledProvidersByTypes(ctx context.Context, providerTypes []string) ([]model.Identity, error)
 	GetProviderTypeList(ctx context.Context) ([]string, error)
 	CreateProvider(ctx context.Context, provider *model.Identity) error
 	UpdateProvider(ctx context.Context, name string, provider *model.Identity) error
@@ -75,6 +76,25 @@ func (ii *IdentityRepo) GetProviderList(ctx context.Context) ([]model.Identity, 
 	var identitys []model.Identity
 	var identity model.Identity
 	if err := ii.Database().WithContext(ctx).Table(identity.TableName()).
+		Order("priority ASC").
+		Select("provider_id, provider_type, name, description, priority, is_enabled").
+		Find(&identitys).Error; err != nil {
+		return nil, err
+	}
+	return identitys, nil
+}
+
+// GetEnabledProvidersByTypes returns enabled identity providers whose provider_type is in
+// the given list, ordered by priority ascending. Returns an empty slice when providerTypes
+// is empty (no SQL is executed in that case).
+func (ii *IdentityRepo) GetEnabledProvidersByTypes(ctx context.Context, providerTypes []string) ([]model.Identity, error) {
+	if len(providerTypes) == 0 {
+		return []model.Identity{}, nil
+	}
+	var identitys []model.Identity
+	var identity model.Identity
+	if err := ii.Database().WithContext(ctx).Table(identity.TableName()).
+		Where("is_enabled = ? AND provider_type IN ?", 1, providerTypes).
 		Order("priority ASC").
 		Select("provider_id, provider_type, name, description, priority, is_enabled").
 		Find(&identitys).Error; err != nil {

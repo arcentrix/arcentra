@@ -194,7 +194,7 @@ type UserWithExt struct {
 
 const userWithExtSelectFields = "" +
 	"u.user_id, u.username, u.full_name, u.avatar, u.email, u.phone, " +
-	"u.is_enabled, u.is_superadmin, ue.last_login_at, " +
+	"u.is_enabled, ue.last_login_at, " +
 	"COALESCE(ue.invitation_status, 'accepted') AS invitation_status, role.role_name"
 
 const roleSubqueryJoinDefault = "" +

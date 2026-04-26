@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/pkg/id"
@@ -40,9 +41,23 @@ type IdentityService struct {
 }
 
 const (
-	providerTypeOAuth = "oauth"
-	providerTypeOIDC  = "oidc"
+	loginModeRedirect = "redirect"
+	loginModeForm     = "form"
 )
+
+// loginProviderTypes lists provider types that are visible on the login page.
+var loginProviderTypes = []string{consts.ProviderTypeOAuth, consts.ProviderTypeOIDC, consts.ProviderTypeLDAP}
+
+// PublicLoginProvider 描述登录页可见的第三方登录提供方元数据（脱敏）。
+// 字段与前端 IdentityProvider 契约一致，使用 camelCase JSON 键名。
+type PublicLoginProvider struct {
+	Name         string `json:"name"`
+	ProviderType string `json:"providerType"`
+	Description  string `json:"description"`
+	Priority     int    `json:"priority"`
+	AuthURL      string `json:"authUrl"`
+	LoginMode    string `json:"loginMode"`
+}
 
 func NewIdentityService(
 	identityRepo repo.IIdentityRepository,
@@ -86,9 +101,9 @@ func (iis *IdentityService) Authorize(ctx context.Context, providerName string) 
 	log.Debugw("State stored", "state", state, "storedProviderName", integration.Name, "urlProvider", providerName)
 
 	switch integration.ProviderType {
-	case providerTypeOAuth:
+	case consts.ProviderTypeOAuth:
 		return provider.AuthCodeURL(state), nil
-	case providerTypeOIDC:
+	case consts.ProviderTypeOIDC:
 		return provider.AuthCodeURL(state), nil
 	default:
 		return "", fmt.Errorf("invalid provider type: %s", integration.ProviderType)
@@ -175,12 +190,12 @@ func (iis *IdentityService) Callback(ctx context.Context, providerName, state, c
 	// Get CoverAttributes configuration
 	var coverAttributes bool
 	switch integration.ProviderType {
-	case providerTypeOAuth:
+	case consts.ProviderTypeOAuth:
 		var oauthCfg model.OAuthConfig
 		if unmarshalErr := sonic.Unmarshal(integration.Config, &oauthCfg); unmarshalErr == nil {
 			coverAttributes = oauthCfg.CoverAttributes
 		}
-	case providerTypeOIDC:
+	case consts.ProviderTypeOIDC:
 		var oidcCfg model.OIDCConfig
 		if unmarshalErr := sonic.Unmarshal(integration.Config, &oidcCfg); unmarshalErr == nil {
 			coverAttributes = oidcCfg.CoverAttributes
@@ -229,7 +244,7 @@ func (iis *IdentityService) convertToProviderConfig(integration *model.Identity)
 	}
 
 	switch integration.ProviderType {
-	case providerTypeOAuth:
+	case consts.ProviderTypeOAuth:
 		var oauthCfg model.OAuthConfig
 		if err := sonic.Unmarshal(integration.Config, &oauthCfg); err != nil {
 			return nil, fmt.Errorf("unmarshal oauth config failed: %w", err)
@@ -254,7 +269,7 @@ func (iis *IdentityService) convertToProviderConfig(integration *model.Identity)
 			return nil, fmt.Errorf("missing authURL or tokenURL in oauth config")
 		}
 
-	case providerTypeOIDC:
+	case consts.ProviderTypeOIDC:
 		var oidcCfg model.OIDCConfig
 		if err := sonic.Unmarshal(integration.Config, &oidcCfg); err != nil {
 			return nil, fmt.Errorf("unmarshal oidc config failed: %w", err)
@@ -301,6 +316,56 @@ func (iis *IdentityService) GetProviderList(ctx context.Context) ([]model.Identi
 		return nil, err
 	}
 	return integrations, nil
+}
+
+// ListPublicLoginProviders returns enabled identity providers that should be visible on
+// the login page. Filtering is performed at the SQL layer (is_enabled = 1 AND
+// provider_type IN (...)). No secrets/config are returned.
+func (iis *IdentityService) ListPublicLoginProviders(ctx context.Context) ([]PublicLoginProvider, error) {
+	integrations, err := iis.identityRepo.GetEnabledProvidersByTypes(ctx, loginProviderTypes)
+	if err != nil {
+		log.Errorw("failed to list public login providers", "error", err)
+		return nil, err
+	}
+
+	result := make([]PublicLoginProvider, 0, len(integrations))
+	for i := range integrations {
+		p := integrations[i]
+		result = append(result, PublicLoginProvider{
+			Name:         p.Name,
+			ProviderType: p.ProviderType,
+			Description:  p.Description,
+			Priority:     p.Priority,
+			AuthURL:      buildLoginAuthURL(p.ProviderType, p.Name),
+			LoginMode:    loginModeFor(p.ProviderType),
+		})
+	}
+	return result, nil
+}
+
+// buildLoginAuthURL returns the relative API path (without API prefix) that the login
+// page should hit for the given provider. The front-end is responsible for prepending
+// the API base (e.g. /api/v1) when calling. LDAP uses a form POST handled by the
+// front-end, so no auth URL is returned.
+func buildLoginAuthURL(providerType, name string) string {
+	switch providerType {
+	case consts.ProviderTypeOAuth, consts.ProviderTypeOIDC:
+		return "/identity/authorize/" + name
+	default:
+		return ""
+	}
+}
+
+// loginModeFor maps a provider type to the front-end interaction mode.
+func loginModeFor(providerType string) string {
+	switch providerType {
+	case consts.ProviderTypeOAuth, consts.ProviderTypeOIDC:
+		return loginModeRedirect
+	case consts.ProviderTypeLDAP:
+		return loginModeForm
+	default:
+		return ""
+	}
 }
 
 func (iis *IdentityService) GetProviderTypeList(ctx context.Context) ([]string, error) {
@@ -680,11 +745,11 @@ func (iis *IdentityService) preserveConfigKeys(existing, updated *model.Identity
 // getImmutableConfigKeys returns list of immutable config keys for each provider type
 func getImmutableConfigKeys(providerType string) []string {
 	switch providerType {
-	case providerTypeOAuth:
+	case consts.ProviderTypeOAuth:
 		return []string{"clientId"}
-	case providerTypeOIDC:
+	case consts.ProviderTypeOIDC:
 		return []string{"clientId", "issuer"}
-	case "ldap":
+	case consts.ProviderTypeLDAP:
 		return []string{"host", "port", "baseDN"}
 	default:
 		return []string{}

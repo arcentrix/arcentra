@@ -1,4 +1,4 @@
-// Copyright 2025 Arcentra Authors.
+// Copyright 2026 Arcentra Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package model
+package consts
 
-import (
-	"gorm.io/datatypes"
+// Identity provider types stored in t_identity.provider_type.
+const (
+	ProviderTypeOAuth = "oauth"
+	ProviderTypeOIDC  = "oidc"
+	ProviderTypeLDAP  = "ldap"
+	ProviderTypeSAML  = "saml"
 )
-
-// Setting represents a workspace-scoped configuration entry.
-// Unique constraint: (workspace, name).
-type Setting struct {
-	BaseModel
-	Name  string         `gorm:"column:name;type:varchar(255);not null;uniqueIndex:uk_workspace_name" json:"name"`
-	Value datatypes.JSON `gorm:"column:value;type:json;not null" json:"value"`
-}
-
-// TableName returns the database table name.
-func (Setting) TableName() string {
-	return "t_setting"
-}

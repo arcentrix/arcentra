@@ -20,25 +20,20 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// settingRouter registers workspace-scoped setting routes.
+// settingRouter registers setting routes.
 func (rt *Router) settingRouter(r fiber.Router, auth fiber.Handler) {
 	settingsGroup := r.Group("/settings")
 	{
-		settingsGroup.Get("/", auth, rt.listSettings)          // GET /settings?workspace=xxx
-		settingsGroup.Get("/:name", auth, rt.getSetting)       // GET /settings/:name?workspace=xxx
-		settingsGroup.Put("/:name", auth, rt.upsertSetting)    // PUT /settings/:name?workspace=xxx
-		settingsGroup.Delete("/:name", auth, rt.deleteSetting) // DELETE /settings/:name?workspace=xxx
+		settingsGroup.Get("/", auth, rt.listSettings)          // GET /settings - list every setting
+		settingsGroup.Get("/:name", auth, rt.getSetting)       // GET /settings/:name - get a single setting
+		settingsGroup.Put("/:name", auth, rt.upsertSetting)    // PUT /settings/:name - create or update a setting
+		settingsGroup.Delete("/:name", auth, rt.deleteSetting) // DELETE /settings/:name - delete a setting
 	}
 }
 
-// listSettings returns all settings for the given workspace.
+// listSettings returns every setting in the table.
 func (rt *Router) listSettings(c *fiber.Ctx) error {
-	workspace := c.Query("workspace")
-	if workspace == "" {
-		return http.Err(c, http.BadRequest.Code, "workspace is required")
-	}
-
-	settings, err := rt.Services.Setting.ListSettings(c.Context(), workspace)
+	settings, err := rt.Services.Setting.ListSettings(c.Context())
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -48,14 +43,13 @@ func (rt *Router) listSettings(c *fiber.Ctx) error {
 
 // getSetting returns a single setting by workspace and name.
 func (rt *Router) getSetting(c *fiber.Ctx) error {
-	workspace := c.Query("workspace")
 	name := c.Params("name")
 
-	if workspace == "" || name == "" {
-		return http.Err(c, http.BadRequest.Code, "workspace and name are required")
+	if name == "" {
+		return http.Err(c, http.BadRequest.Code, "name is required")
 	}
 
-	setting, err := rt.Services.Setting.GetSetting(c.Context(), workspace, name)
+	setting, err := rt.Services.Setting.GetSetting(c.Context(), name)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -65,20 +59,16 @@ func (rt *Router) getSetting(c *fiber.Ctx) error {
 
 // upsertSetting creates or updates a setting.
 func (rt *Router) upsertSetting(c *fiber.Ctx) error {
-	workspace := c.Query("workspace")
 	name := c.Params("name")
 
-	if workspace == "" || name == "" {
-		return http.Err(c, http.BadRequest.Code, "workspace and name are required")
+	if name == "" {
+		return http.Err(c, http.BadRequest.Code, "name is required")
 	}
 
 	var setting model.Setting
 	if err := c.BodyParser(&setting); err != nil {
 		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
-
-	setting.Workspace = workspace
-	setting.Name = name
 
 	if err := rt.Services.Setting.UpsertSetting(c.Context(), &setting); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
@@ -87,16 +77,15 @@ func (rt *Router) upsertSetting(c *fiber.Ctx) error {
 	return http.Detail(c, setting)
 }
 
-// deleteSetting removes a setting by workspace and name.
+// deleteSetting removes a setting by name.
 func (rt *Router) deleteSetting(c *fiber.Ctx) error {
-	workspace := c.Query("workspace")
 	name := c.Params("name")
 
-	if workspace == "" || name == "" {
-		return http.Err(c, http.BadRequest.Code, "workspace and name are required")
+	if name == "" {
+		return http.Err(c, http.BadRequest.Code, "name is required")
 	}
 
-	if err := rt.Services.Setting.DeleteSetting(c.Context(), workspace, name); err != nil {
+	if err := rt.Services.Setting.DeleteSetting(c.Context(), name); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 

@@ -20,15 +20,14 @@ import (
 
 type User struct {
 	BaseModel
-	UserID       string `gorm:"column:user_id" json:"userId"`
-	Username     string `gorm:"column:username" json:"username"`
-	FullName     string `gorm:"column:full_name" json:"fullName"`
-	Password     string `gorm:"column:password" json:"password"`
-	Avatar       string `gorm:"column:avatar" json:"avatar"`
-	Email        string `gorm:"column:email" json:"email"`
-	Phone        string `gorm:"column:phone" json:"phone"`
-	IsEnabled    int    `gorm:"column:is_enabled" json:"isEnabled"`                 // 0: disabled, 1: enabled
-	IsSuperAdmin int    `gorm:"column:is_superadmin;default:0" json:"isSuperAdmin"` // 0: normal user, 1: super admin
+	UserID    string `gorm:"column:user_id" json:"userId"`
+	Username  string `gorm:"column:username" json:"username"`
+	FullName  string `gorm:"column:full_name" json:"fullName"`
+	Password  string `gorm:"column:password" json:"password"`
+	Avatar    string `gorm:"column:avatar" json:"avatar"`
+	Email     string `gorm:"column:email" json:"email"`
+	Phone     string `gorm:"column:phone" json:"phone"`
+	IsEnabled int    `gorm:"column:is_enabled" json:"isEnabled"` // 0: disabled, 1: enabled
 }
 
 func (User) TableName() string {

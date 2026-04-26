@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/pkg/cache"
@@ -84,7 +85,7 @@ func (v *agentTokenVerifier) getSecretConfig(ctx context.Context) (*agentSecretC
 		}
 	}
 
-	setting, err := v.settingService.GetSetting(ctx, "system", "agent_secret_key")
+	setting, err := v.settingService.GetSetting(ctx, consts.SettingNameAgentSecretKey)
 	if err != nil {
 		log.Errorw("failed to get agent secret key configuration", "error", err)
 		return nil, err

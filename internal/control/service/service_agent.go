@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/pkg/id"
@@ -97,7 +98,7 @@ type agentSecretConfig struct {
 
 // GenerateAgentToken generates a token based on agentID for agent communication.
 func (al *AgentService) GenerateAgentToken(ctx context.Context, agentID string) (string, error) {
-	setting, err := al.settingService.GetSetting(ctx, "system", "agent_secret_key")
+	setting, err := al.settingService.GetSetting(ctx, consts.SettingNameAgentSecretKey)
 	if err != nil {
 		log.Errorw("failed to get agent secret key configuration", "error", err)
 		return "", err

@@ -50,10 +50,20 @@ func (rt *Router) identityRouter(r fiber.Router, auth fiber.Handler) {
 		identityGroup.Delete("/providers/:name", auth, rt.deleteProvider) // DELETE /identity/providers/:name - delete provider
 
 		// Authentication flow (no authentication required)
-		identityGroup.Get("/authorize/:provider", rt.authorize)   // GET /identity/authorize/:provider - initiate authorization (OAuth/OIDC)
-		identityGroup.Get("/callback/:provider", rt.callback)     // GET /identity/callback/:provider - authorization callback
-		identityGroup.Post("/ldap/login/:provider", rt.ldapLogin) // POST /identity/ldap/login/:provider - LDAP login
+		identityGroup.Get("/login/providers", rt.listLoginProviders) // GET /identity/login/providers - list providers visible on the login page
+		identityGroup.Get("/authorize/:provider", rt.authorize)      // GET /identity/authorize/:provider - initiate authorization (OAuth/OIDC)
+		identityGroup.Get("/callback/:provider", rt.callback)        // GET /identity/callback/:provider - authorization callback
+		identityGroup.Post("/ldap/login/:provider", rt.ldapLogin)    // POST /identity/ldap/login/:provider - LDAP login
 	}
+}
+
+// listLoginProviders lists enabled identity providers exposed to the login page (no auth required).
+func (rt *Router) listLoginProviders(c *fiber.Ctx) error {
+	providers, err := rt.Services.Identity.ListPublicLoginProviders(c.Context())
+	if err != nil {
+		return http.Err(c, http.Failed.Code, err.Error())
+	}
+	return http.Detail(c, providers)
 }
 
 // authorize initiates authorization (OAuth/OIDC)
@@ -357,36 +367,35 @@ func (rt *Router) deleteProvider(c *fiber.Ctx) error {
 func (rt *Router) getCookiePath() string {
 	const (
 		defaultCookiePath = "/"
-		workspace         = "system"
 		name              = "base_path"
 	)
 
-	setting, err := rt.Services.Setting.GetSetting(context.Background(), workspace, name)
+	setting, err := rt.Services.Setting.GetSetting(context.Background(), name)
 	if err != nil {
-		log.Debugw("failed to get cookie path from database, using default", "workspace", workspace, "name", name, "error", err)
+		log.Debugw("failed to get cookie path from database, using default", "name", name, "error", err)
 		return defaultCookiePath
 	}
 
 	if len(setting.Value) == 0 {
-		log.Debugw("cookie path configuration data is empty, using default", "workspace", workspace, "name", name)
+		log.Debugw("cookie path configuration data is empty, using default", "name", name)
 		return defaultCookiePath
 	}
 
 	var configData map[string]any
 	if err = sonic.Unmarshal(setting.Value, &configData); err != nil {
-		log.Warnw("failed to unmarshal cookie path configuration, using default", "workspace", workspace, "name", name, "error", err)
+		log.Warnw("failed to unmarshal cookie path configuration, using default", "name", name, "error", err)
 		return defaultCookiePath
 	}
 
 	basePathValue, ok := configData["base_path"]
 	if !ok {
-		log.Debugw("base_path not found in configuration data, using default", "workspace", workspace, "name", name)
+		log.Debugw("base_path not found in configuration data, using default", "name", name)
 		return defaultCookiePath
 	}
 
 	basePathStr, ok := basePathValue.(string)
 	if !ok || basePathStr == "" {
-		log.Debugw("base_path is not a valid string, using default", "workspace", workspace, "name", name)
+		log.Debugw("base_path is not a valid string, using default", "name", name)
 		return defaultCookiePath
 	}
 
@@ -410,36 +419,35 @@ func (rt *Router) getCookiePath() string {
 func (rt *Router) getBaseURL() string {
 	const (
 		defaultBaseURL = "/"
-		workspace      = "system"
 		name           = "base_path"
 	)
 
-	setting, err := rt.Services.Setting.GetSetting(context.Background(), workspace, name)
+	setting, err := rt.Services.Setting.GetSetting(context.Background(), name)
 	if err != nil {
-		log.Debugw("failed to get frontend base URL from database, using default", "workspace", workspace, "name", name, "error", err)
+		log.Debugw("failed to get frontend base URL from database, using default", "name", name, "error", err)
 		return defaultBaseURL
 	}
 
 	if len(setting.Value) == 0 {
-		log.Debugw("frontend base URL configuration data is empty, using default", "workspace", workspace, "name", name)
+		log.Debugw("frontend base URL configuration data is empty, using default", "name", name)
 		return defaultBaseURL
 	}
 
 	var configData map[string]any
 	if err = sonic.Unmarshal(setting.Value, &configData); err != nil {
-		log.Warnw("failed to unmarshal frontend base URL configuration, using default", "workspace", workspace, "name", name, "error", err)
+		log.Warnw("failed to unmarshal frontend base URL configuration, using default", "name", name, "error", err)
 		return defaultBaseURL
 	}
 
 	basePathValue, ok := configData["base_path"]
 	if !ok {
-		log.Debugw("base_path not found in configuration data, using default", "workspace", workspace, "name", name)
+		log.Debugw("base_path not found in configuration data, using default", "name", name)
 		return defaultBaseURL
 	}
 
 	basePathStr, ok := basePathValue.(string)
 	if !ok || basePathStr == "" {
-		log.Debugw("base_path is not a valid string, using default", "workspace", workspace, "name", name)
+		log.Debugw("base_path is not a valid string, using default", "name", name)
 		return defaultBaseURL
 	}
 

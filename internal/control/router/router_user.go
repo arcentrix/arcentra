@@ -191,7 +191,6 @@ func (rt *Router) getUserList(c *fiber.Ctx) error {
 		Email            string     `json:"email"`
 		Phone            string     `json:"phone"`
 		IsEnabled        int        `json:"isEnabled"`
-		IsSuperAdmin     int        `json:"isSuperAdmin"`
 		LastLoginAt      *time.Time `json:"lastLoginAt"`
 		InvitationStatus string     `json:"invitationStatus"`
 		RoleName         *string    `json:"roleName"` // 角色名称
@@ -207,7 +206,6 @@ func (rt *Router) getUserList(c *fiber.Ctx) error {
 			Email:            user.Email,
 			Phone:            user.Phone,
 			IsEnabled:        user.IsEnabled,
-			IsSuperAdmin:     user.IsSuperAdmin,
 			LastLoginAt:      user.LastLoginAt,
 			InvitationStatus: user.InvitationStatus,
 			RoleName:         user.RoleName,
@@ -262,7 +260,6 @@ func (rt *Router) getUsersByRole(c *fiber.Ctx) error {
 		Email            string     `json:"email"`
 		Phone            string     `json:"phone"`
 		IsEnabled        int        `json:"isEnabled"`
-		IsSuperAdmin     int        `json:"isSuperAdmin"`
 		LastLoginAt      *time.Time `json:"lastLoginAt"`
 		InvitationStatus string     `json:"invitationStatus"`
 		RoleName         *string    `json:"roleName"` // 角色名称
@@ -278,7 +275,6 @@ func (rt *Router) getUsersByRole(c *fiber.Ctx) error {
 			Email:            user.Email,
 			Phone:            user.Phone,
 			IsEnabled:        user.IsEnabled,
-			IsSuperAdmin:     user.IsSuperAdmin,
 			LastLoginAt:      user.LastLoginAt,
 			InvitationStatus: user.InvitationStatus,
 			RoleName:         user.RoleName,

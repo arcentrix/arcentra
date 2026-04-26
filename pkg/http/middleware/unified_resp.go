@@ -21,6 +21,9 @@ import (
 
 // UnifiedResponseMiddleware 统一响应拦截器
 // c.Locals("detail", value) 用于设置响应数据
+//
+// 如果 handler 已经显式写过响应体（例如调用 http.Err / c.JSON / c.Send 等），
+// 中间件保留原响应不覆盖，避免真实错误被静默重写为 "Request Success"
 func UnifiedResponseMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		err := c.Next()
@@ -28,21 +31,23 @@ func UnifiedResponseMiddleware() fiber.Handler {
 			return err
 		}
 
-		status := c.Response().StatusCode()
-
 		// 默认状态码
-		if status == 0 {
-			status = fiber.StatusOK
-			c.Status(status)
+		if c.Response().StatusCode() == 0 {
+			c.Status(fiber.StatusOK)
 		}
 
 		// 非 2xx 统一错误
-		if status < fiber.StatusOK || status >= fiber.StatusMultipleChoices {
+		if c.Response().StatusCode() < fiber.StatusOK || c.Response().StatusCode() >= fiber.StatusMultipleChoices {
 			return http.Err(
 				c,
 				http.Failed.Code,
 				http.Failed.Msg,
 			)
+		}
+
+		// handler 已写出响应体（如 http.Err 写出的 ResponseErr）：保留原样
+		if len(c.Response().Body()) > 0 {
+			return nil
 		}
 
 		// 有数据返回：统一用 http.JSON 写出 { code, msg, timestamp, detail }

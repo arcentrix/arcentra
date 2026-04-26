@@ -10,7 +10,7 @@ path = "/metrics"
 
 [trace]
 # enable trace, false or true
-enabled = true
+enabled = false
 # trace exporter type: "jaeger", "otlp-grpc", "otlp-http", or "none"
 exporterType = "otlp-grpc"
 # trace endpoint

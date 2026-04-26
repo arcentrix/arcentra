@@ -31,14 +31,12 @@ import (
 // ApprovalCallbackURLBuilder generates HMAC-signed callback URLs for approval actions.
 type ApprovalCallbackURLBuilder struct {
 	settingRepo repo.ISettingRepository
-	workspace   string
 }
 
 // NewApprovalCallbackURLBuilder creates a new builder.
 func NewApprovalCallbackURLBuilder(settingRepo repo.ISettingRepository) *ApprovalCallbackURLBuilder {
 	return &ApprovalCallbackURLBuilder{
 		settingRepo: settingRepo,
-		workspace:   "default",
 	}
 }
 
@@ -76,7 +74,7 @@ func (b *ApprovalCallbackURLBuilder) VerifyToken(ctx context.Context, approvalID
 }
 
 func (b *ApprovalCallbackURLBuilder) getExternalURL(ctx context.Context) (string, error) {
-	setting, err := b.settingRepo.Get(ctx, b.workspace, consts.SettingNameExternalURL)
+	setting, err := b.settingRepo.Get(ctx, consts.SettingNameExternalURL)
 	if err != nil {
 		return "", err
 	}
@@ -92,7 +90,7 @@ func (b *ApprovalCallbackURLBuilder) getExternalURL(ctx context.Context) (string
 }
 
 func (b *ApprovalCallbackURLBuilder) getSecretKey(ctx context.Context) (string, error) {
-	setting, err := b.settingRepo.Get(ctx, b.workspace, consts.SettingNameAgentSecretKey)
+	setting, err := b.settingRepo.Get(ctx, consts.SettingNameAgentSecretKey)
 	if err != nil {
 		return "", err
 	}
