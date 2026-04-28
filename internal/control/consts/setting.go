@@ -23,6 +23,7 @@ const (
 	SettingNameAgentSecretKey              = "AGENT_SECRET_KEY"
 	SettingNameAgentHeartbeatExpireSeconds = "AGENT_HEARTBEAT_EXPIRE_SECONDS"
 	SettingNameTaskHistoryExpireSeconds    = "TASK_HISTORY_EXPIRE_SECONDS"
+	SettingNameAgentAutoApprove            = "AGENT_AUTO_APPROVE"
 )
 
 // JSON value keys used inside t_setting.value payloads.

@@ -45,6 +45,7 @@ type Services struct {
 	LogAggregator     *LogAggregator
 	Approval          *ApprovalService
 	PipelineTemplate  *PipelineTemplateService
+	RegistrationToken *RegistrationTokenService
 	PipelineEngine    IPipelineEngine // set after process initialization
 }
 
@@ -81,6 +82,8 @@ func NewServices(
 	logAggregator := NewLogAggregator(nil, db.Database())
 	approvalService := NewApprovalService(repos.Approval)
 	pipelineTemplateService := NewPipelineTemplateService(repos.PipelineTemplate, repos.Secret)
+	registrationTokenService := NewRegistrationTokenService(repos.RegistrationToken)
+	agentService.SetRegistrationTokenService(registrationTokenService)
 
 	return &Services{
 		User:              userService,
@@ -104,6 +107,7 @@ func NewServices(
 		LogAggregator:     logAggregator,
 		Approval:          approvalService,
 		PipelineTemplate:  pipelineTemplateService,
+		RegistrationToken: registrationTokenService,
 	}
 }
 

@@ -23,6 +23,11 @@ import (
 	"github.com/arcentrix/arcentra/internal/shared/notify/auth"
 )
 
+const (
+	actionStyleDanger  = "danger"
+	actionStyleDefault = "default"
+)
+
 // EmailChannel implements email notification channel
 type EmailChannel struct {
 	smtpHost     string
@@ -134,15 +139,16 @@ func (c *EmailChannel) SendInteractive(ctx context.Context, title, content strin
 	for _, a := range actions {
 		bgColor := "#1890ff"
 		switch a.Style {
-		case "danger":
+		case actionStyleDanger:
 			bgColor = "#ff4d4f"
-		case "default":
+		case actionStyleDefault:
 			bgColor = "#d9d9d9"
 		}
-		sb.WriteString(fmt.Sprintf(
-			`<a href="%s" style="display:inline-block;padding:8px 16px;margin-right:8px;color:#fff;background-color:%s;text-decoration:none;border-radius:4px;">%s</a>`,
+		fmt.Fprintf(&sb,
+			`<a href="%s" style="display:inline-block;padding:8px 16px;margin-right:8px;color:#fff;`+
+				`background-color:%s;text-decoration:none;border-radius:4px;">%s</a>`,
 			a.CallbackURL, bgColor, a.Label,
-		))
+		)
 	}
 	sb.WriteString("</div></body></html>")
 

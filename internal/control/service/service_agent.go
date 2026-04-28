@@ -19,23 +19,24 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
-	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/util"
 	"github.com/bytedance/sonic"
 )
 
 type AgentService struct {
-	agentRepo      repo.IAgentRepository
-	stepRunRepo    repo.IStepRunRepository
-	jobRunRepo     repo.IJobRunRepository
-	settingService *SettingService
+	agentRepo            repo.IAgentRepository
+	stepRunRepo          repo.IStepRunRepository
+	jobRunRepo           repo.IJobRunRepository
+	settingService       *SettingService
+	registrationTokenSvc *RegistrationTokenService
 }
 
 // NewAgentService creates a new AgentService.
@@ -53,41 +54,71 @@ func NewAgentService(
 	}
 }
 
-func (al *AgentService) CreateAgent(ctx context.Context, createAgentReq *model.CreateAgentReq) (*model.CreateAgentResp, error) {
-	agentID := id.ShortID()
-	agent := &model.Agent{
-		AgentID:   agentID,
-		AgentName: createAgentReq.AgentName,
-		Address:   "0.0.0.0",
-		Port:      "8080",
-		OS:        "Linux",
-		Arch:      "amd64",
-		Version:   "0.0.0",
-		Status:    0,
-		Labels:    createAgentReq.Labels,
-		IsEnabled: 1,
-		Metrics:   "/metrics",
-	}
+// SetRegistrationTokenService sets the registration token service for dynamic registration.
+func (al *AgentService) SetRegistrationTokenService(svc *RegistrationTokenService) {
+	al.registrationTokenSvc = svc
+}
 
-	// Create Agent
-	if err := al.agentRepo.Create(ctx, agent); err != nil {
-		log.Errorw("create agent failed", "error", err)
-		return nil, err
+// ValidateRegistrationToken validates a plain-text registration token against the database.
+func (al *AgentService) ValidateRegistrationToken(ctx context.Context, token string) error {
+	if al.registrationTokenSvc == nil {
+		return fmt.Errorf("registration token service not configured")
 	}
+	_, err := al.registrationTokenSvc.ValidateToken(ctx, token)
+	return err
+}
 
-	// Generate token for agent communication based on agentID
-	token, err := al.GenerateAgentToken(ctx, agentID)
+// DynamicRegisterAgent creates a new agent record from dynamic registration.
+func (al *AgentService) DynamicRegisterAgent(ctx context.Context, agentID, agentName string, req *model.Agent) error {
+	req.AgentID = agentID
+	req.AgentName = agentName
+	req.RegisteredBy = "dynamic"
+
+	autoApprove, err := al.getAutoApproveSetting(ctx)
 	if err != nil {
-		log.Errorw("generate agent token failed", "error", err)
-		return nil, err
+		log.Warnw("failed to read auto-approve setting, defaulting to true", "error", err)
+		autoApprove = true
+	}
+	if autoApprove {
+		req.IsEnabled = 1
+	} else {
+		req.IsEnabled = 0
 	}
 
-	// Return created agent with token
-	resp := &model.CreateAgentResp{
-		Agent: *agent,
-		Token: token,
+	if err := al.agentRepo.Create(ctx, req); err != nil {
+		log.Errorw("dynamic register agent failed", "error", err)
+		return err
 	}
-	return resp, nil
+	return nil
+}
+
+// ApproveAgent enables an agent.
+func (al *AgentService) ApproveAgent(ctx context.Context, agentID string) error {
+	return al.agentRepo.Approve(ctx, agentID)
+}
+
+// getAutoApproveSetting reads AGENT_AUTO_APPROVE from t_setting and returns the boolean value.
+func (al *AgentService) getAutoApproveSetting(ctx context.Context) (bool, error) {
+	setting, err := al.settingService.GetSetting(ctx, consts.SettingNameAgentAutoApprove)
+	if err != nil {
+		return true, err // default to true if setting not found
+	}
+
+	var config struct {
+		AutoApprove bool `json:"auto_approve"`
+	}
+	if err := json.Unmarshal(setting.Value, &config); err != nil {
+		return true, err
+	}
+	return config.AutoApprove, nil
+}
+
+// IncrementRegistrationTokenUseCount increments the use count for a registration token.
+func (al *AgentService) IncrementRegistrationTokenUseCount(ctx context.Context, id uint64) error {
+	if al.registrationTokenSvc == nil || al.registrationTokenSvc.tokenRepo == nil {
+		return fmt.Errorf("registration token service not configured")
+	}
+	return al.registrationTokenSvc.tokenRepo.IncrementUseCount(ctx, id)
 }
 
 // agentSecretConfig represents the structure of agent secret key configuration
@@ -197,4 +228,30 @@ func (al *AgentService) GetAgentStatistics(ctx context.Context) (int64, int64, i
 		return 0, 0, 0, err
 	}
 	return total, online, offline, nil
+}
+
+// MarkTimeoutAgentsOffline 检查所有心跳超时的 Agent 并标记为离线。
+// 超时阈值从 AGENT_HEARTBEAT_EXPIRE_SECONDS 设置中读取，默认 180 秒。
+func (al *AgentService) MarkTimeoutAgentsOffline(ctx context.Context) {
+	expireSeconds := 180 // 默认：3 倍标准心跳间隔
+
+	setting, err := al.settingService.GetSetting(ctx, consts.SettingNameAgentHeartbeatExpireSeconds)
+	if err == nil && setting != nil {
+		var cfg struct {
+			ExpireAfterSeconds int `json:"expireAfterSeconds"`
+		}
+		if jsonErr := json.Unmarshal(setting.Value, &cfg); jsonErr == nil && cfg.ExpireAfterSeconds > 0 {
+			expireSeconds = cfg.ExpireAfterSeconds
+		}
+	}
+
+	before := time.Now().Add(-time.Duration(expireSeconds) * time.Second)
+	count, err := al.agentRepo.MarkOfflineByHeartbeatTimeout(ctx, before)
+	if err != nil {
+		log.Errorw("mark timeout agents offline failed", "error", err)
+		return
+	}
+	if count > 0 {
+		log.Infow("marked timeout agents as offline", "count", count, "expireSeconds", expireSeconds)
+	}
 }

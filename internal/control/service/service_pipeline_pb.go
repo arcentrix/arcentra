@@ -37,6 +37,8 @@ import (
 	timepkg "github.com/arcentrix/arcentra/pkg/time"
 )
 
+const defaultBranch = "main"
+
 // IPipelineEngine is an interface for the pipeline execution process,
 // used to avoid circular dependency between service and process packages.
 type IPipelineEngine interface {
@@ -95,7 +97,7 @@ func (s *PipelineServiceImpl) CreatePipeline(
 		branch = project.DefaultBranch
 	}
 	if branch == "" {
-		branch = "main"
+		branch = defaultBranch
 	}
 
 	now := time.Now()

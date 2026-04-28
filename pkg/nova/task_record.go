@@ -91,7 +91,7 @@ type TaskRecordFilter struct {
 
 const (
 	// TaskRecordTableName is the default MySQL table name for task records
-	TaskRecordTableName = "l_task_records"
+	TaskRecordTableName = "task_records"
 )
 
 // TaskRecordModel represents the GORM model for task records in MySQL

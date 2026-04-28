@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"os"
@@ -26,6 +27,7 @@ import (
 
 	"cloud.google.com/go/storage"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/option"
 )
 
@@ -40,7 +42,15 @@ func newGCS(s *Storage) (*GCSStorage, error) {
 
 	// 如果提供了 AccessKey，将其作为 credentials JSON 文件路径
 	if s.AccessKey != "" {
-		opts = append(opts, option.WithCredentialsFile(s.AccessKey))
+		data, err := os.ReadFile(s.AccessKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read GCS credentials file: %w", err)
+		}
+		jwtConfig, err := google.JWTConfigFromJSON(data, storage.ScopeReadWrite)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse GCS credentials: %w", err)
+		}
+		opts = append(opts, option.WithTokenSource(jwtConfig.TokenSource(context.Background())))
 	}
 
 	client, err := storage.NewClient(context.Background(), opts...)

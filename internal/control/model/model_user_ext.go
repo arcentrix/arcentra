@@ -45,7 +45,7 @@ type UserExt struct {
 }
 
 func (UserExt) TableName() string {
-	return "t_user_ext"
+	return "user_ext"
 }
 
 // UserInvitationStatus constants for user ext

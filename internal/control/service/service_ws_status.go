@@ -35,6 +35,7 @@ type statusSubscription struct {
 var (
 	statusTopic = "EVENT_PIPELINE"
 	clientID    = "arcentra-ws-status"
+	groupID     = "arcentra-ws-status"
 )
 
 func (h *WSHandle) handleStatus(conn ws.Conn, action string, params WSParams) error {
@@ -106,6 +107,7 @@ func (h *WSHandle) consumeStatusEvents() {
 		h.kafkaCfg.BootstrapServers,
 		statusTopic,
 		clientID,
+		kafka.WithConsumerGroupID(groupID),
 		kafka.WithConsumerOptions(clientOptions...),
 		kafka.WithConsumerAutoOffsetReset("earliest"),
 	)

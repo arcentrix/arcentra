@@ -131,6 +131,8 @@ func (s *AgentServiceImpl) Register(_ context.Context, _ *agentv1.RegisterReques
 	regReq := &agentv1.RegisterRequest{
 		AgentId:               s.agentConf.Agent.ID,
 		Token:                 s.agentConf.Grpc.Token,
+		RegistrationToken:     s.agentConf.Grpc.RegistrationToken,
+		AgentName:             s.agentConf.Agent.Name,
 		Ip:                    net.GetLocalIP(),
 		Os:                    runtime.GOOS,
 		Arch:                  runtime.GOARCH,
@@ -138,7 +140,8 @@ func (s *AgentServiceImpl) Register(_ context.Context, _ *agentv1.RegisterReques
 		MaxConcurrentStepRuns: int32(s.agentConf.Agent.MaxConcurrentJobs),
 		Labels:                s.agentConf.Agent.Labels,
 	}
-	regCtx, cancel := s.grpcClient.WithTimeoutAndAuth(context.Background())
+	// Use a context without auth metadata for registration (Register is excluded from auth)
+	regCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	resp, err := s.grpcClient.AgentClient.Register(regCtx, regReq)
 	if err != nil {
@@ -155,6 +158,10 @@ func (s *AgentServiceImpl) Register(_ context.Context, _ *agentv1.RegisterReques
 	}
 	if len(resp.Labels) > 0 {
 		s.agentConf.Agent.Labels = resp.Labels
+	}
+	// Save per-agent auth token for subsequent gRPC calls
+	if resp.AuthToken != "" {
+		s.agentConf.Grpc.Token = resp.AuthToken
 	}
 	if resp.Storage != nil && s.storageHolder != nil {
 		s.storageHolder.SetFromProto(resp.Storage)

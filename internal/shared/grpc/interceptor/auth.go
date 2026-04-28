@@ -41,6 +41,7 @@ const (
 // excluded methods that need to skip authentication
 var excludedAuthMethods = map[string]bool{
 	"/api.agent.v1.Agent/Heartbeat":  true,
+	"/api.agent.v1.Agent/Register":   true,
 	"/api.job.v1.Job/Ping":           true,
 	"/api.stream.v1.Stream/Ping":     true,
 	"/api.pipeline.v1.Pipeline/Ping": true,

@@ -115,7 +115,9 @@ func (r *PipelineTemplateRepo) DeleteLibrary(ctx context.Context, libraryID stri
 }
 
 // ListLibraries returns paginated libraries matching the query.
-func (r *PipelineTemplateRepo) ListLibraries(ctx context.Context, query *TemplateLibraryQuery) ([]*model.PipelineTemplateLibrary, int64, error) {
+func (r *PipelineTemplateRepo) ListLibraries(
+	ctx context.Context, query *TemplateLibraryQuery,
+) ([]*model.PipelineTemplateLibrary, int64, error) {
 	if query == nil {
 		query = &TemplateLibraryQuery{}
 	}
@@ -242,11 +244,13 @@ func (r *PipelineTemplateRepo) GetLatestTemplateByName(ctx context.Context, name
 
 // FindTemplateByNameAndLibrary finds the latest template by name within a
 // specific library (matched by library name) and scope.
-func (r *PipelineTemplateRepo) FindTemplateByNameAndLibrary(ctx context.Context, name, libraryName, scope, scopeID string) (*model.PipelineTemplate, error) {
+func (r *PipelineTemplateRepo) FindTemplateByNameAndLibrary(
+	ctx context.Context, name, libraryName, scope, scopeID string,
+) (*model.PipelineTemplate, error) {
 	var one model.PipelineTemplate
 	tx := r.Database().WithContext(ctx).
-		Table("t_pipeline_template t").
-		Joins("JOIN t_pipeline_template_library l ON t.library_id = l.library_id").
+		Table("pipeline_template t").
+		Joins("JOIN pipeline_template_library l ON t.library_id = l.library_id").
 		Where("t.name = ? AND l.name = ? AND t.is_latest = 1 AND t.is_published = 1", name, libraryName)
 	tx = applyScopeFilterAlias(tx, "t", scope, scopeID)
 	err := tx.Select("t.*").First(&one).Error
@@ -384,7 +388,10 @@ func applyScopeFilterAlias(tx *gorm.DB, alias, scope, scopeID string) *gorm.DB {
 	}
 	switch scope {
 	case model.TemplateScopeProject:
-		return tx.Where("("+alias+".scope = ?) OR ("+alias+".scope = ? AND "+alias+".scope_id = ?) OR ("+alias+".scope = ? AND "+alias+".scope_id = ?)",
+		whereClause := "(" + alias + ".scope = ?) OR (" +
+			alias + ".scope = ? AND " + alias + ".scope_id = ?) OR (" +
+			alias + ".scope = ? AND " + alias + ".scope_id = ?)"
+		return tx.Where(whereClause,
 			model.TemplateScopeSystem,
 			model.TemplateScopeOrganization, scopeID,
 			model.TemplateScopeProject, scopeID,

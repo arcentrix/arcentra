@@ -28,5 +28,5 @@ type UserRoleBinding struct {
 }
 
 func (UserRoleBinding) TableName() string {
-	return "t_user_role_binding"
+	return "user_role_binding"
 }

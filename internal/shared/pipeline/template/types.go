@@ -24,9 +24,9 @@ type LibraryManifest struct {
 	Description string `yaml:"description" json:"description"`
 }
 
-// TemplateManifest represents the template.yaml file inside each
+// Manifest represents the template.yaml file inside each
 // template directory (e.g. templates/go-ci/template.yaml).
-type TemplateManifest struct {
+type Manifest struct {
 	Name        string        `yaml:"name" json:"name"`
 	Description string        `yaml:"description" json:"description"`
 	Category    string        `yaml:"category" json:"category"`
@@ -67,7 +67,7 @@ type IncludeEntry struct {
 // directory discovered during a library sync.
 type DiscoveredTemplate struct {
 	DirName     string
-	Manifest    TemplateManifest
+	Manifest    Manifest
 	SpecContent string
 	Readme      string
 }

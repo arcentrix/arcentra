@@ -42,3 +42,32 @@ func ParseAuthorizationToken(f *fiber.Ctx, secretKey string) (*jwt.AuthClaims, e
 	}
 	return claims, nil
 }
+
+// CurrentUserID 从当前请求中提取用户 ID，公共便捷函数
+func CurrentUserID(c *fiber.Ctx, secretKey string) string {
+	claims, err := ParseAuthorizationToken(c, secretKey)
+	if err != nil || claims == nil {
+		return ""
+	}
+	return strings.TrimSpace(claims.UserID)
+}
+
+// UsernameResolver 查询用户名的函数签名
+// 由调用方注入具体实现（如 UserService.FetchUserInfo 的适配）
+type UsernameResolver func(userID string) string
+
+// CurrentUserName 从当前请求中提取用户 ID，再通过 resolver 查询用户名
+// 优先返回 Username；查询失败或 Username 为空时回退为 userID
+func CurrentUserName(c *fiber.Ctx, secretKey string, resolve UsernameResolver) string {
+	userID := CurrentUserID(c, secretKey)
+	if userID == "" {
+		return ""
+	}
+	if resolve == nil {
+		return userID
+	}
+	if name := resolve(userID); name != "" {
+		return name
+	}
+	return userID
+}

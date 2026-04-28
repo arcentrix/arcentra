@@ -184,6 +184,16 @@ func Run(app *App, cleanup func()) {
 		}, "scm-poll")
 	}
 
+	// Agent heartbeat timeout checker — mark agents offline when last_heartbeat
+	// exceeds AGENT_HEARTBEAT_EXPIRE_SECONDS (default 180s, matching 3× 60s heartbeat interval).
+	if app.Services != nil && app.Services.Agent != nil {
+		_ = cron.AddFunc("@every 30s", func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			app.Services.Agent.MarkTimeoutAgentsOffline(ctx)
+		}, "agent-heartbeat-timeout")
+	}
+
 	// Pipeline cron triggers: dynamically register each pipeline's custom cron
 	// expression with the scheduler. SyncAll on startup, then every 5 minutes.
 	if app.Engine != nil && app.Repos != nil {

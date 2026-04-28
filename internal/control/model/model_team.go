@@ -41,7 +41,7 @@ type Team struct {
 }
 
 func (Team) TableName() string {
-	return "t_team"
+	return "team"
 }
 
 // TeamSettings team settings struct

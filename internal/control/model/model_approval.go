@@ -43,7 +43,7 @@ type ApprovalRequest struct {
 
 // TableName returns the database table name.
 func (ApprovalRequest) TableName() string {
-	return "t_approval_request"
+	return "approval_request"
 }
 
 // IsApprovalTerminal returns true when the approval is in a final state.

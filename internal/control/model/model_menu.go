@@ -31,7 +31,7 @@ type Menu struct {
 }
 
 func (Menu) TableName() string {
-	return "t_menu"
+	return "menu"
 }
 
 // 菜单可见性常量

@@ -35,5 +35,5 @@ type ProjectMember struct {
 }
 
 func (pm *ProjectMember) TableName() string {
-	return "t_project_member"
+	return "project_member"
 }

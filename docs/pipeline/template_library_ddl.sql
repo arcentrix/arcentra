@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- Pipeline Template Library DDL
--- Tables: t_pipeline_template_library, t_pipeline_template
+-- Tables: pipeline_template_library, pipeline_template
 
-CREATE TABLE IF NOT EXISTS t_pipeline_template_library (
+CREATE TABLE IF NOT EXISTS pipeline_template_library (
     id                 BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     library_id         VARCHAR(36)   NOT NULL,
     name               VARCHAR(255)  NOT NULL,
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS t_pipeline_template_library (
     INDEX      idx_scope (scope, scope_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE IF NOT EXISTS t_pipeline_template (
+CREATE TABLE IF NOT EXISTS pipeline_template (
     id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     template_id     VARCHAR(36)   NOT NULL,
     library_id      VARCHAR(36)   NOT NULL,

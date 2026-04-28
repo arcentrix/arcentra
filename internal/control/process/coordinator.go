@@ -209,8 +209,8 @@ func (rc *Coordinator) executeDAG(ctx context.Context) error {
 	execCtx.PipelineIDRef = rc.run.PipelineID
 	execCtx.ArtifactURIs = make(map[string]string)
 
-	executor := pipeline.NewPipelineExecutorFromContext(execCtx, *rc.engine.logger)
-	return executor.Execute(ctx)
+	pipelineExec := pipeline.NewPipelineExecutorFromContext(execCtx, *rc.engine.logger)
+	return pipelineExec.Execute(ctx)
 }
 
 // setupEventEmitter initialises the CloudEvents emitter so that

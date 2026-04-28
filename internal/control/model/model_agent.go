@@ -15,38 +15,30 @@
 package model
 
 import (
+	"time"
+
 	"gorm.io/datatypes"
 )
 
 type Agent struct {
 	BaseModel
-	AgentID   string         `gorm:"column:agent_id" json:"agentId"`
-	AgentName string         `gorm:"column:agent_name" json:"agentName"`
-	Address   string         `gorm:"column:address" json:"address"`
-	Port      string         `gorm:"column:port" json:"port"`
-	OS        string         `gorm:"column:os" json:"os"`
-	Arch      string         `gorm:"column:arch" json:"arch"`
-	Version   string         `gorm:"column:version" json:"version"`
-	Status    int            `gorm:"column:status" json:"status"` // 0: unknown, 1: online, 2: offline, 3: busy, 4: idle
-	Labels    datatypes.JSON `gorm:"column:labels" json:"labels"`
-	Metrics   string         `gorm:"column:metrics" json:"metrics"`
-	IsEnabled int            `gorm:"column:is_enabled" json:"isEnabled"` // 0: disable, 1: enable
+	AgentID       string         `gorm:"column:agent_id" json:"agentId"`
+	AgentName     string         `gorm:"column:agent_name" json:"agentName"`
+	Address       string         `gorm:"column:address" json:"address"`
+	Port          string         `gorm:"column:port" json:"port"`
+	OS            string         `gorm:"column:os" json:"os"`
+	Arch          string         `gorm:"column:arch" json:"arch"`
+	Version       string         `gorm:"column:version" json:"version"`
+	Status        int            `gorm:"column:status" json:"status"` // 0: unknown, 1: online, 2: offline, 3: busy, 4: idle
+	Labels        datatypes.JSON `gorm:"column:labels" json:"labels"`
+	Metrics       string         `gorm:"column:metrics" json:"metrics"`
+	LastHeartbeat *time.Time     `gorm:"column:last_heartbeat" json:"lastHeartbeat,omitempty"` // 最后一次心跳时间
+	IsEnabled     int            `gorm:"column:is_enabled" json:"isEnabled"`                   // 0: disable, 1: enable
+	RegisteredBy  string         `gorm:"column:registered_by" json:"registeredBy"`             // admin, dynamic
 }
 
 func (a *Agent) TableName() string {
-	return "t_agent"
-}
-
-// CreateAgentReq request for creating agent
-type CreateAgentReq struct {
-	AgentName string         `json:"agentName"`
-	Labels    datatypes.JSON `json:"labels"`
-}
-
-// CreateAgentResp response for creating agent
-type CreateAgentResp struct {
-	Agent
-	Token string `json:"token"` // Token for agent communication authentication
+	return "agent"
 }
 
 // UpdateAgentReq request for updating agent (AgentId is not allowed to be modified)

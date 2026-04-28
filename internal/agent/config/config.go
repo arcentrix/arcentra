@@ -64,6 +64,7 @@ type MqConfig struct {
 type GrpcConfig struct {
 	ServerAddr           string `mapstructure:"serverAddr"`           // server address (host:port format, e.g., "localhost:9090")
 	Token                string `mapstructure:"token"`                // Bearer token for authentication (uses APIkey if not set)
+	RegistrationToken    string `mapstructure:"registrationToken"`    // Dynamic registration token (art_ prefix)
 	ReadWriteTimeout     int    `mapstructure:"readWriteTimeout"`     // read write timeout (seconds, default: 30)
 	MaxMsgSize           int    `mapstructure:"maxMsgSize"`           // max message size (bytes), 0 means use default value
 	MaxReconnectAttempts int    `mapstructure:"maxReconnectAttempts"` // max reconnection attempts, 0 means unlimited (default: 0)

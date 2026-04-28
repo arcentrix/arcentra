@@ -21,6 +21,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/control/service"
 	tmpl "github.com/arcentrix/arcentra/internal/shared/pipeline/template"
+	"github.com/arcentrix/arcentra/pkg/auth"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/gofiber/fiber/v2"
 )
@@ -81,7 +82,7 @@ func (rt *Router) registerTemplateLibrary(c *fiber.Ctx) error {
 		ScopeID:      strings.TrimSpace(req.ScopeID),
 		SyncInterval: req.SyncInterval,
 		TemplateDir:  strings.TrimSpace(req.TemplateDir),
-		CreatedBy:    rt.currentUserID(c),
+		CreatedBy:    auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey),
 	}
 
 	if err := rt.Services.PipelineTemplate.RegisterLibrary(c.Context(), lib); err != nil {
@@ -301,7 +302,7 @@ func (rt *Router) saveTemplate(c *fiber.Ctx) error {
 
 	editor := strings.TrimSpace(req.Editor)
 	if editor == "" {
-		editor = rt.currentUserID(c)
+		editor = auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
 	}
 
 	commitSha, err := rt.Services.PipelineTemplate.SaveTemplate(c.Context(), service.SaveTemplateRequest{
@@ -342,7 +343,7 @@ func (rt *Router) createTemplateInLibrary(c *fiber.Ctx) error {
 
 	editor := strings.TrimSpace(req.Editor)
 	if editor == "" {
-		editor = rt.currentUserID(c)
+		editor = auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
 	}
 
 	t, err := rt.Services.PipelineTemplate.CreateTemplateInLibrary(c.Context(), service.CreateTemplateRequest{
@@ -378,7 +379,7 @@ func (rt *Router) deleteTemplate(c *fiber.Ctx) error {
 
 	editor := strings.TrimSpace(req.Editor)
 	if editor == "" {
-		editor = rt.currentUserID(c)
+		editor = auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
 	}
 
 	if err := rt.Services.PipelineTemplate.DeleteTemplateFromLibrary(c.Context(), templateID, req.CommitMessage, editor); err != nil {

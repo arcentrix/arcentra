@@ -98,7 +98,9 @@ func (s *PipelineTemplateService) DeleteLibrary(ctx context.Context, libraryID s
 }
 
 // ListLibraries lists libraries matching the query.
-func (s *PipelineTemplateService) ListLibraries(ctx context.Context, query *repo.TemplateLibraryQuery) ([]*model.PipelineTemplateLibrary, int64, error) {
+func (s *PipelineTemplateService) ListLibraries(
+	ctx context.Context, query *repo.TemplateLibraryQuery,
+) ([]*model.PipelineTemplateLibrary, int64, error) {
 	return s.templateRepo.ListLibraries(ctx, query)
 }
 
@@ -270,7 +272,7 @@ func (s *PipelineTemplateService) SaveTemplate(ctx context.Context, req SaveTemp
 		return "", fmt.Errorf("mkdir: %w", mkErr)
 	}
 
-	manifest := tmpl.TemplateManifest{
+	manifest := tmpl.Manifest{
 		Name:        orDefault(req.Name, t.Name),
 		Description: orDefault(req.Description, t.Description),
 		Category:    orDefault(req.Category, t.Category),
@@ -380,7 +382,7 @@ func (s *PipelineTemplateService) CreateTemplateInLibrary(ctx context.Context, r
 		return nil, fmt.Errorf("mkdir: %w", err)
 	}
 
-	manifest := tmpl.TemplateManifest{
+	manifest := tmpl.Manifest{
 		Name:        req.Name,
 		Description: req.Description,
 		Category:    req.Category,
@@ -538,7 +540,9 @@ func (s *PipelineTemplateService) InstantiateTemplate(ctx context.Context, req I
 // ResolveTemplate implements tmpl.ITemplateResolver. It looks up a template
 // by name/version/library within the visible scope, renders it with params,
 // and returns the rendered spec content.
-func (s *PipelineTemplateService) ResolveTemplate(ctx context.Context, name, version, library string, params map[string]any, scope, scopeID string) (string, error) {
+func (s *PipelineTemplateService) ResolveTemplate(
+	ctx context.Context, name, version, library string, params map[string]any, scope, scopeID string,
+) (string, error) {
 	var t *model.PipelineTemplate
 	var err error
 
@@ -573,7 +577,9 @@ func (s *PipelineTemplateService) ResolveTemplate(ctx context.Context, name, ver
 }
 
 // findTemplateByNameVersionScope searches for a template with a specific version across visible scopes.
-func (s *PipelineTemplateService) findTemplateByNameVersionScope(ctx context.Context, name, version, scope, scopeID string) (*model.PipelineTemplate, error) {
+func (s *PipelineTemplateService) findTemplateByNameVersionScope(
+	ctx context.Context, name, version, scope, scopeID string,
+) (*model.PipelineTemplate, error) {
 	libs, _, err := s.templateRepo.ListLibraries(ctx, &repo.TemplateLibraryQuery{
 		Scope:    scope,
 		ScopeID:  scopeID,

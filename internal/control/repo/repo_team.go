@@ -59,7 +59,7 @@ var teamSelectFields = []string{
 	"display_name",
 	"description",
 	"avatar",
-	"parent_team_id",
+	"parenteam_id",
 	"path",
 	"level",
 	"settings",
@@ -78,7 +78,7 @@ var teamSummaryFields = []string{
 	"display_name",
 	"description",
 	"avatar",
-	"parent_team_id",
+	"parenteam_id",
 	"path",
 	"level",
 	"settings",
@@ -95,7 +95,7 @@ var teamUserListFields = []string{
 	"t.display_name",
 	"t.description",
 	"t.avatar",
-	"t.parent_team_id",
+	"t.parenteam_id",
 	"t.path",
 	"t.level",
 	"t.settings",
@@ -169,7 +169,7 @@ func (r *TeamRepo) List(ctx context.Context, query *model.TeamQueryReq) ([]*mode
 		db = db.Where("name LIKE ?", "%"+query.Name+"%")
 	}
 	if query.ParentTeamID != "" {
-		db = db.Where("parent_team_id = ?", query.ParentTeamID)
+		db = db.Where("parenteam_id = ?", query.ParentTeamID)
 	}
 	if query.Visibility != nil {
 		db = db.Where("visibility = ?", *query.Visibility)
@@ -216,7 +216,7 @@ func (r *TeamRepo) ListSubTeams(ctx context.Context, parentTeamID string) ([]*mo
 	var teams []*model.Team
 	err := r.Database().WithContext(ctx).
 		Select(teamSummaryFields).
-		Where("parent_team_id = ? AND is_enabled = ?", parentTeamID, 1).
+		Where("parenteam_id = ? AND is_enabled = ?", parentTeamID, 1).
 		Order("team_id DESC").
 		Find(&teams).Error
 	return teams, err
@@ -279,7 +279,7 @@ func (r *TeamRepo) UpdateStatistics(ctx context.Context, teamID string) error {
 	}
 
 	var projectCount int64
-	r.Database().WithContext(ctx).Table("t_project_team_relation").
+	r.Database().WithContext(ctx).Table("projecteam_relation").
 		Where("team_id = ?", teamID).
 		Count(&projectCount)
 
@@ -338,9 +338,9 @@ func (r *TeamRepo) BatchGet(ctx context.Context, teamIDs []string) ([]*model.Tea
 // ListByUser lists teams for user by userID.
 func (r *TeamRepo) ListByUser(ctx context.Context, userID string) ([]*model.Team, error) {
 	var teams []*model.Team
-	err := r.Database().WithContext(ctx).Table("t_team t").
+	err := r.Database().WithContext(ctx).Table("team t").
 		Select(teamUserListFields).
-		Joins("JOIN t_team_member tm ON t.team_id = tm.team_id").
+		Joins("JOIN team_member tm ON t.team_id = tm.team_id").
 		Where("tm.user_id = ? AND t.is_enabled = ?", userID, 1).
 		Order("t.team_id DESC").
 		Find(&teams).Error

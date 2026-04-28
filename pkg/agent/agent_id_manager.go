@@ -27,6 +27,7 @@ import (
 // Info Agent ID信息
 type Info struct {
 	AgentID       string    `json:"agent_id"`
+	AuthToken     string    `json:"auth_token,omitempty"`
 	RegisteredAt  time.Time `json:"registered_at"`
 	ServerAddress string    `json:"server_address"`
 	Hostname      string    `json:"hostname"`
@@ -104,6 +105,16 @@ func (m *IDManager) GetAgentID() string {
 // GetInfo 获取Agent ID完整信息
 func (m *IDManager) GetInfo() *Info {
 	return m.info
+}
+
+// SetAuthToken sets the per-agent auth token and persists to file.
+func (m *IDManager) SetAuthToken(token string) error {
+	if m.info == nil {
+		m.info = &Info{}
+	}
+	m.info.AuthToken = token
+	m.info.LastUpdateAt = time.Now()
+	return m.saveToFile()
 }
 
 // loadFromFile 从文件加载Agent ID信息

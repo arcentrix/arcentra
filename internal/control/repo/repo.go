@@ -45,6 +45,7 @@ type Repositories struct {
 	JobRun               IJobRunRepository
 	Approval             IApprovalRepository
 	PipelineTemplate     IPipelineTemplateRepository
+	RegistrationToken    IRegistrationTokenRepository
 }
 
 // NewRepositories 初始化所有 repository
@@ -73,6 +74,7 @@ func NewRepositories(db database.IDatabase, ch cache.ICache) *Repositories {
 		JobRun:               NewJobRunRepo(db),
 		Approval:             NewApprovalRepo(db),
 		PipelineTemplate:     NewPipelineTemplateRepo(db),
+		RegistrationToken:    NewRegistrationTokenRepo(db),
 	}
 }
 

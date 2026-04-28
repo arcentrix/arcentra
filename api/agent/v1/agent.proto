@@ -155,6 +155,8 @@ message RegisterRequest {
   string version = 6;                     // Agent version
   int32 max_concurrent_step_runs = 7;    // Maximum concurrent step runs
   map<string, string> labels = 8;        // Custom labels
+  string registration_token = 9;         // Dynamic registration token (art_ prefix)
+  string agent_name = 10;                // Agent name for dynamic registration
 }
 
 // Agent registration response
@@ -165,6 +167,8 @@ message RegisterResponse {
   int64 heartbeat_interval = 4;           // Heartbeat interval (seconds)
   map<string, string> labels = 5;        // Agent labels assigned by Server
   StorageConfig storage = 6;             // Object storage configuration (auto-provisioned)
+  string auth_token = 7;                 // Per-agent auth token for subsequent gRPC calls
+  bool pending_approval = 8;             // Whether agent is pending admin approval
 }
 
 // StorageConfig carries object-storage credentials delivered from control plane.

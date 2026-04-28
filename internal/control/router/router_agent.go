@@ -24,30 +24,27 @@ func (rt *Router) agentRouter(r fiber.Router, auth fiber.Handler) {
 	agentGroup := r.Group("/agent", auth)
 	{
 		// RESTful API
-		agentGroup.Post("", rt.createAgent)                  // POST /agent - create agent
 		agentGroup.Get("", rt.listAgent)                     // GET /agent - list agents
 		agentGroup.Get("/statistics", rt.getAgentStatistics) // GET /agent/statistics - get agent statistics
 		agentGroup.Get("/:agentId", rt.getAgent)             // GET /agent/:agentId - get agent by agentId
 		agentGroup.Put("/:agentId", rt.updateAgent)          // PUT /agent/:agentId - update agent
 		agentGroup.Delete("/:agentId", rt.deleteAgent)       // DELETE /agent/:agentId - delete agent
+		agentGroup.Put("/:agentId/approve", rt.approveAgent) // PUT /agent/:agentId/approve - approve agent
 	}
 }
 
-// createAgent POST /agent - create a new agent
-func (rt *Router) createAgent(c *fiber.Ctx) error {
-	var createAgentReq *model.CreateAgentReq
-	agentLogic := rt.Services.Agent
-
-	if err := c.BodyParser(&createAgentReq); err != nil {
-		return http.Err(c, http.Failed.Code, http.Failed.Msg)
+// approveAgent PUT /agent/:agentId/approve - approve an agent
+func (rt *Router) approveAgent(c *fiber.Ctx) error {
+	agentID := c.Params("agentId")
+	if agentID == "" {
+		return http.Err(c, http.BadRequest.Code, "agent id is required")
 	}
 
-	agent, err := agentLogic.CreateAgent(c.Context(), createAgentReq)
-	if err != nil {
-		return http.Err(c, http.Failed.Code, http.Failed.Msg)
+	if err := rt.Services.Agent.ApproveAgent(c.Context(), agentID); err != nil {
+		return http.Err(c, http.Failed.Code, "failed to approve agent")
 	}
 
-	return http.Detail(c, agent)
+	return http.Operation(c)
 }
 
 // listAgent GET /agent - list agents with pagination

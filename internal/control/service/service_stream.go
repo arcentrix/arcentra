@@ -49,6 +49,7 @@ type StreamServiceImpl struct {
 const (
 	streamStatusTopic   = "EVENT_PIPELINE"
 	streamConsumerGroup = "arcentra-stream"
+	streamClientID      = "arcentra-stream"
 )
 
 type KafkaSettings struct {
@@ -103,6 +104,7 @@ func (s *StreamServiceImpl) startKafkaLogConsumer(cfg KafkaSettings) {
 		cfg.BootstrapServers,
 		"BUILD_LOGS",
 		"arcentra",
+		kafka.WithConsumerGroupID(streamConsumerGroup+"-build-logs"),
 		kafka.WithConsumerOptions(clientOptions...),
 		kafka.WithConsumerAutoOffsetReset("earliest"),
 	)
@@ -499,7 +501,8 @@ func (s *StreamServiceImpl) newTopicConsumer(suffix string) (*kafka.Consumer, er
 	return kafka.NewConsumer(
 		s.kafkaCfg.BootstrapServers,
 		streamStatusTopic,
-		streamConsumerGroup+"-"+suffix,
+		streamClientID,
+		kafka.WithConsumerGroupID(streamConsumerGroup+"-"+suffix),
 		kafka.WithConsumerOptions(
 			kafka.WithSecurityProtocol(s.kafkaCfg.SecurityProtocol),
 			kafka.WithSaslMechanism(s.kafkaCfg.Sasl.Mechanism),

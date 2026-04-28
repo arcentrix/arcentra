@@ -32,7 +32,7 @@ type Identity struct {
 }
 
 func (s *Identity) TableName() string {
-	return "t_identity"
+	return "identity"
 }
 
 // OAuthConfig OAuth 配置

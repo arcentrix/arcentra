@@ -2,8 +2,10 @@
 [grpc]
 # server address (host:port format, e.g., "localhost:9090")
 serverAddr = "localhost:9090"
-# Bearer token for authentication
-token = "8EdOp4FC5Khu8SraD6LKQXtG85G0xQYeahsUyCkoxDE="
+# Bearer token for authentication (set automatically after dynamic registration)
+token = ""
+# Dynamic registration token (art_ prefix) - use this instead of agent.id + token for self-registration
+registrationToken = ""
 # read write timeout (seconds, default: 30)
 readWriteTimeout = 5
 # unit: bytes (default: 100MB) - for plugin uploads

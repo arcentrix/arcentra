@@ -43,7 +43,7 @@ type Organization struct {
 }
 
 func (Organization) TableName() string {
-	return "t_organization"
+	return "organization"
 }
 
 // OrganizationSettings 组织设置结构

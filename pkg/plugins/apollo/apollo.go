@@ -31,6 +31,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const configFormatProperties = "properties"
+
 // Config is the plugin-level configuration.
 type Config struct {
 	PortalURL string `json:"portalUrl"`
@@ -253,7 +255,8 @@ func (p *Apollo) configUpdate(params json.RawMessage, opts json.RawMessage) (jso
 			"comment":             args.Comment,
 			"dataChangeCreatedBy": args.Operator,
 		}
-		resp, err := client.R().
+		var resp *resty.Response
+		resp, err = client.R().
 			SetHeader("Authorization", args.Token).
 			SetHeader("Content-Type", "application/json;charset=UTF-8").
 			SetBody(body).
@@ -533,7 +536,7 @@ func resolveValue(value, valueFile string, opts json.RawMessage) (string, error)
 // parseConfigFile parses a configuration file into key-value pairs.
 func parseConfigFile(data []byte, format string) (map[string]string, error) {
 	switch strings.ToLower(format) {
-	case "properties":
+	case configFormatProperties:
 		return parseProperties(data)
 	case "yaml", "yml":
 		return parseYAML(data)

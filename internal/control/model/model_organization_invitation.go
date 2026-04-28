@@ -28,7 +28,7 @@ type OrganizationInvitation struct {
 }
 
 func (OrganizationInvitation) TableName() string {
-	return "t_organization_invitation"
+	return "organization_invitation"
 }
 
 // InvitationStatus 邀请状态

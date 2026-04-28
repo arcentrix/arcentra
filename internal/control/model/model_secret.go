@@ -28,5 +28,5 @@ type Secret struct {
 }
 
 func (Secret) TableName() string {
-	return "t_secret"
+	return "secret"
 }

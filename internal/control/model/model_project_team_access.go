@@ -23,7 +23,7 @@ type ProjectTeamAccess struct {
 }
 
 func (ProjectTeamAccess) TableName() string {
-	return "t_project_team_access"
+	return "project_team_access"
 }
 
 // ProjectTeamAccessLevel 项目团队访问权限级别

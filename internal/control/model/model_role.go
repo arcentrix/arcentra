@@ -25,7 +25,7 @@ type Role struct {
 }
 
 func (r *Role) TableName() string {
-	return "t_role"
+	return "role"
 }
 
 // 内置组织角色 ID

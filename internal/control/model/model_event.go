@@ -28,7 +28,7 @@ type SystemEvent struct {
 }
 
 func (SystemEvent) TableName() string {
-	return "t_system_event"
+	return "system_event"
 }
 
 // AuditLog 操作审计日志表
@@ -48,5 +48,5 @@ type AuditLog struct {
 }
 
 func (AuditLog) TableName() string {
-	return "t_audit_log"
+	return "audit_log"
 }

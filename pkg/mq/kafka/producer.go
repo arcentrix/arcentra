@@ -58,6 +58,19 @@ func WithProducerCompression(compression string) ProducerOption {
 	}
 }
 
+// Normalize sets default values for empty fields.
+func (c *ProducerConfig) Normalize() {
+	if c.Acks == "" {
+		c.Acks = "all"
+	}
+	if c.Retries == 0 {
+		c.Retries = 3
+	}
+	if c.Compression == "" {
+		c.Compression = "snappy"
+	}
+}
+
 // Producer wraps a Kafka producer instance.
 type Producer struct {
 	producer *kafka.Producer

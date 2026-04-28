@@ -31,7 +31,7 @@ type StorageConfig struct {
 }
 
 func (StorageConfig) TableName() string {
-	return "t_storage_config"
+	return "storage_config"
 }
 
 // StorageConfigDetail 存储配置详情（通用结构）

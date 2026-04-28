@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	dataTablePrefix = "t_"
+	dataTablePrefix = ""
 )
 
 // Options holds common connection pool and logging options

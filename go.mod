@@ -50,7 +50,7 @@ require (
 	github.com/containerd/containerd v1.7.31
 	github.com/gofiber/contrib/fiberi18n/v2 v2.0.6
 	github.com/hashicorp/go-metrics v0.5.4
-	github.com/opencontainers/runtime-spec v1.3.0
+	github.com/opencontainers/runtime-spec v1.1.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.43.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.43.0

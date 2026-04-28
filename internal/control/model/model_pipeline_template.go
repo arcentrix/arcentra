@@ -45,7 +45,7 @@ type PipelineTemplateLibrary struct {
 
 // TableName returns the database table name.
 func (PipelineTemplateLibrary) TableName() string {
-	return "t_pipeline_template_library"
+	return "pipeline_template_library"
 }
 
 // PipelineTemplate represents a single template entry synced from a library
@@ -72,7 +72,7 @@ type PipelineTemplate struct {
 
 // TableName returns the database table name.
 func (PipelineTemplate) TableName() string {
-	return "t_pipeline_template"
+	return "pipeline_template"
 }
 
 // TemplateParam describes a single parameter that a template accepts.

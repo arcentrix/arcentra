@@ -193,15 +193,15 @@ func (r *ProjectRepo) ListByUser(
 	var projects []*model.Project
 	var total int64
 
-	db := r.Database().WithContext(ctx).Table("t_project").
-		Joins("INNER JOIN t_project_member ON t_project.project_id = t_project_member.project_id").
-		Where("t_project_member.user_id = ?", userID)
+	db := r.Database().WithContext(ctx).Table("project").
+		Joins("INNER JOIN project_member ON project.project_id = project_member.project_id").
+		Where("project_member.user_id = ?", userID)
 
 	if orgID != "" {
-		db = db.Where("t_project.org_id = ?", orgID)
+		db = db.Where("project.org_id = ?", orgID)
 	}
 	if role != "" {
-		db = db.Where("t_project_member.role_id = ?", role)
+		db = db.Where("project_member.role_id = ?", role)
 	}
 
 	if err := db.Count(&total).Error; err != nil {
@@ -219,8 +219,8 @@ func (r *ProjectRepo) ListByUser(
 	}
 	offset := (pageNum - 1) * pageSize
 
-	err := db.Select("t_project.*").
-		Order("t_project.created_at DESC").
+	err := db.Select("project.*").
+		Order("project.created_at DESC").
 		Offset(offset).
 		Limit(pageSize).
 		Find(&projects).Error

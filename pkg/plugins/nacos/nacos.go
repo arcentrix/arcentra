@@ -29,6 +29,8 @@ import (
 	"github.com/go-resty/resty/v2"
 )
 
+const nacosDefaultGroup = "DEFAULT_GROUP"
+
 // Config is the plugin-level configuration.
 type Config struct {
 	ServerAddr string `json:"serverAddr"`
@@ -157,7 +159,7 @@ func (p *Nacos) configGet(params json.RawMessage, _ json.RawMessage) (json.RawMe
 		return nil, fmt.Errorf("data_id is required")
 	}
 	if args.Group == "" {
-		args.Group = "DEFAULT_GROUP"
+		args.Group = nacosDefaultGroup
 	}
 
 	client := p.newClient(args.ServerAddr)
@@ -207,7 +209,7 @@ func (p *Nacos) configPublish(params json.RawMessage, opts json.RawMessage) (jso
 		return nil, fmt.Errorf("data_id is required")
 	}
 	if args.Group == "" {
-		args.Group = "DEFAULT_GROUP"
+		args.Group = nacosDefaultGroup
 	}
 
 	content, err := p.resolveContent(args.Content, args.ContentFile, opts)
@@ -266,7 +268,7 @@ func (p *Nacos) configDelete(params json.RawMessage, _ json.RawMessage) (json.Ra
 		return nil, fmt.Errorf("data_id is required")
 	}
 	if args.Group == "" {
-		args.Group = "DEFAULT_GROUP"
+		args.Group = nacosDefaultGroup
 	}
 
 	client := p.newClient(args.ServerAddr)

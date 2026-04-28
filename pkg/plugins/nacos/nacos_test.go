@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const nacosConfigsPath = "/nacos/v1/cs/configs"
+
 func TestNewNacos(t *testing.T) {
 	p := NewNacos()
 	assert.NotNil(t, p)
@@ -105,7 +107,7 @@ func TestConfigGet_MissingDataID(t *testing.T) {
 
 func TestConfigGet_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/nacos/v1/cs/configs" && r.Method == http.MethodGet {
+		if r.URL.Path == nacosConfigsPath && r.Method == http.MethodGet {
 			assert.Equal(t, "app.yaml", r.URL.Query().Get("dataId"))
 			assert.Equal(t, "DEFAULT_GROUP", r.URL.Query().Get("group"))
 			assert.Equal(t, "ns1", r.URL.Query().Get("tenant"))
@@ -152,7 +154,7 @@ func TestConfigGet_NotFound(t *testing.T) {
 
 func TestConfigPublish_InlineContent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/nacos/v1/cs/configs" && r.Method == http.MethodPost {
+		if r.URL.Path == nacosConfigsPath && r.Method == http.MethodPost {
 			_ = r.ParseForm()
 			assert.Equal(t, "app.yaml", r.FormValue("dataId"))
 			assert.Equal(t, "yaml", r.FormValue("type"))
@@ -183,7 +185,7 @@ func TestConfigPublish_InlineContent(t *testing.T) {
 
 func TestConfigPublish_ContentFile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/nacos/v1/cs/configs" && r.Method == http.MethodPost {
+		if r.URL.Path == nacosConfigsPath && r.Method == http.MethodPost {
 			_ = r.ParseForm()
 			assert.Contains(t, r.FormValue("content"), "from-file")
 			_, _ = w.Write([]byte("true"))
@@ -302,7 +304,7 @@ func TestEnsureToken_WithCredentials(t *testing.T) {
 			_, _ = w.Write([]byte(`{"accessToken":"tk123","tokenTtl":600}`))
 			return
 		}
-		if r.URL.Path == "/nacos/v1/cs/configs" {
+		if r.URL.Path == nacosConfigsPath {
 			assert.Equal(t, "tk123", r.URL.Query().Get("accessToken"))
 			_, _ = w.Write([]byte("content"))
 			return

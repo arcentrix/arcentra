@@ -47,7 +47,7 @@ func ProvideEngine(
 // ProvideTaskQueueProducer creates a Kafka-backed task queue for the control
 // plane to enqueue job run tasks. Returns nil when Kafka is not configured,
 // enabling a pure local-execution mode.
-func ProvideTaskQueueProducer(appConf *config.AppConfig, logger *log.Logger) nova.TaskQueue {
+func ProvideTaskQueueProducer(appConf *config.AppConfig, _ *log.Logger) nova.TaskQueue {
 	kafkaCfg := appConf.MessageQueue.Kafka
 	if kafkaCfg.BootstrapServers == "" {
 		log.Info("Kafka not configured, pipeline process running in local-only mode")

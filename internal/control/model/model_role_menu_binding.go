@@ -27,7 +27,7 @@ type RoleMenuBinding struct {
 }
 
 func (RoleMenuBinding) TableName() string {
-	return "t_role_menu_binding"
+	return "role_menu_binding"
 }
 
 // 角色菜单访问权限常量

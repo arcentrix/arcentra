@@ -28,7 +28,7 @@ type TeamVariable struct {
 }
 
 func (TeamVariable) TableName() string {
-	return "t_team_variable"
+	return "team_variable"
 }
 
 // TeamVariableType 团队变量类型枚举

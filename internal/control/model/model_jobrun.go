@@ -46,7 +46,7 @@ type JobRun struct {
 
 // TableName returns the database table name.
 func (JobRun) TableName() string {
-	return "t_job_run"
+	return "job_run"
 }
 
 // JobRun status constants align with StepRun status for consistency.

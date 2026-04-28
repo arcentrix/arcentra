@@ -28,5 +28,5 @@ type Setting struct {
 
 // TableName returns the database table name.
 func (Setting) TableName() string {
-	return "t_setting"
+	return "setting"
 }

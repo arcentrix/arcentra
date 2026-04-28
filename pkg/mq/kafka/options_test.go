@@ -41,6 +41,7 @@ func TestProducerOptionsApply(t *testing.T) {
 
 func TestNormalizeProducerConfig_Defaults(t *testing.T) {
 	cfg := ProducerConfig{}
+	cfg.Normalize()
 
 	if cfg.Acks != "all" {
 		t.Fatalf("expected default Acks to be all, got %s", cfg.Acks)
@@ -82,6 +83,7 @@ func TestConsumerOptionsApply(t *testing.T) {
 
 func TestNormalizeConsumerConfig_Defaults(t *testing.T) {
 	cfg := ConsumerConfig{}
+	cfg.Normalize()
 
 	if cfg.AutoOffsetReset != "earliest" {
 		t.Fatalf("expected default AutoOffsetReset to be earliest, got %s", cfg.AutoOffsetReset)

@@ -266,7 +266,12 @@ func executeJobRun(
 	}
 
 	start := time.Now()
-	reportJobRunStatus(grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_BUSY, int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING), "", start, 0)
+	reportJobRunStatus(
+		grpcClient, agentConf, payload.JobRunID,
+		agentv1.AgentStatus_AGENT_STATUS_BUSY,
+		int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING),
+		"", start, 0,
+	)
 
 	workspace := payload.Workspace
 	if workspace == "" {
@@ -280,9 +285,7 @@ func executeJobRun(
 		return fmt.Errorf("source clone failed: %w", err)
 	}
 
-	if err := handleArtifactDownload(jobCtx, payload.ArtifactURIs, workspace, storageInstance); err != nil {
-		log.Warnw("artifact download failed (non-fatal)", "jobRunId", payload.JobRunID, "error", err)
-	}
+	handleArtifactDownload(jobCtx, payload.ArtifactURIs, workspace, storageInstance)
 
 	var jobErr error
 	for _, step := range payload.Steps {
@@ -582,9 +585,9 @@ func handleSourceClone(ctx context.Context, src *taskqueue.SourcePayload, worksp
 // handleArtifactDownload downloads upstream job artifacts from object storage
 // into the workspace. Each entry in uris maps "jobName/artifactName" to an
 // object key (or URI) in the configured bucket.
-func handleArtifactDownload(ctx context.Context, uris map[string]string, workspace string, st storage.IStorage) error {
+func handleArtifactDownload(ctx context.Context, uris map[string]string, workspace string, st storage.IStorage) {
 	if len(uris) == 0 || st == nil {
-		return nil
+		return
 	}
 
 	artifactsDir := filepath.Join(workspace, ".artifacts")
@@ -606,5 +609,4 @@ func handleArtifactDownload(ctx context.Context, uris map[string]string, workspa
 		}
 		log.Infow("artifact downloaded", "key", key, "localPath", localPath)
 	}
-	return nil
 }

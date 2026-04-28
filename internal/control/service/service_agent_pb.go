@@ -24,6 +24,7 @@ import (
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/bytedance/sonic"
 	"google.golang.org/grpc/codes"
@@ -70,60 +71,137 @@ func (a *AgentServiceImpl) Heartbeat(ctx context.Context, req *agentv1.Heartbeat
 }
 
 func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
-	// Validate token
-	if req.Token == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "token is required")
+	registrationToken := strings.TrimSpace(req.RegistrationToken)
+
+	// Dynamic registration path
+	if registrationToken != "" {
+		return a.dynamicRegister(ctx, req)
 	}
 
+	// Legacy path: if token is provided, validate as HMAC-SHA256 per-agent token
+	if req.Token != "" {
+		return a.legacyRegister(ctx, req)
+	}
+
+	return nil, status.Errorf(codes.InvalidArgument, "registration_token or token is required")
+}
+
+// dynamicRegister handles agent registration via a shared registration token.
+func (a *AgentServiceImpl) dynamicRegister(ctx context.Context, req *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
+	// Validate registration token
+	if err := a.agentService.ValidateRegistrationToken(ctx, req.RegistrationToken); err != nil {
+		log.Warnw("registration token validation failed", "error", err)
+		return nil, status.Errorf(codes.Unauthenticated, "invalid registration token")
+	}
+
+	// Generate new agent ID
+	agentID := id.ShortID()
+
+	// Determine agent name
+	agentName := strings.TrimSpace(req.AgentName)
+	if agentName == "" {
+		agentName = agentID
+	}
+
+	// Encode labels
+	labelsJSON := "{}"
+	if len(req.Labels) > 0 {
+		if encoded, err := sonic.Marshal(req.Labels); err == nil {
+			labelsJSON = string(encoded)
+		}
+	}
+
+	agent := &model.Agent{
+		AgentID:   agentID,
+		AgentName: agentName,
+		Address:   req.Ip,
+		OS:        req.Os,
+		Arch:      req.Arch,
+		Version:   req.Version,
+		Status:    1, // online
+		Labels:    []byte(labelsJSON),
+		Metrics:   "/metrics",
+	}
+
+	if err := a.agentService.DynamicRegisterAgent(ctx, agentID, agentName, agent); err != nil {
+		log.Errorw("failed to create agent via dynamic registration", "error", err)
+		return nil, status.Errorf(codes.Internal, "failed to register agent")
+	}
+
+	// Generate per-agent auth token
+	authToken, err := a.agentService.GenerateAgentToken(ctx, agentID)
+	if err != nil {
+		log.Errorw("failed to generate auth token", "agentID", agentID, "error", err)
+		return nil, status.Errorf(codes.Internal, "failed to generate auth token")
+	}
+
+	// Check if pending approval
+	pendingApproval := agent.IsEnabled == 0
+
+	// Parse labels for response
+	respLabels := req.Labels
+	if respLabels == nil {
+		respLabels = make(map[string]string)
+	}
+
+	resp := &agentv1.RegisterResponse{
+		Success:           true,
+		Message:           "registration successful",
+		AgentId:           agentID,
+		HeartbeatInterval: 60,
+		Labels:            respLabels,
+		AuthToken:         authToken,
+		PendingApproval:   pendingApproval,
+	}
+
+	if a.storageRepo != nil {
+		if sc := a.buildStorageConfig(ctx); sc != nil {
+			resp.Storage = sc
+		}
+	}
+
+	return resp, nil
+}
+
+// legacyRegister handles the existing HMAC-SHA256 per-agent token registration.
+func (a *AgentServiceImpl) legacyRegister(ctx context.Context, req *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
 	agentRepo := a.agentService.agentRepo
-	var agentID string
-	var err error
 
 	// Extract agentID from token (token format: agentID:signature)
-	// If request provides agentID, use it for validation; otherwise extract from token
 	tokenParts := strings.SplitN(req.Token, ":", 2)
 	if len(tokenParts) != 2 {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid token format: expected agentID:signature")
 	}
 	tokenAgentID := tokenParts[0]
 
-	// Use agentID from request if provided, otherwise use agentID from token
-	if req.AgentId != "" {
-		agentID = req.AgentId
-		// Validate that request agentID matches token agentID
-		if agentID != tokenAgentID {
-			log.Warnw("agentID mismatch", "requestAgentId", agentID, "tokenAgentID", tokenAgentID)
-			return nil, status.Errorf(codes.InvalidArgument, "agentID mismatch: request agentID does not match token")
-		}
-	} else {
+	agentID := req.AgentId
+	if agentID == "" {
 		agentID = tokenAgentID
 	}
-
-	// Verify token by regenerating it and comparing
-	expectedToken, err := a.agentService.GenerateAgentToken(ctx, agentID)
-	if err != nil {
-		log.Errorw("failed to generate token for verification", "agentID", agentID, "error", err)
-		return nil, status.Errorf(codes.Internal, "failed to verify token")
+	if agentID != tokenAgentID {
+		return nil, status.Errorf(codes.InvalidArgument, "agentID mismatch: request agentID does not match token")
 	}
 
+	// Verify token
+	expectedToken, err := a.agentService.GenerateAgentToken(ctx, agentID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to verify token")
+	}
 	if req.Token != expectedToken {
-		log.Warnw("token verification failed", "agentID", agentID)
 		return nil, status.Errorf(codes.Unauthenticated, "invalid token")
 	}
 
-	// Check if agent exists
+	// Check agent exists
 	_, err = agentRepo.Get(ctx, agentID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, status.Errorf(codes.NotFound, "agent not found: %s", agentID)
 		}
-		log.Errorw("failed to get agent", "agentID", agentID, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to get agent")
 	}
 
-	// Update agent information from registration request
+	// Update agent info
 	updates := make(map[string]any)
-
 	if req.Ip != "" {
 		updates["address"] = req.Ip
 	}
@@ -137,44 +215,34 @@ func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 		updates["version"] = req.Version
 	}
 	if len(req.Labels) > 0 {
-		encoded, marshalErr := sonic.Marshal(req.Labels)
-		if marshalErr == nil {
+		if encoded, marshalErr := sonic.Marshal(req.Labels); marshalErr == nil {
 			updates["labels"] = string(encoded)
 		}
 	}
-	updates["status"] = 1 // Set status to online
+	updates["status"] = 1
 	updates["last_heartbeat"] = time.Now()
 
 	if len(updates) > 0 {
 		if err = agentRepo.Patch(ctx, agentID, updates); err != nil {
-			log.Errorw("failed to update agent during registration", "agentID", agentID, "error", err)
 			return nil, status.Errorf(codes.Internal, "failed to update agent")
 		}
 	}
 
-	// Get agent detail to return heartbeat interval
 	detail, err := agentRepo.GetDetail(ctx, agentID)
 	if err != nil {
-		log.Errorw("failed to get agent detail", "agentID", agentID, "error", err)
 		return nil, status.Errorf(codes.Internal, "failed to get agent detail")
 	}
 
-	heartbeatInterval := int64(60) // default
-
-	// Parse labels from JSON
 	labels := make(map[string]string)
 	if len(detail.Labels) > 0 {
-		if unmarshalErr := sonic.Unmarshal(detail.Labels, &labels); unmarshalErr != nil {
-			log.Warnw("failed to parse labels", "agentID", agentID, "error", unmarshalErr)
-			// Continue with empty labels if parsing fails
-		}
+		_ = sonic.Unmarshal(detail.Labels, &labels)
 	}
 
 	resp := &agentv1.RegisterResponse{
 		Success:           true,
 		Message:           "registration successful",
 		AgentId:           agentID,
-		HeartbeatInterval: heartbeatInterval,
+		HeartbeatInterval: 60,
 		Labels:            labels,
 	}
 

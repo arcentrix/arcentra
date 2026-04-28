@@ -27,7 +27,7 @@ type OrganizationMember struct {
 }
 
 func (OrganizationMember) TableName() string {
-	return "t_organization_member"
+	return "organization_member"
 }
 
 // OrganizationMemberRole 组织成员角色

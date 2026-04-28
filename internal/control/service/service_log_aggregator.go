@@ -67,7 +67,7 @@ func NewLogAggregator(_ *redis.Client, mysql *gorm.DB) *LogAggregator {
 		subscribers:   make(map[string][]chan *LogEntry),
 		bufferSize:    100,             // 缓冲100条日志后写入
 		flushInterval: 3 * time.Second, // 3秒强制刷新
-		tableName:     "l_step_run_logs",
+		tableName:     "step_run_logs",
 	}
 
 	return la

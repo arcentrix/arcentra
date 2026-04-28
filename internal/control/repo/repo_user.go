@@ -165,7 +165,7 @@ func (ur *UserRepo) Register(register *model.Register) error {
 		return errors.New(http.UserAlreadyExist.Msg)
 	}
 	return ur.Database().Exec(
-		"INSERT INTO t_user (user_id, username, full_name, email, avatar, password, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO user (user_id, username, full_name, email, avatar, password, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		register.UserID,
 		register.Username,
 		register.FullName,
@@ -203,8 +203,8 @@ const roleSubqueryJoinDefault = "" +
 	"FROM (" +
 	"SELECT urb.user_id, r.name, " +
 	"ROW_NUMBER() OVER (PARTITION BY urb.user_id ORDER BY urb.create_time ASC) rn " +
-	"FROM t_user_role_binding urb " +
-	"JOIN t_role r ON r.role_id = urb.role_id " +
+	"FROM user_role_binding urb " +
+	"JOIN role r ON r.role_id = urb.role_id " +
 	"WHERE r.is_enabled = 1" +
 	") t WHERE rn = 1" +
 	") role ON role.user_id = u.user_id"
@@ -212,8 +212,8 @@ const roleSubqueryJoinDefault = "" +
 const roleSubqueryJoinByRoleID = "" +
 	"INNER JOIN (" +
 	"SELECT DISTINCT urb.user_id, r.name AS role_name " +
-	"FROM t_user_role_binding urb " +
-	"JOIN t_role r ON r.role_id = urb.role_id " +
+	"FROM user_role_binding urb " +
+	"JOIN role r ON r.role_id = urb.role_id " +
 	"WHERE r.is_enabled = 1 AND urb.role_id = ?" +
 	") role ON role.user_id = u.user_id"
 
@@ -223,8 +223,8 @@ const roleSubqueryJoinByRoleName = "" +
 	"FROM (" +
 	"SELECT urb.user_id, r.name, " +
 	"ROW_NUMBER() OVER (PARTITION BY urb.user_id ORDER BY urb.create_time ASC) rn " +
-	"FROM t_user_role_binding urb " +
-	"JOIN t_role r ON r.role_id = urb.role_id " +
+	"FROM user_role_binding urb " +
+	"JOIN role r ON r.role_id = urb.role_id " +
 	"WHERE r.is_enabled = 1 AND r.name = ?" +
 	") t WHERE rn = 1" +
 	") role ON role.user_id = u.user_id"
@@ -237,11 +237,11 @@ func (ur *UserRepo) GetUserList(offset int, pageSize int) ([]UserWithExt, int64,
 	// join with user ext table and role table to get last login time, invitation status, and role name
 	// use subquery to get the first role name for each user to avoid duplicate rows
 	selectFields := userWithExtSelectFields
-	userExtJoin := "LEFT JOIN t_user_ext ue ON ue.user_id = u.user_id"
+	userExtJoin := "LEFT JOIN user_ext ue ON ue.user_id = u.user_id"
 	roleSubqueryJoin := roleSubqueryJoinDefault
 
 	err := ur.Database().
-		Table("t_user AS u").
+		Table("user AS u").
 		Select(selectFields).
 		Joins(userExtJoin).
 		Joins(roleSubqueryJoin).
@@ -263,7 +263,7 @@ func (ur *UserRepo) GetUsersByRole(roleID string, roleName string, offset int, p
 	var count int64
 
 	selectFields := userWithExtSelectFields
-	userExtJoin := "LEFT JOIN t_user_ext ue ON ue.user_id = u.user_id"
+	userExtJoin := "LEFT JOIN user_ext ue ON ue.user_id = u.user_id"
 
 	// 构建角色子查询，根据 roleID 或 roleName 过滤
 	var roleSubqueryJoin string
@@ -279,7 +279,7 @@ func (ur *UserRepo) GetUsersByRole(roleID string, roleName string, offset int, p
 	}
 
 	db := ur.Database().
-		Table("t_user AS u").
+		Table("user AS u").
 		Select(selectFields).
 		Joins(userExtJoin)
 

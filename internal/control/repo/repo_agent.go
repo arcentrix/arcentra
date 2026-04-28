@@ -36,6 +36,11 @@ type IAgentRepository interface {
 	Delete(ctx context.Context, agentID string) error
 	List(ctx context.Context, page, size int) ([]model.Agent, int64, error)
 	Statistics(ctx context.Context) (total, online, offline int64, err error)
+	Approve(ctx context.Context, agentID string) error
+	// MarkOfflineByHeartbeatTimeout sets status=2 (offline) for agents whose
+	// last_heartbeat is before the given time and whose status is still online.
+	// Returns the number of agents marked offline.
+	MarkOfflineByHeartbeatTimeout(ctx context.Context, before time.Time) (int64, error)
 }
 
 type AgentRepo struct {
@@ -43,7 +48,9 @@ type AgentRepo struct {
 	cache.ICache
 }
 
-const agentListSelectFields = "id, agent_id, agent_name, address, port, os, arch, version, status, labels, metrics, is_enabled"
+const agentListSelectFields = "id, agent_id, agent_name, address, port, os, arch, version, " +
+	"status, labels, metrics, last_heartbeat, is_enabled, " +
+	"COALESCE(registered_by, 'admin') as registered_by"
 
 // NewAgentRepo creates an agent repository with optional cache.
 func NewAgentRepo(db database.IDatabase, ch cache.ICache) IAgentRepository {
@@ -82,7 +89,9 @@ var agentSelectFields = []string{
 	"status",
 	"labels",
 	"metrics",
+	"last_heartbeat",
 	"is_enabled",
+	"COALESCE(registered_by, 'admin') as registered_by",
 	"created_at",
 	"updated_at",
 }
@@ -201,6 +210,27 @@ func (ar *AgentRepo) Statistics(ctx context.Context) (total, online, offline int
 		return 0, 0, 0, err
 	}
 	return total, online, offline, nil
+}
+
+// Approve enables an agent by setting is_enabled=1.
+func (ar *AgentRepo) Approve(ctx context.Context, agentID string) error {
+	if err := ar.Database().WithContext(ctx).Table((&model.Agent{}).TableName()).
+		Where("agent_id = ?", agentID).Update("is_enabled", 1).Error; err != nil {
+		return err
+	}
+	ar.invalidateAgentCache(ctx, agentID)
+	return nil
+}
+
+// MarkOfflineByHeartbeatTimeout sets status=2 (offline) for agents whose
+// last_heartbeat is before the given time (or NULL but created before the
+// threshold) and are not already offline/unknown.
+func (ar *AgentRepo) MarkOfflineByHeartbeatTimeout(ctx context.Context, before time.Time) (int64, error) {
+	result := ar.Database().WithContext(ctx).Table((&model.Agent{}).TableName()).
+		Where("(last_heartbeat < ? OR (last_heartbeat IS NULL AND created_at < ?)) AND status NOT IN (?, ?)",
+			before, before, 0, 2).
+		Updates(map[string]any{"status": 2, "updated_at": time.Now()})
+	return result.RowsAffected, result.Error
 }
 
 // invalidateAgentCache clears agent cache.

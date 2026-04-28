@@ -328,18 +328,20 @@ func (c *Cron) runWithRecovery(j Job, name string, t time.Time) {
 	if c.redisClient != nil {
 		ctx := context.Background()
 		key := "pipeline:cron:lock:" + name + ":" + t.String()
-		// use SET NX EX to get distributed lock, set expiration time to 5 minutes
-		locked, err := c.redisClient.SetNX(ctx, key, "1", 5*time.Minute).Result()
+		// use SET with NX option for distributed lock (replaces deprecated SetNX)
+		err := c.redisClient.SetArgs(ctx, key, "1", redis.SetArgs{
+			Mode: "NX",
+			TTL:  5 * time.Minute,
+		}).Err()
 		if err != nil {
+			if err == redis.Nil {
+				// the lock has been acquired by other instance, skip execution
+				return
+			}
 			c.logf("cron: failed to acquire lock for job %s: %v", name, err)
 			jobErr = err
 			return
 		}
-		if !locked {
-			// the lock has been acquired by other instance, skip execution
-			return
-		}
-		// ensure to release the lock when the function ends
 		defer func() {
 			if err := c.redisClient.Del(ctx, key).Err(); err != nil {
 				c.logf("cron: failed to release lock for job %s: %v", name, err)
@@ -347,7 +349,7 @@ func (c *Cron) runWithRecovery(j Job, name string, t time.Time) {
 		}()
 	}
 
-	log.Infow("[CROND] triggered success", "name", name, "tigger time", t.String())
+	log.Debugw("[CROND] triggered success", "name", name, "tigger time", t.String())
 	j.Run()
 }
 

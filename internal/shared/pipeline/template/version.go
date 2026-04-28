@@ -21,8 +21,8 @@ import (
 	"strings"
 )
 
-// semver holds parsed semantic version components.
-type semver struct {
+// Semver holds parsed semantic version components.
+type Semver struct {
 	Major      int
 	Minor      int
 	Patch      int
@@ -33,7 +33,7 @@ type semver struct {
 // ParseSemver parses a version string (with optional "v" prefix) into
 // its major.minor.patch components. Pre-release suffixes (e.g. -rc1) are
 // preserved but rank lower during comparison.
-func ParseSemver(version string) (semver, error) {
+func ParseSemver(version string) (Semver, error) {
 	raw := version
 	v := strings.TrimPrefix(version, "v")
 	parts := strings.SplitN(v, "-", 2)
@@ -45,27 +45,27 @@ func ParseSemver(version string) (semver, error) {
 
 	segments := strings.SplitN(core, ".", 3)
 	if len(segments) != 3 {
-		return semver{Raw: raw}, fmt.Errorf("invalid semver: %s", version)
+		return Semver{Raw: raw}, fmt.Errorf("invalid Semver: %s", version)
 	}
 
 	major, err := strconv.Atoi(segments[0])
 	if err != nil {
-		return semver{Raw: raw}, fmt.Errorf("invalid major version: %s", version)
+		return Semver{Raw: raw}, fmt.Errorf("invalid major version: %s", version)
 	}
 	minor, err := strconv.Atoi(segments[1])
 	if err != nil {
-		return semver{Raw: raw}, fmt.Errorf("invalid minor version: %s", version)
+		return Semver{Raw: raw}, fmt.Errorf("invalid minor version: %s", version)
 	}
 	patch, err := strconv.Atoi(segments[2])
 	if err != nil {
-		return semver{Raw: raw}, fmt.Errorf("invalid patch version: %s", version)
+		return Semver{Raw: raw}, fmt.Errorf("invalid patch version: %s", version)
 	}
 
-	return semver{Major: major, Minor: minor, Patch: patch, PreRelease: pre, Raw: raw}, nil
+	return Semver{Major: major, Minor: minor, Patch: patch, PreRelease: pre, Raw: raw}, nil
 }
 
-// Less returns true if s ranks lower than other according to semver rules.
-func (s semver) Less(other semver) bool {
+// Less returns true if s ranks lower than other according to Semver rules.
+func (s Semver) Less(other Semver) bool {
 	if s.Major != other.Major {
 		return s.Major < other.Major
 	}
@@ -85,7 +85,7 @@ func (s semver) Less(other semver) bool {
 	return s.PreRelease < other.PreRelease
 }
 
-// SortVersionsDesc sorts a list of version strings in descending semver
+// SortVersionsDesc sorts a list of version strings in descending Semver
 // order. Non-parseable versions are placed at the end.
 func SortVersionsDesc(versions []string) {
 	sort.Slice(versions, func(i, j int) bool {
@@ -104,7 +104,7 @@ func SortVersionsDesc(versions []string) {
 	})
 }
 
-// LatestVersion returns the highest semver tag from a list. If the list
+// LatestVersion returns the highest Semver tag from a list. If the list
 // is empty an empty string is returned.
 func LatestVersion(versions []string) string {
 	if len(versions) == 0 {

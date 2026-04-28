@@ -67,7 +67,7 @@ func (rt *Router) createPipeline(c *fiber.Ctx) error {
 
 	createdBy := strings.TrimSpace(req.CreatedBy)
 	if createdBy == "" {
-		createdBy = rt.currentUserID(c)
+		createdBy = auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
 	}
 
 	resp, err := rt.pipelineService().CreatePipeline(c.Context(), &pipelinev1.CreatePipelineRequest{
@@ -259,7 +259,7 @@ func (rt *Router) savePipelineSpec(c *fiber.Ctx) error {
 	}
 	editor := strings.TrimSpace(req.Editor)
 	if editor == "" {
-		editor = rt.currentUserID(c)
+		editor = auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
 	}
 	resp, err := rt.pipelineService().SavePipelineSpec(c.Context(), &pipelinev1.SavePipelineSpecRequest{
 		PipelineId:            pipelineID,
@@ -300,7 +300,7 @@ func (rt *Router) triggerPipeline(c *fiber.Ctx) error {
 	}
 	triggeredBy := strings.TrimSpace(req.TriggeredBy)
 	if triggeredBy == "" {
-		triggeredBy = rt.currentUserID(c)
+		triggeredBy = auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
 	}
 	resp, err := rt.pipelineService().TriggerPipeline(c.Context(), &pipelinev1.TriggerPipelineRequest{
 		PipelineId:  pipelineID,
@@ -409,7 +409,7 @@ func (rt *Router) changePipelinePauseState(c *fiber.Ctx, pause bool) error {
 	}
 	operator := strings.TrimSpace(req.Operator)
 	if operator == "" {
-		operator = rt.currentUserID(c)
+		operator = auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
 	}
 	if err := rt.applyPauseState(c, pause, pipelineID, runID, req.Reason, operator); err != nil {
 		return err
@@ -455,14 +455,6 @@ func (rt *Router) applyPauseState(
 
 func (rt *Router) pipelineService() *service.PipelineServiceImpl {
 	return service.NewPipelineServiceImpl(rt.Services)
-}
-
-func (rt *Router) currentUserID(c *fiber.Ctx) string {
-	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
-	if err != nil || claims == nil {
-		return ""
-	}
-	return strings.TrimSpace(claims.UserID)
 }
 
 type pipelineRespErr struct {

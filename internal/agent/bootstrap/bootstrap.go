@@ -237,10 +237,19 @@ func Run(app *Agent, cleanup func()) {
 func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 	appConf := app.AgentConf
 
-	// 检查是否已注册（有token、serverAddr和agent ID）
-	if appConf.Grpc.Token == "" || appConf.Grpc.ServerAddr == "" || appConf.Agent.ID == "" {
+	// Check for dynamic registration token first, then fall back to legacy token+agentID
+	hasRegistrationToken := appConf.Grpc.RegistrationToken != ""
+	hasLegacyConfig := appConf.Grpc.Token != "" && appConf.Agent.ID != ""
+
+	if appConf.Grpc.ServerAddr == "" {
 		log.Warn("Agent not registered, skipping heartbeat startup. " +
-			"Please configure agent.id, grpc.serverAddr and grpc.token in configuration file")
+			"Please configure grpc.serverAddr in configuration file")
+		return
+	}
+
+	if !hasRegistrationToken && !hasLegacyConfig {
+		log.Warn("Agent not registered, skipping heartbeat startup. " +
+			"Please configure grpc.registrationToken or (agent.id + grpc.token) in configuration file")
 		return
 	}
 

@@ -57,7 +57,7 @@ type Project struct {
 }
 
 func (Project) TableName() string {
-	return "t_project"
+	return "project"
 }
 
 // ProjectSettings 项目设置结构
@@ -147,7 +147,7 @@ type ProjectWebhook struct {
 }
 
 func (ProjectWebhook) TableName() string {
-	return "t_project_webhook"
+	return "project_webhook"
 }
 
 // ProjectVariable 项目变量表
@@ -164,7 +164,7 @@ type ProjectVariable struct {
 }
 
 func (ProjectVariable) TableName() string {
-	return "t_project_variable"
+	return "project_variable"
 }
 
 // ProjectVariableType 项目变量类型

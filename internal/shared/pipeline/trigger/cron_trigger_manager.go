@@ -35,7 +35,9 @@ type IPipelineEngine interface {
 }
 
 // DefinitionLoader loads a pipeline's YAML content from its backing repository.
-type DefinitionLoader func(ctx context.Context, pipeline *model.Pipeline, project *model.Project) (content string, headSha string, err error)
+type DefinitionLoader func(
+	ctx context.Context, pipeline *model.Pipeline, project *model.Project,
+) (content string, headSha string, err error)
 
 // CronTriggerManager dynamically registers pipeline cron triggers with the
 // global shared/cron scheduler. Each pipeline with triggers[].type=cron gets its

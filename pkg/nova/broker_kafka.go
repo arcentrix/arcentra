@@ -106,6 +106,17 @@ func newKafkaBroker(config *queueConfig) (MessageQueueBroker, DelayManager, erro
 	if programName == "" {
 		programName = "arcentra"
 	}
+	consumerGroupID := strings.TrimSpace(kafkaConfig.GroupID)
+	if consumerGroupID == "" {
+		queueGroupID := strings.TrimSpace(config.GroupID)
+		if queueGroupID != "" && queueGroupID != DefaultGroupID {
+			consumerGroupID = queueGroupID
+		}
+	}
+	if consumerGroupID == "" {
+		consumerGroupID = programName
+	}
+	kafkaConfig.GroupID = consumerGroupID
 
 	producer, err := mqkafka.NewProducer(
 		kafkaConfig.BootstrapServers,
@@ -120,6 +131,7 @@ func newKafkaBroker(config *queueConfig) (MessageQueueBroker, DelayManager, erro
 		kafkaConfig.BootstrapServers,
 		fmt.Sprintf("%s%s", kafkaConfig.TopicPrefix, PriorityNormalSuffix),
 		programName,
+		mqkafka.WithConsumerGroupID(consumerGroupID),
 		mqkafka.WithConsumerOptions(clientOptions...),
 		mqkafka.WithConsumerEnableAutoCommit(kafkaConfig.AutoCommit),
 		mqkafka.WithConsumerSessionTimeoutMs(kafkaConfig.SessionTimeout),

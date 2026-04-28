@@ -46,7 +46,7 @@ type Pipeline struct {
 }
 
 func (Pipeline) TableName() string {
-	return "t_pipeline"
+	return "pipeline"
 }
 
 // PipelineRun 流水线执行记录表
@@ -76,7 +76,7 @@ type PipelineRun struct {
 }
 
 func (PipelineRun) TableName() string {
-	return "t_pipeline_run"
+	return "pipeline_run"
 }
 
 // PipelineStage 流水线阶段表
@@ -90,7 +90,7 @@ type PipelineStage struct {
 }
 
 func (PipelineStage) TableName() string {
-	return "t_pipeline_stage"
+	return "pipeline_stage"
 }
 
 // PipelineStatusUnknown and related constants enumerate pipeline execution statuses.

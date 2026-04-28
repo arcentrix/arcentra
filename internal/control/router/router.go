@@ -180,6 +180,9 @@ func (rt *Router) routerGroup(r fiber.Router) {
 	// agent
 	rt.agentRouter(r, auth)
 
+	// registration tokens (dynamic agent registration)
+	rt.registrationTokenRouter(r, auth)
+
 	// team
 	rt.teamRouter(r, auth)
 

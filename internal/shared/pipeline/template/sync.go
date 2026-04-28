@@ -138,7 +138,7 @@ func discoverTemplates(tmplDir string) ([]DiscoveredTemplate, error) {
 			continue
 		}
 		dirPath := filepath.Join(tmplDir, entry.Name())
-		manifest, mErr := parseTemplateManifest(dirPath)
+		manifest, mErr := parseManifest(dirPath)
 		if mErr != nil {
 			continue
 		}
@@ -163,14 +163,14 @@ func discoverTemplates(tmplDir string) ([]DiscoveredTemplate, error) {
 	return result, nil
 }
 
-// parseTemplateManifest reads template.yaml from a template directory.
-func parseTemplateManifest(dir string) (*TemplateManifest, error) {
+// parseManifest reads template.yaml from a template directory.
+func parseManifest(dir string) (*Manifest, error) {
 	for _, name := range []string{"template.yaml", "template.yml"} {
 		data, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			continue
 		}
-		var m TemplateManifest
+		var m Manifest
 		if err := yaml.Unmarshal(data, &m); err != nil {
 			return nil, err
 		}

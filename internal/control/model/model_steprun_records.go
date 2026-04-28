@@ -43,5 +43,5 @@ type StepRunRecord struct {
 
 // TableName 返回表名称
 func (StepRunRecord) TableName() string {
-	return "l_step_run_records"
+	return "step_run_records"
 }

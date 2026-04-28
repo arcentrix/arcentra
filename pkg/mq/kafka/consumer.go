@@ -74,6 +74,19 @@ func WithConsumerMaxPollIntervalMs(intervalMs int) ConsumerOption {
 	}
 }
 
+// Normalize sets default values for empty fields.
+func (c *ConsumerConfig) Normalize() {
+	if c.AutoOffsetReset == "" {
+		c.AutoOffsetReset = "earliest"
+	}
+	if c.SessionTimeoutMs == 0 {
+		c.SessionTimeoutMs = 10000
+	}
+	if c.MaxPollIntervalMs == 0 {
+		c.MaxPollIntervalMs = 300000
+	}
+}
+
 // Consumer wraps a Kafka consumer instance.
 type Consumer struct {
 	consumer *kafka.Consumer

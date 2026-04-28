@@ -56,7 +56,7 @@ type StepRun struct {
 }
 
 func (StepRun) TableName() string {
-	return "t_step_run"
+	return "step_run"
 }
 
 // StepRunArtifact 步骤执行产物表
@@ -78,5 +78,5 @@ type StepRunArtifact struct {
 }
 
 func (StepRunArtifact) TableName() string {
-	return "t_step_run_artifact"
+	return "step_run_artifact"
 }

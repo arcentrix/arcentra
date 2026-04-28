@@ -32,5 +32,5 @@ type TeamMember struct {
 }
 
 func (TeamMember) TableName() string {
-	return "t_team_member"
+	return "team_member"
 }

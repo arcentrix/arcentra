@@ -55,5 +55,5 @@ type TerminalOutputMetadata struct {
 
 // TableName 返回表名称
 func (TerminalOutputRecord) TableName() string {
-	return "l_terminal_output_records"
+	return "terminal_output_records"
 }
