@@ -23,30 +23,59 @@ import (
 	tmpl "github.com/arcentrix/arcentra/internal/shared/pipeline/template"
 	"github.com/arcentrix/arcentra/pkg/auth"
 	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
-func (rt *Router) pipelineTemplateRouter(r fiber.Router, authMiddleware fiber.Handler) {
+func (rt *Router) pipelineTemplateRouter(r fiber.Router, authMiddleware fiber.Handler, subjectMiddleware fiber.Handler) {
 	libraries := r.Group("/pipeline-template-libraries")
 	{
-		libraries.Post("/", authMiddleware, rt.registerTemplateLibrary)
-		libraries.Get("/", authMiddleware, rt.listTemplateLibraries)
-		libraries.Get("/:libraryID", authMiddleware, rt.getTemplateLibrary)
-		libraries.Put("/:libraryID", authMiddleware, rt.updateTemplateLibrary)
-		libraries.Delete("/:libraryID", authMiddleware, rt.deleteTemplateLibrary)
-		libraries.Post("/:libraryID/sync", authMiddleware, rt.syncTemplateLibrary)
-		libraries.Post("/:libraryID/templates", authMiddleware, rt.createTemplateInLibrary)
+		libraries.Post("/", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.registerTemplateLibrary)
+		libraries.Get("/", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.listTemplateLibraries)
+		libraries.Get("/:libraryID", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.getTemplateLibrary)
+		libraries.Put("/:libraryID", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.updateTemplateLibrary)
+		libraries.Delete("/:libraryID", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.deleteTemplateLibrary)
+		libraries.Post("/:libraryID/sync", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.syncTemplateLibrary)
+		libraries.Post("/:libraryID/templates", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.createTemplateInLibrary)
 	}
 
 	templates := r.Group("/pipeline-templates")
 	{
-		templates.Get("/", authMiddleware, rt.listTemplates)
-		templates.Get("/categories", authMiddleware, rt.listTemplateCategories)
-		templates.Post("/instantiate", authMiddleware, rt.instantiateTemplate)
-		templates.Get("/:templateID", authMiddleware, rt.getTemplate)
-		templates.Get("/:templateID/versions", authMiddleware, rt.listTemplateVersions)
-		templates.Put("/:templateID", authMiddleware, rt.saveTemplate)
-		templates.Delete("/:templateID", authMiddleware, rt.deleteTemplate)
+		templates.Get("/", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.listTemplates)
+		templates.Get("/categories", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.listTemplateCategories)
+		templates.Post("/instantiate", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.instantiateTemplate)
+		templates.Get("/:templateID", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.getTemplate)
+		templates.Get("/:templateID/versions", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.listTemplateVersions)
+		templates.Put("/:templateID", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.saveTemplate)
+		templates.Delete("/:templateID", authMiddleware, subjectMiddleware,
+			rt.permission("project:manage_template", middleware.ResolvePlatformScope()),
+			rt.deleteTemplate)
 	}
 }
 

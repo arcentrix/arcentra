@@ -14,40 +14,43 @@
 
 package model
 
-// Role 角色表（支持自定义角色）
+// Role 角色表（系统内置与组织自定义统一模型）
 type Role struct {
 	BaseModel
 	RoleID      string `gorm:"column:role_id;not null;uniqueIndex" json:"roleId"`
-	Name        string `gorm:"column:name;not null" json:"name"`                      // 角色名称
-	DisplayName string `gorm:"column:display_name" json:"displayName"`                // 显示名称
-	Description string `gorm:"column:description" json:"description"`                 // 角色描述
-	IsEnabled   int    `gorm:"column:is_enabled;not null;default:1" json:"isEnabled"` // 0: disabled, 1: enabled
+	Name        string `gorm:"column:name;not null" json:"name"`
+	DisplayName string `gorm:"column:display_name;not null;default:''" json:"displayName"`
+	Description string `gorm:"column:description;not null;default:''" json:"description"`
+	ScopeType   string `gorm:"column:scope_type;not null;default:'platform';index" json:"scopeType"`
+	IsSystem    int    `gorm:"column:is_system;not null;default:0" json:"isSystem"`
+	OrgID       string `gorm:"column:org_id;index" json:"orgId"`
+	IsEnabled   int    `gorm:"column:is_enabled;not null;default:1" json:"isEnabled"`
 }
 
+// TableName 返回数据库表名
 func (r *Role) TableName() string {
 	return "role"
 }
 
-// 内置组织角色 ID
-const (
-	Owner  = "owner"  // 组织所有者
-	Admin  = "admin"  // 组织管理员
-	Member = "member" // 组织成员
-)
-
-// CreateRoleReq request for creating role
+// CreateRoleReq 表示创建角色请求
 type CreateRoleReq struct {
 	RoleID      string `json:"roleId" binding:"required"`
 	Name        string `json:"name" binding:"required"`
 	DisplayName string `json:"displayName"`
 	Description string `json:"description"`
+	ScopeType   string `json:"scopeType"`
+	IsSystem    *int   `json:"isSystem"`
+	OrgID       string `json:"orgId"`
 	IsEnabled   *int   `json:"isEnabled"`
 }
 
-// UpdateRoleReq request for updating role
+// UpdateRoleReq 表示更新角色请求
 type UpdateRoleReq struct {
 	Name        *string `json:"name,omitempty"`
 	DisplayName *string `json:"displayName,omitempty"`
 	Description *string `json:"description,omitempty"`
+	ScopeType   *string `json:"scopeType,omitempty"`
+	IsSystem    *int    `json:"isSystem,omitempty"`
+	OrgID       *string `json:"orgId,omitempty"`
 	IsEnabled   *int    `json:"isEnabled,omitempty"`
 }

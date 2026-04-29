@@ -20,21 +20,36 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/auth"
 	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
 // secretRouter registers secret related routes
-func (rt *Router) secretRouter(r fiber.Router, authMiddleware fiber.Handler) {
+func (rt *Router) secretRouter(r fiber.Router, authMiddleware fiber.Handler, subjectMiddleware fiber.Handler) {
 	secretGroup := r.Group("/secrets")
 	{
 		// Secret routes (authentication required)
-		secretGroup.Post("/", authMiddleware, rt.createSecret)      // create secret
-		secretGroup.Get("/", authMiddleware, rt.getSecretList)      // list secrets
-		secretGroup.Get("/:secretID", authMiddleware, rt.getSecret) // get secret (masked)
-		secretGroup.Get("/:secretID/value", authMiddleware, rt.getSecretValue)
-		secretGroup.Put("/:secretID", authMiddleware, rt.updateSecret) // update secret
-		secretGroup.Delete("/:secretID", authMiddleware, rt.deleteSecret)
-		secretGroup.Get("/scope/:scope/:scopeID", authMiddleware, rt.getSecretsByScope)
+		secretGroup.Post("/", authMiddleware, subjectMiddleware,
+			rt.permission("secret:write", middleware.ResolvePlatformScope()),
+			rt.createSecret)
+		secretGroup.Get("/", authMiddleware, subjectMiddleware,
+			rt.permission("secret:read", middleware.ResolvePlatformScope()),
+			rt.getSecretList)
+		secretGroup.Get("/:secretID", authMiddleware, subjectMiddleware,
+			rt.permission("secret:read", middleware.ResolvePlatformScope()),
+			rt.getSecret)
+		secretGroup.Get("/:secretID/value", authMiddleware, subjectMiddleware,
+			rt.permission("secret:read", middleware.ResolvePlatformScope()),
+			rt.getSecretValue)
+		secretGroup.Put("/:secretID", authMiddleware, subjectMiddleware,
+			rt.permission("secret:write", middleware.ResolvePlatformScope()),
+			rt.updateSecret)
+		secretGroup.Delete("/:secretID", authMiddleware, subjectMiddleware,
+			rt.permission("secret:delete", middleware.ResolvePlatformScope()),
+			rt.deleteSecret)
+		secretGroup.Get("/scope/:scope/:scopeID", authMiddleware, subjectMiddleware,
+			rt.permission("secret:read", middleware.ResolvePlatformScope()),
+			rt.getSecretsByScope)
 	}
 }
 

@@ -39,35 +39,35 @@ type LoginService interface {
 }
 
 type UserService struct {
-	cache               cache.ICache
-	userRepo            repo.IUserRepository
-	userExtRepo         repo.IUserExtRepository
-	userRoleBindingRepo repo.IUserRoleBindingRepository
-	roleMenuBindingRepo repo.IRoleMenuBindingRepository
-	menuRepo            repo.IMenuRepository
-	roleRepo            repo.IRoleRepository
-	menuService         *MenuService
+	cache          cache.ICache
+	userRepo       repo.IUserRepository
+	userExtRepo    repo.IUserExtRepository
+	roleGrantRepo  repo.IRoleGrantRepository
+	permissionRepo repo.IPermissionRepository
+	menuRepo       repo.IMenuRepository
+	roleRepo       repo.IRoleRepository
+	menuService    *MenuService
 }
 
 func NewUserService(
 	cacheStore cache.ICache,
 	userRepo repo.IUserRepository,
 	userExtRepo repo.IUserExtRepository,
-	userRoleBindingRepo repo.IUserRoleBindingRepository,
-	roleMenuBindingRepo repo.IRoleMenuBindingRepository,
+	roleGrantRepo repo.IRoleGrantRepository,
+	permissionRepo repo.IPermissionRepository,
 	menuRepo repo.IMenuRepository,
 	roleRepo repo.IRoleRepository,
 	menuService *MenuService,
 ) *UserService {
 	return &UserService{
-		cache:               cacheStore,
-		userRepo:            userRepo,
-		userExtRepo:         userExtRepo,
-		userRoleBindingRepo: userRoleBindingRepo,
-		roleMenuBindingRepo: roleMenuBindingRepo,
-		menuRepo:            menuRepo,
-		roleRepo:            roleRepo,
-		menuService:         menuService,
+		cache:          cacheStore,
+		userRepo:       userRepo,
+		userExtRepo:    userExtRepo,
+		roleGrantRepo:  roleGrantRepo,
+		permissionRepo: permissionRepo,
+		menuRepo:       menuRepo,
+		roleRepo:       roleRepo,
+		menuService:    menuService,
 	}
 }
 
@@ -282,6 +282,62 @@ func (ul *UserService) AddUser(ctx context.Context, addUserReq model.AddUserReq)
 	return nil
 }
 
+// InviteUser 邀请用户：根据 email 创建用户并按需授予角色（platform 作用域）
+func (ul *UserService) InviteUser(ctx context.Context, email, roleID, invitedBy string) (string, error) {
+	if email == "" {
+		return "", errors.New("email is required")
+	}
+	username := emailToUsername(email)
+	tempPassword, err := getPassword(id.GetUUIDWithoutDashes())
+	if err != nil {
+		return "", fmt.Errorf("hash temp password: %w", err)
+	}
+	addReq := model.AddUserReq{
+		UserID:    id.GetUUIDWithoutDashes(),
+		Username:  username,
+		FullName:  username,
+		Email:     email,
+		Password:  string(tempPassword),
+		IsEnabled: 1,
+		CreatedAt: time.Now(),
+	}
+	if err := ul.userRepo.AddUser(&addReq); err != nil {
+		return "", fmt.Errorf("add user: %w", err)
+	}
+	if err := ul.createUserExtIfNotExists(ctx, addReq.UserID); err != nil {
+		log.Warnw("failed to init user ext after invite", "userID", addReq.UserID, "error", err)
+	}
+	if roleID != "" {
+		grant := &model.RoleGrant{
+			GrantID:     id.GetUUIDWithoutDashes(),
+			SubjectType: string(consts.SubjectTypeUser),
+			SubjectID:   addReq.UserID,
+			RoleID:      roleID,
+			ScopeType:   string(consts.ScopeTypePlatform),
+			ScopeID:     "",
+			GrantedBy:   invitedBy,
+			IsEnabled:   1,
+		}
+		if err := ul.roleGrantRepo.Create(ctx, grant); err != nil {
+			log.Errorw("failed to grant invited user role", "userID", addReq.UserID, "roleID", roleID, "error", err)
+		}
+	}
+	return addReq.UserID, nil
+}
+
+// emailToUsername 从 email 生成默认用户名
+func emailToUsername(email string) string {
+	for i := 0; i < len(email); i++ {
+		if email[i] == '@' {
+			if i == 0 {
+				return email
+			}
+			return email[:i]
+		}
+	}
+	return email
+}
+
 func (ul *UserService) UpdateUser(userID string, updateReq *model.UpdateUserReq) error {
 	// Check if user exists
 	_, err := ul.userRepo.GetUserByUserID(userID)
@@ -435,32 +491,45 @@ func (ul *UserService) UpdateAvatar(userID, avatarURL string) error {
 	return nil
 }
 
-// GetUserRoles 获取用户的角色信息
-func (ul *UserService) GetUserRoles(ctx context.Context, userID string) ([]model.RoleDTO, error) {
-	roleBindings, err := ul.userRoleBindingRepo.List(ctx, userID)
+// listUserRoleIDs 返回用户当前生效的角色ID列表（已去重）
+func (ul *UserService) listUserRoleIDs(ctx context.Context, userID string) ([]string, error) {
+	grants, err := ul.roleGrantRepo.ListBySubject(ctx, string(consts.SubjectTypeUser), userID)
 	if err != nil {
-		log.Errorw("failed to get user role bindings", "userID", userID, "error", err)
+		log.Errorw("failed to list user role grants", "userID", userID, "error", err)
 		return nil, err
 	}
+	if len(grants) == 0 {
+		return []string{}, nil
+	}
+	seen := make(map[string]struct{}, len(grants))
+	roleIDs := make([]string, 0, len(grants))
+	for _, grant := range grants {
+		if grant.RoleID == "" {
+			continue
+		}
+		if _, ok := seen[grant.RoleID]; ok {
+			continue
+		}
+		seen[grant.RoleID] = struct{}{}
+		roleIDs = append(roleIDs, grant.RoleID)
+	}
+	return roleIDs, nil
+}
 
-	if len(roleBindings) == 0 {
+// GetUserRoles 获取用户的角色信息
+func (ul *UserService) GetUserRoles(ctx context.Context, userID string) ([]model.RoleDTO, error) {
+	roleIDs, err := ul.listUserRoleIDs(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(roleIDs) == 0 {
 		return []model.RoleDTO{}, nil
 	}
-
-	// 提取角色ID列表
-	roleIDs := make([]string, 0, len(roleBindings))
-	for _, binding := range roleBindings {
-		roleIDs = append(roleIDs, binding.RoleID)
-	}
-
-	// 获取角色详情
-	roles, err := ul.roleRepo.BatchGet(context.Background(), roleIDs)
+	roles, err := ul.roleRepo.BatchGet(ctx, roleIDs)
 	if err != nil {
 		log.Errorw("failed to get roles", "roleIDs", roleIDs, "error", err)
 		return nil, err
 	}
-
-	// 构建角色列表
 	roleList := make([]model.RoleDTO, 0, len(roles))
 	for _, role := range roles {
 		roleList = append(roleList, model.RoleDTO{
@@ -470,114 +539,108 @@ func (ul *UserService) GetUserRoles(ctx context.Context, userID string) ([]model
 			Description: role.Description,
 		})
 	}
-
 	return roleList, nil
 }
 
-// GetUserRoutes 获取用户可访问的路由列表
-func (ul *UserService) GetUserRoutes(ctx context.Context, userID string, resourceID string) ([]string, error) {
-	roleBindings, err := ul.userRoleBindingRepo.List(ctx, userID)
+// listAllowedMenusByRoles 根据角色集合返回可访问的菜单（处理通配权限）
+func (ul *UserService) listAllowedMenusByRoles(ctx context.Context, roleIDs []string) ([]model.Menu, error) {
+	allMenus, err := ul.menuRepo.List(ctx)
 	if err != nil {
-		log.Errorw("failed to get user role bindings", "userID", userID, "error", err)
+		log.Errorw("failed to list menus", "error", err)
+		return nil, err
+	}
+	if len(roleIDs) == 0 {
+		return []model.Menu{}, nil
+	}
+
+	bindings, err := ul.permissionRepo.ListRoleBindings(ctx, roleIDs)
+	if err != nil {
+		log.Errorw("failed to list role permission bindings", "roleIDs", roleIDs, "error", err)
+		return nil, err
+	}
+	if len(bindings) == 0 {
+		return []model.Menu{}, nil
+	}
+
+	permissionIDSet := make(map[string]struct{}, len(bindings))
+	permissionIDs := make([]string, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding.PermissionID == "" {
+			continue
+		}
+		if _, ok := permissionIDSet[binding.PermissionID]; ok {
+			continue
+		}
+		permissionIDSet[binding.PermissionID] = struct{}{}
+		permissionIDs = append(permissionIDs, binding.PermissionID)
+	}
+	permissions, err := ul.permissionRepo.GetByPermissionIDs(ctx, permissionIDs)
+	if err != nil {
+		log.Errorw("failed to get permissions", "permissionIDs", permissionIDs, "error", err)
 		return nil, err
 	}
 
-	if len(roleBindings) == 0 {
-		return []string{}, nil
-	}
-
-	roleIDs := make([]string, 0, len(roleBindings))
-	for _, binding := range roleBindings {
-		roleIDs = append(roleIDs, binding.RoleID)
-	}
-
-	menuBindings, err := ul.roleMenuBindingRepo.ListByRoles(ctx, roleIDs, resourceID)
-	if err != nil {
-		log.Errorw("failed to get menu bindings", "userID", userID, "roleIDs", roleIDs, "error", err)
-		return nil, err
-	}
-
-	if len(menuBindings) == 0 {
-		return []string{}, nil
-	}
-
-	menuIDSet := make(map[string]bool)
-	for _, binding := range menuBindings {
-		if binding.IsVisible == model.MenuVisible && binding.IsAccessible == model.RoleMenuAccessible {
-			menuIDSet[binding.MenuID] = true
+	hasWildcard := false
+	for _, permission := range permissions {
+		if permission.ResourceType == "*" && permission.Action == "*" {
+			hasWildcard = true
+			break
 		}
 	}
 
-	menuIDs := make([]string, 0, len(menuIDSet))
-	for menuID := range menuIDSet {
-		menuIDs = append(menuIDs, menuID)
+	allowed := make([]model.Menu, 0, len(allMenus))
+	for _, menu := range allMenus {
+		if menu.IsEnabled != model.MenuEnabled {
+			continue
+		}
+		if menu.PermissionID == "" || hasWildcard {
+			allowed = append(allowed, menu)
+			continue
+		}
+		if _, ok := permissionIDSet[menu.PermissionID]; ok {
+			allowed = append(allowed, menu)
+		}
 	}
+	return allowed, nil
+}
 
-	menus, err := ul.menuRepo.BatchGet(ctx, menuIDs)
+// GetUserRoutes 获取用户可访问的路由列表
+func (ul *UserService) GetUserRoutes(ctx context.Context, userID string, _ string) ([]string, error) {
+	roleIDs, err := ul.listUserRoleIDs(ctx, userID)
 	if err != nil {
-		log.Errorw("failed to get menus", "menuIDs", menuIDs, "error", err)
 		return nil, err
 	}
-
-	// 提取所有路由路径
-	routes := make([]string, 0)
+	if len(roleIDs) == 0 {
+		return []string{}, nil
+	}
+	menus, err := ul.listAllowedMenusByRoles(ctx, roleIDs)
+	if err != nil {
+		return nil, err
+	}
+	routes := make([]string, 0, len(menus))
 	for _, menu := range menus {
 		if menu.Path != "" {
 			routes = append(routes, menu.Path)
 		}
 	}
-
 	return routes, nil
 }
 
 // GetUserMenus 获取用户可访问的菜单列表（树形结构）
-func (ul *UserService) GetUserMenus(ctx context.Context, userID string, resourceID string) ([]model.MenuDTO, []string, error) {
-	roleBindings, err := ul.userRoleBindingRepo.List(ctx, userID)
+func (ul *UserService) GetUserMenus(ctx context.Context, userID string, _ string) ([]model.MenuDTO, []string, error) {
+	roleIDs, err := ul.listUserRoleIDs(ctx, userID)
 	if err != nil {
-		log.Errorw("failed to get user role bindings", "userID", userID, "error", err)
 		return nil, nil, err
 	}
-
-	if len(roleBindings) == 0 {
+	if len(roleIDs) == 0 {
 		return []model.MenuDTO{}, []string{}, nil
 	}
-
-	roleIDs := make([]string, 0, len(roleBindings))
-	for _, binding := range roleBindings {
-		roleIDs = append(roleIDs, binding.RoleID)
-	}
-
-	menuBindings, err := ul.roleMenuBindingRepo.ListByRoles(ctx, roleIDs, resourceID)
+	menus, err := ul.listAllowedMenusByRoles(ctx, roleIDs)
 	if err != nil {
-		log.Errorw("failed to get menu bindings", "userID", userID, "roleIDs", roleIDs, "error", err)
 		return nil, nil, err
 	}
-
-	if len(menuBindings) == 0 {
-		return []model.MenuDTO{}, []string{}, nil
-	}
-
-	menuIDSet := make(map[string]bool)
-	for _, binding := range menuBindings {
-		if binding.IsVisible == model.MenuVisible && binding.IsAccessible == model.RoleMenuAccessible {
-			menuIDSet[binding.MenuID] = true
-		}
-	}
-
-	menuIDs := make([]string, 0, len(menuIDSet))
-	for menuID := range menuIDSet {
-		menuIDs = append(menuIDs, menuID)
-	}
-
-	menus, err := ul.menuRepo.BatchGet(ctx, menuIDs)
-	if err != nil {
-		log.Errorw("failed to get menus", "menuIDs", menuIDs, "error", err)
-		return nil, nil, err
-	}
-
 	menuTree := ul.menuService.BuildMenuTree(menus)
 	routes := ul.menuService.ExtractRoutes(menuTree)
-
 	return menuTree, routes, nil
 }
 
@@ -600,37 +663,18 @@ func (ul *UserService) GetUserRolesAndRoutes(userID string, resourceID string) (
 	}
 
 	queryFunc := func(ctx context.Context) (userRolesRoutesCache, error) {
-		roleBindings, err := ul.userRoleBindingRepo.List(ctx, userID)
+		roleIDs, err := ul.listUserRoleIDs(ctx, userID)
 		if err != nil {
-			log.Errorw("failed to get user role bindings", "userID", userID, "error", err)
 			return userRolesRoutesCache{}, err
 		}
-
-		if len(roleBindings) == 0 {
+		if len(roleIDs) == 0 {
 			return userRolesRoutesCache{Roles: []model.RoleDTO{}, Routes: []string{}}, nil
 		}
-
-		roleIDs := make([]string, 0, len(roleBindings))
-		for _, binding := range roleBindings {
-			roleIDs = append(roleIDs, binding.RoleID)
+		roles, err := ul.roleRepo.BatchGet(ctx, roleIDs)
+		if err != nil {
+			log.Errorw("failed to get roles", "roleIDs", roleIDs, "error", err)
+			return userRolesRoutesCache{}, err
 		}
-
-		var roles []model.Role
-		var menuBindings []model.RoleMenuBinding
-		var roleErr, menuErr error
-
-		roles, roleErr = ul.roleRepo.BatchGet(ctx, roleIDs)
-		if roleErr != nil {
-			log.Errorw("failed to get roles", "roleIDs", roleIDs, "error", roleErr)
-			return userRolesRoutesCache{}, roleErr
-		}
-
-		menuBindings, menuErr = ul.roleMenuBindingRepo.ListByRoles(ctx, roleIDs, resourceID)
-		if menuErr != nil {
-			log.Errorw("failed to get menu bindings", "userID", userID, "roleIDs", roleIDs, "error", menuErr)
-			return userRolesRoutesCache{}, menuErr
-		}
-
 		roleList := make([]model.RoleDTO, 0, len(roles))
 		for _, role := range roles {
 			roleList = append(roleList, model.RoleDTO{
@@ -640,36 +684,16 @@ func (ul *UserService) GetUserRolesAndRoutes(userID string, resourceID string) (
 				Description: role.Description,
 			})
 		}
-
-		if len(menuBindings) == 0 {
-			return userRolesRoutesCache{Roles: roleList, Routes: []string{}}, nil
-		}
-
-		menuIDset := make(map[string]bool)
-		for _, binding := range menuBindings {
-			if binding.IsVisible == model.MenuVisible && binding.IsAccessible == model.RoleMenuAccessible {
-				menuIDset[binding.MenuID] = true
-			}
-		}
-
-		menuIDs := make([]string, 0, len(menuIDset))
-		for menuID := range menuIDset {
-			menuIDs = append(menuIDs, menuID)
-		}
-
-		menus, err := ul.menuRepo.BatchGet(ctx, menuIDs)
+		menus, err := ul.listAllowedMenusByRoles(ctx, roleIDs)
 		if err != nil {
-			log.Errorw("failed to get menus", "menuIDs", menuIDs, "error", err)
 			return userRolesRoutesCache{}, err
 		}
-
 		routes := make([]string, 0, len(menus))
 		for _, menu := range menus {
 			if menu.Path != "" {
 				routes = append(routes, menu.Path)
 			}
 		}
-
 		return userRolesRoutesCache{Roles: roleList, Routes: routes}, nil
 	}
 

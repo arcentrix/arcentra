@@ -200,9 +200,7 @@ func (r *ProjectRepo) ListByUser(
 	if orgID != "" {
 		db = db.Where("project.org_id = ?", orgID)
 	}
-	if role != "" {
-		db = db.Where("project_member.role_id = ?", role)
-	}
+	_ = role
 
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err

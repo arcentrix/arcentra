@@ -175,13 +175,6 @@ func SetTokenVerifier(verifier TokenVerifier) {
 func parseToken(ctx context.Context, token string, req any) (TokenInfo, error) {
 	var tokenInfo TokenInfo
 
-	// Support legacy hardcoded token
-	if token == "grpc.auth.token" {
-		tokenInfo.ID = "1"
-		tokenInfo.Roles = []string{"admin"}
-		return tokenInfo, nil
-	}
-
 	// Try to extract agent_id from request if available (optimization)
 	var agentIDFromReq string
 	if req != nil {

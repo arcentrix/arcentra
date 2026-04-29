@@ -20,43 +20,46 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/auth"
 	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/gofiber/fiber/v2"
 )
 
-func (rt *Router) teamRouter(r fiber.Router, authMW fiber.Handler) {
+func (rt *Router) teamRouter(r fiber.Router, authMW fiber.Handler, subjectMW fiber.Handler) {
 	teamGroup := r.Group("/team")
 	{
 		// 创建团队
-		teamGroup.Post("/create", authMW, rt.createTeam)
+		teamGroup.Post("/create", authMW, subjectMW, rt.permission("org:create_team", middleware.ResolvePlatformScope()), rt.createTeam)
 
 		// 更新团队
-		teamGroup.Put("/:teamID", authMW, rt.updateTeam)
+		teamGroup.Put("/:teamID", authMW, subjectMW, rt.permission("org:update", middleware.ResolvePlatformScope()), rt.updateTeam)
 
 		// 删除团队
-		teamGroup.Delete("/:teamID", authMW, rt.deleteTeam)
+		teamGroup.Delete("/:teamID", authMW, subjectMW, rt.permission("org:update", middleware.ResolvePlatformScope()), rt.deleteTeam)
 
 		// 获取团队详情
-		teamGroup.Get("/:teamID", authMW, rt.getTeamByID)
+		teamGroup.Get("/:teamID", authMW, subjectMW, rt.permission("org:read", middleware.ResolvePlatformScope()), rt.getTeamByID)
 
 		// 查询团队列表
-		teamGroup.Get("/list", authMW, rt.listTeams)
+		teamGroup.Get("/list", authMW, subjectMW, rt.permission("org:read", middleware.ResolvePlatformScope()), rt.listTeams)
 
 		// 获取组织下的所有团队
-		teamGroup.Get("/org/:orgId", authMW, rt.getTeamsByOrgID)
+		teamGroup.Get("/org/:orgId", authMW, subjectMW, rt.permission("org:read", middleware.ResolvePlatformScope()), rt.getTeamsByOrgID)
 
 		// 获取子团队
-		teamGroup.Get("/:teamID/subteams", authMW, rt.getSubTeams)
+		teamGroup.Get("/:teamID/subteams", authMW, subjectMW, rt.permission("org:read", middleware.ResolvePlatformScope()), rt.getSubTeams)
 
 		// 获取用户所属团队
-		teamGroup.Get("/user/myteams", authMW, rt.getUserTeams)
+		teamGroup.Get("/user/myteams", authMW, subjectMW, rt.permission("org:read", middleware.ResolvePlatformScope()), rt.getUserTeams)
 
 		// 启用/禁用团队
-		teamGroup.Post("/:teamID/enable", authMW, rt.enableTeam)
-		teamGroup.Post("/:teamID/disable", authMW, rt.disableTeam)
+		teamGroup.Post("/:teamID/enable", authMW, subjectMW, rt.permission("org:update", middleware.ResolvePlatformScope()), rt.enableTeam)
+		teamGroup.Post("/:teamID/disable", authMW, subjectMW, rt.permission("org:update", middleware.ResolvePlatformScope()), rt.disableTeam)
 
 		// 更新团队统计信息
-		teamGroup.Post("/:teamID/statistics", authMW, rt.updateTeamStatistics)
+		teamGroup.Post("/:teamID/statistics", authMW, subjectMW,
+			rt.permission("org:update", middleware.ResolvePlatformScope()),
+			rt.updateTeamStatistics)
 	}
 }
 

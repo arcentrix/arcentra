@@ -17,19 +17,26 @@ package model
 // Menu 菜单表
 type Menu struct {
 	BaseModel
-	MenuID      string `gorm:"column:menu_id;not null;uniqueIndex" json:"menuId"` // 菜单唯一标识
-	ParentID    string `gorm:"column:parent_id;index" json:"parentId"`            // 父菜单ID（为空表示顶级菜单）
-	Name        string `gorm:"column:name;not null" json:"name"`                  // 菜单名称
-	Path        string `gorm:"column:path" json:"path"`                           // 菜单路径（路由路径）
-	Component   string `gorm:"column:component" json:"component"`                 // 组件路径（前端组件）
-	Icon        string `gorm:"column:icon" json:"icon"`                           // 图标（图标名称或URL）
-	Order       int    `gorm:"column:order;default:0" json:"order"`               // 排序（数值越小越靠前）
-	IsVisible   int    `gorm:"column:is_visible;default:1" json:"isVisible"`      // 是否可见：0-隐藏，1-显示
-	IsEnabled   int    `gorm:"column:is_enabled;default:1" json:"isEnabled"`      // 是否启用：0-禁用，1-启用
-	Description string `gorm:"column:description" json:"description"`             // 菜单描述
-	Meta        string `gorm:"column:meta;type:text" json:"meta"`                 // 扩展元数据（JSON格式）
+	MenuID       string `gorm:"column:menu_id;not null;uniqueIndex" json:"menuId"`
+	ParentID     string `gorm:"column:parent_id;index" json:"parentId"`
+	Name         string `gorm:"column:name;not null;uniqueIndex" json:"name"`
+	Title        string `gorm:"column:title;not null;default:''" json:"title"`
+	Path         string `gorm:"column:path" json:"path"`
+	Component    string `gorm:"column:component" json:"component"`
+	Redirect     string `gorm:"column:redirect" json:"redirect"`
+	IsLayout     int    `gorm:"column:is_layout;default:0" json:"isLayout"`
+	IsIndex      int    `gorm:"column:is_index;default:0" json:"isIndex"`
+	Icon         string `gorm:"column:icon" json:"icon"`
+	Order        int    `gorm:"column:order;default:0" json:"order"`
+	Meta         string `gorm:"column:meta_json;type:json" json:"meta"`
+	PermissionID string `gorm:"column:permission_id;index" json:"permissionId"`
+	ScopeType    string `gorm:"column:scope_type;not null;default:'platform';index" json:"scopeType"`
+	IsVisible    int    `gorm:"column:is_visible;default:1" json:"isVisible"`
+	IsEnabled    int    `gorm:"column:is_enabled;default:1" json:"isEnabled"`
+	Description  string `gorm:"column:description" json:"description"`
 }
 
+// TableName 返回数据库表名
 func (Menu) TableName() string {
 	return "menu"
 }

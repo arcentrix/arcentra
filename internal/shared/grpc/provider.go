@@ -44,6 +44,7 @@ func ProvideGrpcServer(
 	// Set up token verifier for agent authentication
 	tokenVerifier := interceptor.NewAgentTokenVerifier(services.Agent, repos.Agent, services.Setting, c)
 	interceptor.SetTokenVerifier(tokenVerifier)
+	interceptor.SetAuthorizer(services.Authorizer)
 
 	// 获取 Redis 客户端
 	var redisClient *redis.Client

@@ -69,17 +69,24 @@ type RoleDTO struct {
 
 // MenuDTO 菜单数据传输对象
 type MenuDTO struct {
-	MenuID      string    `json:"menuId"`
-	ParentID    string    `json:"parentId"`
-	Name        string    `json:"name"`
-	Path        string    `json:"path"`
-	Component   string    `json:"component"`
-	Icon        string    `json:"icon"`
-	Order       int       `json:"order"`
-	IsVisible   bool      `json:"isVisible"`
-	IsEnabled   bool      `json:"isEnabled"`
-	Description string    `json:"description"`
-	Children    []MenuDTO `json:"children,omitempty"` // 子菜单列表
+	MenuID           string    `json:"menuId"`
+	ParentID         string    `json:"parentId"`
+	Name             string    `json:"name"`
+	Title            string    `json:"title"`
+	Path             string    `json:"path"`
+	Component        string    `json:"component"`
+	Redirect         string    `json:"redirect"`
+	Icon             string    `json:"icon"`
+	Order            int       `json:"order"`
+	IsLayout         bool      `json:"isLayout"`
+	IsIndex          bool      `json:"isIndex"`
+	IsVisible        bool      `json:"isVisible"`
+	IsEnabled        bool      `json:"isEnabled"`
+	ScopeType        string    `json:"scopeType"`
+	PermissionAction string    `json:"permissionAction"`
+	Description      string    `json:"description"`
+	Meta             string    `json:"meta"`
+	Children         []MenuDTO `json:"children,omitempty"`
 }
 
 type UserInfo struct {

@@ -28,7 +28,6 @@ type TeamMember struct {
 	BaseModel
 	TeamID string `gorm:"column:team_id;not null;index:idx_team_user,unique" json:"teamId"`
 	UserID string `gorm:"column:user_id;not null;index:idx_team_user,unique;index:idx_user" json:"userId"`
-	RoleID string `gorm:"column:role_id;not null;index" json:"roleId"` // 角色ID（引用 t_role 表）
 }
 
 func (TeamMember) TableName() string {

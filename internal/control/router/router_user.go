@@ -62,7 +62,8 @@ func (rt *Router) login(c *fiber.Ctx) error {
 
 	result := make(map[string]any)
 	result["token"] = user.Token
-	result["role"] = nil
+	result["role"] = user.Role
+	result["initialRoutes"] = user.Routes
 
 	return http.Detail(c, result)
 }
@@ -109,18 +110,32 @@ func (rt *Router) logout(c *fiber.Ctx) error {
 	return http.NotDetail(c)
 }
 
+type inviteUserRequest struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
 func (rt *Router) addUser(c *fiber.Ctx) error {
-	var addUserReq *model.AddUserReq
-	userLogic := rt.Services.User
-	if err := c.BodyParser(&addUserReq); err != nil {
-		return http.Err(c, http.Failed.Code, http.Failed.Msg)
+	var req inviteUserRequest
+	if err := c.BodyParser(&req); err != nil {
+		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
-
-	if err := userLogic.AddUser(c.Context(), *addUserReq); err != nil {
-		return http.Err(c, http.Failed.Code, http.Failed.Msg)
+	if req.Email == "" {
+		return http.Err(c, http.BadRequest.Code, "email is required")
 	}
-
-	return http.NotDetail(c)
+	invitedBy := ""
+	if claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey); err == nil {
+		invitedBy = claims.UserID
+	}
+	userID, err := rt.Services.User.InviteUser(c.Context(), req.Email, req.Role, invitedBy)
+	if err != nil {
+		return http.Err(c, http.Failed.Code, err.Error())
+	}
+	return http.Detail(c, fiber.Map{
+		"userId": userID,
+		"email":  req.Email,
+		"role":   req.Role,
+	})
 }
 
 func (rt *Router) updateUser(c *fiber.Ctx) error {

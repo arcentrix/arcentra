@@ -31,7 +31,6 @@ type ProjectMember struct {
 	BaseModel
 	ProjectID string `gorm:"column:project_id;not null;index:idx_project_user,unique" json:"projectId"`
 	UserID    string `gorm:"column:user_id;not null;index:idx_project_user,unique;index:idx_user" json:"userId"`
-	RoleID    string `gorm:"column:role_id;not null;index" json:"roleId"` // 角色ID（引用 t_role 表）
 }
 
 func (pm *ProjectMember) TableName() string {

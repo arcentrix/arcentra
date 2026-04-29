@@ -19,6 +19,7 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -48,10 +49,12 @@ func (w *AuditWriter) Write(ctx context.Context, entry *model.AuditLog) {
 // PipelineAudit is a convenience helper to create a pipeline audit log entry.
 func PipelineAudit(action, userID, resourceID, resourceName string) *model.AuditLog {
 	return &model.AuditLog{
-		UserID:       userID,
+		LogID:        uuid.NewString(),
+		ActorUserID:  userID,
 		Action:       action,
 		ResourceType: "pipeline_run",
 		ResourceID:   resourceID,
-		ResourceName: resourceName,
+		Reason:       resourceName,
+		Result:       model.AuditResultSuccess,
 	}
 }

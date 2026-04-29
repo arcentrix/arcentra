@@ -16,17 +16,18 @@ package router
 
 import (
 	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
 // approvalRouter registers approval-related routes.
-func (rt *Router) approvalRouter(r fiber.Router, auth fiber.Handler) {
+func (rt *Router) approvalRouter(r fiber.Router, auth fiber.Handler, subject fiber.Handler) {
 	g := r.Group("/approvals")
 	{
-		g.Get("/", auth, rt.listApprovals)
-		g.Get("/:id", rt.getApproval)
-		g.Post("/:id/approve", rt.approveRequest)
-		g.Post("/:id/reject", rt.rejectRequest)
+		g.Get("/", auth, subject, rt.permission("approval:read", middleware.ResolvePlatformScope()), rt.listApprovals)
+		g.Get("/:id", auth, subject, rt.permission("approval:read", middleware.ResolveFromApprovalID("id", rt)), rt.getApproval)
+		g.Post("/:id/approve", auth, subject, rt.permission("approval:approve", middleware.ResolveFromApprovalID("id", rt)), rt.approveRequest)
+		g.Post("/:id/reject", auth, subject, rt.permission("approval:reject", middleware.ResolveFromApprovalID("id", rt)), rt.rejectRequest)
 	}
 }
 

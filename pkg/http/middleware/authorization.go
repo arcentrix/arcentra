@@ -29,11 +29,6 @@ import (
 	goJwt "github.com/golang-jwt/jwt/v5"
 )
 
-// PermissionChecker 权限检查器接口
-type PermissionChecker interface {
-	GetUserRoutes(ctx context.Context, userID string, resourceID string) ([]string, error)
-}
-
 // AuthorizationMiddleware 认证中间件
 // secretKey: 用于验证 JWT 的密钥
 // client: Redis 客户端
@@ -97,82 +92,4 @@ func AuthorizationMiddleware(secretKey string, store cache.ICache) fiber.Handler
 		c.Locals("claims", claims)
 		return c.Next()
 	}
-}
-
-// PermissionMiddleware 权限鉴权中间件
-// permissionChecker: 权限检查器，用于获取用户可访问的路由列表
-// excludedPaths: 排除权限检查的路径列表（如登录接口等）
-// This function is used as the middleware of fiber.
-func PermissionMiddleware(permissionChecker PermissionChecker, excludedPaths []string) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		// 检查当前路径是否在排除列表中
-		currentPath := c.Path()
-		for _, excludedPath := range excludedPaths {
-			if currentPath == excludedPath || strings.HasPrefix(currentPath, excludedPath) {
-				return c.Next()
-			}
-		}
-
-		// 从 context 中获取 claims（应该由 AuthorizationMiddleware 设置）
-		claimsValue := c.Locals("claims")
-		if claimsValue == nil {
-			log.Errorw("claims not found in context", "path", currentPath)
-			return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
-		}
-
-		claims, ok := claimsValue.(*jwt.AuthClaims)
-		if !ok || claims == nil {
-			log.Errorw("invalid claims type", "path", currentPath)
-			return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
-		}
-
-		userID := claims.UserID
-		if userID == "" {
-			log.Errorw("user id is empty", "path", currentPath)
-			return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
-		}
-
-		// 获取资源ID（优先从 query 参数获取，其次从 header 获取）
-		resourceID := c.Query("orgId")
-		if resourceID == "" {
-			resourceID = c.Query("teamId")
-		}
-		if resourceID == "" {
-			resourceID = c.Query("projectId")
-		}
-		if resourceID == "" {
-			resourceID = c.Get("X-Resource-Id")
-		}
-		// 如果都没有，则为空字符串，表示平台级权限
-
-		allowedRoutes, err := permissionChecker.GetUserRoutes(c.Context(), userID, resourceID)
-		if err != nil {
-			log.Errorw("failed to get user routes", "userId", userID, "resourceId", resourceID, "error", err)
-			return http.Err(c, http.InternalError.Code, http.InternalError.Msg)
-		}
-
-		// 检查当前路径是否在允许的路由列表中
-		if !isRouteAllowed(currentPath, allowedRoutes) {
-			log.Debugw("permission denied", "userId", userID, "resourceId", resourceID, "path", currentPath, "allowedRoutes", allowedRoutes)
-			return http.Err(c, http.Forbidden.Code, http.Forbidden.Msg)
-		}
-
-		return c.Next()
-	}
-}
-
-// isRouteAllowed 检查路由是否在允许的路由列表中
-// 支持精确匹配和前缀匹配
-func isRouteAllowed(path string, allowedRoutes []string) bool {
-	for _, allowedRoute := range allowedRoutes {
-		// 精确匹配
-		if path == allowedRoute {
-			return true
-		}
-		// 前缀匹配：如果允许的路由是 /api/v1/projects，则 /api/v1/projects/123 也应该被允许
-		if strings.HasPrefix(path, allowedRoute+"/") || strings.HasPrefix(path, allowedRoute+"?") {
-			return true
-		}
-	}
-	return false
 }

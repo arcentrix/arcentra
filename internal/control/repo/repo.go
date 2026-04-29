@@ -30,14 +30,16 @@ type Repositories struct {
 	Setting              ISettingRepository
 	Project              IProjectRepository
 	ProjectMember        IProjectMemberRepository
-	ProjectTeamAccess    IProjectTeamAccessRepository
 	TeamMember           ITeamMemberRepository
 	UserExt              IUserExtRepository
 	Secret               ISecretRepository
-	UserRoleBinding      IUserRoleBindingRepository
-	RoleMenuBinding      IRoleMenuBindingRepository
 	Menu                 IMenuRepository
 	Role                 IRoleRepository
+	Permission           IPermissionRepository
+	RoleGrant            IRoleGrantRepository
+	ApprovalPolicy       IApprovalPolicyRepository
+	ApprovalDecision     IApprovalDecisionRepository
+	AuditLog             IAuditLogRepository
 	NotificationTemplate INotificationTemplateRepository
 	NotificationChannel  INotificationChannelRepository
 	StepRun              IStepRunRepository
@@ -59,14 +61,16 @@ func NewRepositories(db database.IDatabase, ch cache.ICache) *Repositories {
 		Setting:              NewSettingRepo(db, ch),
 		Project:              NewProjectRepo(db),
 		ProjectMember:        NewProjectMemberRepo(db),
-		ProjectTeamAccess:    NewProjectTeamAccessRepo(db),
 		TeamMember:           NewTeamMemberRepo(db),
 		UserExt:              NewUserExtRepo(db),
 		Secret:               NewSecretRepo(db),
-		UserRoleBinding:      NewUserRoleBindingRepo(db),
-		RoleMenuBinding:      NewRoleMenuBindingRepo(db),
 		Menu:                 NewMenuRepo(db),
 		Role:                 NewRoleRepo(db),
+		Permission:           NewPermissionRepo(db),
+		RoleGrant:            NewRoleGrantRepo(db),
+		ApprovalPolicy:       NewApprovalPolicyRepo(db),
+		ApprovalDecision:     NewApprovalDecisionRepo(db),
+		AuditLog:             NewAuditLogRepo(db),
 		NotificationTemplate: NewNotificationTemplateRepo(db),
 		NotificationChannel:  NewNotificationChannelRepo(db),
 		StepRun:              NewStepRunRepo(db),

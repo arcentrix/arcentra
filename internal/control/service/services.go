@@ -15,9 +15,11 @@
 package service
 
 import (
+	"github.com/arcentrix/arcentra/internal/control/authz"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
+	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/sso/util"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -36,17 +38,29 @@ type Services struct {
 	Scm               *ScmService
 	UserExt           *UserExt
 	Menu              *MenuService
+	Me                *MeService
 	Role              *RoleService
 	ProjectMemberRepo repo.IProjectMemberRepository
+	TeamMemberRepo    repo.ITeamMemberRepository
 	StepRunRepo       repo.IStepRunRepository
 	ProjectRepo       repo.IProjectRepository
 	PipelineRepo      repo.IPipelineRepository
 	StorageRepo       repo.IStorageRepository
 	LogAggregator     *LogAggregator
 	Approval          *ApprovalService
+	ApprovalPolicy    *ApprovalPolicyService
+	RoleGrant         *RoleGrantService
+	AuditLog          *AuditLogService
 	PipelineTemplate  *PipelineTemplateService
 	RegistrationToken *RegistrationTokenService
+	Authorizer        authz.IAuthorizer
 	PipelineEngine    IPipelineEngine // set after process initialization
+	repos             *repo.Repositories
+}
+
+// Repos 返回 repositories 聚合（仅供 router 偶尔直接访问通用仓储使用）
+func (s *Services) Repos() *repo.Repositories {
+	return s.repos
 }
 
 // NewServices 初始化所有 service
@@ -61,8 +75,8 @@ func NewServices(
 		cacheStore,
 		repos.User,
 		repos.UserExt,
-		repos.UserRoleBinding,
-		repos.RoleMenuBinding,
+		repos.RoleGrant,
+		repos.Permission,
 		repos.Menu,
 		repos.Role,
 		menuService,
@@ -80,10 +94,18 @@ func NewServices(
 	userExt := NewUserExt(repos.UserExt)
 	roleService := NewRoleService(repos.Role)
 	logAggregator := NewLogAggregator(nil, db.Database())
-	approvalService := NewApprovalService(repos.Approval)
+	approvalService := NewApprovalService(repos.Approval, repos.ApprovalDecision, repos.ApprovalPolicy)
+	approvalPolicyService := NewApprovalPolicyService(repos.ApprovalPolicy)
+	roleGrantService := NewRoleGrantService(repos.RoleGrant)
+	auditLogService := NewAuditLogService(repos.AuditLog)
 	pipelineTemplateService := NewPipelineTemplateService(repos.PipelineTemplate, repos.Secret)
 	registrationTokenService := NewRegistrationTokenService(repos.RegistrationToken)
 	agentService.SetRegistrationTokenService(registrationTokenService)
+	authorizer, err := authz.NewAuthorizer(repos, cacheStore)
+	if err != nil {
+		log.Errorw("initialize authorizer failed", "error", err)
+	}
+	meService := NewMeService(repos.Menu, repos.TeamMember, menuService, authorizer)
 
 	return &Services{
 		User:              userService,
@@ -98,16 +120,23 @@ func NewServices(
 		Scm:               scmService,
 		UserExt:           userExt,
 		Menu:              menuService,
+		Me:                meService,
 		Role:              roleService,
 		ProjectMemberRepo: repos.ProjectMember,
+		TeamMemberRepo:    repos.TeamMember,
 		StepRunRepo:       repos.StepRun,
 		ProjectRepo:       repos.Project,
 		PipelineRepo:      repos.Pipeline,
 		StorageRepo:       repos.Storage,
 		LogAggregator:     logAggregator,
 		Approval:          approvalService,
+		ApprovalPolicy:    approvalPolicyService,
+		RoleGrant:         roleGrantService,
+		AuditLog:          auditLogService,
 		PipelineTemplate:  pipelineTemplateService,
 		RegistrationToken: registrationTokenService,
+		Authorizer:        authorizer,
+		repos:             repos,
 	}
 }
 

@@ -43,17 +43,24 @@ func (s *MenuService) BuildMenuTree(menus []model.Menu) []model.MenuDTO {
 			continue
 		}
 		menuDTO := &model.MenuDTO{
-			MenuID:      menu.MenuID,
-			ParentID:    menu.ParentID,
-			Name:        menu.Name,
-			Path:        menu.Path,
-			Component:   menu.Component,
-			Icon:        menu.Icon,
-			Order:       menu.Order,
-			IsVisible:   menu.IsVisible == model.MenuVisible,
-			IsEnabled:   menu.IsEnabled == model.MenuEnabled,
-			Description: menu.Description,
-			Children:    []model.MenuDTO{},
+			MenuID:           menu.MenuID,
+			ParentID:         menu.ParentID,
+			Name:             menu.Name,
+			Title:            menu.Title,
+			Path:             menu.Path,
+			Component:        menu.Component,
+			Redirect:         menu.Redirect,
+			Icon:             menu.Icon,
+			Order:            menu.Order,
+			IsLayout:         menu.IsLayout == 1,
+			IsIndex:          menu.IsIndex == 1,
+			IsVisible:        menu.IsVisible == model.MenuVisible,
+			IsEnabled:        menu.IsEnabled == model.MenuEnabled,
+			ScopeType:        menu.ScopeType,
+			PermissionAction: menu.PermissionID,
+			Description:      menu.Description,
+			Meta:             menu.Meta,
+			Children:         []model.MenuDTO{},
 		}
 		menuMap[menu.MenuID] = menuDTO
 	}

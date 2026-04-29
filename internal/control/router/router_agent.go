@@ -17,19 +17,20 @@ package router
 import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
 )
 
-func (rt *Router) agentRouter(r fiber.Router, auth fiber.Handler) {
+func (rt *Router) agentRouter(r fiber.Router, auth fiber.Handler, subject fiber.Handler) {
 	agentGroup := r.Group("/agent", auth)
 	{
 		// RESTful API
-		agentGroup.Get("", rt.listAgent)                     // GET /agent - list agents
-		agentGroup.Get("/statistics", rt.getAgentStatistics) // GET /agent/statistics - get agent statistics
-		agentGroup.Get("/:agentId", rt.getAgent)             // GET /agent/:agentId - get agent by agentId
-		agentGroup.Put("/:agentId", rt.updateAgent)          // PUT /agent/:agentId - update agent
-		agentGroup.Delete("/:agentId", rt.deleteAgent)       // DELETE /agent/:agentId - delete agent
-		agentGroup.Put("/:agentId/approve", rt.approveAgent) // PUT /agent/:agentId/approve - approve agent
+		agentGroup.Get("", subject, rt.permission("agent:read", middleware.ResolvePlatformScope()), rt.listAgent)
+		agentGroup.Get("/statistics", subject, rt.permission("agent:read", middleware.ResolvePlatformScope()), rt.getAgentStatistics)
+		agentGroup.Get("/:agentId", subject, rt.permission("agent:read", middleware.ResolvePlatformScope()), rt.getAgent)
+		agentGroup.Put("/:agentId", subject, rt.permission("agent:update_config", middleware.ResolvePlatformScope()), rt.updateAgent)
+		agentGroup.Delete("/:agentId", subject, rt.permission("agent:delete", middleware.ResolvePlatformScope()), rt.deleteAgent)
+		agentGroup.Put("/:agentId/approve", subject, rt.permission("agent:approve", middleware.ResolvePlatformScope()), rt.approveAgent)
 	}
 }
 

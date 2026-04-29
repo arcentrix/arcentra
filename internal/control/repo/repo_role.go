@@ -40,7 +40,9 @@ func NewRoleRepo(db database.IDatabase) IRoleRepository {
 	return &RoleRepo{IDatabase: db}
 }
 
-var roleSelectFields = []string{"id", "role_id", "name", "display_name", "description", "is_enabled", "created_at", "updated_at"}
+var roleSelectFields = []string{
+	"id", "role_id", "name", "display_name", "description", "scope_type", "is_system", "org_id", "is_enabled", "created_at", "updated_at",
+}
 
 // Create creates a new role.
 func (r *RoleRepo) Create(ctx context.Context, role *model.Role) error {

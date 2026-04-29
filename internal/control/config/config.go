@@ -53,6 +53,14 @@ type TaskQueueConfig struct {
 	MessageCodec      string `mapstructure:"messageCodec"`
 }
 
+// AuthzConfig 定义授权模块配置
+type AuthzConfig struct {
+	Enabled          bool   `mapstructure:"enabled" json:"enabled"`
+	Enforcer         string `mapstructure:"enforcer" json:"enforcer"`
+	CacheTTLSeconds  int    `mapstructure:"cacheTtlSeconds" json:"cacheTtlSeconds"`
+	PolicySyncEnable bool   `mapstructure:"policySyncEnable" json:"policySyncEnable"`
+}
+
 type AppConfig struct {
 	Log          log.Conf             `mapstructure:"log" json:"Log"`
 	Grpc         grpc.Conf            `mapstructure:"grpc" json:"Grpc"`
@@ -64,6 +72,7 @@ type AppConfig struct {
 	Metrics      metrics.Config       `mapstructure:"metrics" json:"Metrics"`
 	Pprof        pprof.Config         `mapstructure:"pprof" json:"Pprof"`
 	Trace        trace.Config         `mapstructure:"trace" json:"Trace"`
+	Authz        AuthzConfig          `mapstructure:"authz" json:"Authz"`
 	TaskQueue    nova.TaskQueueConfig `mapstructure:"taskQueue" json:"TaskQueue"`
 	Pipeline     PipelineConfig       `mapstructure:"pipeline" json:"Pipeline"`
 }

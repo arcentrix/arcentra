@@ -158,6 +158,7 @@ func (rt *Router) Router() *fiber.App {
 
 func (rt *Router) routerGroup(r fiber.Router) {
 	auth := middleware.AuthorizationMiddleware(rt.HTTP.Auth.SecretKey, rt.Cache)
+	subject := middleware.SubjectMiddleware(rt.Services.TeamMemberRepo)
 
 	// WebSocket
 	rt.wsRouter(r, auth)
@@ -173,18 +174,19 @@ func (rt *Router) routerGroup(r fiber.Router) {
 	// user
 	rt.userRouter(r, auth)
 	rt.userExtRouter(r, auth)
+	rt.meRouter(r, auth, subject)
 
 	// identity
 	rt.identityRouter(r, auth)
 
 	// agent
-	rt.agentRouter(r, auth)
+	rt.agentRouter(r, auth, subject)
 
 	// registration tokens (dynamic agent registration)
 	rt.registrationTokenRouter(r, auth)
 
 	// team
-	rt.teamRouter(r, auth)
+	rt.teamRouter(r, auth, subject)
 
 	// storag
 	rt.storageRouter(r, auth)
@@ -193,20 +195,29 @@ func (rt *Router) routerGroup(r fiber.Router) {
 	rt.settingRouter(r, auth)
 
 	// project
-	rt.projectRouter(r, auth)
+	rt.projectRouter(r, auth, subject)
 
 	// pipeline
-	rt.pipelineRouter(r, auth)
+	rt.pipelineRouter(r, auth, subject)
 
 	// secrets
-	rt.secretRouter(r, auth)
+	rt.secretRouter(r, auth, subject)
 
 	// role
-	rt.roleRouter(r, auth)
+	rt.roleRouter(r, auth, subject)
+
+	// permission dictionary
+	rt.permissionRouter(r, auth, subject)
+
+	// audit logs
+	rt.auditLogRouter(r, auth, subject)
 
 	// approval
-	rt.approvalRouter(r, auth)
+	rt.approvalRouter(r, auth, subject)
+
+	// approval policies
+	rt.approvalPolicyRouter(r, auth, subject)
 
 	// pipeline templates
-	rt.pipelineTemplateRouter(r, auth)
+	rt.pipelineTemplateRouter(r, auth, subject)
 }

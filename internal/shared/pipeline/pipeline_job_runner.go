@@ -17,9 +17,11 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/bytedance/sonic"
 )
 
 // JobRunner runs a single job
@@ -94,6 +96,9 @@ func (r *JobRunner) Run(ctx context.Context) error {
 
 	// Handle target deployment if specified
 	if r.job.Target != nil {
+		if r.isProductionTarget() && (r.job.Approval == nil || !r.job.Approval.Required) {
+			return fmt.Errorf("production target requires approval policy")
+		}
 		if err := r.handleTarget(ctx); err != nil {
 			return fmt.Errorf("handle target: %w", err)
 		}
@@ -148,7 +153,7 @@ func (r *JobRunner) handleSource(_ context.Context) error {
 }
 
 // handleApproval handles approval workflow
-func (r *JobRunner) handleApproval(_ context.Context) error {
+func (r *JobRunner) handleApproval(ctx context.Context) error {
 	if r.job.Approval.Plugin == "" {
 		return fmt.Errorf("approval plugin is required")
 	}
@@ -158,20 +163,93 @@ func (r *JobRunner) handleApproval(_ context.Context) error {
 		return fmt.Errorf("approval plugin not found: %s: %w", r.job.Approval.Plugin, err)
 	}
 
-	r.ctx.LogJob(r.job.Name, "waiting for approval...")
-
-	paramsJSON, err := r.ctx.MarshalParams(spec.StructAsMap(r.job.Approval.Params))
+	r.ctx.LogJob(r.job.Name, "waiting for approval")
+	params := spec.StructAsMap(r.job.Approval.Params)
+	params["pipelineRunId"] = r.ctx.PipelineRunID
+	params["jobName"] = r.job.Name
+	if _, ok := params["requiredApproverCount"]; !ok {
+		params["requiredApproverCount"] = 1
+	}
+	paramsJSON, err := r.ctx.MarshalParams(params)
 	if err != nil {
 		return fmt.Errorf("marshal approval params: %w", err)
 	}
-	_, err = pluginClient.Execute("approval.create", paramsJSON, nil)
+	resultRaw, err := pluginClient.Execute("approval.create", paramsJSON, nil)
 	if err != nil {
 		return err
 	}
 
-	// Poll for approval status
-	// TODO: Implement polling logic
-	return nil
+	resultMap := map[string]any{}
+	if len(resultRaw) > 0 {
+		_ = sonic.Unmarshal(resultRaw, &resultMap)
+	}
+
+	approvalID := getStringWithFallback(resultMap, "approvalId", "approval_id", "id")
+	if approvalID == "" {
+		approvalID = fmt.Sprintf("%s:%s", r.ctx.PipelineRunID, r.job.Name)
+	}
+
+	status := strings.ToLower(getStringWithFallback(resultMap, "status"))
+	switch status {
+	case "approved":
+		r.ctx.LogJob(r.job.Name, "approval passed immediately")
+		return nil
+	case "rejected":
+		return fmt.Errorf("approval rejected")
+	case "expired":
+		return fmt.Errorf("approval expired")
+	}
+
+	timeoutSec := getIntWithFallback(params["timeoutSeconds"], 3600)
+	if timeoutSec <= 0 {
+		timeoutSec = 3600
+	}
+	timeout := time.NewTimer(time.Duration(timeoutSec) * time.Second)
+	defer timeout.Stop()
+
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout.C:
+			return fmt.Errorf("approval wait timeout")
+		case <-ticker.C:
+			statusParams := map[string]any{
+				"approvalId": approvalID,
+				"jobName":    r.job.Name,
+			}
+			statusJSON, marshalErr := r.ctx.MarshalParams(statusParams)
+			if marshalErr != nil {
+				return fmt.Errorf("marshal approval status params: %w", marshalErr)
+			}
+			statusRaw, statusErr := pluginClient.Execute("approval.status", statusJSON, nil)
+			if statusErr != nil {
+				r.ctx.LogJob(r.job.Name, fmt.Sprintf("approval.status unavailable, retrying: %v", statusErr))
+				continue
+			}
+			statusResp := map[string]any{}
+			if len(statusRaw) > 0 {
+				_ = sonic.Unmarshal(statusRaw, &statusResp)
+			}
+			current := strings.ToLower(getStringWithFallback(statusResp, "status"))
+			switch current {
+			case "approved":
+				r.ctx.LogJob(r.job.Name, "approval passed")
+				return nil
+			case "rejected":
+				return fmt.Errorf("approval rejected")
+			case "expired":
+				return fmt.Errorf("approval expired")
+			case "pending", "":
+				// continue waiting
+			default:
+				r.ctx.LogJob(r.job.Name, fmt.Sprintf("unknown approval status: %s", current))
+			}
+		}
+	}
 }
 
 // handleTarget handles deployment target
@@ -198,4 +276,42 @@ func (r *JobRunner) handleTarget(_ context.Context) error {
 
 	_, err = pluginClient.Execute("deploy", paramsJSON, optsJSON)
 	return err
+}
+
+func (r *JobRunner) isProductionTarget() bool {
+	if r.job == nil || r.job.Target == nil {
+		return false
+	}
+	config := spec.StructAsMap(r.job.Target.Config)
+	env := strings.ToLower(getStringWithFallback(config, "environment", "env"))
+	return env == "prod" || env == "production"
+}
+
+func getStringWithFallback(data map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		if value, ok := data[key]; ok {
+			if strValue, castOK := value.(string); castOK {
+				return strings.TrimSpace(strValue)
+			}
+		}
+	}
+	return ""
+}
+
+func getIntWithFallback(value any, defaultValue int) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return defaultValue
+	}
 }

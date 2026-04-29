@@ -30,23 +30,3 @@ type SystemEvent struct {
 func (SystemEvent) TableName() string {
 	return "system_event"
 }
-
-// AuditLog 操作审计日志表
-type AuditLog struct {
-	BaseModel
-	UserID         string `gorm:"column:user_id" json:"userId"`
-	Username       string `gorm:"column:username" json:"username"`
-	Action         string `gorm:"column:action" json:"action"`              // create/update/delete/execute
-	ResourceType   string `gorm:"column:resource_type" json:"resourceType"` // pipeline/job/agent/user
-	ResourceID     string `gorm:"column:resource_id" json:"resourceId"`
-	ResourceName   string `gorm:"column:resource_name" json:"resourceName"`
-	IPAddress      string `gorm:"column:ip_address" json:"ipAddress"`
-	UserAgent      string `gorm:"column:user_agent" json:"userAgent"`
-	RequestParams  string `gorm:"column:request_params;type:json" json:"requestParams"` // JSON格式
-	ResponseStatus int    `gorm:"column:response_status" json:"responseStatus"`
-	ErrorMessage   string `gorm:"column:error_message;type:text" json:"errorMessage"`
-}
-
-func (AuditLog) TableName() string {
-	return "audit_log"
-}

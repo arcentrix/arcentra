@@ -21,30 +21,81 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/pkg/auth"
 	"github.com/arcentrix/arcentra/pkg/http"
+	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/gofiber/fiber/v2"
 )
 
-func (rt *Router) pipelineRouter(r fiber.Router, authMiddleware fiber.Handler) {
+func (rt *Router) pipelineRouter(r fiber.Router, authMiddleware fiber.Handler, subjectMiddleware fiber.Handler) {
 	pipeline := r.Group("/pipelines")
 	{
-		pipeline.Post("/", authMiddleware, rt.createPipeline)
-		pipeline.Put("/:pipelineID", authMiddleware, rt.updatePipeline)
-		pipeline.Get("/:pipelineID", authMiddleware, rt.getPipeline)
-		pipeline.Get("/", authMiddleware, rt.listPipelines)
-		pipeline.Delete("/:pipelineID", authMiddleware, rt.deletePipeline)
+		pipeline.Post("/",
+			authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:create", middleware.ResolvePlatformScope()),
+			rt.createPipeline,
+		)
+		pipeline.Put("/:pipelineID",
+			authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:update", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
+			rt.updatePipeline,
+		)
+		pipeline.Get("/:pipelineID",
+			authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:read", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
+			rt.getPipeline,
+		)
+		pipeline.Get("/", authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:read", middleware.ResolvePlatformScope()), rt.listPipelines)
+		pipeline.Delete("/:pipelineID",
+			authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:delete", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
+			rt.deletePipeline,
+		)
 
-		pipeline.Get("/:pipelineID/spec", authMiddleware, rt.getPipelineSpec)
-		pipeline.Post("/:pipelineID/spec/validate", authMiddleware, rt.validatePipelineSpec)
-		pipeline.Post("/:pipelineID/spec/save", authMiddleware, rt.savePipelineSpec)
+		pipeline.Get("/:pipelineID/spec",
+			authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:read", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
+			rt.getPipelineSpec,
+		)
+		pipeline.Post("/:pipelineID/spec/validate",
+			authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:update", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
+			rt.validatePipelineSpec,
+		)
+		pipeline.Post("/:pipelineID/spec/save",
+			authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:update", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
+			rt.savePipelineSpec,
+		)
 
-		pipeline.Post("/:pipelineID/trigger", authMiddleware, rt.triggerPipeline)
-		pipeline.Get("/:pipelineID/runs", authMiddleware, rt.listPipelineRuns)
-		pipeline.Get("/runs/:runID", authMiddleware, rt.getPipelineRun)
+		pipeline.Post("/:pipelineID/trigger",
+			authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:trigger", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
+			rt.triggerPipeline,
+		)
+		pipeline.Get("/:pipelineID/runs",
+			authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:read", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
+			rt.listPipelineRuns,
+		)
+		pipeline.Get("/runs/:runID", authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:read", middleware.ResolvePlatformScope()), rt.getPipelineRun)
 
-		pipeline.Post("/:pipelineID/runs/:runID/stop", authMiddleware, rt.stopPipeline)
-		pipeline.Post("/:pipelineID/runs/:runID/pause", authMiddleware, rt.pausePipeline)
-		pipeline.Post("/:pipelineID/runs/:runID/resume", authMiddleware, rt.resumePipeline)
+		pipeline.Post("/:pipelineID/runs/:runID/stop",
+			authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:cancel", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
+			rt.stopPipeline,
+		)
+		pipeline.Post("/:pipelineID/runs/:runID/pause",
+			authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:pause", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
+			rt.pausePipeline,
+		)
+		pipeline.Post("/:pipelineID/runs/:runID/resume",
+			authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:resume", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
+			rt.resumePipeline,
+		)
 	}
 }
 

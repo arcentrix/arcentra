@@ -201,31 +201,31 @@ const roleSubqueryJoinDefault = "" +
 	"LEFT JOIN (" +
 	"SELECT user_id, name AS role_name " +
 	"FROM (" +
-	"SELECT urb.user_id, r.name, " +
-	"ROW_NUMBER() OVER (PARTITION BY urb.user_id ORDER BY urb.create_time ASC) rn " +
-	"FROM user_role_binding urb " +
-	"JOIN role r ON r.role_id = urb.role_id " +
-	"WHERE r.is_enabled = 1" +
+	"SELECT rg.subject_id AS user_id, r.name, " +
+	"ROW_NUMBER() OVER (PARTITION BY rg.subject_id ORDER BY rg.created_at ASC) rn " +
+	"FROM role_grant rg " +
+	"JOIN role r ON r.role_id = rg.role_id " +
+	"WHERE r.is_enabled = 1 AND rg.subject_type = 'user' AND rg.is_enabled = 1" +
 	") t WHERE rn = 1" +
 	") role ON role.user_id = u.user_id"
 
 const roleSubqueryJoinByRoleID = "" +
 	"INNER JOIN (" +
-	"SELECT DISTINCT urb.user_id, r.name AS role_name " +
-	"FROM user_role_binding urb " +
-	"JOIN role r ON r.role_id = urb.role_id " +
-	"WHERE r.is_enabled = 1 AND urb.role_id = ?" +
+	"SELECT DISTINCT rg.subject_id AS user_id, r.name AS role_name " +
+	"FROM role_grant rg " +
+	"JOIN role r ON r.role_id = rg.role_id " +
+	"WHERE r.is_enabled = 1 AND rg.subject_type = 'user' AND rg.is_enabled = 1 AND rg.role_id = ?" +
 	") role ON role.user_id = u.user_id"
 
 const roleSubqueryJoinByRoleName = "" +
 	"INNER JOIN (" +
 	"SELECT user_id, name AS role_name " +
 	"FROM (" +
-	"SELECT urb.user_id, r.name, " +
-	"ROW_NUMBER() OVER (PARTITION BY urb.user_id ORDER BY urb.create_time ASC) rn " +
-	"FROM user_role_binding urb " +
-	"JOIN role r ON r.role_id = urb.role_id " +
-	"WHERE r.is_enabled = 1 AND r.name = ?" +
+	"SELECT rg.subject_id AS user_id, r.name, " +
+	"ROW_NUMBER() OVER (PARTITION BY rg.subject_id ORDER BY rg.created_at ASC) rn " +
+	"FROM role_grant rg " +
+	"JOIN role r ON r.role_id = rg.role_id " +
+	"WHERE r.is_enabled = 1 AND rg.subject_type = 'user' AND rg.is_enabled = 1 AND r.name = ?" +
 	") t WHERE rn = 1" +
 	") role ON role.user_id = u.user_id"
 

@@ -63,6 +63,7 @@ func NewGrpcServer(cfg Conf) *ServerWrapper {
 			grpcctxtags.StreamServerInterceptor(),
 			interceptor.LoggingStreamInterceptor(), // 使用自定义日志拦截器，可过滤心跳接口
 			interceptor.AuthStreamInterceptor(),    // 使用自定义认证拦截器，可跳过心跳接口
+			interceptor.AuthzStreamInterceptor(),   // 使用统一授权拦截器
 			grpcrecovery.StreamServerInterceptor(),
 		)),
 		grpc.UnaryInterceptor(grpcmiddleware.ChainUnaryServer(
@@ -71,6 +72,7 @@ func NewGrpcServer(cfg Conf) *ServerWrapper {
 			grpcctxtags.UnaryServerInterceptor(),
 			interceptor.LoggingUnaryInterceptor(), // 使用自定义日志拦截器，可过滤心跳接口
 			interceptor.AuthUnaryInterceptor(),    // 使用自定义认证拦截器，可跳过心跳接口
+			interceptor.AuthzUnaryInterceptor(),   // 使用统一授权拦截器
 			grpcrecovery.UnaryServerInterceptor(),
 		)),
 	}

@@ -246,3 +246,9 @@ maxPollInterval = 300000
 messageFormat = "protobuf"
 # MessageCodec: optional custom codec name (defaults to MessageFormat)
 messageCodec = "protobuf"
+
+[authz]
+enabled = true
+enforcer = "casbin"
+cacheTtlSeconds = 300
+policySyncEnable = true
