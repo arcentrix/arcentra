@@ -46,6 +46,7 @@ require (
 require (
 	github.com/VictoriaMetrics/fastcache v1.13.3
 	github.com/apache/rocketmq-client-go/v2 v2.1.2
+	github.com/casbin/casbin/v2 v2.135.0
 	github.com/confluentinc/confluent-kafka-go/v2 v2.14.1
 	github.com/containerd/containerd v1.7.31
 	github.com/gofiber/contrib/fiberi18n/v2 v2.0.6
@@ -68,11 +69,9 @@ require (
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.56.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/signin v1.0.10 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
-	github.com/casbin/casbin/v2 v2.135.0 // indirect
 	github.com/casbin/govaluate v1.3.0 // indirect
 	github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2 // indirect
 	github.com/containerd/cgroups/v3 v3.0.3 // indirect
-	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/klauspost/crc32 v1.3.0 // indirect
@@ -91,7 +90,7 @@ require (
 	cyphar.com/go-pathrs v0.2.4 // indirect
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 // indirect
 	github.com/AdamKorcz/go-118-fuzz-build v0.0.0-20250520111509-a70c2aa677fa // indirect
-	github.com/Azure/go-ntlmssp v0.1.0 // indirect
+	github.com/Azure/go-ntlmssp v0.1.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/Microsoft/hcsshim v0.12.5 // indirect
 	github.com/andybalholm/brotli v1.2.1 // indirect
