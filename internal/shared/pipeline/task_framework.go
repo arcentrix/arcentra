@@ -16,17 +16,18 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
-	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/plugin"
-	"github.com/arcentrix/arcentra/pkg/retry"
+	"github.com/arcentrix/arcentra/pkg/scm"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
 )
@@ -52,7 +53,34 @@ func NewTaskFramework(
 }
 
 // Execute executes a task through the standard lifecycle
-func (tf *TaskFramework) Execute(ctx context.Context, task *Task) error {
+func (tf *TaskFramework) Execute(ctx context.Context, task *Task) (resultErr error) {
+	if task == nil || task.Job == nil {
+		return fmt.Errorf("task and job must not be nil")
+	}
+	tf = NewTaskFramework(tf.execCtx.ForJob(), tf.logger)
+	tf.execCtx.Env = tf.execCtx.ResolveStepEnv(task.Job, nil)
+	if task.Job.Timeout != "" {
+		timeout, err := time.ParseDuration(task.Job.Timeout)
+		if err != nil || timeout <= 0 {
+			err := fmt.Errorf("invalid job timeout %q", task.Job.Timeout)
+			task.MarkCompleted(TaskStateFailed, err)
+			return err
+		}
+
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	if err := tf.checkPause(ctx); err != nil {
+		task.MarkCompleted(TaskStateFailed, err)
+		return err
+	}
+	defer func() { tf.finishRecords(ctx, task, resultErr) }()
+	if err := tf.createRecords(ctx, task); err != nil {
+		task.MarkCompleted(TaskStateFailed, err)
+		return err
+	}
+
 	// Prepare: validate and prepare task execution
 	if err := tf.prepare(ctx, task); err != nil {
 		task.MarkCompleted(TaskStateFailed, err)
@@ -91,22 +119,9 @@ func (tf *TaskFramework) Execute(ctx context.Context, task *Task) error {
 		return fmt.Errorf("queue task %s: %w", task.Name, err)
 	}
 
-	// Apply timeout if specified
-	waitCtx := ctx
-	var cancel context.CancelFunc
-	if task.Job.Timeout != "" {
-		timeout, err := time.ParseDuration(task.Job.Timeout)
-		if err != nil {
-			task.MarkCompleted(TaskStateFailed, err)
-			return fmt.Errorf("invalid timeout format: %w", err)
-		}
-		waitCtx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
 	// Wait: wait for task completion
-	if err := tf.wait(waitCtx, task); err != nil {
-		if waitCtx.Err() == context.Canceled {
+	if err := tf.wait(ctx, task); err != nil {
+		if ctx.Err() == context.Canceled {
 			task.MarkCompleted(TaskStateFailed, err)
 			tf.emitJobEvent(plugin.EventTypeJobCancelled, task, map[string]any{
 				"status": "cancelled",
@@ -137,9 +152,9 @@ func (tf *TaskFramework) prepare(_ context.Context, task *Task) error {
 
 	// Inject upstream job artifact URIs into this job's environment so that
 	// steps can reference them as ${{ ARTIFACT_<jobName>_<artifactName> }}.
-	if len(tf.execCtx.ArtifactURIs) > 0 {
-		for key, uri := range tf.execCtx.ArtifactURIs {
-			tf.execCtx.Env["ARTIFACT_"+key] = uri
+	if artifacts := tf.execCtx.ArtifactSnapshot(); len(artifacts) > 0 {
+		for key, uri := range artifacts {
+			tf.execCtx.Env["ARTIFACT_"+strings.NewReplacer("/", "_", "-", "_", ".", "_").Replace(key)] = uri
 		}
 	}
 
@@ -170,7 +185,7 @@ func (tf *TaskFramework) create(ctx context.Context, task *Task) error {
 	task.State = TaskStateCreated
 
 	// Handle source if specified
-	if task.Job.Source != nil {
+	if task.Job.Source != nil && !isAgentJob(task.Job) {
 		if err := tf.handleSource(ctx, task); err != nil {
 			return fmt.Errorf("handle source: %w", err)
 		}
@@ -188,13 +203,18 @@ func (tf *TaskFramework) create(ctx context.Context, task *Task) error {
 }
 
 // start starts task execution
-func (tf *TaskFramework) start(_ context.Context, task *Task) error {
+func (tf *TaskFramework) start(ctx context.Context, task *Task) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")
 	}
 	now := time.Now()
 	task.StartedAt = &now
 	task.State = TaskStateStarted
+	if store := tf.getJobRunStore(); store != nil && !isAgentJob(task.Job) {
+		if err := store.UpdateJobRun(ctx, tf.execCtx.JobRunID, map[string]any{"status": model.JobRunStatusRunning, "start_time": now}); err != nil {
+			return err
+		}
+	}
 
 	tf.logger.Infow("task started", "task", task.Name)
 	tf.emitJobEvent(plugin.EventTypeJobStarted, task, map[string]any{
@@ -219,116 +239,55 @@ func isAgentJob(job *spec.Job) bool {
 // message. Local jobs skip this phase entirely.
 func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 	task.State = TaskStateQueued
-	tf.logger.Infow("task queued", "task", task.Name)
-
-	if tf.execCtx.TaskQueue == nil || !isAgentJob(task.Job) {
+	if !isAgentJob(task.Job) {
 		return nil
 	}
-
-	store := tf.getJobRunStore()
-	if store == nil {
-		return nil
+	if tf.execCtx.TaskQueue == nil {
+		return fmt.Errorf("agent job requires a configured task queue")
 	}
-
-	jobRunID := id.GetUild()
-	task.Set("jobRunID", jobRunID)
-
-	envJSON, _ := sonic.MarshalString(tf.execCtx.ResolveStepEnv(task.Job, nil))
-	jr := &model.JobRun{
-		JobRunID:      jobRunID,
-		PipelineID:    tf.execCtx.PipelineIDRef,
-		PipelineRunID: tf.execCtx.PipelineRunID,
-		JobName:       task.Job.Name,
-		Status:        model.JobRunStatusQueued,
-		Priority:      5,
-		Env:           envJSON,
-		Workspace:     tf.execCtx.JobWorkspace(task.Job.Name),
-		Timeout:       task.Job.Timeout,
-		TotalSteps:    len(task.Job.Steps),
+	if tf.getJobRunStore() == nil {
+		return fmt.Errorf("agent job requires a job run store")
 	}
-	if err := store.CreateJobRun(ctx, jr); err != nil {
-		return fmt.Errorf("create job run: %w", err)
+	if tf.execCtx.SelectAgent == nil {
+		return fmt.Errorf("agent selection is not configured")
 	}
-
-	stepPayloads := make([]taskqueue.StepPayload, 0, len(task.Job.Steps))
+	agentID, err := tf.execCtx.SelectAgent(ctx, task.Job)
+	if err != nil {
+		return fmt.Errorf("select agent: %w", err)
+	}
+	task.Set("agentID", agentID)
+	if err := tf.getJobRunStore().UpdateJobRun(ctx, tf.execCtx.JobRunID, map[string]any{"agent_id": agentID, "status": model.JobRunStatusQueued}); err != nil {
+		return err
+	}
+	steps := make([]taskqueue.StepPayload, 0, len(task.Job.Steps))
 	for i, step := range task.Job.Steps {
 		if step == nil {
 			continue
 		}
-		stepRunID := id.GetUild()
-		sr := &model.StepRun{
-			StepRunID:     stepRunID,
-			PipelineID:    tf.execCtx.PipelineIDRef,
-			PipelineRunID: tf.execCtx.PipelineRunID,
-			JobID:         fmt.Sprintf("%s-%s", tf.execCtx.PipelineIDRef, task.Job.Name),
-			JobRunID:      jobRunID,
-			Name:          step.Name,
-			StepIndex:     i,
-			Status:        1, // pending
-			Uses:          step.Uses,
-			Action:        step.Action,
-			Workspace:     tf.execCtx.StepWorkspace(task.Job.Name, step.Name),
-			Timeout:       step.Timeout,
+		stepRunID := tf.execCtx.StepRunIDs[step.Name]
+		if err := tf.getJobRunStore().UpdateStepRun(ctx, stepRunID, map[string]any{"agent_id": agentID, "status": 2}); err != nil {
+			return err
 		}
-		if argsMap := spec.StructAsMap(step.Args); len(argsMap) > 0 {
-			if raw, err := sonic.MarshalString(argsMap); err == nil {
-				sr.Args = raw
-			}
-		}
-		if stepEnv := tf.execCtx.ResolveStepEnv(task.Job, step); len(stepEnv) > 0 {
-			if raw, err := sonic.MarshalString(stepEnv); err == nil {
-				sr.Env = raw
-			}
-		}
-		if err := store.CreateStepRun(ctx, sr); err != nil {
-			return fmt.Errorf("create step run %s: %w", step.Name, err)
-		}
-
-		stepPayloads = append(stepPayloads, taskqueue.StepPayload{
-			Name:            step.Name,
-			StepIndex:       int32(i),
-			StepRunID:       stepRunID,
-			Uses:            step.Uses,
-			Action:          step.Action,
-			Args:            spec.StructAsMap(step.Args),
-			Env:             tf.execCtx.ResolveStepEnv(task.Job, step),
-			ContinueOnError: step.ContinueOnError,
-			Timeout:         step.Timeout,
-			When:            step.When,
-		})
+		steps = append(steps, taskqueue.StepPayload{Name: step.Name, StepIndex: int32(i), StepRunID: stepRunID, Uses: step.Uses, Action: step.Action,
+			Args: tf.execCtx.ResolveVariables(spec.StructAsMap(step.Args)), Env: tf.execCtx.ResolveStepEnv(task.Job, step), ContinueOnError: step.ContinueOnError, Timeout: step.Timeout, When: step.When})
 	}
-
-	payload := &taskqueue.JobRunTaskPayload{
-		PipelineID:    tf.execCtx.PipelineIDRef,
-		PipelineRunID: tf.execCtx.PipelineRunID,
-		JobRunID:      jobRunID,
-		JobName:       task.Job.Name,
-		Steps:         stepPayloads,
-		Env:           tf.execCtx.ResolveStepEnv(task.Job, nil),
-		Workspace:     tf.execCtx.JobWorkspace(task.Job.Name),
-		Timeout:       task.Job.Timeout,
-		ArtifactURIs:  tf.execCtx.ArtifactURIs,
-	}
-	if task.Job.Source != nil {
-		payload.Source = &taskqueue.SourcePayload{
-			Type:   task.Job.Source.Type,
-			Repo:   task.Job.Source.Repo,
-			Branch: task.Job.Source.Branch,
+	payload := &taskqueue.JobRunTaskPayload{PipelineID: tf.execCtx.PipelineIDRef, PipelineRunID: tf.execCtx.PipelineRunID,
+		JobRunID: tf.execCtx.JobRunID, JobName: task.Job.Name, AgentID: agentID, Steps: steps,
+		Env: tf.execCtx.ResolveStepEnv(task.Job, nil), Variables: tf.execCtx.Pipeline.Variables,
+		Timeout: task.Job.Timeout, ArtifactURIs: tf.execCtx.ArtifactSnapshot()}
+	if source := task.Job.Source; source != nil {
+		payload.Source = &taskqueue.SourcePayload{Type: source.Type, Repo: tf.execCtx.ResolveVariable(source.Repo), Branch: tf.execCtx.ResolveVariable(source.Branch)}
+		if source.Auth != nil {
+			payload.Source.Auth = map[string]string{"username": tf.execCtx.ResolveVariable(source.Auth.Username), "password": tf.execCtx.ResolveVariable(source.Auth.Password), "token": tf.execCtx.ResolveVariable(source.Auth.Token)}
 		}
 	}
-
-	payloadBytes, err := sonic.Marshal(payload)
+	data, err := sonic.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("marshal job run payload: %w", err)
+		return fmt.Errorf("marshal job run: %w", err)
 	}
-	if _, err = tf.execCtx.TaskQueue.Enqueue(&nova.Task{
-		Type:    taskqueue.TaskTypeJobRun,
-		Payload: payloadBytes,
-	}, nova.Queue("DEFAULT")); err != nil {
-		return fmt.Errorf("enqueue job run task: %w", err)
+	if _, err = tf.execCtx.TaskQueue.Enqueue(&nova.Task{Type: taskqueue.TaskTypeJobRun, Payload: data}, nova.Queue(taskqueue.AgentQueue(agentID))); err != nil {
+		return fmt.Errorf("enqueue job run: %w", err)
 	}
-
-	tf.logger.Infow("job run enqueued to kafka", "jobRunId", jobRunID, "job", task.Job.Name)
 	return nil
 }
 
@@ -362,9 +321,6 @@ func (tf *TaskFramework) waitForAgentJob(ctx context.Context, task *Task) error 
 	defer ticker.Stop()
 
 	for {
-		if err := tf.checkPause(ctx); err != nil {
-			return err
-		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -434,37 +390,17 @@ func (tf *TaskFramework) sendFailureNotification(ctx context.Context, task *Task
 
 // executeStep executes a single step
 func (tf *TaskFramework) executeStep(ctx context.Context, task *Task, step *spec.Step) error {
-	// Use retry if configured
-	if task.Job.Retry != nil && task.Job.Retry.MaxAttempts > 0 {
-		delay := time.Duration(0)
-		if task.Job.Retry.Delay != "" {
-			var err error
-			delay, err = time.ParseDuration(task.Job.Retry.Delay)
-			if err != nil {
-				return fmt.Errorf("invalid retry delay format: %w", err)
-			}
-		}
-
-		var lastErr error
-		err := retry.Do(ctx, func(ctx context.Context) error {
-			task.RetryCount++
-			lastErr = tf.executeStepOnce(ctx, task, step)
-			return lastErr
-		}, retry.WithMaxAttempts(int(task.Job.Retry.MaxAttempts)), retry.WithBackoff(retry.Fixed(delay)))
-		if err != nil {
-			return fmt.Errorf("step execution failed after retries: %w", lastErr)
-		}
-		return nil
-	}
-
 	return tf.executeStepOnce(ctx, task, step)
 }
 
 // executeStepOnce executes a step once
 func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *spec.Step) error {
+	start := time.Now()
+
 	// Evaluate when condition
 	if step.When != "" {
 		stepContext := map[string]any{
+			"env": tf.execCtx.ResolveStepEnv(task.Job, step),
 			"job": map[string]any{
 				"name": task.Job.Name,
 			},
@@ -474,13 +410,20 @@ func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *
 		}
 		ok, err := tf.execCtx.EvalConditionWithContext(step.When, stepContext)
 		if err != nil {
+			tf.recordStep(ctx, task, step, 5, start, err)
 			return fmt.Errorf("evaluate when condition: %w", err)
 		}
 		if !ok {
+			tf.recordStep(ctx, task, step, 8, start, nil)
 			return nil // Step skipped
 		}
 	}
 
+	if store := tf.getJobRunStore(); store != nil {
+		if err := store.UpdateStepRun(ctx, tf.execCtx.StepRunIDs[step.Name], map[string]any{"status": 3, "start_time": start, "workspace": tf.execCtx.JobWorkspace(task.Name)}); err != nil {
+			return err
+		}
+	}
 	tf.emitStepEvent(plugin.EventTypeStepStarted, task, step.Name, map[string]any{
 		"status": "started",
 	})
@@ -488,7 +431,9 @@ func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *
 	// Create step runner and execute
 	stepRunner := NewStepRunner(tf.execCtx, task.Job, step)
 	if err := stepRunner.Run(ctx); err != nil {
-		if step.ContinueOnError {
+		status := stepFailureStatus(ctx, err)
+		tf.recordStep(ctx, task, step, status, start, err)
+		if step.ContinueOnError && ctx.Err() == nil {
 			tf.logger.Warnw("step failed but continuing", "task", task.Name, "step", step.Name, "error", err)
 			tf.emitStepEvent(plugin.EventTypeStepFailed, task, step.Name, map[string]any{
 				"status": "failed",
@@ -503,6 +448,7 @@ func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *
 		return err
 	}
 
+	tf.recordStep(ctx, task, step, 4, start, nil)
 	tf.emitStepEvent(plugin.EventTypeStepCompleted, task, step.Name, map[string]any{
 		"status": "completed",
 	})
@@ -510,25 +456,47 @@ func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *
 	return nil
 }
 
+func stepFailureStatus(ctx context.Context, err error) int {
+	executionCause := ctx.Err()
+	if executionCause == nil {
+		executionCause = executor.ExecutionContextCause(err)
+	}
+	switch {
+	case errors.Is(executionCause, context.DeadlineExceeded):
+		return 7
+	case errors.Is(executionCause, context.Canceled):
+		return 6
+	case errors.Is(err, executor.ErrBuildLogPersistence):
+		return 5
+	case errors.Is(err, context.DeadlineExceeded):
+		return 7
+	case errors.Is(err, context.Canceled):
+		return 6
+	default:
+		return 5
+	}
+}
+
 // handleSource handles source configuration by invoking the appropriate
 // source plugin (e.g. "git") to populate the job workspace.
-func (tf *TaskFramework) handleSource(_ context.Context, task *Task) error {
+func (tf *TaskFramework) handleSource(ctx context.Context, task *Task) error {
 	src := task.Job.Source
 	if src == nil {
 		return nil
 	}
 
-	if tf.pluginManager == nil {
-		tf.logger.Warnw("plugin manager not available, skipping source", "job", task.Name)
-		return nil
-	}
-
 	workspace := tf.execCtx.JobWorkspace(task.Job.Name)
 	sourceType := src.Type
-	if sourceType == "" {
-		sourceType = "git"
+	if sourceType == "" || sourceType == "git" {
+		auth := scm.GitAuth{}
+		if src.Auth != nil {
+			auth = scm.NewGitAuthFromMap(map[string]string{"username": tf.execCtx.ResolveVariable(src.Auth.Username), "password": tf.execCtx.ResolveVariable(src.Auth.Password), "token": tf.execCtx.ResolveVariable(src.Auth.Token)})
+		}
+		return scm.CloneContext(ctx, scm.GitCloneRequest{Workdir: workspace, RepoURL: tf.execCtx.ResolveVariable(src.Repo), Branch: tf.execCtx.ResolveVariable(src.Branch), Auth: auth})
 	}
-
+	if tf.pluginManager == nil {
+		return fmt.Errorf("source plugin manager is unavailable")
+	}
 	p, err := tf.pluginManager.GetPlugin(sourceType)
 	if err != nil {
 		return fmt.Errorf("source plugin %q not found: %w", sourceType, err)
@@ -539,7 +507,7 @@ func (tf *TaskFramework) handleSource(_ context.Context, task *Task) error {
 		"branch":    src.Branch,
 		"workspace": workspace,
 	}
-	paramsJSON, err := json.Marshal(params)
+	paramsJSON, err := sonic.Marshal(params)
 	if err != nil {
 		return fmt.Errorf("marshal source params: %w", err)
 	}
@@ -605,7 +573,7 @@ func (tf *TaskFramework) backflowArtifactURIs(ctx context.Context, task *Task) {
 		return
 	}
 	for key, uri := range uris {
-		tf.execCtx.ArtifactURIs[task.Job.Name+"/"+key] = uri
+		tf.execCtx.RecordArtifact(task.Job.Name+"/"+key, uri)
 	}
 }
 
@@ -647,8 +615,32 @@ func (tf *TaskFramework) handleApproval(ctx context.Context, task *Task) error {
 }
 
 // handleTarget handles target deployment
-func (tf *TaskFramework) handleTarget(_ context.Context, _ *Task) error {
-	// Implementation similar to JobRunner.handleTarget
-	// This would use target plugins
-	return nil
+func (tf *TaskFramework) handleTarget(ctx context.Context, task *Task) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	target := task.Job.Target
+	if target == nil {
+		return nil
+	}
+	if tf.pluginManager == nil || target.Type == "" {
+		return fmt.Errorf("deployment target plugin is not configured")
+	}
+	client, err := tf.pluginManager.GetPlugin(target.Type)
+	if err != nil {
+		return fmt.Errorf("deployment target plugin %q: %w", target.Type, err)
+	}
+	params, err := sonic.Marshal(tf.execCtx.ResolveVariables(spec.StructAsMap(target.Config)))
+	if err != nil {
+		return err
+	}
+	opts, err := sonic.Marshal(map[string]any{"workspace": tf.execCtx.JobWorkspace(task.Name), "env": tf.execCtx.ResolveStepEnv(task.Job, nil)})
+	if err != nil {
+		return err
+	}
+	result, err := client.Execute("deploy", params, opts)
+	if err != nil {
+		return err
+	}
+	return checkPluginResult(result)
 }

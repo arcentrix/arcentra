@@ -1,0 +1,76 @@
+package pipeline
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/arcentrix/arcentra/pkg/log"
+	"go.uber.org/zap"
+)
+
+type terminalJobStore struct {
+	jobRunStoreIface
+	job    *model.JobRun
+	writes int
+}
+
+func (s *terminalJobStore) GetJobRun(context.Context, string) (*model.JobRun, error) {
+	return s.job, nil
+}
+func (s *terminalJobStore) UpdateJobRun(context.Context, string, map[string]any) error {
+	s.writes++
+	return nil
+}
+func (s *terminalJobStore) UpdateJobRunIfStatus(context.Context, string, int, map[string]any) error {
+	s.writes++
+	return nil
+}
+
+func TestRemoteTerminalReportsAreNeverReclassified(t *testing.T) {
+	for _, status := range []int{model.JobRunStatusSuccess, model.JobRunStatusFailed, model.JobRunStatusTimeout, model.JobRunStatusCancelled} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			originalEnd := time.Now().Add(-time.Minute)
+			store := &terminalJobStore{job: &model.JobRun{JobRunID: "remote", Status: status, EndTime: &originalEnd, Duration: 1234}}
+			logger := log.Logger{SugaredLogger: zap.NewNop().Sugar()}
+			execution := NewExecutionContext(&spec.Pipeline{Namespace: "test"}, nil, t.TempDir(), logger)
+			execution.JobRunStore = store
+			execution.JobRunID = "remote"
+			framework := NewTaskFramework(execution, logger)
+			task := &Task{Name: "remote", State: TaskStateFailed, Job: &spec.Job{Name: "remote", Steps: []*spec.Step{{Name: "shell", RunOnAgent: true}}}}
+			framework.finishRecords(context.Background(), task, fmt.Errorf("agent job finished with status %d", status))
+			if store.writes != 0 || store.job.Status != status || store.job.Duration != 1234 {
+				t.Fatalf("terminal report overwritten: %+v", store.job)
+			}
+		})
+	}
+}
+
+func TestRuntimeEnvironmentIsExplicitlyApplied(t *testing.T) {
+	ctx := NewExecutionContext(&spec.Pipeline{Runtime: &spec.Runtime{Env: map[string]string{"RUNTIME_ONLY": "available", "PRIORITY": "runtime"}}, Variables: map[string]string{"PRIORITY": "pipeline"}}, nil, t.TempDir(), log.Logger{SugaredLogger: zap.NewNop().Sugar()})
+	if ctx.Env["RUNTIME_ONLY"] != "available" || ctx.Env["PRIORITY"] != "pipeline" {
+		t.Fatalf("runtime env not applied: %+v", ctx.Env)
+	}
+}
+
+func TestRemoteArtifactBackflowIsScopedAndSharedWithDownstreamJobs(t *testing.T) {
+	logger := log.Logger{SugaredLogger: zap.NewNop().Sugar()}
+	root := NewExecutionContext(&spec.Pipeline{Namespace: "test"}, nil, t.TempDir(), logger)
+	root.JobRunStore = &terminalJobStore{job: &model.JobRun{JobRunID: "upstream-run", Status: model.JobRunStatusSuccess, ArtifactURIs: `{"dist/output.bin":"opaque/run-a/job-a/dist/output.bin"}`}}
+	upstream := root.ForJob()
+	task := &Task{Name: "build", Job: &spec.Job{Name: "build"}}
+	task.Set("jobRunID", "upstream-run")
+	NewTaskFramework(upstream, logger).backflowArtifactURIs(context.Background(), task)
+	downstream := root.ForJob()
+	uris := downstream.ArtifactSnapshot()
+	if len(uris) != 1 || uris["build/dist/output.bin"] != "opaque/run-a/job-a/dist/output.bin" {
+		t.Fatalf("artifact backflow lost scope/key: %+v", uris)
+	}
+	uris["build/dist/output.bin"] = "mutated"
+	if root.ArtifactSnapshot()["build/dist/output.bin"] != "opaque/run-a/job-a/dist/output.bin" {
+		t.Fatal("downstream snapshot mutated shared artifact state")
+	}
+}

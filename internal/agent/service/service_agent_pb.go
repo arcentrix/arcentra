@@ -84,7 +84,7 @@ func (s *AgentServiceImpl) Heartbeat(_ context.Context, req *agentv1.HeartbeatRe
 			ctx, cancel := s.grpcClient.WithTimeoutAndAuth(context.Background())
 			defer cancel()
 			resp, err := s.grpcClient.AgentClient.Heartbeat(ctx, hbReq)
-			if err != nil || !resp.Success {
+			if err != nil || resp == nil || !resp.Success {
 				log.Warnw("Periodic heartbeat failed", "error", err)
 				return
 			}
@@ -107,7 +107,7 @@ func (s *AgentServiceImpl) Heartbeat(_ context.Context, req *agentv1.HeartbeatRe
 		ctx, cancel := s.grpcClient.WithTimeoutAndAuth(context.Background())
 		defer cancel()
 		resp, err := s.grpcClient.AgentClient.Heartbeat(ctx, initReq)
-		if err != nil || !resp.Success {
+		if err != nil || resp == nil || !resp.Success {
 			log.Warnw("Initial heartbeat failed", "error", err)
 			return nil, fmt.Errorf("initial heartbeat failed: %w", err)
 		}
@@ -124,7 +124,7 @@ func (s *AgentServiceImpl) Heartbeat(_ context.Context, req *agentv1.HeartbeatRe
 
 // Register registers this agent with the central server via gRPC.
 // Builds request from agentConf, calls server, updates agentConf in-place from response.
-func (s *AgentServiceImpl) Register(_ context.Context, _ *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
+func (s *AgentServiceImpl) Register(ctx context.Context, _ *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
 	if s == nil || s.agentConf == nil || s.grpcClient == nil || s.grpcClient.AgentClient == nil {
 		return nil, fmt.Errorf("agent grpc client is not ready")
 	}
@@ -141,7 +141,7 @@ func (s *AgentServiceImpl) Register(_ context.Context, _ *agentv1.RegisterReques
 		Labels:                s.agentConf.Agent.Labels,
 	}
 	// Use a context without auth metadata for registration (Register is excluded from auth)
-	regCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	regCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	resp, err := s.grpcClient.AgentClient.Register(regCtx, regReq)
 	if err != nil {
@@ -162,6 +162,7 @@ func (s *AgentServiceImpl) Register(_ context.Context, _ *agentv1.RegisterReques
 	// Save per-agent auth token for subsequent gRPC calls
 	if resp.AuthToken != "" {
 		s.agentConf.Grpc.Token = resp.AuthToken
+		s.grpcClient.UpdateToken(resp.AuthToken)
 	}
 	if resp.Storage != nil && s.storageHolder != nil {
 		s.storageHolder.SetFromProto(resp.Storage)
@@ -275,44 +276,5 @@ func (s *AgentServiceImpl) UpdateLabels(_ context.Context, req *agentv1.UpdateLa
 	}, nil
 }
 
-// getRunningStepRunsCount returns the current running step runs count from prometheus metrics.
-func getRunningStepRunsCount(metricsServer *metrics.Server) int32 {
-	if metricsServer == nil {
-		return 0
-	}
-	registry := metricsServer.GetRegistry()
-	if registry == nil {
-		return 0
-	}
-	metricFamilies, err := registry.Gather()
-	if err != nil {
-		log.Debugw("Failed to gather metrics", "error", err)
-		return 0
-	}
-	metricNames := []string{
-		"agent_running_step_runs",
-		"running_step_runs",
-		"agent_step_runs_running",
-		"step_runs_running",
-		"agent_running_jobs",
-		"running_tasks",
-		"agent_running_tasks",
-		"agent_tasks_running",
-		"tasks_running",
-	}
-	for _, mf := range metricFamilies {
-		for _, name := range metricNames {
-			if mf.GetName() == name {
-				for _, metric := range mf.GetMetric() {
-					if metric.Gauge != nil {
-						return int32(metric.Gauge.GetValue())
-					}
-					if metric.Counter != nil {
-						return int32(metric.Counter.GetValue())
-					}
-				}
-			}
-		}
-	}
-	return 0
-}
+// getRunningStepRunsCount 获取真实运行步骤数量，避免依赖可选的指标服务
+func getRunningStepRunsCount(_ *metrics.Server) int32 { return taskqueue.RunningStepRunsCount() }

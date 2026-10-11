@@ -16,6 +16,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,14 +34,17 @@ func LoadPipelineDefinition(
 	pipeline *model.Pipeline,
 	project *model.Project,
 ) (string, string, error) {
-	auth := scmAuthFromProject(project)
+	auth, err := scmAuthForPipeline(pipeline, project)
+	if err != nil {
+		return "", "", err
+	}
 	workdir, err := os.MkdirTemp("", "arcentra-pipeline-read-*")
 	if err != nil {
 		return "", "", err
 	}
 	defer func() { _ = os.RemoveAll(workdir) }()
 
-	if cloneErr := scm.Clone(scm.GitCloneRequest{
+	if cloneErr := scm.CloneContext(ctx, scm.GitCloneRequest{
 		Workdir: workdir,
 		RepoURL: pipeline.RepoURL,
 		Branch:  pipeline.DefaultBranch,
@@ -48,12 +52,20 @@ func LoadPipelineDefinition(
 	}); cloneErr != nil {
 		return "", "", cloneErr
 	}
-	headSha, err := scm.HeadSHA(scm.GitHeadSHARequest{Workdir: workdir})
+	headSha, err := scm.HeadSHAContext(ctx, scm.GitHeadSHARequest{Workdir: workdir})
 	if err != nil {
 		return "", "", err
 	}
-	filePath := strings.TrimLeft(strings.TrimSpace(pipeline.PipelineFilePath), "/")
-	content, err := os.ReadFile(filepath.Join(workdir, filePath))
+	filePath, err := validatedPipelinePath(pipeline.PipelineFilePath)
+	if err != nil {
+		return "", "", err
+	}
+	root, err := os.OpenRoot(workdir)
+	if err != nil {
+		return "", "", err
+	}
+	defer root.Close()
+	content, err := root.ReadFile(filePath)
 	if err != nil {
 		return "", "", err
 	}
@@ -61,4 +73,35 @@ func LoadPipelineDefinition(
 		return "", "", ctxErr
 	}
 	return string(content), headSha, nil
+}
+
+func validatedPipelinePath(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if !filepath.IsLocal(value) || strings.Contains(value, "\\") {
+		return "", fmt.Errorf("pipeline file must be a relative repository path")
+	}
+	cleaned := filepath.Clean(value)
+	if cleaned == "." {
+		return "", fmt.Errorf("pipeline file is required")
+	}
+	for _, part := range strings.Split(filepath.ToSlash(cleaned), "/") {
+		if part == ".git" {
+			return "", fmt.Errorf("pipeline file cannot be inside .git")
+		}
+	}
+	return cleaned, nil
+}
+
+func scmAuthForPipeline(pipeline *model.Pipeline, project *model.Project) (map[string]string, error) {
+	if pipeline == nil || project == nil {
+		return nil, fmt.Errorf("pipeline and project are required")
+	}
+	if strings.TrimSpace(project.Credential) != "" && normalizedRepository(pipeline.RepoURL) != normalizedRepository(project.RepoURL) {
+		return nil, fmt.Errorf("project SCM credentials may only be used with the project's configured repository")
+	}
+	return scmAuthFromProject(project), nil
+}
+
+func normalizedRepository(value string) string {
+	return strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(value), "/"), ".git")
 }

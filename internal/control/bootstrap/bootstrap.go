@@ -123,6 +123,14 @@ func NewApp(
 			grpcServer.Stop()
 		}
 
+		if rt.Services != nil && rt.Services.LogAggregator != nil {
+			flushCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			if err := rt.Services.LogAggregator.Close(flushCtx); err != nil {
+				log.Errorw("Failed to flush build logs during shutdown", "error", err)
+			}
+			cancel()
+		}
+
 		// stop global cron scheduler
 		cron.Stop()
 

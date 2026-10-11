@@ -153,12 +153,12 @@ func (e *UnifiedExecutor) executeRemotely(ctx context.Context, req *ExecutionReq
 
 	// 构建远程执行请求
 	remoteReq := &RemoteExecutionRequest{
-		PipelineID: req.Pipeline.Namespace,
-		BuildID:    "", // TODO: 从 context 获取
-		JobName:    req.Job.Name,
+		PipelineID: buildEventContext(req).PipelineID,
+		BuildID:    req.PipelineRunID,
+		JobName:    executionJobName(req),
 		StepName:   req.Step.Name,
 		Step:       remoteStep,
-		StepIndex:  0, // TODO: 从 context 获取
+		StepIndex:  int(req.StepIndex),
 		Workspace:  req.Workspace,
 		Env:        req.Env,
 		Selector:   req.Step.RemoteSelector,
@@ -179,6 +179,11 @@ func (e *UnifiedExecutor) executeRemotely(ctx context.Context, req *ExecutionReq
 		return result, err
 	}
 
+	if remoteResult == nil {
+		err := fmt.Errorf("remote executor returned no result")
+		result.Complete(false, -1, err)
+		return result, err
+	}
 	// 转换结果
 	result.Success = remoteResult.Success
 	result.ExitCode = remoteResult.ExitCode
@@ -270,40 +275,9 @@ func (e *UnifiedExecutor) executeLocally(_ context.Context, req *ExecutionReques
 		return result, err
 	}
 
-	// 解析 plugin 返回结果
-	var resultData map[string]any
-	if len(pluginResult) > 0 {
-		if err := sonic.Unmarshal(pluginResult, &resultData); err == nil {
-			// 提取输出信息
-			if stdout, ok := resultData["stdout"].(string); ok {
-				result.Output = stdout
-			}
-			if stderr, ok := resultData["stderr"].(string); ok {
-				result.ErrorOutput = stderr
-			}
-			if exitCode, ok := resultData["exit_code"].(float64); ok {
-				result.ExitCode = int32(exitCode)
-			}
-			if success, ok := resultData["success"].(bool); ok {
-				result.Success = success
-			}
-			if progress, ok := resultData["progress"]; ok {
-				result.WithMetadata("progress", progress)
-			}
-			if artifact, ok := resultData["artifact"]; ok {
-				result.WithMetadata("artifact", artifact)
-			}
-		}
+	if err := decodePluginResult(result, pluginResult); err != nil {
+		return result, err
 	}
-
-	// 如果没有从结果中提取到成功状态，默认为成功
-	// 注意：此时 err 一定是 nil（如果 err != nil，函数已在前面返回）
-	if !result.Success {
-		result.Success = true
-		result.ExitCode = 0
-	}
-
-	result.Complete(result.Success, result.ExitCode, nil)
 
 	e.logger.Debugw("local execution completed",
 		"step", req.Step.Name,
@@ -312,4 +286,11 @@ func (e *UnifiedExecutor) executeLocally(_ context.Context, req *ExecutionReques
 		"duration", result.Duration)
 
 	return result, nil
+}
+
+func executionJobName(req *ExecutionRequest) string {
+	if req.Job == nil {
+		return ""
+	}
+	return req.Job.Name
 }

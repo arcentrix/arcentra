@@ -20,20 +20,25 @@
 #   dist/linux/arm64/{arcentra,arcentra-agent,conf.d/}
 
 # ── arcentra (control-plane) ─────────────────────────────────────────
-FROM gcr.io/distroless/base-debian12 AS arcentra
+FROM debian:bookworm-slim AS arcentra
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git bash && rm -rf /var/lib/apt/lists/*
 
 ARG TARGETARCH
 COPY dist/linux/${TARGETARCH}/arcentra /arcentra
 COPY dist/linux/${TARGETARCH}/conf.d/  /conf.d/
 
 EXPOSE 8080
-ENTRYPOINT ["/arcentra", "-conf", "/conf.d/config.toml"]
+ENTRYPOINT ["/arcentra", "-conf", "/conf.d/config.toml", "-plugin-conf", "/conf.d/plugins.toml"]
 
 # ── arcentra-agent ───────────────────────────────────────────────────
-FROM gcr.io/distroless/base-debian12 AS arcentra-agent
+FROM debian:bookworm-slim AS arcentra-agent
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git bash && rm -rf /var/lib/apt/lists/*
 
 ARG TARGETARCH
 COPY dist/linux/${TARGETARCH}/arcentra-agent /arcentra-agent
 COPY dist/linux/${TARGETARCH}/conf.d/        /conf.d/
 
-ENTRYPOINT ["/arcentra-agent"]
+WORKDIR /var/lib/arcentra
+ENTRYPOINT ["/arcentra-agent", "-conf", "/conf.d/agent.toml"]

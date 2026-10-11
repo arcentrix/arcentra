@@ -16,6 +16,7 @@ package outbox
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -66,6 +67,16 @@ func (o *Outbox) Append(ctx context.Context, payload []byte) (uint64, error) {
 		return 0, ErrClosed
 	}
 	o.mu.Unlock()
+	if len(payload) > MaxEventPayloadBytes {
+		return 0, ErrEventPayloadTooLarge
+	}
+	var value map[string]any
+	if err := sonic.Unmarshal(payload, &value); err != nil {
+		return 0, fmt.Errorf("outbox: invalid event JSON: %w", err)
+	}
+	if err := ValidateEventPayload(value); err != nil {
+		return 0, err
+	}
 	r := &Record{
 		Type:    RecordTypeEvent,
 		Codec:   CodecJSON,
@@ -130,7 +141,9 @@ func (o *Outbox) sendBatch() {
 		newAcked = flushedSeq
 	}
 	if newAcked > lastAcked {
-		_ = o.wal.Commit().Write(newAcked)
+		if err := o.wal.Commit().Write(newAcked); err != nil {
+			return
+		}
 		_ = o.wal.DeleteSegmentsUpTo(newAcked)
 	}
 }

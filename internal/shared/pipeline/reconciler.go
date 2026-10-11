@@ -33,6 +33,8 @@ type Reconciler struct {
 	taskFramework *TaskFramework
 	logger        log.Logger
 	mu            sync.RWMutex
+	running       map[string]bool
+	wg            sync.WaitGroup
 	completed     map[string]TaskState
 	onCompleted   func() // Callback when task completes to trigger next reconcile
 }
@@ -50,6 +52,7 @@ func NewReconciler(
 		taskFramework: taskFramework,
 		logger:        logger,
 		completed:     make(map[string]TaskState),
+		running:       make(map[string]bool),
 	}
 }
 
@@ -65,6 +68,13 @@ func (r *Reconciler) SetOnCompleted(callback func()) {
 func (r *Reconciler) Reconcile(ctx context.Context) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if r.taskFramework.execCtx.RunCoordinator != nil && r.taskFramework.execCtx.RunCoordinator.IsPaused() {
+		return true, nil
+	}
 
 	// Only succeeded/skipped tasks unlock downstream dependencies; failed tasks
 	// do NOT appear in completedNames so their dependents are never scheduled.
@@ -100,16 +110,19 @@ func (r *Reconciler) Reconcile(ctx context.Context) (bool, error) {
 		}
 
 		// Skip if already processing or completed
-		if _, done := r.completed[taskName]; done {
+		if _, done := r.completed[taskName]; done || r.running[taskName] {
 			continue
 		}
 
 		// Mark as processing (not completed yet)
 		// Start task execution asynchronously
 		// Capture loop variables for goroutine
+		r.running[taskName] = true
+		r.wg.Add(1)
 		currentTaskName := taskName
 		currentTask := task
 		safe.Go(func() {
+			defer r.wg.Done()
 			if err := r.taskFramework.Execute(ctx, currentTask); err != nil {
 				r.logger.Errorw("task execution failed", "task", currentTaskName, "error", err)
 			}
@@ -123,6 +136,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) (bool, error) {
 // markCompleted records the terminal state of a task.
 func (r *Reconciler) markCompleted(taskName string, state TaskState) {
 	r.mu.Lock()
+	delete(r.running, taskName)
 	r.completed[taskName] = state
 	callback := r.onCompleted
 	r.mu.Unlock()
@@ -139,6 +153,9 @@ func (r *Reconciler) IsCompleted() bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	if len(r.running) > 0 {
+		return false
+	}
 	if len(r.completed) == len(r.tasks) {
 		return true
 	}
@@ -199,3 +216,6 @@ func (r *Reconciler) GetCompletedTasks() []string {
 	}
 	return completed
 }
+
+// Wait 等待所有已调度任务退出，避免取消后清理仍在使用的工作目录
+func (r *Reconciler) Wait() { r.wg.Wait() }

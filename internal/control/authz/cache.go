@@ -26,7 +26,7 @@ import (
 const effectiveActionsCacheTTL = 5 * time.Minute
 
 func buildEffectiveActionsCacheKey(subject Subject, scopeType, scopeID string) string {
-	return fmt.Sprintf("authz:eff:%s:%s:%s", subject.UserID, scopeType, scopeID)
+	return fmt.Sprintf("authz:eff:v2:%s:%s:%s", subject.UserID, scopeType, scopeID)
 }
 
 func getCachedActions(ctx context.Context, ch cache.ICache, key string) ([]string, bool) {

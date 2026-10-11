@@ -19,12 +19,12 @@ import "time"
 // RoleGrant 表示角色授权记录
 type RoleGrant struct {
 	BaseModel
-	GrantID     string     `gorm:"column:grant_id;not null;uniqueIndex" json:"grantId"`
-	SubjectType string     `gorm:"column:subject_type;not null;index:idx_subject_scope,priority:1;index:idx_subject,priority:1" json:"subjectType"` //nolint:lll
-	SubjectID   string     `gorm:"column:subject_id;not null;index:idx_subject_scope,priority:2;index:idx_subject,priority:2" json:"subjectId"`
-	RoleID      string     `gorm:"column:role_id;not null;index:idx_subject_scope,priority:3;index" json:"roleId"`
-	ScopeType   string     `gorm:"column:scope_type;not null;index:idx_subject_scope,priority:4;index:idx_scope,priority:1" json:"scopeType"`
-	ScopeID     string     `gorm:"column:scope_id;not null;index:idx_subject_scope,priority:5;index:idx_scope,priority:2" json:"scopeId"`
+	GrantID     string     `gorm:"column:grant_id;not null;uniqueIndex;type:varchar(64)" json:"grantId"`
+	SubjectType string     `gorm:"column:subject_type;not null;index:idx_subject_scope,priority:1;index:idx_subject,priority:1;type:varchar(32)" json:"subjectType"` //nolint:lll
+	SubjectID   string     `gorm:"column:subject_id;not null;index:idx_subject_scope,priority:2;index:idx_subject,priority:2;type:varchar(64)" json:"subjectId"`
+	RoleID      string     `gorm:"column:role_id;not null;index:idx_subject_scope,priority:3;index;type:varchar(64)" json:"roleId"`
+	ScopeType   string     `gorm:"column:scope_type;not null;index:idx_subject_scope,priority:4;index:idx_role_grant_scope,priority:1;type:varchar(32)" json:"scopeType"`
+	ScopeID     string     `gorm:"column:scope_id;not null;index:idx_subject_scope,priority:5;index:idx_role_grant_scope,priority:2;type:varchar(64)" json:"scopeId"`
 	GrantedBy   string     `gorm:"column:granted_by;not null;default:''" json:"grantedBy"`
 	ExpiresAt   *time.Time `gorm:"column:expires_at;index" json:"expiresAt"`
 	IsEnabled   int        `gorm:"column:is_enabled;not null;default:1" json:"isEnabled"`

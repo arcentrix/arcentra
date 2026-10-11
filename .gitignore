@@ -9,3 +9,9 @@ docs/*.md
 /cmd/*/wire_gen.go
 .DS_Store
 /internal/db/queries/*.go
+/arcentra
+/arcentra-agent
+/cli
+
+# Containerd capability-gated validation guide
+!docs/sandbox-containerd.md

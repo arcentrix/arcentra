@@ -32,6 +32,7 @@ type JobRunTaskPayload struct {
 	AgentID       string            `json:"agentId,omitempty"`
 	Steps         []StepPayload     `json:"steps"`
 	Env           map[string]string `json:"env,omitempty"`
+	Variables     map[string]string `json:"variables,omitempty"`
 	Workspace     string            `json:"workspace,omitempty"`
 	Timeout       string            `json:"timeout,omitempty"`
 	ArtifactURIs  map[string]string `json:"artifactUris,omitempty"`
@@ -54,9 +55,11 @@ type StepPayload struct {
 
 // SourcePayload describes source code configuration for a job.
 type SourcePayload struct {
-	Type   string `json:"type"`
-	Repo   string `json:"repo,omitempty"`
-	Branch string `json:"branch,omitempty"`
+	Type   string            `json:"type"`
+	Repo   string            `json:"repo,omitempty"`
+	Branch string            `json:"branch,omitempty"`
+	Auth   map[string]string `json:"auth,omitempty"`
+	Commit string            `json:"commit,omitempty"`
 }
 
 // JobRunKey returns a composite key for the job run task.

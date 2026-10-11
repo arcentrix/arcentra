@@ -22,15 +22,16 @@ import (
 // 根据 DSL: Step → StepRun
 type StepRun struct {
 	BaseModel
-	StepRunID       string     `gorm:"column:step_run_id" json:"stepRunId"`
+	StepRunID       string     `gorm:"column:step_run_id;type:varchar(64);uniqueIndex:uk_step_run_business_id" json:"stepRunId"`
 	Name            string     `gorm:"column:name" json:"name"`
 	PipelineID      string     `gorm:"column:pipeline_id" json:"pipelineId"`
-	PipelineRunID   string     `gorm:"column:pipeline_run_id" json:"pipelineRunId"`
+	PipelineRunID   string     `gorm:"column:pipeline_run_id;type:varchar(64);index:idx_step_run_pipeline_run" json:"pipelineRunId"`
 	StageID         string     `gorm:"column:stage_id" json:"stageId"`
 	JobID           string     `gorm:"column:job_id" json:"jobId"`
 	JobRunID        string     `gorm:"column:job_run_id" json:"jobRunId"`
 	StepIndex       int        `gorm:"column:step_index" json:"stepIndex"`
 	AgentID         string     `gorm:"column:agent_id" json:"agentId"`
+	ClaimID         string     `gorm:"column:claim_id;type:varchar(64);default:''" json:"-"`
 	Status          int        `gorm:"column:status" json:"status"`       // 1:等待 2:入队 3:运行中 4:成功 5:失败 6:已取消 7:超时 8:已跳过
 	Priority        int        `gorm:"column:priority" json:"priority"`   // 1:最高 5:普通 10:最低
 	Uses            string     `gorm:"column:uses" json:"uses"`           // 插件标识

@@ -15,6 +15,8 @@
 package pipeline
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
@@ -113,8 +115,11 @@ func BuildDAG(jobs []*spec.Job) (*dag.DAG, map[string]*Task, error) {
 	// Create tasks from jobs
 	for i := range jobs {
 		job := jobs[i]
-		if job == nil {
-			continue
+		if job == nil || strings.TrimSpace(job.Name) == "" {
+			return nil, nil, fmt.Errorf("job[%d] must have a name", i)
+		}
+		if _, exists := tasks[job.Name]; exists {
+			return nil, nil, fmt.Errorf("duplicate job name %q", job.Name)
 		}
 		task := &Task{
 			Name:         job.Name,
@@ -130,9 +135,10 @@ func BuildDAG(jobs []*spec.Job) (*dag.DAG, map[string]*Task, error) {
 	for _, task := range tasks {
 		if len(task.Job.DependsOn) > 0 {
 			for _, depName := range task.Job.DependsOn {
-				if _, exists := tasks[depName]; exists {
-					task.Dependencies = append(task.Dependencies, depName)
+				if _, exists := tasks[depName]; !exists {
+					return nil, nil, fmt.Errorf("job %q depends on unknown job %q", task.Name, depName)
 				}
+				task.Dependencies = append(task.Dependencies, depName)
 			}
 		}
 	}

@@ -189,7 +189,10 @@ func (a *Authorizer) CheckAny(ctx context.Context, subject Subject, actions []st
 // EffectiveActions 返回主体在指定作用域下的有效 action 列表
 func (a *Authorizer) EffectiveActions(ctx context.Context, subject Subject, scopeType, scopeID string) ([]string, error) {
 	key := buildEffectiveActionsCacheKey(subject, scopeType, scopeID)
-	resource := resourceFromScope(scopeType, scopeID)
+	resource, err := a.resolveEffectiveResource(ctx, scopeType, scopeID)
+	if err != nil {
+		return nil, err
+	}
 	if actions, ok := getCachedActions(ctx, a.cache, key); ok {
 		containsWildcard := false
 		for _, action := range actions {
@@ -393,4 +396,35 @@ func (a *Authorizer) checkNoAudit(subject Subject, action string, resource Resou
 		}
 	}
 	return false, nil
+}
+
+func (a *Authorizer) resolveEffectiveResource(ctx context.Context, scopeType, scopeID string) (ResourceRef, error) {
+	resource := resourceFromScope(scopeType, scopeID)
+	if scopeType == string(consts.ScopeTypePipeline) {
+		if a.repos == nil || a.repos.Pipeline == nil {
+			return ResourceRef{}, errors.New("pipeline repository is unavailable")
+		}
+		pipeline, err := a.repos.Pipeline.Get(ctx, scopeID)
+		if err != nil {
+			return ResourceRef{}, err
+		}
+		if pipeline == nil || pipeline.ProjectID == "" {
+			return ResourceRef{}, errors.New("pipeline project scope is unavailable")
+		}
+		resource.ProjectID = pipeline.ProjectID
+	}
+	if resource.ProjectID != "" {
+		if a.repos == nil || a.repos.Project == nil {
+			return ResourceRef{}, errors.New("project repository is unavailable")
+		}
+		project, err := a.repos.Project.Get(ctx, resource.ProjectID)
+		if err != nil {
+			return ResourceRef{}, err
+		}
+		if project == nil {
+			return ResourceRef{}, errors.New("project not found")
+		}
+		resource.OrgID = project.OrgID
+	}
+	return resource, nil
 }

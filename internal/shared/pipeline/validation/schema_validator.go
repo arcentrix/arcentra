@@ -39,10 +39,23 @@ func (v *SchemaValidator) Validate(pipeline *spec.Pipeline) error {
 	if err := v.validateVersion(pipeline.Version); err != nil {
 		return fmt.Errorf("version: %w", err)
 	}
+	if runtime := pipeline.Runtime; runtime != nil {
+		switch strings.ToLower(strings.TrimSpace(runtime.Type)) {
+		case "", "local", "baremetal":
+		default:
+			return fmt.Errorf("runtime type %q is unsupported; only trusted local/baremetal execution is available", runtime.Type)
+		}
+		if strings.TrimSpace(runtime.Image) != "" || runtime.Resources != nil || len(spec.StructAsMap(runtime.Config)) > 0 {
+			return fmt.Errorf("runtime image, resources, and isolation configuration are unsupported")
+		}
+	}
 	if len(pipeline.Jobs) == 0 {
 		return fmt.Errorf("pipeline must have at least one job")
 	}
 	if err := v.validateUniqueJobNames(pipeline.Jobs); err != nil {
+		return err
+	}
+	if err := validateDependencies(pipeline.Jobs); err != nil {
 		return err
 	}
 	for i, job := range pipeline.Jobs {
@@ -113,6 +126,14 @@ func (v *SchemaValidator) validateJobAdvanced(job *spec.Job, index int) error {
 	if err := v.validateUniqueStepNames(job.Steps); err != nil {
 		return fmt.Errorf("job[%d] '%s' steps: %w", index, job.Name, err)
 	}
+	for _, step := range job.Steps {
+		if step.RunOnAgent && job.Retry != nil {
+			return fmt.Errorf("job %q: automatic retry is not supported for agent jobs", job.Name)
+		}
+		if step.RunOnAgent && job.Target != nil {
+			return fmt.Errorf("job %q: use an explicit deployment step for agent jobs", job.Name)
+		}
+	}
 	for i, step := range job.Steps {
 		if err := v.validateStepAdvanced(step, i); err != nil {
 			return fmt.Errorf("job[%d] '%s' step[%d] '%s': %w", index, job.Name, i, step.Name, err)
@@ -171,9 +192,12 @@ func (v *SchemaValidator) validateName(name, field string) error {
 }
 
 func (v *SchemaValidator) validateTimeout(timeout string) error {
-	_, err := time.ParseDuration(timeout)
+	duration, err := time.ParseDuration(timeout)
 	if err != nil {
 		return fmt.Errorf("invalid timeout format '%s': %w (expected format: 30s, 5m, 1h)", timeout, err)
+	}
+	if duration <= 0 {
+		return fmt.Errorf("timeout must be greater than zero")
 	}
 	return nil
 }
@@ -227,6 +251,9 @@ func (v *SchemaValidator) validateAgentSelector(selector *spec.AgentSelector) er
 }
 
 func (v *SchemaValidator) validateLabelExpression(expr *spec.LabelExpression, index int) error {
+	if expr == nil {
+		return fmt.Errorf("matchExpressions[%d] must not be nil", index)
+	}
 	if strings.TrimSpace(expr.Key) == "" {
 		return fmt.Errorf("matchExpressions[%d] label expression key is required", index)
 	}
@@ -244,6 +271,42 @@ func (v *SchemaValidator) validateLabelExpression(expr *spec.LabelExpression, in
 	}
 	if (expr.Operator == "Exists" || expr.Operator == "NotExists") && len(expr.Values) > 0 {
 		return fmt.Errorf("matchExpressions[%d] label expression operator '%s' does not require values", index, expr.Operator)
+	}
+	return nil
+}
+
+func validateDependencies(jobs []*spec.Job) error {
+	byName := make(map[string]*spec.Job, len(jobs))
+	for _, job := range jobs {
+		byName[job.Name] = job
+	}
+	visiting, visited := map[string]bool{}, map[string]bool{}
+	var visit func(string) error
+	visit = func(name string) error {
+		if visiting[name] {
+			return fmt.Errorf("dependency cycle at job %q", name)
+		}
+		if visited[name] {
+			return nil
+		}
+		job, exists := byName[name]
+		if !exists {
+			return fmt.Errorf("unknown job dependency %q", name)
+		}
+		visiting[name] = true
+		for _, dependency := range job.DependsOn {
+			if err := visit(dependency); err != nil {
+				return err
+			}
+		}
+		visiting[name] = false
+		visited[name] = true
+		return nil
+	}
+	for _, job := range jobs {
+		if err := visit(job.Name); err != nil {
+			return err
+		}
 	}
 	return nil
 }

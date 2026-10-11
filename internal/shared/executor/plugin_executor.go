@@ -68,7 +68,7 @@ func (e *PluginExecutor) CanExecute(req *ExecutionRequest) bool {
 // - 如果 args 中包含 url 字段，使用 HTTP 执行
 // - 否则使用 Shell/Plugin 执行（本地或远程）
 func (e *PluginExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
-	if req.Step == nil {
+	if req == nil || req.Step == nil {
 		result := NewExecutionResult(e.Name())
 		err := fmt.Errorf("step is nil")
 		result.Complete(false, -1, err)
@@ -85,6 +85,12 @@ func (e *PluginExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*E
 
 	// 使用 Shell/Plugin 执行（本地或远程）
 	// 获取 plugin
+	if e.pluginManager == nil {
+		result := NewExecutionResult(e.Name())
+		err := fmt.Errorf("plugin manager is not available for %s", req.Step.Uses)
+		result.Complete(false, -1, err)
+		return result, err
+	}
 	pluginInstance, err := e.pluginManager.GetPlugin(req.Step.Uses)
 	if err != nil {
 		result := NewExecutionResult(e.Name())
@@ -146,39 +152,9 @@ func (e *PluginExecutor) executePlugin(_ context.Context, req *ExecutionRequest,
 		return result, err
 	}
 
-	// 解析 plugin 返回结果
-	var resultData map[string]any
-	if len(pluginResult) > 0 {
-		if err := sonic.Unmarshal(pluginResult, &resultData); err == nil {
-			// 提取输出信息
-			if stdout, ok := resultData["stdout"].(string); ok {
-				result.Output = stdout
-			}
-			if stderr, ok := resultData["stderr"].(string); ok {
-				result.ErrorOutput = stderr
-			}
-			if exitCode, ok := resultData["exit_code"].(float64); ok {
-				result.ExitCode = int32(exitCode)
-			}
-			if success, ok := resultData["success"].(bool); ok {
-				result.Success = success
-			}
-			if progress, ok := resultData["progress"]; ok {
-				result.WithMetadata("progress", progress)
-			}
-			if artifact, ok := resultData["artifact"]; ok {
-				result.WithMetadata("artifact", artifact)
-			}
-		}
+	if err := decodePluginResult(result, pluginResult); err != nil {
+		return result, err
 	}
-
-	// 如果没有从结果中提取到成功状态，默认为成功
-	if !result.Success {
-		result.Success = true
-		result.ExitCode = 0
-	}
-
-	result.Complete(result.Success, result.ExitCode, nil)
 
 	e.logger.Debugw("plugin execution completed",
 		"step", req.Step.Name,

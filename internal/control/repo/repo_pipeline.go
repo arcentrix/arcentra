@@ -80,7 +80,7 @@ func (r *PipelineRepo) Update(ctx context.Context, pipelineID string, updates ma
 func (r *PipelineRepo) Get(ctx context.Context, pipelineID string) (*model.Pipeline, error) {
 	var one model.Pipeline
 	if err := r.Database().WithContext(ctx).
-		Where("pipeline_id = ?", pipelineID).
+		Where("pipeline_id = ? AND is_deleted = ?", pipelineID, 0).
 		First(&one).Error; err != nil {
 		return nil, err
 	}
@@ -102,7 +102,7 @@ func (r *PipelineRepo) List(ctx context.Context, query *PipelineQuery) ([]*model
 		query.PageSize = 100
 	}
 
-	tx := r.Database().WithContext(ctx).Model(&model.Pipeline{})
+	tx := r.Database().WithContext(ctx).Model(&model.Pipeline{}).Where("is_deleted = ?", 0)
 	if query.ProjectID != "" {
 		tx = tx.Where("project_id = ?", query.ProjectID)
 	}
@@ -208,4 +208,42 @@ func (r *PipelineRepo) ListRuns(ctx context.Context, query *PipelineRunQuery) ([
 		return nil, 0, err
 	}
 	return list, total, nil
+}
+
+// IncrementRuns 原子更新流水线执行次数，避免并发触发丢失计数
+func (r *PipelineRepo) IncrementRuns(ctx context.Context, pipelineID string) error {
+	return r.Database().WithContext(ctx).Model(&model.Pipeline{}).Where("pipeline_id = ?", pipelineID).UpdateColumn("total_runs", gorm.Expr("total_runs + ?", 1)).Error
+}
+
+// RecordRunResult 原子更新流水线成功和失败统计
+func (r *PipelineRepo) RecordRunResult(ctx context.Context, pipelineID string, status int) error {
+	updates := map[string]any{"status": status}
+	if status == model.PipelineStatusSuccess {
+		updates["success_runs"] = gorm.Expr("success_runs + ?", 1)
+	}
+	if status == model.PipelineStatusFailed {
+		updates["failed_runs"] = gorm.Expr("failed_runs + ?", 1)
+	}
+	return r.Database().WithContext(ctx).Model(&model.Pipeline{}).Where("pipeline_id = ?", pipelineID).Updates(updates).Error
+}
+
+// UpdateRunIfStatus 仅当当前状态匹配时推进运行状态，防止暂停操作覆盖终态
+func (r *PipelineRepo) UpdateRunIfStatus(ctx context.Context, runID string, status int, updates map[string]any) error {
+	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var run model.PipelineRun
+		if err := tx.Select("pipeline_id").Where("run_id = ?", runID).First(&run).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&model.PipelineRun{}).Where("run_id = ? AND status = ?", runID, status).Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		if nextStatus, ok := updates["status"]; ok {
+			return tx.Model(&model.Pipeline{}).Where("pipeline_id = ?", run.PipelineID).Update("status", nextStatus).Error
+		}
+		return nil
+	})
 }

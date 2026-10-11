@@ -1,5 +1,7 @@
 # Pipeline 执行栈盘点与端到端关系
 
+> Historical inventory: this describes an earlier execution path. For the current implementation, verification, and remaining limitations, see [Pipeline / Agent integration](implementation.md).
+
 本文档落实「Pipeline 核心流程」计划中的 **inventory-callers**：梳理 `internal/shared/pipeline` 执行栈、Agent/队列与控制面 HTTP 的**实际连接**，并标出当前缺口。
 
 **生成方式**：对仓库 `*.go` 的静态检索（`NewPipelineRunner`、`NewPipelineExecutor`、`TaskQueue`、`AgentManager`、`TriggerRun` 等）；**不修改**计划文件本身。

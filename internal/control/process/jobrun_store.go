@@ -16,6 +16,8 @@ package process
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
@@ -72,4 +74,42 @@ func (s *JobRunStore) CreateStepRun(ctx context.Context, sr *model.StepRun) erro
 // UpdateStepRun patches a step run record by its business ID.
 func (s *JobRunStore) UpdateStepRun(ctx context.Context, stepRunID string, updates map[string]any) error {
 	return s.stepRunRepo.PatchByStepRunID(ctx, stepRunID, updates)
+}
+
+// UpdateJobRunIfStatus 只更新仍处于观察状态的作业，保护 Agent 并发终态报告
+func (s *JobRunStore) UpdateJobRunIfStatus(ctx context.Context, jobRunID string, status int, updates map[string]any) error {
+	updater, ok := s.jobRunRepo.(interface {
+		PatchStatusIfCurrent(context.Context, string, int, map[string]any) error
+	})
+	if !ok {
+		return fmt.Errorf("conditional job status updates unavailable")
+	}
+	return updater.PatchStatusIfCurrent(ctx, jobRunID, status, updates)
+}
+
+// FinishOpenStepRuns 仅结束尚未达到终态的步骤
+func (s *JobRunStore) FinishOpenStepRuns(ctx context.Context, stepIDs []string, status int) error {
+	updater, ok := s.stepRunRepo.(interface {
+		PatchStatusIfCurrent(context.Context, string, int, map[string]any) error
+	})
+	if !ok {
+		return fmt.Errorf("conditional step status updates unavailable")
+	}
+	for _, stepID := range stepIDs {
+		step, err := s.stepRunRepo.GetByStepRunID(ctx, stepID)
+		if err != nil {
+			return err
+		}
+		if step == nil || step.Status >= 4 {
+			continue
+		}
+		if err := updater.PatchStatusIfCurrent(ctx, stepID, step.Status, map[string]any{"status": status, "end_time": time.Now()}); err != nil {
+			// 并发状态变化时保留 Agent 的结果，下一次读取可反映终态
+			current, readErr := s.stepRunRepo.GetByStepRunID(ctx, stepID)
+			if readErr != nil || current == nil || current.Status < 4 {
+				return err
+			}
+		}
+	}
+	return nil
 }

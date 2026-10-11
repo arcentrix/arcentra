@@ -17,6 +17,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -27,6 +28,8 @@ import (
 	"github.com/arcentrix/arcentra/internal/shared/pipeline"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/mq/kafka"
+	"github.com/arcentrix/arcentra/pkg/serde"
 )
 
 // Coordinator drives a single PipelineRun through its full lifecycle:
@@ -36,10 +39,11 @@ type Coordinator struct {
 	spec   *spec.Pipeline
 	engine *Process
 
-	cancelFn context.CancelFunc
-	mu       sync.Mutex
-	paused   bool
-	pauseCh  chan struct{} // closed when resume is called
+	cancelFn  context.CancelFunc
+	mu        sync.Mutex
+	cancelled bool
+	paused    bool
+	pauseCh   chan struct{} // closed when resume is called
 }
 
 // NewCoordinator creates a coordinator for one pipeline run.
@@ -57,12 +61,16 @@ func (rc *Coordinator) SetCancel(cancel context.CancelFunc) {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
 	rc.cancelFn = cancel
+	if rc.cancelled {
+		cancel()
+	}
 }
 
 // Cancel cancels the run.
 func (rc *Coordinator) Cancel() {
 	rc.mu.Lock()
 	defer rc.mu.Unlock()
+	rc.cancelled = true
 	if rc.cancelFn != nil {
 		rc.cancelFn()
 	}
@@ -126,22 +134,36 @@ func (rc *Coordinator) Execute(ctx context.Context) error {
 	}
 
 	totalJobs := len(rc.spec.Jobs)
-	if err := pipelineRepo.UpdateRun(ctx, rc.run.RunID, map[string]any{
-		"status":     model.PipelineStatusRunning,
-		"start_time": now,
-		"total_jobs": totalJobs,
-	}); err != nil {
-		return fmt.Errorf("update run to running: %w", err)
+	execErr := ctx.Err()
+	if execErr == nil {
+		if err := pipelineRepo.UpdateRun(ctx, rc.run.RunID, map[string]any{"status": model.PipelineStatusRunning, "start_time": now, "total_jobs": totalJobs}); err != nil {
+			execErr = fmt.Errorf("update run to running: %w", err)
+		} else {
+			execErr = rc.executeDAG(ctx)
+		}
 	}
-
-	execErr := rc.executeDAG(ctx)
+	// Execution cancellation must not discard final DB writes.
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
 
 	endTime := time.Now()
 	duration := endTime.Sub(now).Milliseconds()
 
-	updates := map[string]any{
-		"end_time": endTime,
-		"duration": duration,
+	updates := map[string]any{"end_time": endTime, "duration": duration, "running_jobs": 0}
+	if rc.engine.repos.JobRun != nil {
+		jobs, err := rc.engine.repos.JobRun.ListByPipelineRunID(persistCtx, rc.run.RunID)
+		if err == nil {
+			completed, failed := 0, 0
+			for _, job := range jobs {
+				if model.IsJobRunTerminal(job.Status) {
+					completed++
+				}
+				if job.Status == model.JobRunStatusFailed || job.Status == model.JobRunStatusTimeout {
+					failed++
+				}
+			}
+			updates["completed_jobs"], updates["failed_jobs"] = completed, failed
+		}
 	}
 
 	var auditAction string
@@ -158,19 +180,19 @@ func (rc *Coordinator) Execute(ctx context.Context) error {
 		auditAction = "pipeline_run.completed"
 	}
 
-	if err := pipelineRepo.UpdateRun(ctx, rc.run.RunID, updates); err != nil {
+	if err := pipelineRepo.UpdateRun(persistCtx, rc.run.RunID, updates); err != nil {
 		log.Errorw("failed to update run terminal status", "runId", rc.run.RunID, "error", err)
 	}
 
 	// Audit: pipeline run terminal state.
 	if auditWriter != nil {
-		auditWriter.Write(ctx, PipelineAudit(auditAction, "", rc.run.RunID, rc.run.PipelineID))
+		auditWriter.Write(persistCtx, PipelineAudit(auditAction, "", rc.run.RunID, rc.run.PipelineID))
 	}
 
-	rc.updatePipelineStats(ctx, updates["status"].(int))
+	rc.updatePipelineStats(persistCtx, updates["status"].(int))
 
 	// Workspace cleanup: remove the run working directory unless kept for debugging.
-	if !rc.engine.appConf.Pipeline.KeepWorkspace {
+	if rc.engine.appConf == nil || !rc.engine.appConf.Pipeline.KeepWorkspace {
 		workspace := rc.resolveWorkspace()
 		if err := os.RemoveAll(workspace); err != nil {
 			log.Warnw("failed to clean up workspace", "runId", rc.run.RunID, "path", workspace, "error", err)
@@ -195,8 +217,11 @@ func (rc *Coordinator) executeDAG(ctx context.Context) error {
 		execCtx.SetTaskQueue(rc.engine.taskQueue)
 	}
 
+	maps.Copy(execCtx.Env, serde.UnmarshalStringMap(rc.run.Env))
+	execCtx.Pipeline.Variables = maps.Clone(execCtx.Env)
 	rc.loadSecrets(ctx, execCtx)
-	rc.setupEventEmitter(execCtx)
+	closeEvents := rc.setupEventEmitter(execCtx)
+	defer closeEvents()
 	rc.setupLogPublisher(execCtx)
 
 	jobRunStore := NewJobRunStore(
@@ -205,6 +230,8 @@ func (rc *Coordinator) executeDAG(ctx context.Context) error {
 	)
 	execCtx.JobRunStore = jobRunStore
 	execCtx.RunCoordinator = rc
+	execCtx.SelectAgent = rc.engine.selectAgent
+	execCtx.CancelJob = rc.engine.cancelJobRunOnAgent
 	execCtx.PipelineRunID = rc.run.RunID
 	execCtx.PipelineIDRef = rc.run.PipelineID
 	execCtx.ArtifactURIs = make(map[string]string)
@@ -216,46 +243,44 @@ func (rc *Coordinator) executeDAG(ctx context.Context) error {
 // setupEventEmitter initialises the CloudEvents emitter so that
 // TaskFramework job/step events are actually published (to Kafka when
 // configured, otherwise silently dropped).
-func (rc *Coordinator) setupEventEmitter(execCtx *pipeline.ExecutionContext) {
+func (rc *Coordinator) setupEventEmitter(execCtx *pipeline.ExecutionContext) func() {
 	cfg := executor.EventEmitterConfig{
 		SourcePrefix:   "urn:arcentra:control",
 		PublishTimeout: 5 * time.Second,
 	}
 
+	if rc.engine.appConf == nil {
+		return func() {}
+	}
 	kafkaCfg := rc.engine.appConf.MessageQueue.Kafka
 	if kafkaCfg.BootstrapServers == "" {
 		// Fallback: log events instead of silently dropping them.
 		execCtx.SetEventEmitter(executor.NewEventEmitter(&executor.LogEventPublisher{}, cfg))
-		return
+		return func() {}
 	}
 	publisher, err := executor.NewKafkaPublisher(
 		kafkaCfg.BootstrapServers,
 		"arcentra-control-events",
 		"EVENT_PIPELINE",
+		kafka.WithProducerOptions(kafka.WithSecurityProtocol(kafkaCfg.SecurityProtocol), kafka.WithSaslMechanism(kafkaCfg.Sasl.Mechanism), kafka.WithSaslUsername(kafkaCfg.Sasl.Username), kafka.WithSaslPassword(kafkaCfg.Sasl.Password), kafka.WithSslCaFile(kafkaCfg.Ssl.CaFile), kafka.WithSslCertFile(kafkaCfg.Ssl.CertFile), kafka.WithSslKeyFile(kafkaCfg.Ssl.KeyFile), kafka.WithSslPassword(kafkaCfg.Ssl.Password)),
 	)
 	if err != nil {
 		log.Warnw("failed to create event publisher, falling back to log", "error", err)
 		execCtx.SetEventEmitter(executor.NewEventEmitter(&executor.LogEventPublisher{}, cfg))
-		return
+		return func() {}
 	}
 
 	execCtx.SetEventEmitter(executor.NewEventEmitter(publisher, cfg))
+	return func() { _ = publisher.Close() }
 }
 
 // setupLogPublisher initialises a KafkaLogPublisher so that local steps
 // executed on the control plane publish their logs to the BUILD_LOGS topic,
 // making them visible through the WebSocket log stream.
 func (rc *Coordinator) setupLogPublisher(execCtx *pipeline.ExecutionContext) {
-	kafkaCfg := rc.engine.appConf.MessageQueue.Kafka
-	if kafkaCfg.BootstrapServers == "" {
-		return
+	if rc.engine.logPublisher != nil {
+		execCtx.LogPublisher = rc.engine.logPublisher
 	}
-	pub, err := executor.NewKafkaLogPublisher(kafkaCfg, "arcentra-control-logs")
-	if err != nil {
-		log.Warnw("failed to create log publisher for control-plane steps", "error", err)
-		return
-	}
-	execCtx.LogPublisher = pub
 }
 
 // loadSecrets fetches project-scoped secrets and injects them into the
@@ -264,9 +289,11 @@ func (rc *Coordinator) loadSecrets(ctx context.Context, execCtx *pipeline.Execut
 	if rc.engine.secretSvc == nil {
 		return
 	}
-	secrets, _, err := rc.engine.secretSvc.GetSecretList(
-		ctx, 1, 100, "", "project", rc.run.PipelineID, "",
-	)
+	definition, err := rc.engine.repos.Pipeline.Get(ctx, rc.run.PipelineID)
+	if err != nil || definition == nil {
+		return
+	}
+	secrets, _, err := rc.engine.secretSvc.GetSecretList(ctx, 1, 100, "", "project", definition.ProjectID, "")
 	if err != nil {
 		log.Warnw("failed to load secrets for pipeline run", "runId", rc.run.RunID, "error", err)
 		return
@@ -295,6 +322,14 @@ func (rc *Coordinator) resolveWorkspace() string {
 // updatePipelineStats updates the Pipeline aggregate counters.
 func (rc *Coordinator) updatePipelineStats(ctx context.Context, status int) {
 	pipelineRepo := rc.engine.repos.Pipeline
+	if atomic, ok := pipelineRepo.(interface {
+		RecordRunResult(context.Context, string, int) error
+	}); ok {
+		if err := atomic.RecordRunResult(ctx, rc.run.PipelineID, status); err != nil {
+			log.Errorw("update pipeline statistics failed", "error", err)
+		}
+		return
+	}
 	p, err := pipelineRepo.Get(ctx, rc.run.PipelineID)
 	if err != nil || p == nil {
 		return

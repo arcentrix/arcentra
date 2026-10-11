@@ -15,6 +15,7 @@
 package scm
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -36,18 +37,25 @@ func NewGitAuthFromMap(auth map[string]string) GitAuth {
 }
 
 // Clone clones repository into workdir and optionally checks out branch.
-func Clone(req GitCloneRequest) error {
+func Clone(req GitCloneRequest) error { return CloneContext(context.Background(), req) }
+
+// CloneContext 在可取消的上下文中克隆代码仓库
+func CloneContext(ctx context.Context, req GitCloneRequest) error {
 	args := []string{"clone", "--depth", "1"}
 	if strings.TrimSpace(req.Branch) != "" {
 		args = append(args, "--branch", req.Branch)
 	}
-	args = append(args, req.RepoURL, ".")
-	return runGit(req.Workdir, req.Auth, args...)
+	args = append(args, "--", req.RepoURL, ".")
+	_, err := runGitOutputContext(ctx, req.Workdir, req.Auth, args...)
+	return err
 }
 
 // HeadSHA returns current repository HEAD commit sha.
-func HeadSHA(req GitHeadSHARequest) (string, error) {
-	out, err := runGitOutput(req.Workdir, GitAuth{}, "rev-parse", "HEAD")
+func HeadSHA(req GitHeadSHARequest) (string, error) { return HeadSHAContext(context.Background(), req) }
+
+// HeadSHAContext 在可取消的上下文中读取当前提交
+func HeadSHAContext(ctx context.Context, req GitHeadSHARequest) (string, error) {
+	out, err := runGitOutputContext(ctx, req.Workdir, GitAuth{}, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
 	}
@@ -84,7 +92,11 @@ func runGit(workdir string, auth GitAuth, args ...string) error {
 }
 
 func runGitOutput(workdir string, auth GitAuth, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	return runGitOutputContext(context.Background(), workdir, auth, args...)
+}
+
+func runGitOutputContext(ctx context.Context, workdir string, auth GitAuth, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = workdir
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
@@ -138,6 +150,9 @@ func runGitOutput(workdir string, auth GitAuth, args ...string) (string, error) 
 	}
 
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
 	if err != nil {
 		return "", fmt.Errorf("git %s failed: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}

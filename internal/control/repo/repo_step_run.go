@@ -122,9 +122,11 @@ func (r *StepRunRepo) List(ctx context.Context, filter StepRunFilter) ([]model.S
 	}
 
 	sortBy := "created_at"
-	if strings.TrimSpace(filter.SortBy) != "" {
+	switch strings.TrimSpace(filter.SortBy) {
+	case "created_at", "updated_at", "step_index", "start_time", "end_time", "status", "name":
 		sortBy = strings.TrimSpace(filter.SortBy)
 	}
+
 	order := sortBy + " ASC"
 	if filter.SortDesc {
 		order = sortBy + " DESC"

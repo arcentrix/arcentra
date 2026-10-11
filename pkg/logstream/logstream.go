@@ -14,10 +14,18 @@
 
 package logstream
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
-// BuildLogMessage represents a build log message sent through Kafka.
+// MaxEventIDLength 限制构建日志事件标识的最大字节数
+const MaxEventIDLength = 128
+
+// BuildLogMessage 表示通过 Kafka 传递的构建日志
 type BuildLogMessage struct {
+	// EventID 在首次持久化前生成，并在所有发布重试中保持不变
+	EventID       string `json:"eventId,omitempty"`
 	ProjectID     string `json:"projectId,omitempty"`
 	PipelineID    string `json:"pipelineId,omitempty"`
 	PipelineRunID string `json:"pipelineRunId,omitempty"`
@@ -34,7 +42,22 @@ type BuildLogMessage struct {
 	PluginName    string `json:"pluginName,omitempty"`
 }
 
-// BuildLogKey returns a composite key for log message partitioning.
+// ValidateEventID 校验可选事件标识，空字符串兼容旧版生产者
+func ValidateEventID(eventID string) error {
+	if len(eventID) > MaxEventIDLength {
+		return fmt.Errorf("build log event id exceeds %d bytes", MaxEventIDLength)
+	}
+	for i := range len(eventID) {
+		c := eventID[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-' {
+			continue
+		}
+		return fmt.Errorf("build log event id contains an invalid character at byte %d", i)
+	}
+	return nil
+}
+
+// BuildLogKey 返回用于日志消息分区的组合键
 func (m *BuildLogMessage) BuildLogKey() string {
 	if m == nil {
 		return ""

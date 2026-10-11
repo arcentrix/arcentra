@@ -16,6 +16,7 @@ package nova
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -174,6 +175,7 @@ func NewTaskQueue(opts ...QueueOption) (TaskQueue, error) {
 	}
 
 	queue := &TaskQueueImpl{
+		eg:             &errgroup.Group{},
 		config:         config,
 		broker:         broker,
 		delayManager:   delayManager,
@@ -348,7 +350,8 @@ func (q *TaskQueueImpl) Stop() error {
 	defer q.mu.Unlock()
 
 	if !q.running {
-		return nil
+		q.cancel()
+		return q.broker.Close()
 	}
 
 	q.running = false
@@ -358,7 +361,7 @@ func (q *TaskQueueImpl) Stop() error {
 	_ = q.delayManager.Stop()
 
 	// Wait for all goroutines to exit
-	if err := q.eg.Wait(); err != nil {
+	if err := q.eg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("failed to stop task queue: %w", err)
 	}
 
@@ -375,7 +378,7 @@ func (q *TaskQueueImpl) handleMessage(ctx context.Context, msg *Message) error {
 	// Decode task message
 	var taskMsg TaskMessage
 	if err := q.codec.Decode(msg.Value, &taskMsg); err != nil {
-		return fmt.Errorf("failed to decode task message: %w", err)
+		return permanentDeliveryError{cause: fmt.Errorf("failed to decode task message: %w", err)}
 	}
 
 	// Process task
@@ -393,7 +396,7 @@ func (q *TaskQueueImpl) handleBatchMessage(ctx context.Context, msg *Message) er
 	// Decode task message
 	var taskMsg TaskMessage
 	if err := q.codec.Decode(msg.Value, &taskMsg); err != nil {
-		return fmt.Errorf("failed to decode task message: %w", err)
+		return permanentDeliveryError{cause: fmt.Errorf("failed to decode task message: %w", err)}
 	}
 
 	// Add to aggregator
@@ -492,7 +495,10 @@ func (q *TaskQueueImpl) sendBatchTasks(tasks []*Task, queueName string, priority
 }
 
 // getQueueName gets the queue name based on custom queue and priority
-func (q *TaskQueueImpl) getQueueName(_ string, priority Priority) string {
+func (q *TaskQueueImpl) getQueueName(name string, priority Priority) string {
+	if name = normalizeQueueName(name); name != "" {
+		return name
+	}
 	return q.priorityQueues[priority]
 }
 

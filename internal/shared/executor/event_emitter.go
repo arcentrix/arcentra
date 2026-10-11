@@ -20,7 +20,6 @@ import (
 
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/plugin"
-	"github.com/arcentrix/arcentra/pkg/safe"
 )
 
 const defaultEventSourcePrefix = "urn:arcentra:executor"
@@ -45,32 +44,21 @@ func NewEventEmitter(publisher EventPublisher, config EventEmitterConfig) *Event
 	}
 }
 
-// Emit sends a CloudEvent without blocking execution.
-func (e *EventEmitter) Emit(_ context.Context, eventType, source, subject string, data map[string]any, extensions map[string]any) {
+// Emit 按调用顺序发布事件，返回前完成持久化尝试
+func (e *EventEmitter) Emit(ctx context.Context, eventType, source, subject string, data map[string]any, extensions map[string]any) {
 	if e == nil || e.publisher == nil {
 		return
 	}
-
-	event := plugin.NewCloudEvent(
-		eventType,
-		source,
-		data,
-		plugin.WithCloudEventSubject(subject),
-		plugin.WithCloudEventExtensions(extensions),
-	)
-
+	event := plugin.NewCloudEvent(eventType, source, data, plugin.WithCloudEventSubject(subject), plugin.WithCloudEventExtensions(extensions))
 	timeout := e.config.PublishTimeout
 	if timeout <= 0 {
 		timeout = 3 * time.Second
 	}
-
-	safe.Go(func() {
-		publishCtx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		if err := e.publisher.Publish(publishCtx, event.ToMap()); err != nil {
-			log.Warnw("publish event failed", "type", eventType, "error", err)
-		}
-	})
+	publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer cancel()
+	if err := e.publisher.Publish(publishCtx, event.ToMap()); err != nil {
+		log.Warnw("publish event failed", "type", eventType, "error", err)
+	}
 }
 
 // BuildSource builds the CloudEvent source value.

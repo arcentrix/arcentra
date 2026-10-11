@@ -49,12 +49,14 @@ func (rt *Router) userRouter(r fiber.Router, authMW fiber.Handler) {
 
 func (rt *Router) login(c *fiber.Ctx) error {
 	var login *model.Login
-	userService := rt.Services.User
-
 	if err := c.BodyParser(&login); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
+	if login == nil || login.Password == "" || login.Username == "" && login.Email == "" {
+		return http.Err(c, http.Failed.Code, "username or email and password are required")
+	}
+	userService := rt.Services.User
 	user, err := userService.Login(login, rt.HTTP.Auth)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())

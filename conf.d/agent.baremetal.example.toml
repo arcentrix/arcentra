@@ -1,0 +1,57 @@
+# TRUSTED CODE ONLY: commands have the same host access as this Agent process.
+# This is NOT container isolation. Use a dedicated disposable VM/container,
+# least-privilege credentials, and trusted pipeline definitions/repositories.
+# Copy this file to a private config file; do not commit live credentials.
+[grpc]
+serverAddr = "127.0.0.1:9090"
+token = ""
+registrationToken = ""
+readWriteTimeout = 10
+
+[agent]
+mode = "baremetal"
+id = ""
+name = "trusted-build-agent"
+interval = 30
+maxConcurrentJobs = 1
+jobTimeout = 3600
+workspaceDir = "./data/workspaces"
+tempDir = "./data/tmp"
+deniedCommands = []
+
+[agent.sandbox]
+enable = false
+
+[agent.labels]
+env = "development"
+trusted = "true"
+
+[messageQueue.kafka]
+bootstrapServers = "127.0.0.1:9092"
+securityProtocol = "PLAINTEXT"
+
+[taskQueue]
+provider = "kafka"
+autoCommit = false
+sessionTimeout = 30000
+maxPollInterval = 7200000
+delaySlotCount = 24
+delaySlotDuration = 3600
+
+[log]
+output = "stdout"
+level = "INFO"
+
+[metrics]
+enable = false
+
+[outbox]
+sendIntervalMs = 50
+sendBatchSize = 100
+maxDiskUsageMB = 512
+
+# Redacted build logs are fsynced here before acceptance and replayed after restart.
+# Keep this private directory on persistent storage, exclusive to this Agent process.
+[logSpool]
+directory = "./data/build-log-spool/agent"
+maxDiskUsageMB = 512

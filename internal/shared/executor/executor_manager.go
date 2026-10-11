@@ -16,11 +16,33 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/arcentrix/arcentra/pkg/plugin"
 )
+
+// ErrBuildLogPersistence 表示构建日志无法持久化，不能将内部取消误判为用户取消
+var ErrBuildLogPersistence = errors.New("build log persistence failed")
+
+type executionContextError struct {
+	cause error
+	err   error
+}
+
+func (e *executionContextError) Error() string { return e.err.Error() }
+func (e *executionContextError) Unwrap() error { return e.err }
+
+// ExecutionContextCause 返回执行上下文的取消或超时原因，不包含日志发布窗口超时
+func ExecutionContextCause(err error) error {
+	var executionErr *executionContextError
+	if errors.As(err, &executionErr) {
+		return executionErr.cause
+	}
+	return nil
+}
 
 // Manager 执行器管理器，负责注册与选择执行器。
 type Manager struct {
@@ -41,11 +63,16 @@ func NewExecutorManager() *Manager {
 func (m *Manager) Register(executor Executor) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.executors = append(m.executors, executor)
+	if executor != nil {
+		m.executors = append(m.executors, executor)
+	}
 }
 
 // SelectExecutor 按注册顺序选择第一个可执行该请求的执行器。
 func (m *Manager) SelectExecutor(req *ExecutionRequest) (Executor, error) {
+	if req == nil || req.Step == nil {
+		return nil, fmt.Errorf("nil request or step")
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -66,15 +93,140 @@ func (m *Manager) Execute(ctx context.Context, req *ExecutionRequest) (*Executio
 		return nil, err
 	}
 
-	m.emitStarted(ctx, req, executor.Name())
+	return m.ExecuteWithExecutor(ctx, req, executor)
+}
 
-	result, execErr := executor.Execute(ctx, req)
+// ExecuteWithExecutor 使用指定的请求级执行器并保留事件与日志处理
+func (m *Manager) ExecuteWithExecutor(ctx context.Context, req *ExecutionRequest, executor Executor) (*ExecutionResult, error) {
+	if req == nil || req.Step == nil || executor == nil {
+		return nil, fmt.Errorf("execution request and executor are required")
+	}
+	executionCtx := ctx
+	if req.Options != nil && req.Options.Timeout > 0 {
+		var cancel context.CancelFunc
+		executionCtx, cancel = context.WithTimeout(ctx, req.Options.Timeout)
+		defer cancel()
+	}
+	runCtx, cancelRun := context.WithCancel(executionCtx)
+	defer cancelRun()
+	m.emitStarted(runCtx, req, executor.Name())
+	request := *req
+	redactor := newSecretRedactor(req.Env)
+	var outputMu sync.Mutex
+	var logErr error
+	var canceledLogDeadline time.Time
+	streamed := make(map[string]bool)
+	eventCtx := buildEventContext(req)
+	emitter := m.getEmitter()
+	publisher := m.getLogPublisher()
+	var publishOutput func(string, string, bool)
+	if emitter != nil || publisher != nil || req.OutputHandler != nil {
+		// 调用方持有 outputMu，串行处理输出、脱敏状态和首次持久化错误
+		publishOutput = func(stream, content string, notifyHandler bool) {
+			if content == "" || logErr != nil {
+				return
+			}
+			// 取消后继续接收管道尾部输出，但所有尾部输出共享有界的发布窗口
+			deadline := time.Now().Add(3 * time.Second)
+			if runCtx.Err() != nil {
+				if canceledLogDeadline.IsZero() {
+					canceledLogDeadline = deadline
+				}
+				deadline = canceledLogDeadline
+			}
+			logCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+			defer cancel()
+			for len(content) > 0 {
+				n := min(len(content), 64*1024)
+				chunk := content[:n]
+				content = content[n:]
+				if err := m.publishBuildLog(logCtx, publisher, eventCtx, chunk, stream); err != nil {
+					logErr = redactedExecutionError{cause: errors.Join(ErrBuildLogPersistence, err), message: ErrBuildLogPersistence.Error() + ": " + redactor.redact(err.Error())}
+					cancelRun()
+					return
+				}
+				if notifyHandler && req.OutputHandler != nil {
+					req.OutputHandler(stream, chunk)
+				}
+				if emitter != nil {
+					emitter.Emit(logCtx, plugin.EventTypeTaskLog, emitter.BuildSource(executor.Name()), eventCtx.Subject(), map[string]any{"stream": stream, "content": chunk}, eventCtx.Extensions())
+				}
+			}
+		}
+		request.OutputHandler = func(stream, content string) {
+			outputMu.Lock()
+			defer outputMu.Unlock()
+			if logErr != nil || content == "" {
+				return
+			}
+			streamed[stream] = true
+			if safe := redactor.chunk(stream, content, false); safe != "" {
+				publishOutput(stream, safe, true)
+			}
+		}
+	}
+	result, execErr := executor.Execute(runCtx, &request)
+	outputMu.Lock()
+	if publishOutput != nil {
+		for stream := range redactor.pending {
+			if safe := redactor.chunk(stream, "", true); safe != "" {
+				publishOutput(stream, safe, true)
+			}
+		}
+	}
+	if result != nil {
+		result.Output = redactor.redact(result.Output)
+		result.ErrorOutput = redactor.redact(result.ErrorOutput)
+		result.Error = redactor.redact(result.Error)
+		// 不支持流式输出的执行器也必须先持久化日志，再报告最终状态
+		if publishOutput != nil && result.Metadata["logsStreamed"] != true {
+			if !streamed["stdout"] {
+				publishOutput("stdout", result.Output, false)
+			}
+			if !streamed["stderr"] {
+				publishOutput("stderr", result.ErrorOutput, false)
+			}
+		}
+	}
+	publishErr := logErr
+	outputMu.Unlock()
 	if execErr != nil {
-		m.emitFailure(ctx, req, result, execErr, executor.Name())
+		execErr = redactedExecutionError{cause: execErr, message: redactor.redact(execErr.Error())}
+	}
+	if execErr == nil && result == nil {
+		execErr = fmt.Errorf("executor returned no result")
+	}
+	if execErr == nil && !result.Success {
+		if result.Error != "" {
+			execErr = errors.New(result.Error)
+		} else {
+			execErr = fmt.Errorf("execution failed with exit code %d", result.ExitCode)
+		}
+	}
+	if publishErr != nil {
+		// 保留原始命令错误及取消语义，同时确保日志拒收永远不会变成成功
+		execErr = errors.Join(execErr, publishErr)
+	}
+	if cause := executionCtx.Err(); cause != nil {
+		if !errors.Is(execErr, cause) {
+			execErr = errors.Join(execErr, cause)
+		}
+		execErr = &executionContextError{cause: cause, err: execErr}
+	}
+	if execErr != nil && result != nil {
+		result.Success = false
+		result.Error = execErr.Error()
+		if result.ExitCode == 0 {
+			result.ExitCode = 1
+		}
+	}
+	reportCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if execErr != nil {
+		m.emitFailure(reportCtx, req, result, execErr, executor.Name())
 		return result, execErr
 	}
-
-	m.emitSuccess(ctx, req, result, executor.Name())
+	m.emitSuccess(reportCtx, req, result, executor.Name())
 	return result, nil
 }
 
@@ -155,10 +307,10 @@ func (m *Manager) emitStarted(ctx context.Context, req *ExecutionRequest, execut
 
 func (m *Manager) emitSuccess(ctx context.Context, req *ExecutionRequest, result *ExecutionResult, executorName string) {
 	emitter := m.getEmitter()
+	eventCtx := buildEventContext(req)
 	if emitter == nil {
 		return
 	}
-	eventCtx := buildEventContext(req)
 	durationMs := int64(0)
 	if result != nil {
 		durationMs = result.Duration.Milliseconds()
@@ -168,7 +320,6 @@ func (m *Manager) emitSuccess(ctx context.Context, req *ExecutionRequest, result
 		"durationMs": durationMs,
 	}
 	emitter.Emit(ctx, plugin.EventTypeTaskSucceeded, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
-	m.emitLogs(ctx, emitter, eventCtx, executorName, result)
 	m.emitProgress(ctx, emitter, eventCtx, executorName, result)
 	m.emitArtifact(ctx, emitter, eventCtx, executorName, result)
 	m.emitFinished(ctx, emitter, eventCtx, executorName, "succeeded", durationMs)
@@ -181,10 +332,10 @@ func (m *Manager) emitFailure(ctx context.Context,
 	executorName string,
 ) {
 	emitter := m.getEmitter()
+	eventCtx := buildEventContext(req)
 	if emitter == nil {
 		return
 	}
-	eventCtx := buildEventContext(req)
 	durationMs := int64(0)
 	exitCode := int32(-1)
 	if result != nil {
@@ -197,7 +348,6 @@ func (m *Manager) emitFailure(ctx context.Context,
 		"exitCode":     exitCode,
 	}
 	emitter.Emit(ctx, plugin.EventTypeTaskFailed, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
-	m.emitLogs(ctx, emitter, eventCtx, executorName, result)
 	m.emitProgress(ctx, emitter, eventCtx, executorName, result)
 	m.emitArtifact(ctx, emitter, eventCtx, executorName, result)
 	m.emitFinished(ctx, emitter, eventCtx, executorName, "failed", durationMs)
@@ -217,41 +367,12 @@ func (m *Manager) emitFinished(
 	emitter.Emit(ctx, plugin.EventTypeTaskFinished, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
 }
 
-func (m *Manager) emitLogs(
-	ctx context.Context,
-	emitter *EventEmitter,
-	eventCtx EventContext,
-	executorName string,
-	result *ExecutionResult,
-) {
-	if result == nil {
-		return
-	}
-	logPublisher := m.getLogPublisher()
-	if result.Output != "" {
-		data := map[string]any{
-			"stream":  "stdout",
-			"content": result.Output,
-		}
-		emitter.Emit(ctx, plugin.EventTypeTaskLog, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
-		m.publishBuildLog(ctx, logPublisher, eventCtx, result.Output, "stdout")
-	}
-	if result.ErrorOutput != "" {
-		data := map[string]any{
-			"stream":  "stderr",
-			"content": result.ErrorOutput,
-		}
-		emitter.Emit(ctx, plugin.EventTypeTaskLog, emitter.BuildSource(executorName), eventCtx.Subject(), data, eventCtx.Extensions())
-		m.publishBuildLog(ctx, logPublisher, eventCtx, result.ErrorOutput, "stderr")
-	}
-}
-
-func (m *Manager) publishBuildLog(ctx context.Context, publisher LogPublisher, eventCtx EventContext, content, stream string) {
+func (m *Manager) publishBuildLog(ctx context.Context, publisher LogPublisher, eventCtx EventContext, content, stream string) error {
 	if publisher == nil || content == "" {
-		return
+		return nil
 	}
 	entry := BuildLogMessageFromEvent(eventCtx, content, stream)
-	_ = publisher.Publish(ctx, entry)
+	return publisher.Publish(ctx, entry)
 }
 
 func (m *Manager) emitProgress(

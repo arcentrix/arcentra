@@ -17,10 +17,10 @@ package model
 // Permission 权限字典表
 type Permission struct {
 	BaseModel
-	PermissionID string `gorm:"column:permission_id;not null;uniqueIndex" json:"permissionId"`
-	ResourceType string `gorm:"column:resource_type;not null;index" json:"resourceType"`
+	PermissionID string `gorm:"column:permission_id;not null;uniqueIndex;type:varchar(64)" json:"permissionId"`
+	ResourceType string `gorm:"column:resource_type;not null;index;type:varchar(32)" json:"resourceType"`
 	Action       string `gorm:"column:action;not null" json:"action"`
-	ScopeType    string `gorm:"column:scope_type;not null;default:'project';index" json:"scopeType"`
+	ScopeType    string `gorm:"column:scope_type;not null;default:'project';index;type:varchar(32)" json:"scopeType"`
 	Description  string `gorm:"column:description;not null;default:''" json:"description"`
 	IsSystem     int    `gorm:"column:is_system;not null;default:1" json:"isSystem"`
 }
@@ -32,8 +32,8 @@ func (Permission) TableName() string {
 
 // RolePermissionBinding 角色与权限绑定表
 type RolePermissionBinding struct {
-	RoleID       string `gorm:"column:role_id;primaryKey" json:"roleId"`
-	PermissionID string `gorm:"column:permission_id;primaryKey;index" json:"permissionId"`
+	RoleID       string `gorm:"column:role_id;primaryKey;type:varchar(64)" json:"roleId"`
+	PermissionID string `gorm:"column:permission_id;primaryKey;index;type:varchar(64)" json:"permissionId"`
 }
 
 // TableName 返回数据库表名

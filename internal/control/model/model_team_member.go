@@ -26,8 +26,8 @@ const (
 // TeamMember 团队成员表
 type TeamMember struct {
 	BaseModel
-	TeamID string `gorm:"column:team_id;not null;index:idx_team_user,unique" json:"teamId"`
-	UserID string `gorm:"column:user_id;not null;index:idx_team_user,unique;index:idx_user" json:"userId"`
+	TeamID string `gorm:"column:team_id;not null;index:idx_team_user,unique;type:varchar(64)" json:"teamId"`
+	UserID string `gorm:"column:user_id;not null;index:idx_team_user,unique;index:idx_team_member_user;type:varchar(64)" json:"userId"`
 }
 
 func (TeamMember) TableName() string {
