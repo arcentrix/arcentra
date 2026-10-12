@@ -448,7 +448,11 @@ func (s *CopilotService) redactor(ctx context.Context, project *model.Project, r
 		return nil, ErrCopilotSecrets
 	}
 	values := s.registry.Secrets()
-	values = append(values, project.WebhookSecret)
+	values = append(values, project.WebhookSecret, project.Credential)
+	// 同时覆盖 SCM 实际使用的拆分口令，避免只遮蔽 username:password 整体
+	for _, credential := range scmAuthFromProject(project) {
+		values = append(values, credential)
+	}
 	// 当前运行注入项目秘密；同时覆盖适用的流水线/全局已登记秘密
 	// 不因用户直接列出秘密权限而跳过内部脱敏，也不返回秘密值
 	secrets := make([]*model.Secret, 0)

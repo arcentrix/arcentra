@@ -78,6 +78,15 @@ func (s *JobRunStore) UpdateStepRun(ctx context.Context, stepRunID string, updat
 
 // UpdateJobRunIfStatus 只更新仍处于观察状态的作业，保护 Agent 并发终态报告
 func (s *JobRunStore) UpdateJobRunIfStatus(ctx context.Context, jobRunID string, status int, updates map[string]any) error {
+	if next, _ := updates["status"].(int); next == model.JobRunStatusCancelled {
+		canceller, ok := s.jobRunRepo.(interface {
+			CancelAgentJobIfCurrent(context.Context, string, int, map[string]any) error
+		})
+		if !ok {
+			return fmt.Errorf("atomic agent cancellation unavailable")
+		}
+		return canceller.CancelAgentJobIfCurrent(ctx, jobRunID, status, updates)
+	}
 	updater, ok := s.jobRunRepo.(interface {
 		PatchStatusIfCurrent(context.Context, string, int, map[string]any) error
 	})

@@ -53,6 +53,9 @@ func (s *PipelineServiceImpl) GetPipelineDeploymentReview(ctx context.Context, p
 		return review, "", err
 	}
 	review.Target = target
+	if err := s.deployment.ValidatePipelineApprovalPlan(ctx, pipeline.ProjectID, plan, ""); err != nil {
+		return review, "", err
+	}
 	fingerprint, err := s.deployment.PipelineDeploymentTargetFingerprint(ctx, pipeline.ProjectID, plan.EnvironmentID)
 	if err != nil {
 		return review, "", err
@@ -90,6 +93,9 @@ func (s *PipelineServiceImpl) authorizeDeploymentTrigger(ctx context.Context, re
 	}
 	if err := s.deployment.AuthorizePipelineDeployment(ctx, actor, pipeline.ProjectID, pipeline.PipelineID, plan.EnvironmentID); err != nil {
 		return nil, 403, fmt.Errorf("deployment permission denied: %w", err)
+	}
+	if err := s.deployment.ValidatePipelineApprovalPlan(ctx, pipeline.ProjectID, plan, actor); err != nil {
+		return nil, 400, err
 	}
 	fingerprint, err := s.deployment.PipelineDeploymentTargetFingerprint(ctx, pipeline.ProjectID, plan.EnvironmentID)
 	if err != nil {

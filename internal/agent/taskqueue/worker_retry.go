@@ -150,15 +150,17 @@ func executeJobAttempts(ctx, jobCtx context.Context, conf *config.AgentConfig, c
 	}
 
 	for _, step := range payload.Steps {
-		for index, stepID := range stepAttemptIDs(step) {
+		for _, stepID := range stepAttemptIDs(step) {
 			reason := "attempt not used"
 			status := steprunv1.StepRunStatus_STEP_RUN_STATUS_SKIPPED
-			if index == 0 && jobCtx.Err() != nil {
+			// 日志持久化内部取消仍属于失败，不能冒充控制面或用户取消
+			if jobCtx.Err() != nil || errors.Is(jobErr, context.Canceled) && !errors.Is(jobErr, executor.ErrBuildLogPersistence) {
 				status = steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED
+				reason = context.Canceled.Error()
 				if errors.Is(jobCtx.Err(), context.DeadlineExceeded) {
 					status = steprunv1.StepRunStatus_STEP_RUN_STATUS_TIMEOUT
+					reason = context.DeadlineExceeded.Error()
 				}
-				reason = jobCtx.Err().Error()
 			}
 			_ = skip(stepID, reason, status) // Final receipt stages and delivers every pending attempt before the job.
 

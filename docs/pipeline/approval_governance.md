@@ -1,5 +1,7 @@
 # 流水线审批治理：Web UI、IM 与统一状态机
 
+> 当前已实现的最终部署作业持久化门禁见 [durable-deployment-approvals.md](durable-deployment-approvals.md)。下文保留通用审批和 IM 的目标架构；不要把建议 API 或旧内存插件流程视为已支持的部署授权。
+
 本文档落实 **approval-governance**：描述目标架构（**单一审批单、多通道呈现**），并与现有代码、事件类型对齐；**不要求**本文档即完整 OpenAPI。
 
 ---

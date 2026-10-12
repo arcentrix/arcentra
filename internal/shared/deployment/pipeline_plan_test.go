@@ -116,3 +116,61 @@ func TestPipelineDeploymentRejectsAutomaticTriggersButPreservesOrdinaryCI(t *tes
 		t.Fatal(err)
 	}
 }
+
+func TestPipelineDeploymentAcceptsOnlyExactDurableFinalGate(t *testing.T) {
+	p := deploymentPlanSpec(t)
+	p.Jobs[1].Approval = &pipelinev1.Approval{Required: true, Type: "manual", Plugin: "builtin:deployment"}
+	plan, err := DecodePipelinePlan(p)
+	if err != nil || plan == nil || !plan.ApprovalRequired {
+		t.Fatalf("durable gate rejected: %+v %v", plan, err)
+	}
+	data, digest, err := plan.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := ParsePipelinePlan(data, digest)
+	if err != nil || !decoded.ApprovalRequired {
+		t.Fatal("gate missing from pinned plan")
+	}
+	for _, mutate := range []func(*pipelinev1.Spec){
+		func(p *pipelinev1.Spec) { p.Jobs[1].Approval.Required = false },
+		func(p *pipelinev1.Spec) { p.Jobs[1].Approval.Type = "auto" },
+		func(p *pipelinev1.Spec) { p.Jobs[1].Approval.Type = "" },
+		func(p *pipelinev1.Spec) { p.Jobs[1].Approval.Plugin = "external" },
+		func(p *pipelinev1.Spec) { p.Jobs[1].Approval.Plugin = "" },
+		func(p *pipelinev1.Spec) { p.Jobs[0].Approval = p.Jobs[1].Approval; p.Jobs[1].Approval = nil },
+		func(p *pipelinev1.Spec) {
+			p.Jobs[1].Approval.Params, _ = structpb.NewStruct(map[string]any{"approvers": []any{"requester"}})
+		},
+	} {
+		copy := proto.Clone(p).(*pipelinev1.Spec)
+		mutate(copy)
+		if _, err := DecodePipelinePlan(copy); err == nil {
+			t.Fatalf("unsupported gate accepted: %+v", copy)
+		}
+	}
+}
+
+func TestPipelineApprovalPolicyValidatesAndCopiesOperatorCandidates(t *testing.T) {
+	valid := &PipelineApprovalPolicy{Approvers: []string{"bob", "alice"}, MinApprovals: 2, TimeoutSeconds: 600}
+	if err := ValidatePipelineApprovalPolicy(valid); err != nil {
+		t.Fatal(err)
+	}
+	copy := ClonePipelineApprovalPolicy(valid)
+	valid.Approvers[0] = "changed"
+	if copy.Approvers[0] != "alice" || copy.Approvers[1] != "bob" {
+		t.Fatal("operator candidate copy changed")
+	}
+	for _, invalid := range []*PipelineApprovalPolicy{
+		{}, {Approvers: []string{"a", "a"}, MinApprovals: 1, TimeoutSeconds: 30},
+		{Approvers: []string{"a"}, MinApprovals: 2, TimeoutSeconds: 30},
+		{Approvers: []string{"a"}, MinApprovals: 0, TimeoutSeconds: 30},
+		{Approvers: []string{"a"}, MinApprovals: 1, TimeoutSeconds: 0},
+		{Approvers: []string{"a"}, MinApprovals: 1, TimeoutSeconds: 3601},
+		{Approvers: []string{" bad "}, MinApprovals: 1, TimeoutSeconds: 30},
+	} {
+		if err := ValidatePipelineApprovalPolicy(invalid); err == nil {
+			t.Fatalf("invalid policy accepted: %+v", invalid)
+		}
+	}
+}

@@ -33,13 +33,14 @@ type PipelinePredecessor struct {
 
 // PipelineDeploymentPlan 保存经验证的不可变部署计划
 type PipelineDeploymentPlan struct {
-	Version        int                       `json:"version"`
-	JobName        string                    `json:"jobName"`
-	StepName       string                    `json:"stepName"`
-	EnvironmentID  string                    `json:"environmentId"`
-	Artifact       PipelineArtifactReference `json:"artifact"`
-	TimeoutSeconds int64                     `json:"timeoutSeconds"`
-	Predecessors   []PipelinePredecessor     `json:"predecessors"`
+	Version          int                       `json:"version"`
+	ApprovalRequired bool                      `json:"approvalRequired,omitempty"`
+	JobName          string                    `json:"jobName"`
+	StepName         string                    `json:"stepName"`
+	EnvironmentID    string                    `json:"environmentId"`
+	Artifact         PipelineArtifactReference `json:"artifact"`
+	TimeoutSeconds   int64                     `json:"timeoutSeconds"`
+	Predecessors     []PipelinePredecessor     `json:"predecessors"`
 }
 
 var planLiteral = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$`)
@@ -82,8 +83,8 @@ func DecodePipelinePlan(spec *pipelinev1.Spec) (*PipelineDeploymentPlan, error) 
 	}
 	job, step := deployJob, deployStep
 	for _, other := range spec.Jobs {
-		if other.Approval != nil {
-			return nil, fmt.Errorf("job %q: approval blocks are unsupported for pipeline deployments", other.Name)
+		if other.Approval != nil && (other != deployJob || !IsPipelineDeploymentApproval(other.Approval)) {
+			return nil, fmt.Errorf("job %q: only required manual builtin:deployment approval with empty params on the final deployment job is supported", other.Name)
 		}
 		if other.Target != nil {
 			return nil, fmt.Errorf("legacy target blocks cannot coexist with pipeline deployments")
@@ -181,7 +182,7 @@ func DecodePipelinePlan(spec *pipelinev1.Spec) (*PipelineDeploymentPlan, error) 
 	if len(visited) != len(jobs) {
 		return nil, fmt.Errorf("deployment job must be the final DAG job with every other job in its predecessor closure")
 	}
-	result := &PipelineDeploymentPlan{Version: 1, JobName: job.Name, StepName: step.Name, EnvironmentID: environment, Artifact: ref, TimeoutSeconds: int64(duration / time.Second)}
+	result := &PipelineDeploymentPlan{Version: 1, ApprovalRequired: job.Approval != nil, JobName: job.Name, StepName: step.Name, EnvironmentID: environment, Artifact: ref, TimeoutSeconds: int64(duration / time.Second)}
 	for _, j := range spec.Jobs {
 		if j == job {
 			continue
@@ -222,4 +223,9 @@ func ParsePipelinePlan(data, hash string) (*PipelineDeploymentPlan, error) {
 		return nil, fmt.Errorf("invalid immutable deployment plan")
 	}
 	return &p, nil
+}
+
+// IsPipelineDeploymentApproval 仅识别控制面持久化的精确人工部署门禁
+func IsPipelineDeploymentApproval(approval *pipelinev1.Approval) bool {
+	return approval != nil && approval.Required && approval.Type == "manual" && approval.Plugin == "builtin:deployment" && len(approval.GetParams().GetFields()) == 0
 }

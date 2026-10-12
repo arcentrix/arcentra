@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/internal/shared/deployment"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/internal/shared/retry"
@@ -195,7 +196,7 @@ func (tf *TaskFramework) create(ctx context.Context, task *Task) error {
 	}
 
 	// Handle approval if required
-	if task.Job.Approval != nil && task.Job.Approval.Required {
+	if task.Job.Approval != nil && task.Job.Approval.Required && !(deployment.IsPipelineDeploymentApproval(task.Job.Approval) && tf.execCtx.RunDeployment != nil && len(task.Job.Steps) == 1 && task.Job.Steps[0].Uses == "builtin:kubernetes") {
 		if err := tf.handleApproval(ctx, task); err != nil {
 			return fmt.Errorf("approval failed: %w", err)
 		}

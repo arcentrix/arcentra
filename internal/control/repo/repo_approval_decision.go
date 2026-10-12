@@ -47,6 +47,7 @@ func (r *ApprovalDecisionRepo) Create(ctx context.Context, decision *model.Appro
 func (r *ApprovalDecisionRepo) GetByApprovalAndUser(ctx context.Context, approvalID, userID string) (*model.ApprovalDecision, error) {
 	var decision model.ApprovalDecision
 	err := r.Database().WithContext(ctx).
+		Select(approvalDecisionColumns).
 		Where("approval_id = ? AND user_id = ?", approvalID, userID).
 		First(&decision).Error
 	if err != nil {
@@ -59,6 +60,7 @@ func (r *ApprovalDecisionRepo) GetByApprovalAndUser(ctx context.Context, approva
 func (r *ApprovalDecisionRepo) ListByApproval(ctx context.Context, approvalID string) ([]model.ApprovalDecision, error) {
 	var decisions []model.ApprovalDecision
 	err := r.Database().WithContext(ctx).
+		Select(approvalDecisionColumns).
 		Where("approval_id = ?", approvalID).
 		Order("created_at ASC").
 		Find(&decisions).Error

@@ -141,3 +141,85 @@ func TestDeploymentLiveAuthorizationFailsClosed(t *testing.T) {
 		t.Fatal("missing dependencies accepted")
 	}
 }
+
+func TestDeploymentApprovalAuthorizationDoesNotGrantExecution(t *testing.T) {
+	_, db, environment, repositories := liveDeploymentAuthorizationFixture(t, true)
+	deployment := &DeploymentService{records: repo.NewDeploymentRepo(artifactServiceDatabase{db})}
+	authorize := NewDeploymentApprovalAuthorizer(repositories, deployment)
+	ctx := context.Background()
+	if err := authorize(ctx, "actor", "project", "pipe", environment); !errors.Is(err, ErrDeploymentAuthorization) {
+		t.Fatal("deployment permission alone allowed approval", err)
+	}
+	if err := db.Create(&model.Permission{PermissionID: "approval:approve", ResourceType: "approval", Action: "approve"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.RolePermissionBinding{RoleID: "deploy-role", PermissionID: "approval:approve"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("role_id = ? AND permission_id IN ?", "deploy-role", []string{"pipeline:trigger", "project:update"}).Delete(&model.RolePermissionBinding{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := authorize(ctx, "actor", "project", "pipe", environment); err != nil {
+		t.Fatal("reviewer without execution authority denied", err)
+	}
+	if err := NewPipelineDeploymentAuthorizer(repositories, deployment)(ctx, "actor", "project", "pipe", environment); !errors.Is(err, ErrDeploymentAuthorization) {
+		t.Fatal("review permission granted execution", err)
+	}
+	if err := db.Where("team_id = ? AND user_id = ?", "team", "actor").Delete(&model.TeamMember{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := authorize(ctx, "actor", "project", "pipe", environment); !errors.Is(err, ErrDeploymentAuthorization) {
+		t.Fatal("revoked reviewer membership allowed approval", err)
+	}
+}
+
+func TestDeploymentApprovalAuthorizationRechecksRoleAndScope(t *testing.T) {
+	for _, permission := range []string{"approval:approve", "release:deploy_prod", "project:read", "pipeline:read"} {
+		t.Run(permission, func(t *testing.T) {
+			_, db, environment, repositories := liveDeploymentAuthorizationFixture(t, false)
+			if err := db.Create(&model.Permission{PermissionID: "approval:approve", ResourceType: "approval", Action: "approve"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&model.RolePermissionBinding{RoleID: "deploy-role", PermissionID: "approval:approve"}).Error; err != nil {
+				t.Fatal(err)
+			}
+			authorize := NewDeploymentApprovalAuthorizer(repositories, &DeploymentService{records: repo.NewDeploymentRepo(artifactServiceDatabase{db})})
+			if err := authorize(context.Background(), "actor", "project", "pipe", environment); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Where("role_id = ? AND permission_id = ?", "deploy-role", permission).Delete(&model.RolePermissionBinding{}).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := authorize(context.Background(), "actor", "project", "pipe", environment); !errors.Is(err, ErrDeploymentAuthorization) {
+				t.Fatal("revoked permission accepted", err)
+			}
+		})
+	}
+}
+
+func TestDeploymentRejectOnlyAuthorizationDoesNotApprove(t *testing.T) {
+	_, db, environment, repositories := liveDeploymentAuthorizationFixture(t, false)
+	deployment := &DeploymentService{records: repo.NewDeploymentRepo(artifactServiceDatabase{db})}
+	if err := db.Create(&model.Permission{PermissionID: "approval:reject", ResourceType: "approval", Action: "reject"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.RolePermissionBinding{RoleID: "deploy-role", PermissionID: "approval:reject"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("role_id = ? AND permission_id IN ?", "deploy-role", []string{"pipeline:trigger", "project:update"}).Delete(&model.RolePermissionBinding{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := NewDeploymentRejectionAuthorizer(repositories, deployment)(ctx, "actor", "project", "pipe", environment); err != nil {
+		t.Fatal("reject-only reviewer denied", err)
+	}
+	if err := NewDeploymentApprovalAuthorizer(repositories, deployment)(ctx, "actor", "project", "pipe", environment); !errors.Is(err, ErrDeploymentAuthorization) {
+		t.Fatal("reject-only reviewer can approve", err)
+	}
+	if err := db.Where("role_id = ? AND permission_id = ?", "deploy-role", "approval:reject").Delete(&model.RolePermissionBinding{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := NewDeploymentRejectionAuthorizer(repositories, deployment)(ctx, "actor", "project", "pipe", environment); !errors.Is(err, ErrDeploymentAuthorization) {
+		t.Fatal("revoked rejection permission accepted", err)
+	}
+}

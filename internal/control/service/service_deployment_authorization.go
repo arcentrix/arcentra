@@ -17,6 +17,20 @@ var ErrDeploymentAuthorization = errors.New("deployment authorization denied or 
 
 // NewPipelineDeploymentAuthorizer 每次读取当前用户、团队和有效授权，拒绝过期的执行权限。
 func NewPipelineDeploymentAuthorizer(repositories *repo.Repositories, deployments *DeploymentService) PipelineDeploymentAuthorizer {
+	return newDeploymentAuthorizer(repositories, deployments, "")
+}
+
+// NewDeploymentApprovalAuthorizer 每次复核候选审批人的身份、项目读取、审批和发布等级权限
+func NewDeploymentApprovalAuthorizer(repositories *repo.Repositories, deployments *DeploymentService) PipelineDeploymentAuthorizer {
+	return newDeploymentAuthorizer(repositories, deployments, "approval:approve")
+}
+
+// NewDeploymentRejectionAuthorizer 每次复核候选审批人的拒绝权限，不隐含同意权限
+func NewDeploymentRejectionAuthorizer(repositories *repo.Repositories, deployments *DeploymentService) PipelineDeploymentAuthorizer {
+	return newDeploymentAuthorizer(repositories, deployments, "approval:reject")
+}
+
+func newDeploymentAuthorizer(repositories *repo.Repositories, deployments *DeploymentService, approvalAction string) PipelineDeploymentAuthorizer {
 	return func(ctx context.Context, actorID, projectID, pipelineID, environmentID string) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -84,14 +98,22 @@ func NewPipelineDeploymentAuthorizer(repositories *repo.Repositories, deployment
 			return ErrDeploymentAuthorization
 		}
 		projectScope := authz.ResourceRef{Type: "project", ID: projectID, ProjectID: projectID, OrgID: project.OrgID}
-		for _, permission := range []string{"project:read", "project:update", action} {
+		projectPermissions := []string{"project:read", "project:update", action}
+		if approvalAction != "" {
+			projectPermissions = []string{"project:read", approvalAction, action}
+		}
+		for _, permission := range projectPermissions {
 			allowed, err := authorizer.Check(ctx, subject, permission, projectScope)
 			if err != nil || !allowed {
 				return ErrDeploymentAuthorization
 			}
 		}
 		pipelineScope := authz.ResourceRef{Type: "pipeline", ID: pipelineID, ProjectID: projectID, OrgID: project.OrgID}
-		for _, permission := range []string{"pipeline:read", "pipeline:trigger"} {
+		pipelinePermissions := []string{"pipeline:read", "pipeline:trigger"}
+		if approvalAction != "" {
+			pipelinePermissions = []string{"pipeline:read"}
+		}
+		for _, permission := range pipelinePermissions {
 			allowed, err := authorizer.Check(ctx, subject, permission, pipelineScope)
 			if err != nil || !allowed {
 				return ErrDeploymentAuthorization

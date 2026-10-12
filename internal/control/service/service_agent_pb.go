@@ -25,6 +25,7 @@ import (
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/internal/shared/agentidentity"
 	artifactutil "github.com/arcentrix/arcentra/pkg/artifact"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
@@ -397,6 +398,16 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 		}
 		return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "claim confirmed"}, nil
 	}
+	if entity.Status == model.JobRunStatusCancelled && entity.CancellationClaimID != "" && int(req.Status) == 3 {
+		want := entity.ClaimID
+		if want == "" {
+			want = agentidentity.StepClaimID(entity.CancellationClaimID, entity.StepRunID)
+		}
+		if claimID != want {
+			return nil, status.Error(codes.PermissionDenied, "original cancelled step claim required")
+		}
+		return nil, agentidentity.CancelledStepClaimError(entity.StepRunID, claimID)
+	}
 	if err := validateReportedStatus(entity.Status, int(req.Status), true); err != nil {
 		return nil, err
 	}
@@ -406,6 +417,12 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 		if err != nil {
 			return nil, err
 		}
+	}
+	if entity.Status == model.JobRunStatusCancelled && entity.CancellationClaimID != "" {
+		if err := confirmCancelledStepReceipt(ctx, a.agentService.stepRunRepo, entity, claimID, digest); err != nil {
+			return nil, err
+		}
+		return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "cancellation receipt confirmed"}, nil
 	}
 	if entity.Status >= 4 {
 		if err := validateTerminalReplay(entity.TerminalReportDigest, digest); err != nil {
@@ -474,6 +491,12 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 		if err != nil {
 			return nil, err
 		}
+	}
+	if entity.Status == model.JobRunStatusCancelled && entity.CancellationClaimID != "" {
+		if err := confirmCancelledJobReceipt(ctx, a.agentService.jobRunRepo, entity, claimID, digest); err != nil {
+			return nil, err
+		}
+		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "cancellation receipt confirmed"}, nil
 	}
 	if model.IsJobRunTerminal(entity.Status) {
 		if err := validateTerminalReplay(entity.TerminalReportDigest, digest); err != nil {

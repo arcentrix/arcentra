@@ -30,6 +30,7 @@ type JobRun struct {
 	JobName                    string     `gorm:"column:job_name" json:"jobName"`
 	AgentID                    string     `gorm:"column:agent_id" json:"agentId"`
 	ClaimID                    string     `gorm:"column:claim_id;type:varchar(64);default:''" json:"-"`
+	CancellationClaimID        string     `gorm:"column:cancellation_claim_id;type:varchar(64);not null;default:''" json:"-"` // 原作业认领，仅由控制面取消事务写入
 	TerminalReportDigest       string     `gorm:"column:terminal_report_digest;type:varchar(64);not null;default:''" json:"-"`
 	Status                     int        `gorm:"column:status" json:"status"`
 	Priority                   int        `gorm:"column:priority" json:"priority"`

@@ -433,6 +433,7 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 	if found, err := replayTerminalForTask(ctx, grpcClient, agentConf, "job", payload.JobRunID); found || err != nil {
 		return err
 	}
+	ctx = withJobExecutionClaim(ctx, payload.JobRunID)
 	jobCtx, cancel := context.WithCancel(ctx)
 	if _, loaded := runningJobRunCancel.LoadOrStore(payload.JobRunID, cancel); loaded {
 		cancel()
@@ -456,10 +457,9 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 	storageMu.RUnlock()
 	artifacts := &artifactExecutor{job: payload, storage: st, reference: reference, uploaded: make(map[string]string)}
 	start := time.Now()
-	if jobCtx.Err() == nil {
-		if err := reportJobRunStatus(ctx, grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_BUSY, int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING), "", start, 0, artifacts); err != nil {
-			return fmt.Errorf("claim job run: %w", err)
-		}
+	// 即使控制消息先到，也先确认原作业认领；已终态且未认领的任务不能产生收据
+	if err := reportJobRunStatus(ctx, grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_BUSY, int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING), "", start, 0, artifacts); err != nil {
+		return fmt.Errorf("claim job run: %w", err)
 	}
 	jobErr := validateJobExecution(payload)
 	workspace := ""
