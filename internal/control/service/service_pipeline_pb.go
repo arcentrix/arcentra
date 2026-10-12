@@ -56,6 +56,7 @@ type PipelineServiceImpl struct {
 	stepRunRepo      repo.IStepRunRepository
 	logAggregator    *LogAggregator
 	engine           IPipelineEngine
+	deployment       *DeploymentService
 	templateResolver *PipelineTemplateService
 }
 
@@ -67,6 +68,7 @@ func NewPipelineServiceImpl(services *Services) *PipelineServiceImpl {
 		stepRunRepo:      services.StepRunRepo,
 		logAggregator:    services.LogAggregator,
 		engine:           services.PipelineEngine,
+		deployment:       services.Deployment,
 		templateResolver: services.PipelineTemplate,
 	}
 	if repos := services.Repos(); repos != nil {
@@ -348,6 +350,9 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 			}, nil
 		}
 		if existing != nil {
+			if err := validateDeploymentDuplicate(ctx, req, existing); err != nil {
+				return &pipelinev1.TriggerPipelineResponse{Success: false, Message: err.Error(), Error: s.error(409, err.Error(), "conflict", nil)}, nil
+			}
 			return &pipelinev1.TriggerPipelineResponse{
 				Success: true,
 				Message: "idempotent request",
@@ -372,6 +377,7 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 			Error:   s.error(500, err.Error(), "internal", nil),
 		}, nil
 	}
+	originalContent := content
 	content, err = s.resolveIncludes(ctx, content, pipeline.ProjectID)
 	if err != nil {
 		return &pipelinev1.TriggerPipelineResponse{
@@ -396,6 +402,10 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 		}, nil
 	}
 
+	deploymentConsent, code, err := s.authorizeDeploymentTrigger(ctx, req, pipeline, headSha, parsedSpec, content != originalContent)
+	if err != nil {
+		return &pipelinev1.TriggerPipelineResponse{Success: false, Message: err.Error(), Error: s.error(int32(code), err.Error(), "deployment_validation", nil)}, nil
+	}
 	variablesJSON := serde.MarshalStringMap(req.GetVariables())
 	run := &model.PipelineRun{
 		RunID:               id.GetUild(),
@@ -412,10 +422,22 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 		Env:                 variablesJSON,
 		TotalJobs:           len(parsedSpec.Jobs),
 	}
+	if deploymentConsent != nil {
+		run.AllowDeployments = deploymentConsent.AllowDeployments
+		run.DeploymentActorID = deploymentConsent.DeploymentActorID
+		run.DeploymentPlan = deploymentConsent.DeploymentPlan
+		run.DeploymentPlanHash = deploymentConsent.DeploymentPlanHash
+		run.DeploymentTargetFingerprint = deploymentConsent.DeploymentTargetFingerprint
+		// Definition revision is not proof of the separately cloned source revision.
+		run.CommitSha = ""
+	}
 	if err := s.pipelineRepo.CreateRun(ctx, run); err != nil {
 		if requestID != "" && isDuplicateEntryError(err) {
 			existing, getErr := s.pipelineRepo.GetRunByRequestID(ctx, pipeline.PipelineID, requestID)
 			if getErr == nil && existing != nil {
+				if err := validateDeploymentDuplicate(ctx, req, existing); err != nil {
+					return &pipelinev1.TriggerPipelineResponse{Success: false, Message: err.Error(), Error: s.error(409, err.Error(), "conflict", nil)}, nil
+				}
 				return &pipelinev1.TriggerPipelineResponse{
 					Success: true,
 					Message: "idempotent request",
@@ -1044,6 +1066,8 @@ func toPipelineRunDetail(run *model.PipelineRun) *pipelinev1.PipelineRunDetail {
 		return nil
 	}
 	return &pipelinev1.PipelineRunDetail{
+		AllowDeployments:    run.AllowDeployments,
+		DeploymentPlanHash:  run.DeploymentPlanHash,
 		RunId:               run.RunID,
 		PipelineId:          run.PipelineID,
 		PipelineName:        run.PipelineName,

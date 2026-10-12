@@ -59,7 +59,7 @@ var teamSelectFields = []string{
 	"display_name",
 	"description",
 	"avatar",
-	"parenteam_id",
+	"parent_team_id",
 	"path",
 	"level",
 	"settings",
@@ -78,7 +78,7 @@ var teamSummaryFields = []string{
 	"display_name",
 	"description",
 	"avatar",
-	"parenteam_id",
+	"parent_team_id",
 	"path",
 	"level",
 	"settings",
@@ -95,7 +95,7 @@ var teamUserListFields = []string{
 	"t.display_name",
 	"t.description",
 	"t.avatar",
-	"t.parenteam_id",
+	"t.parent_team_id",
 	"t.path",
 	"t.level",
 	"t.settings",
@@ -169,7 +169,7 @@ func (r *TeamRepo) List(ctx context.Context, query *model.TeamQueryReq) ([]*mode
 		db = db.Where("name LIKE ?", "%"+query.Name+"%")
 	}
 	if query.ParentTeamID != "" {
-		db = db.Where("parenteam_id = ?", query.ParentTeamID)
+		db = db.Where("parent_team_id = ?", query.ParentTeamID)
 	}
 	if query.Visibility != nil {
 		db = db.Where("visibility = ?", *query.Visibility)
@@ -216,7 +216,7 @@ func (r *TeamRepo) ListSubTeams(ctx context.Context, parentTeamID string) ([]*mo
 	var teams []*model.Team
 	err := r.Database().WithContext(ctx).
 		Select(teamSummaryFields).
-		Where("parenteam_id = ? AND is_enabled = ?", parentTeamID, 1).
+		Where("parent_team_id = ? AND is_enabled = ?", parentTeamID, 1).
 		Order("team_id DESC").
 		Find(&teams).Error
 	return teams, err

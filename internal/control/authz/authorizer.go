@@ -60,6 +60,10 @@ type Authorizer struct {
 
 // NewAuthorizer 创建统一鉴权器
 func NewAuthorizer(repos *repo.Repositories, ch cache.ICache) (IAuthorizer, error) {
+	return newAuthorizer(context.Background(), repos, ch)
+}
+
+func newAuthorizer(ctx context.Context, repos *repo.Repositories, ch cache.ICache) (IAuthorizer, error) {
 	if repos == nil {
 		return nil, errors.New("repositories is nil")
 	}
@@ -76,7 +80,7 @@ func NewAuthorizer(repos *repo.Repositories, ch cache.ICache) (IAuthorizer, erro
 		cache:    ch,
 		enforcer: enforcer,
 	}
-	if err = a.Reload(context.Background()); err != nil {
+	if err = a.Reload(ctx); err != nil {
 		return nil, err
 	}
 	return a, nil

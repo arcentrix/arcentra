@@ -161,7 +161,7 @@ func TestRemoteArtifactRPCIdentityOwnershipAndAtomicPersistence(t *testing.T) {
 		if err := jobs.Create(ctx, &model.JobRun{JobRunID: id, PipelineID: "security-pipeline", PipelineRunID: "security-run", AgentID: agentID, Status: 2}); err != nil {
 			t.Fatal(err)
 		}
-		if err := steps.Create(ctx, &model.StepRun{StepRunID: id + "-step", JobRunID: id, PipelineID: "security-pipeline", PipelineRunID: "security-run", AgentID: agentID, Status: 2}); err != nil {
+		if err := steps.Create(ctx, &model.StepRun{StepRunID: id + "-step", JobRunID: id, PipelineID: "security-pipeline", PipelineRunID: "security-run", AgentID: agentID, Status: 4}); err != nil {
 			t.Fatal(err)
 		}
 	}

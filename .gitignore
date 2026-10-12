@@ -5,7 +5,7 @@
 !/internal/engine/router/static/.gitkeep
 /logs
 docs/*.md
-/api/*/*/*.pb.go
+# Protobuf packages are committed so dependency tooling works before codegen.
 /cmd/*/wire_gen.go
 .DS_Store
 /internal/db/queries/*.go
@@ -22,3 +22,15 @@ docs/*.md
 
 # Artifact API and immutable metadata guide
 !docs/artifact-api.md
+
+# Durable terminal receipt operator guide
+!docs/agent-terminal-reports.md
+
+# Kubernetes release operator guide
+!docs/kubernetes-releases.md
+
+# Read-only Copilot operator guide
+!docs/copilot-read-only.md
+
+# Pipeline-linked release engine and recovery guide
+!docs/pipeline-release-engine.md

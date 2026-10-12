@@ -42,17 +42,18 @@ const defaultMaxConcurrentRuns = 10
 // Process manages pipeline run orchestration. It bridges the trigger layer
 // (HTTP/gRPC/Cron/Webhook) with the execution process (Executor DAG).
 type Process struct {
-	repos        *repo.Repositories
-	pluginMgr    *plugin.Manager
-	taskQueue    nova.TaskQueue
-	storage      storage.IStorage
-	logger       *log.Logger
-	appConf      *config.AppConfig
-	secretSvc    *service.SecretService
-	auditWriter  *AuditWriter
-	logPublisher executor.LogPublisher
-	closeLogs    func()
-	logInitErr   error
+	repos             *repo.Repositories
+	pluginMgr         *plugin.Manager
+	taskQueue         nova.TaskQueue
+	storage           storage.IStorage
+	logger            *log.Logger
+	appConf           *config.AppConfig
+	secretSvc         *service.SecretService
+	deploymentService *service.DeploymentService
+	auditWriter       *AuditWriter
+	logPublisher      executor.LogPublisher
+	closeLogs         func()
+	logInitErr        error
 
 	mu        sync.Mutex
 	stopped   bool
@@ -108,6 +109,12 @@ func (e *Process) Submit(run *model.PipelineRun, parsedSpec *spec.Pipeline) erro
 	if err := validation.NewSchemaValidator().Validate(parsedSpec); err != nil {
 		return err
 	}
+	isDeployment, err := e.validateDeploymentRun(run, parsedSpec)
+	if err != nil {
+		return err
+	}
+	runCopy := *run
+	run = &runCopy
 	parsedSpec = proto.Clone(parsedSpec).(*spec.Pipeline)
 	if _, _, err := pipeline.BuildDAG(parsedSpec.Jobs); err != nil {
 		return fmt.Errorf("invalid pipeline DAG: %w", err)
@@ -119,6 +126,36 @@ func (e *Process) Submit(run *model.PipelineRun, parsedSpec *spec.Pipeline) erro
 	}
 	if e.stopped {
 		return fmt.Errorf("process is shutting down")
+	}
+	if _, exists := e.runs.Load(run.RunID); exists {
+		return fmt.Errorf("run %s is already submitted", run.RunID)
+	}
+	if isDeployment {
+		starter, ok := e.repos.Pipeline.(interface {
+			StartRunIfPending(context.Context, string) error
+		})
+		if !ok {
+			return fmt.Errorf("durable deployment scheduling is unavailable")
+		}
+		checkCtx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
+		defer cancel()
+		stored, err := e.repos.Pipeline.GetRun(checkCtx, run.RunID)
+		if err != nil {
+			return err
+		}
+		if stored == nil || stored.Status != model.PipelineStatusPending || stored.PipelineID != run.PipelineID || !stored.AllowDeployments || stored.DeploymentActorID != run.DeploymentActorID || stored.DeploymentPlan != run.DeploymentPlan || stored.DeploymentPlanHash != run.DeploymentPlanHash || stored.DefinitionCommitSha != run.DefinitionCommitSha || stored.DeploymentTargetFingerprint != run.DeploymentTargetFingerprint {
+			return fmt.Errorf("deployment run cannot be replayed or changed")
+		}
+		jobs, err := e.repos.JobRun.ListByPipelineRunID(checkCtx, run.RunID)
+		if err != nil {
+			return err
+		}
+		if len(jobs) != 0 {
+			return fmt.Errorf("deployment run already has execution records; automatic resume is prohibited")
+		}
+		if err := starter.StartRunIfPending(checkCtx, run.RunID); err != nil {
+			return err
+		}
 	}
 	runCtx, runCancel := context.WithCancel(e.ctx)
 	rc := NewCoordinator(run, parsedSpec, e)

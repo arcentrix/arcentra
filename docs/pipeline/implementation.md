@@ -84,7 +84,7 @@ The Playwright smoke script uses explicit local API fixtures. Chromium could not
 
 - No production or staging deployment was performed. MySQL, external Kafka, real object storage, and container images need environment-specific integration validation.
 - Sandbox execution/resource isolation is unsupported and rejected. Trusted baremetal is the supported path in this change.
-- Agent-job automatic retry policies are rejected instead of ignored. Manual reruns create a fresh pipeline run. Local step retry follows the existing policy.
+- Control and Agent jobs support the same explicit live-attempt retry policy: `failed_step` or `whole_job`, 2–5 attempts, idempotent opt-in, and an allowlist of real shell exit codes. Each attempt has an immutable StepRun identity. Manual reruns create a fresh pipeline run; post-terminal step resume is unavailable. See [retry semantics](retries.md).
 - Agent jobs with an implicit deployment target are rejected; use an explicit deployment step on the agent. Local target plugins use the existing `deploy` contract and fail when unavailable.
 - Automatic takeover/resumption after agent/control-plane process loss still needs execution-attempt leases and fencing. Explicit offline reconciliation is available below; completed-replay protection is present, but exactly-once execution across crashes is not promised.
 - Gateway CloudEvents now persist transactionally before acknowledgment, and WAL restart preserves committed sequence numbers. Legacy Gateway PushLogs returns an explicit unsupported error; live build logs use Kafka.

@@ -53,27 +53,32 @@ func (Pipeline) TableName() string {
 // PipelineRun 流水线执行记录表
 type PipelineRun struct {
 	BaseModel
-	RunID               string     `gorm:"column:run_id;type:varchar(64);uniqueIndex:uk_pipeline_run_business_id" json:"runId"`
-	PipelineID          string     `gorm:"column:pipeline_id;type:varchar(64);uniqueIndex:uk_pipeline_run_request,priority:1;index" json:"pipelineId"`
-	RequestID           string     `gorm:"column:request_id;type:varchar(128);default:null;uniqueIndex:uk_pipeline_run_request,priority:2" json:"requestId"`
-	PipelineName        string     `gorm:"column:pipeline_name" json:"pipelineName"`
-	Branch              string     `gorm:"column:branch" json:"branch"`
-	CommitSha           string     `gorm:"column:commit_sha" json:"commitSha"`
-	DefinitionCommitSha string     `gorm:"column:definition_commit_sha" json:"definitionCommitSha"`
-	DefinitionPath      string     `gorm:"column:definition_path" json:"definitionPath"`
-	Status              int        `gorm:"column:status" json:"status"`
-	TriggerType         int        `gorm:"column:trigger_type" json:"triggerType"`
-	TriggeredBy         string     `gorm:"column:triggered_by" json:"triggeredBy"`
-	Env                 string     `gorm:"column:env;type:json" json:"env"` // JSON格式
-	TotalJobs           int        `gorm:"column:total_jobs" json:"totalJobs"`
-	CompletedJobs       int        `gorm:"column:completed_jobs" json:"completedJobs"`
-	FailedJobs          int        `gorm:"column:failed_jobs" json:"failedJobs"`
-	RunningJobs         int        `gorm:"column:running_jobs" json:"runningJobs"`
-	CurrentStage        int        `gorm:"column:current_stage" json:"currentStage"`
-	TotalStages         int        `gorm:"column:total_stages" json:"totalStages"`
-	StartTime           *time.Time `gorm:"column:start_time" json:"startTime"`
-	EndTime             *time.Time `gorm:"column:end_time" json:"endTime"`
-	Duration            int64      `gorm:"column:duration" json:"duration"` // 毫秒
+	RunID                       string     `gorm:"column:run_id;type:varchar(64);uniqueIndex:uk_pipeline_run_business_id" json:"runId"`
+	PipelineID                  string     `gorm:"column:pipeline_id;type:varchar(64);uniqueIndex:uk_pipeline_run_request,priority:1;index" json:"pipelineId"`
+	RequestID                   string     `gorm:"column:request_id;type:varchar(128);default:null;uniqueIndex:uk_pipeline_run_request,priority:2" json:"requestId"`
+	PipelineName                string     `gorm:"column:pipeline_name" json:"pipelineName"`
+	Branch                      string     `gorm:"column:branch" json:"branch"`
+	CommitSha                   string     `gorm:"column:commit_sha" json:"commitSha"`
+	DefinitionCommitSha         string     `gorm:"column:definition_commit_sha" json:"definitionCommitSha"`
+	AllowDeployments            bool       `gorm:"column:allow_deployments;not null;default:false" json:"allowDeployments"`
+	DeploymentActorID           string     `gorm:"column:deployment_actor_id;type:varchar(64)" json:"-"`
+	DeploymentPlan              string     `gorm:"column:deployment_plan;type:text" json:"-"`
+	DeploymentTargetFingerprint string     `gorm:"column:deployment_target_fingerprint;type:varchar(64)" json:"-"`
+	DeploymentPlanHash          string     `gorm:"column:deployment_plan_hash;type:varchar(64)" json:"deploymentPlanHash"`
+	DefinitionPath              string     `gorm:"column:definition_path" json:"definitionPath"`
+	Status                      int        `gorm:"column:status" json:"status"`
+	TriggerType                 int        `gorm:"column:trigger_type" json:"triggerType"`
+	TriggeredBy                 string     `gorm:"column:triggered_by" json:"triggeredBy"`
+	Env                         string     `gorm:"column:env;type:json" json:"env"` // JSON格式
+	TotalJobs                   int        `gorm:"column:total_jobs" json:"totalJobs"`
+	CompletedJobs               int        `gorm:"column:completed_jobs" json:"completedJobs"`
+	FailedJobs                  int        `gorm:"column:failed_jobs" json:"failedJobs"`
+	RunningJobs                 int        `gorm:"column:running_jobs" json:"runningJobs"`
+	CurrentStage                int        `gorm:"column:current_stage" json:"currentStage"`
+	TotalStages                 int        `gorm:"column:total_stages" json:"totalStages"`
+	StartTime                   *time.Time `gorm:"column:start_time" json:"startTime"`
+	EndTime                     *time.Time `gorm:"column:end_time" json:"endTime"`
+	Duration                    int64      `gorm:"column:duration" json:"duration"` // 毫秒
 }
 
 func (PipelineRun) TableName() string {

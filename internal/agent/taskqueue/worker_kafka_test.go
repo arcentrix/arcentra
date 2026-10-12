@@ -2,19 +2,23 @@ package taskqueue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
+	agentgrpc "github.com/arcentrix/arcentra/internal/shared/grpc"
 	kafkaconfig "github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/nova"
 	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
 	ckafka "github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"google.golang.org/grpc"
 )
 
 func TestKafkaAgentRoutingAndCancellation(t *testing.T) {
@@ -37,12 +41,12 @@ func TestKafkaAgentRoutingAndCancellation(t *testing.T) {
 				}
 			}
 		}
-		conf := &config.AgentConfig{Agent: config.AgentInfo{ID: id, Mode: "baremetal", WorkspaceDir: filepath.Join(root, id), JobTimeout: 60}, MessageQueue: config.MqConfig{Kafka: kafkaconfig.Config{BootstrapServers: cluster.BootstrapServers(), SecurityProtocol: "PLAINTEXT"}}, TaskQueue: nova.TaskQueueConfig{DelaySlotCount: 1, DelaySlotDuration: 3600, SessionTimeout: 6000, MaxPollInterval: 120000}}
+		conf := &config.AgentConfig{Grpc: config.GrpcConfig{ServerAddr: "terminal-test.invalid:9090"}, Agent: config.AgentInfo{ID: id, Mode: "baremetal", WorkspaceDir: filepath.Join(root, id), JobTimeout: 60}, MessageQueue: config.MqConfig{Kafka: kafkaconfig.Config{BootstrapServers: cluster.BootstrapServers(), SecurityProtocol: "PLAINTEXT"}}, TaskQueue: nova.TaskQueueConfig{DelaySlotCount: 1, DelaySlotDuration: 3600, SessionTimeout: 6000, MaxPollInterval: 120000}}
 		manager := executor.NewExecutorManager()
 		manager.Register(executor.NewShellExecutor())
-		queue, err := StartWorker(context.Background(), conf, nil, manager)
+		queue, err := StartWorker(context.Background(), conf, &agentgrpc.ClientWrapper{AgentClient: &acceptTerminalClient{}}, manager)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%v: %v", err, errors.Unwrap(err))
 		}
 		t.Cleanup(func() {
 			if err := queue.Stop(); err != nil {
@@ -95,4 +99,14 @@ func TestKafkaAgentRoutingAndCancellation(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, agents[0], "run", agents[1]+"-job")); !os.IsNotExist(err) {
 		t.Fatalf("second job ran on the wrong agent: %v", err)
 	}
+}
+
+// acceptTerminalClient 保持 Kafka 集成测试的上报确认线程安全
+type acceptTerminalClient struct{ agentv1.AgentServiceClient }
+
+func (*acceptTerminalClient) ReportJobRunStatus(context.Context, *agentv1.ReportJobRunStatusRequest, ...grpc.CallOption) (*agentv1.ReportJobRunStatusResponse, error) {
+	return &agentv1.ReportJobRunStatusResponse{Success: true}, nil
+}
+func (*acceptTerminalClient) ReportStepRunStatus(context.Context, *agentv1.ReportStepRunStatusRequest, ...grpc.CallOption) (*agentv1.ReportStepRunStatusResponse, error) {
+	return &agentv1.ReportStepRunStatusResponse{Success: true}, nil
 }

@@ -60,10 +60,27 @@ properties:
         retry:
           type: object
           properties:
-            max_attempts:
+            mode:
+              type: string
+              enum: [failed_step, whole_job]
+            maxAttempts:
               type: integer
+              minimum: 2
+              maximum: 5
+            idempotent:
+              type: boolean
+              const: true
+            allowedExitCodes:
+              type: array
+              minItems: 1
+              uniqueItems: true
+              items:
+                type: integer
+                minimum: 1
+                maximum: 125
             delay:
               type: string
+          required: [mode, maxAttempts, idempotent, allowedExitCodes]
 
         when:
           type: string
@@ -408,3 +425,4 @@ triggers:
  - timeout
  - env（覆盖 job/env）
 4. notify 部分改为：plugin + action
+See [Explicit retry attempts](retries.md) for workspace reuse and audit semantics.

@@ -16,12 +16,14 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/builtin"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/arcentrix/arcentra/internal/shared/retry"
 	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/bytedance/sonic"
 )
@@ -73,44 +75,26 @@ func (r *StepRunner) Run(ctx context.Context) error {
 		defer cancel()
 	}
 
-	// Determine retry attempts
-	retries := 1
-	if r.job.Retry != nil && r.job.Retry.MaxAttempts > 0 {
-		retries = int(r.job.Retry.MaxAttempts)
-	}
-
-	var lastErr error
-	for attempt := 1; attempt <= retries; attempt++ {
-		if attempt > 1 {
-			r.ctx.LogStep(r.job.Name, r.step.Name, fmt.Sprintf("retry attempt %d/%d", attempt, retries))
-			if r.job.Retry != nil && r.job.Retry.Delay != "" {
-				delay, err := time.ParseDuration(r.job.Retry.Delay)
-				if err == nil {
-					timer := time.NewTimer(delay)
-					select {
-					case <-ctx.Done():
-						timer.Stop()
-						return ctx.Err()
-					case <-timer.C:
-					}
-				}
-			}
+	// Attempt identity and retry decisions belong to TaskFramework, never this executor.
+	if err := r.execute(ctx); err != nil {
+		if executor.ExecutionContextCause(err) != nil || errors.Is(err, executor.ErrBuildLogPersistence) {
+			return retry.Block(err)
 		}
-
-		lastErr = r.execute(ctx)
-		if lastErr == nil {
-			r.ctx.LogStep(r.job.Name, r.step.Name, "completed successfully")
-			return nil
-		}
-
-		r.ctx.LogStep(r.job.Name, r.step.Name, fmt.Sprintf("attempt %d failed: %v", attempt, lastErr))
+		return err
 	}
-
-	return fmt.Errorf("step failed after %d attempts: %w", retries, lastErr)
+	r.ctx.LogStep(r.job.Name, r.step.Name, "completed successfully")
+	return nil
 }
 
 // execute executes the step action
 func (r *StepRunner) execute(ctx context.Context) error {
+	if r.step.Uses == "builtin:kubernetes" {
+		if r.ctx.RunDeployment == nil || r.step.Action != "deploy" || r.step.RunOnAgent || r.step.AgentSelector != nil || r.step.ContinueOnError || r.job.Retry != nil {
+			return retry.Block(fmt.Errorf("verified controller deployment runner is required"))
+		}
+		return retry.Block(r.ctx.RunDeployment(ctx, DeploymentStepExecution{PipelineRunID: r.ctx.PipelineRunID, PipelineID: r.ctx.PipelineIDRef, JobRunID: r.ctx.JobRunID, StepRunID: r.ctx.StepRunIDs[r.step.Name], JobName: r.job.Name, StepName: r.step.Name}))
+	}
+
 	// Check if step should run on agent
 	if r.step.RunOnAgent && r.ctx.AgentManager != nil {
 		return r.executeOnAgent(ctx)
@@ -366,7 +350,7 @@ func (r *StepRunner) executeShell(ctx context.Context) error {
 			persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
 			if saveErr := store.UpdateStepRun(persistCtx, req.StepRunID, map[string]any{"exit_code": int(result.ExitCode)}); saveErr != nil {
-				r.ctx.Logger.Warnw("persist shell exit code failed", "error", saveErr)
+				return retry.Block(fmt.Errorf("persist shell exit code: %w", saveErr))
 			}
 		}
 	}

@@ -7,6 +7,7 @@
 | 命令 | 说明 |
 |---|---|
 | `make deps` | 整理并验证 Go 模块依赖 |
+| `make deps-check` | 在不生成代码的情况下检查 Go 模块依赖是否完整 |
 | `make build` | 代码生成（buf + wire）+ `go build`（带 ldflags），覆盖所有 cmd/* 目标 |
 | `make run` | 代码生成 + `go run` |
 | `make test` | `go test -race -count=1 ./...` |
@@ -14,11 +15,14 @@
 | `make fmt-check` | 使用 `gofmt` 检查格式，跳过生成文件 |
 | `make codegen` | 运行 buf protobuf 生成 + wire DI 代码生成（所有目标） |
 | `make buf` | 仅运行 buf proto 生成 |
+| `make buf-check` | 用固定版本生成器检查已提交的 protobuf 代码是否一致 |
 | `make wire` | 仅运行 wire DI 代码生成 |
 | `make staticcheck` | 运行 `staticcheck ./...` |
 | `make build-target` | 发布构建（跳过代码生成，启用 trimpath + strip） |
 
 运行单个测试：`go test -race -run TestName ./path/to/package`
+
+`api/**/*.pb.go` 必须与 `.proto` 一起提交，保证新检出和 Dependabot 无需先执行代码生成即可解析 Go 依赖。Buf、Wire 及两个官方 protobuf 插件版本固定在 Makefile；`api/buf.gen.yaml` 使用本地插件，不会向远程服务发送 schema。`cmd/*/wire_gen.go` 仍由 `make codegen` 生成且不提交。
 
 ## 架构概览
 

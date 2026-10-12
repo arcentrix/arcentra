@@ -24,6 +24,7 @@ import (
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/internal/shared/deployment"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	tmpl "github.com/arcentrix/arcentra/internal/shared/pipeline/template"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/trigger"
@@ -164,6 +165,10 @@ func (s *ScmService) tryTriggerPipeline(ctx context.Context, p *model.Pipeline, 
 		return
 	}
 
+	if plan, err := deployment.DecodePipelinePlan(parsedSpec); err != nil || plan != nil {
+		log.Warnw("webhook trigger refused: deployment-bearing pipelines require verified manual consent", "pipelineId", p.PipelineID)
+		return
+	}
 	if !trigger.MatchAnyEventTrigger(parsedSpec, string(ev.EventType), ev.Ref) {
 		return
 	}

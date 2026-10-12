@@ -18,12 +18,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/arcentrix/arcentra/internal/shared/retry"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/plugin"
@@ -265,14 +268,16 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 			continue
 		}
 		stepRunID := tf.execCtx.StepRunIDs[step.Name]
-		if err := tf.getJobRunStore().UpdateStepRun(ctx, stepRunID, map[string]any{"agent_id": agentID, "status": 2}); err != nil {
-			return err
+		for _, attemptID := range tf.execCtx.StepAttemptIDs[step.Name] {
+			if err := tf.getJobRunStore().UpdateStepRun(ctx, attemptID, map[string]any{"agent_id": agentID, "status": 2}); err != nil {
+				return err
+			}
 		}
-		steps = append(steps, taskqueue.StepPayload{Name: step.Name, StepIndex: int32(i), StepRunID: stepRunID, Uses: step.Uses, Action: step.Action,
+		steps = append(steps, taskqueue.StepPayload{AttemptRunIDs: tf.execCtx.StepAttemptIDs[step.Name], Name: step.Name, StepIndex: int32(i), StepRunID: stepRunID, Uses: step.Uses, Action: step.Action,
 			Args: tf.execCtx.ResolveVariables(spec.StructAsMap(step.Args)), Env: tf.execCtx.ResolveStepEnv(task.Job, step), ContinueOnError: step.ContinueOnError, Timeout: step.Timeout, When: step.When})
 	}
 	payload := &taskqueue.JobRunTaskPayload{PipelineID: tf.execCtx.PipelineIDRef, PipelineRunID: tf.execCtx.PipelineRunID,
-		JobRunID: tf.execCtx.JobRunID, JobName: task.Job.Name, AgentID: agentID, Steps: steps,
+		JobRunID: tf.execCtx.JobRunID, JobName: task.Job.Name, AgentID: agentID, Steps: steps, Retry: task.Job.Retry,
 		Env: tf.execCtx.ResolveStepEnv(task.Job, nil), Variables: tf.execCtx.Pipeline.Variables,
 		Timeout: task.Job.Timeout, ArtifactURIs: tf.execCtx.ArtifactSnapshot(), ArtifactReferences: tf.execCtx.ArtifactReferenceSnapshot()}
 	if source := task.Job.Source; source != nil {
@@ -344,20 +349,41 @@ func (tf *TaskFramework) waitForAgentJob(ctx context.Context, task *Task) error 
 
 // waitForLocalJob executes steps sequentially in the control-plane process.
 func (tf *TaskFramework) waitForLocalJob(ctx context.Context, task *Task) error {
-	for i := range task.Job.Steps {
-		step := task.Job.Steps[i]
+	steps := make([]retry.Step, len(task.Job.Steps))
+	for i, step := range task.Job.Steps {
+		if step != nil {
+			steps[i] = retry.Step{Uses: step.Uses, ContinueOnError: step.ContinueOnError}
+		}
+	}
+	if err := retry.Run(ctx, task.Job.Retry, steps, func(index, attempt int) error {
+		step := task.Job.Steps[index]
 		if step == nil {
-			continue
+			return nil
 		}
 		if err := tf.checkPause(ctx); err != nil {
 			return err
 		}
-		if err := tf.executeStep(ctx, task, step); err != nil {
-			tf.sendFailureNotification(ctx, task)
-			return fmt.Errorf("step %s failed: %w", step.Name, err)
+		ids := tf.execCtx.StepAttemptIDs[step.Name]
+		if len(ids) > 0 {
+			tf.execCtx.StepRunIDs[step.Name] = ids[attempt-1]
 		}
+		// Retries reuse the live workspace; never reconstruct lost state as a resume.
+		if attempt > 1 {
+			if task.Job.Retry.Mode == "whole_job" {
+				if err := tf.skipPreviousAttempts(ctx, task, attempt); err != nil {
+					return err
+				}
+			}
+			workspace := filepath.Join(tf.execCtx.WorkspaceRoot, tf.execCtx.Pipeline.Namespace, task.Name)
+			if info, err := os.Stat(workspace); err != nil || !info.IsDir() {
+				return fmt.Errorf("retry workspace unavailable; a fresh run is required")
+			}
+		}
+		return tf.executeStep(ctx, task, step)
+	}); err != nil {
+		tf.sendFailureNotification(ctx, task)
+		return fmt.Errorf("job steps failed: %w", err)
 	}
-
 	if task.Job.Target != nil {
 		if err := tf.handleTarget(ctx, task); err != nil {
 			return fmt.Errorf("handle target: %w", err)
@@ -410,18 +436,20 @@ func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *
 		}
 		ok, err := tf.execCtx.EvalConditionWithContext(step.When, stepContext)
 		if err != nil {
-			tf.recordStep(ctx, task, step, 5, start, err)
+			if saveErr := tf.recordStep(ctx, task, step, 5, start, err); saveErr != nil {
+				return saveErr
+			}
 			return fmt.Errorf("evaluate when condition: %w", err)
 		}
 		if !ok {
-			tf.recordStep(ctx, task, step, 8, start, nil)
-			return nil // Step skipped
+			return tf.recordStep(ctx, task, step, 8, start, nil)
 		}
 	}
 
 	if store := tf.getJobRunStore(); store != nil {
 		if err := store.UpdateStepRun(ctx, tf.execCtx.StepRunIDs[step.Name], map[string]any{"status": 3, "start_time": start, "workspace": tf.execCtx.JobWorkspace(task.Name)}); err != nil {
-			return err
+			task.Set("recordError", err)
+			return retry.Block(err)
 		}
 	}
 	tf.emitStepEvent(plugin.EventTypeStepStarted, task, step.Name, map[string]any{
@@ -432,8 +460,10 @@ func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *
 	stepRunner := NewStepRunner(tf.execCtx, task.Job, step)
 	if err := stepRunner.Run(ctx); err != nil {
 		status := stepFailureStatus(ctx, err)
-		tf.recordStep(ctx, task, step, status, start, err)
-		if step.ContinueOnError && ctx.Err() == nil {
+		if saveErr := tf.recordStep(ctx, task, step, status, start, err); saveErr != nil {
+			return saveErr
+		}
+		if step.ContinueOnError && ctx.Err() == nil && !retry.IsBlocked(err) {
 			tf.logger.Warnw("step failed but continuing", "task", task.Name, "step", step.Name, "error", err)
 			tf.emitStepEvent(plugin.EventTypeStepFailed, task, step.Name, map[string]any{
 				"status": "failed",
@@ -448,7 +478,9 @@ func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *
 		return err
 	}
 
-	tf.recordStep(ctx, task, step, 4, start, nil)
+	if saveErr := tf.recordStep(ctx, task, step, 4, start, nil); saveErr != nil {
+		return saveErr
+	}
 	tf.emitStepEvent(plugin.EventTypeStepCompleted, task, step.Name, map[string]any{
 		"status": "completed",
 	})

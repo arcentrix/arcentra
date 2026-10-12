@@ -12,11 +12,22 @@ import (
 	"gorm.io/gorm"
 )
 
-// PatchStatusAndArtifacts 原子提交作业终态和制品，任何元数据失败均保留可重试状态
-func (r *JobRunRepo) PatchStatusAndArtifacts(ctx context.Context, runID string, current int, updates map[string]any, artifacts []*model.ProjectArtifact) error {
+// PatchReportedStatusAndArtifacts 原子提交归属匹配的作业终态、回执与制品，失败保留待上报状态
+func (r *JobRunRepo) PatchReportedStatusAndArtifacts(ctx context.Context, expected *model.JobRun, updates map[string]any, artifacts []*model.ProjectArtifact) error {
+	if expected == nil || expected.Status < 1 || expected.Status > 3 {
+		return fmt.Errorf("active job snapshot is required")
+	}
 	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockReportedJob(ctx, tx, expected); err != nil {
+			return err
+		}
+		if next, _ := updates["status"].(int); next >= 4 {
+			if err := ensureJobAttemptsTerminal(ctx, tx, expected.JobRunID); err != nil {
+				return err
+			}
+		}
 		var job model.JobRun
-		if err := tx.WithContext(ctx).Select("job_run_id", "pipeline_id", "pipeline_run_id", "agent_id", "artifact_storage_id", "artifact_storage_fingerprint", "artifact_storage_type").Where("job_run_id = ? AND status = ?", runID, current).First(&job).Error; err != nil {
+		if err := reportedJobQuery(tx.WithContext(ctx).Select("job_run_id", "pipeline_id", "pipeline_run_id", "agent_id", "artifact_storage_id", "artifact_storage_fingerprint", "artifact_storage_type"), expected).First(&job).Error; err != nil {
 			return err
 		}
 		for _, item := range artifacts {
@@ -35,7 +46,7 @@ func (r *JobRunRepo) PatchStatusAndArtifacts(ctx context.Context, runID string, 
 			}
 		}
 		updates["updated_at"] = time.Now()
-		result := tx.WithContext(ctx).Model(&model.JobRun{}).Where("job_run_id = ? AND status = ?", runID, current).Updates(updates)
+		result := reportedJobQuery(tx.WithContext(ctx).Model(&model.JobRun{}), expected).Updates(updates)
 		if result.Error != nil {
 			return result.Error
 		}

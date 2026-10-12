@@ -3,8 +3,10 @@ package repo
 import (
 	"context"
 	"fmt"
-	"github.com/arcentrix/arcentra/internal/control/model"
 	"time"
+
+	"github.com/arcentrix/arcentra/internal/control/model"
+	"gorm.io/gorm"
 )
 
 // PatchStatusIfCurrent 防止迟到或并发状态报告覆盖步骤终态
@@ -31,6 +33,61 @@ func (r *JobRunRepo) PatchStatusIfCurrent(ctx context.Context, runID string, cur
 	}
 	if result.RowsAffected != 1 {
 		return fmt.Errorf("execution state changed")
+	}
+	return nil
+}
+
+// PatchReportedStatus 原子校验步骤归属与原执行认领后提交状态和终态回执
+func (r *StepRunRepo) PatchReportedStatus(ctx context.Context, expected *model.StepRun, updates map[string]any) error {
+	if expected == nil || expected.Status < 1 || expected.Status > 3 {
+		return fmt.Errorf("active step snapshot is required")
+	}
+	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if next, _ := updates["status"].(int); next == 3 {
+			if err := validateRetryActivation(ctx, tx, expected); err != nil {
+				return err
+			}
+		}
+		updates["updated_at"] = time.Now()
+		result := tx.Model(&model.StepRun{}).
+			Where("step_run_id = ? AND status = ? AND agent_id = ? AND claim_id = ?", expected.StepRunID, expected.Status, expected.AgentID, expected.ClaimID).
+			Where("pipeline_id = ? AND pipeline_run_id = ? AND job_run_id = ?", expected.PipelineID, expected.PipelineRunID, expected.JobRunID).
+			Where("terminal_report_digest = ?", expected.TerminalReportDigest).Updates(updates)
+		return reportedStatusResult(result)
+	})
+}
+
+// PatchReportedStatus 原子校验作业归属与原执行认领后提交状态和终态回执
+func (r *JobRunRepo) PatchReportedStatus(ctx context.Context, expected *model.JobRun, updates map[string]any) error {
+	if expected == nil || expected.Status < 1 || expected.Status > 3 {
+		return fmt.Errorf("active job snapshot is required")
+	}
+	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockReportedJob(ctx, tx, expected); err != nil {
+			return err
+		}
+		if next, _ := updates["status"].(int); next >= 4 {
+			if err := ensureJobAttemptsTerminal(ctx, tx, expected.JobRunID); err != nil {
+				return err
+			}
+		}
+		updates["updated_at"] = time.Now()
+		return reportedStatusResult(reportedJobQuery(tx.Model(&model.JobRun{}), expected).Updates(updates))
+	})
+}
+
+func reportedJobQuery(tx *gorm.DB, expected *model.JobRun) *gorm.DB {
+	return tx.Where("job_run_id = ? AND status = ? AND agent_id = ? AND claim_id = ?", expected.JobRunID, expected.Status, expected.AgentID, expected.ClaimID).
+		Where("pipeline_id = ? AND pipeline_run_id = ?", expected.PipelineID, expected.PipelineRunID).
+		Where("terminal_report_digest = ?", expected.TerminalReportDigest)
+}
+
+func reportedStatusResult(result *gorm.DB) error {
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("execution identity or state changed")
 	}
 	return nil
 }

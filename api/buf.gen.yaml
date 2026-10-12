@@ -19,14 +19,13 @@ managed:
     - file_option: go_package_prefix
       value: github.com/arcentrix/arcentra/api
 plugins:
-  # Pin both upstream versions and BSR packaging revisions for repeatable CI.
-  - remote: buf.build/protocolbuffers/go:v1.36.11
-    revision: 1
+  # make proto-tools pins and installs these official plugins locally.
+  # No schema descriptors are sent to a remote generation service.
+  - local: protoc-gen-go
     out: .
     opt:
       - paths=source_relative
-  - remote: buf.build/grpc/go:v1.5.1
-    revision: 1
+  - local: protoc-gen-go-grpc
     out: .
     opt:
       - paths=source_relative

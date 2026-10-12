@@ -14,7 +14,10 @@
 
 package taskqueue
 
-import "strings"
+import (
+	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
+	"strings"
+)
 
 const (
 	// TaskTypeJobRun identifies job-run execution tasks.
@@ -25,6 +28,7 @@ const (
 // JobRunTaskPayload is the Kafka payload for dispatching a complete job to an Agent.
 // The Agent receives the entire job definition and executes all steps sequentially.
 type JobRunTaskPayload struct {
+	Retry              *pipelinev1.Retry            `json:"retry,omitempty"`
 	PipelineID         string                       `json:"pipelineId"`
 	PipelineRunID      string                       `json:"pipelineRunId"`
 	JobRunID           string                       `json:"jobRunId"`
@@ -42,6 +46,7 @@ type JobRunTaskPayload struct {
 
 // StepPayload describes a single step inside a JobRunTaskPayload.
 type StepPayload struct {
+	AttemptRunIDs   []string          `json:"attemptRunIds,omitempty"`
 	Name            string            `json:"name"`
 	StepIndex       int32             `json:"stepIndex"`
 	StepRunID       string            `json:"stepRunId"`

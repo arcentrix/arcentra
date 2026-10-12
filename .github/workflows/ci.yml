@@ -40,7 +40,11 @@ jobs:
       - name: Verify dependencies
         run: |
           go mod download
-          go mod verify
+          # Run before codegen, like Dependabot's source-only checkout.
+          make deps-check
+
+      - name: Check committed protobuf code
+        run: make buf-check
 
       - name: Generate protobuf and dependency injection code
         run: make codegen

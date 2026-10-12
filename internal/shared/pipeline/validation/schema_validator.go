@@ -20,7 +20,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arcentrix/arcentra/internal/shared/deployment"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/arcentrix/arcentra/internal/shared/retry"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 
@@ -63,6 +65,9 @@ func (v *SchemaValidator) Validate(pipeline *spec.Pipeline) error {
 		if err := v.validateJobAdvanced(job, i); err != nil {
 			return err
 		}
+	}
+	if _, err := deployment.DecodePipelinePlan(pipeline); err != nil {
+		return err
 	}
 	return nil
 }
@@ -131,9 +136,6 @@ func (v *SchemaValidator) validateJobAdvanced(job *spec.Job, index int) error {
 		return fmt.Errorf("job[%d] '%s' steps: %w", index, job.Name, err)
 	}
 	for _, step := range job.Steps {
-		if step.RunOnAgent && job.Retry != nil {
-			return fmt.Errorf("job %q: automatic retry is not supported for agent jobs", job.Name)
-		}
 		if step.RunOnAgent && job.Target != nil {
 			return fmt.Errorf("job %q: use an explicit deployment step for agent jobs", job.Name)
 		}
@@ -215,20 +217,12 @@ func (v *SchemaValidator) validateTimeout(timeout string) error {
 	return nil
 }
 
-func (v *SchemaValidator) validateRetry(retry *spec.Retry) error {
-	if retry.MaxAttempts <= 0 {
-		return fmt.Errorf("max_attempts must be greater than 0")
-	}
-	if retry.Delay != "" {
-		if err := v.validateTimeout(retry.Delay); err != nil {
-			return fmt.Errorf("delay: %w", err)
-		}
-	}
-	return nil
+func (v *SchemaValidator) validateRetry(policy *spec.Retry) error {
+	return retry.Validate(policy)
 }
 
 func (v *SchemaValidator) validateUses(uses string) error {
-	if uses == "builtin:shell" || uses == "builtin:artifacts" {
+	if uses == "builtin:shell" || uses == "builtin:artifacts" || uses == "builtin:kubernetes" {
 		return nil
 	}
 	if strings.TrimSpace(uses) == "" {

@@ -26,6 +26,8 @@ import (
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/bytedance/sonic"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -213,39 +215,9 @@ func (s *StepRunServiceImpl) CancelStepRun(
 	return &steprunv1.CancelStepRunResponse{Success: true, Message: "cancelled"}, nil
 }
 
-func (s *StepRunServiceImpl) RetryStepRun(
-	ctx context.Context,
-	req *steprunv1.RetryStepRunRequest,
-) (*steprunv1.RetryStepRunResponse, error) {
-	if s.stepRunRepo == nil {
-		return &steprunv1.RetryStepRunResponse{Success: false, Message: "step run repository unavailable"}, nil
-	}
-	oldStepRunID := strings.TrimSpace(req.StepRunId)
-	if oldStepRunID == "" {
-		return &steprunv1.RetryStepRunResponse{Success: false, Message: "stepRunID is required"}, nil
-	}
-	oldRun, err := s.stepRunRepo.GetByStepRunID(ctx, oldStepRunID)
-	if err != nil {
-		return &steprunv1.RetryStepRunResponse{Success: false, Message: fmt.Sprintf("load step run failed: %v", err)}, nil
-	}
-	if oldRun == nil {
-		return &steprunv1.RetryStepRunResponse{Success: false, Message: "step run not found"}, nil
-	}
-	newStepRunID := oldStepRunID + "-retry-" + id.ShortID()
-	newRun := *oldRun
-	newRun.ID = 0
-	newRun.StepRunID = newStepRunID
-	newRun.Status = int(steprunv1.StepRunStatus_STEP_RUN_STATUS_PENDING)
-	newRun.CurrentRetry = oldRun.CurrentRetry + 1
-	newRun.ExitCode = nil
-	newRun.ErrorMessage = ""
-	newRun.StartTime = nil
-	newRun.EndTime = nil
-	newRun.Duration = 0
-	if err := s.stepRunRepo.Create(ctx, &newRun); err != nil {
-		return &steprunv1.RetryStepRunResponse{Success: false, Message: fmt.Sprintf("create retry step run failed: %v", err)}, nil
-	}
-	return &steprunv1.RetryStepRunResponse{Success: true, Message: "retry created", NewStepRunId: newStepRunID}, nil
+// RetryStepRun 拒绝没有可靠工作区检查点的终态步骤恢复
+func (s *StepRunServiceImpl) RetryStepRun(context.Context, *steprunv1.RetryStepRunRequest) (*steprunv1.RetryStepRunResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "post-terminal step retry requires a verified workspace checkpoint; configure explicit live-job retry or start a new pipeline run")
 }
 
 func (s *StepRunServiceImpl) ListStepRunArtifacts(

@@ -255,3 +255,23 @@ func TestValidator_Validate(t *testing.T) {
 		})
 	}
 }
+
+func TestExplicitRetryDSLContract(t *testing.T) {
+	parser := NewDSLParser(log.Logger{SugaredLogger: log.GetLogger()})
+	input := `{"namespace":"retry","jobs":[{"name":"job","retry":{"mode":"whole_job","maxAttempts":3,"delay":"1s","idempotent":true,"allowedExitCodes":[9,75]},"steps":[{"name":"step","uses":"shell","runOnAgent":true,"args":{"run":"exit 9"}}]}]}`
+	parsed, err := parser.Parse(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = validation.NewSchemaValidator().Validate(parsed); err != nil {
+		t.Fatal(err)
+	}
+	p := parsed.Jobs[0].Retry
+	if p.Mode != "whole_job" || p.MaxAttempts != 3 || !p.Idempotent || len(p.AllowedExitCodes) != 2 {
+		t.Fatalf("retry fields lost: %+v", p)
+	}
+	parsed.Jobs[0].Retry.Mode = ""
+	if err = validation.NewSchemaValidator().Validate(parsed); err == nil {
+		t.Fatal("implicit retry scope accepted")
+	}
+}

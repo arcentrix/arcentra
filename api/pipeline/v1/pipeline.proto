@@ -204,6 +204,10 @@ message TriggerPipelineRequest {
   string triggered_by = 3;
   // Idempotency key in pipeline scope (pipeline_id + request_id).
   string request_id = 4;
+  // Explicit manual consent for an immutable deployment-bearing definition.
+  bool allow_deployments = 5;
+  string expected_definition_commit_sha = 6;
+  string expected_deployment_plan_hash = 7;
 }
 
 message TriggerPipelineResponse {
@@ -281,6 +285,8 @@ message PipelineRunDetail {
   int64 start_time = 16;
   int64 end_time = 17;
   int64 duration = 18;
+  bool allow_deployments = 19;
+  string deployment_plan_hash = 20;
 }
 
 message GetPipelineRunResponse {

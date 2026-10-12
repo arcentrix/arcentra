@@ -30,6 +30,7 @@ type JobRun struct {
 	JobName                    string     `gorm:"column:job_name" json:"jobName"`
 	AgentID                    string     `gorm:"column:agent_id" json:"agentId"`
 	ClaimID                    string     `gorm:"column:claim_id;type:varchar(64);default:''" json:"-"`
+	TerminalReportDigest       string     `gorm:"column:terminal_report_digest;type:varchar(64);not null;default:''" json:"-"`
 	Status                     int        `gorm:"column:status" json:"status"`
 	Priority                   int        `gorm:"column:priority" json:"priority"`
 	Env                        string     `gorm:"column:env;type:json" json:"env"`

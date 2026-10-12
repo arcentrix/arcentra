@@ -36,6 +36,9 @@ func validateStepExecution(uses, action string, args map[string]any, jobContext 
 }
 
 func validateJobExecution(payload *taskqueue.JobRunTaskPayload) error {
+	if err := validateJobAttempts(payload); err != nil {
+		return err
+	}
 	for _, step := range payload.Steps {
 		if err := validateStepExecution(step.Uses, step.Action, step.Args, true); err != nil {
 			return fmt.Errorf("step %q: %w", step.Name, err)

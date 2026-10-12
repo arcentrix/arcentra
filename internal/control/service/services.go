@@ -26,6 +26,7 @@ import (
 
 // Services 统一管理所有 service
 type Services struct {
+	Deployment        *DeploymentService
 	Artifact          *ArtifactService
 	User              *UserService
 	Agent             *AgentService
@@ -109,6 +110,7 @@ func NewServices(
 	meService := NewMeService(repos.Menu, repos.TeamMember, menuService, authorizer)
 
 	return &Services{
+		Deployment:        NewDeploymentService(repos.Deployment, repos.Pipeline, repos.Artifact, NewArtifactService(repos.Artifact, repos.Storage, ""), repos.Approval, nil),
 		Artifact:          NewArtifactService(repos.Artifact, repos.Storage, ""),
 		User:              userService,
 		Agent:             agentService,

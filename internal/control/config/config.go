@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/arcentrix/arcentra/internal/control/copilot"
+	"github.com/arcentrix/arcentra/internal/shared/deployment"
 	"github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
@@ -63,6 +65,8 @@ type AuthzConfig struct {
 }
 
 type AppConfig struct {
+	Deployment   deployment.Config     `mapstructure:"deployment" json:"-"`
+	Copilot      copilot.Config        `mapstructure:"copilot" json:"-"`
 	LogSpool     logstream.SpoolConfig `mapstructure:"logSpool" json:"logSpool"`
 	Log          log.Conf              `mapstructure:"log" json:"Log"`
 	Grpc         grpc.Conf             `mapstructure:"grpc" json:"Grpc"`

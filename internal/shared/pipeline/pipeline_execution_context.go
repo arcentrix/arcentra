@@ -65,6 +65,10 @@ type ExecutionContext struct {
 	// TaskFramework can associate DB records with the current run.
 	PipelineRunID string
 	PipelineIDRef string
+	// TriggeredBy 保存当前流水线触发者，所有重试继承原始审计身份
+	TriggeredBy string
+	// RunDeployment 是控制面注入的发布桥接，缺省不可用
+	RunDeployment DeploymentStepRunner
 
 	// ArtifactURIs stores upstream job artifact URIs keyed by "jobName/artifactName".
 	// Populated after each Job completes; downstream jobs read from here.
@@ -82,7 +86,9 @@ type ExecutionContext struct {
 	CancelJob func(context.Context, string, string, string) error
 	// StepRunIDs 保存当前作业的步骤执行标识
 	StepRunIDs map[string]string
-	JobRunID   string
+	// StepAttemptIDs 保存控制面预分配的不可变尝试标识
+	StepAttemptIDs map[string][]string
+	JobRunID       string
 
 	// LogPublisher publishes build log messages to the BUILD_LOGS topic.
 	// Set by the control-plane process for local step log visibility.
@@ -360,6 +366,7 @@ func (c *ExecutionContext) ForJob() *ExecutionContext {
 	child := *c
 	child.Env = maps.Clone(c.Env)
 	child.StepRunIDs = make(map[string]string)
+	child.StepAttemptIDs = make(map[string][]string)
 	return &child
 }
 

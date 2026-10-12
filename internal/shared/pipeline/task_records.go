@@ -9,11 +9,16 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/arcentrix/arcentra/internal/shared/retry"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/bytedance/sonic"
 )
 
 func (tf *TaskFramework) createRecords(ctx context.Context, task *Task) error {
+	if err := retry.Validate(task.Job.Retry); err != nil {
+		return err
+	}
+
 	tf.execCtx.JobRunID = id.GetUild()
 	task.Set("jobRunID", tf.execCtx.JobRunID)
 	task.Set("stepStatuses", map[string]int{})
@@ -25,28 +30,49 @@ func (tf *TaskFramework) createRecords(ctx context.Context, task *Task) error {
 			return fmt.Errorf("create job run: %w", err)
 		}
 	}
+	if tf.execCtx.StepAttemptIDs == nil {
+		tf.execCtx.StepAttemptIDs = make(map[string][]string)
+	}
+	if tf.execCtx.StepRunIDs == nil {
+		tf.execCtx.StepRunIDs = make(map[string]string)
+	}
+	task.Set("attemptStatuses", map[string]int{})
 	for i, step := range task.Job.Steps {
 		if step == nil {
 			continue
 		}
-		stepID := id.GetUild()
-		tf.execCtx.StepRunIDs[step.Name] = stepID
-		if store == nil {
-			continue
-		}
-		args, err := sonic.MarshalString(spec.StructAsMap(step.Args))
-		if err != nil {
-			return err
-		}
-		sr := &model.StepRun{StepRunID: stepID, PipelineID: tf.execCtx.PipelineIDRef, PipelineRunID: tf.execCtx.PipelineRunID,
-			JobID: tf.execCtx.PipelineIDRef + "-" + task.Job.Name, JobRunID: tf.execCtx.JobRunID, Name: step.Name,
-			StepIndex: i, Status: 1, Priority: 5, Uses: step.Uses, Action: step.Action, Args: args, Env: "{}", Secrets: "{}",
-			LabelSelector: "{}", Timeout: step.Timeout, When: step.When}
-		if step.ContinueOnError {
-			sr.ContinueOnError = 1
-		}
-		if err := store.CreateStepRun(ctx, sr); err != nil {
-			return fmt.Errorf("create step run %s: %w", step.Name, err)
+		previous := ""
+		for attempt := 1; attempt <= retry.Attempts(task.Job.Retry); attempt++ {
+			stepID := id.GetUild()
+			tf.execCtx.StepAttemptIDs[step.Name] = append(tf.execCtx.StepAttemptIDs[step.Name], stepID)
+			if attempt == 1 {
+				tf.execCtx.StepRunIDs[step.Name] = stepID
+			}
+			if store != nil {
+				args, err := sonic.MarshalString(spec.StructAsMap(step.Args))
+				if err != nil {
+					return err
+				}
+				policyJSON, err := sonic.MarshalString(task.Job.Retry)
+				if err != nil {
+					return err
+				}
+				mode := ""
+				if task.Job.Retry != nil {
+					mode = task.Job.Retry.Mode
+				}
+				sr := &model.StepRun{StepRunID: stepID, PipelineID: tf.execCtx.PipelineIDRef, PipelineRunID: tf.execCtx.PipelineRunID,
+					JobID: tf.execCtx.PipelineIDRef + "-" + task.Job.Name, JobRunID: tf.execCtx.JobRunID, Name: step.Name,
+					CreatedBy: tf.execCtx.TriggeredBy, StepIndex: i, Attempt: attempt, RetryMode: mode, RetryPolicy: policyJSON, PreviousStepRunID: previous, Status: 1, Priority: 5,
+					Uses: step.Uses, Action: step.Action, Args: args, Env: "{}", Secrets: "{}", LabelSelector: "{}", Timeout: step.Timeout, When: step.When}
+				if step.ContinueOnError {
+					sr.ContinueOnError = 1
+				}
+				if err := store.CreateStepRun(ctx, sr); err != nil {
+					return fmt.Errorf("create step run %s attempt %d: %w", step.Name, attempt, err)
+				}
+			}
+			previous = stepID
 		}
 	}
 	return nil
@@ -55,6 +81,9 @@ func (tf *TaskFramework) createRecords(ctx context.Context, task *Task) error {
 func (tf *TaskFramework) finishRecords(ctx context.Context, task *Task, runErr error) {
 	store := tf.getJobRunStore()
 	if store == nil {
+		return
+	}
+	if _, failed := task.Get("recordError"); failed {
 		return
 	}
 	// 取消执行不能取消最终状态的持久化
@@ -116,6 +145,23 @@ func (tf *TaskFramework) finishRecords(ctx context.Context, task *Task, runErr e
 	if !isAgentJob(task.Job) || task.State == TaskStateSkipped {
 		states, _ := task.Get("stepStatuses")
 		stepStates, _ := states.(map[string]int)
+		attemptsValue, _ := task.Get("attemptStatuses")
+		attemptStates, _ := attemptsValue.(map[string]int)
+		for _, ids := range tf.execCtx.StepAttemptIDs {
+			for index, stepID := range ids {
+				if _, done := attemptStates[stepID]; done {
+					continue
+				}
+				attemptStatus, reason := 8, "attempt not used"
+				if index == 0 && (status == model.JobRunStatusCancelled || status == model.JobRunStatusTimeout) {
+					attemptStatus, reason = status, "job cancelled or timed out before step execution"
+				}
+				if err := store.UpdateStepRun(persistCtx, stepID, map[string]any{"status": attemptStatus, "end_time": now, "error_message": reason}); err != nil {
+					tf.logger.Errorw("finalize unused attempt failed", "error", err)
+					return
+				}
+			}
+		}
 		completed, failed := 0, 0
 		for _, step := range task.Job.Steps {
 			if step == nil {
@@ -127,8 +173,11 @@ func (tf *TaskFramework) finishRecords(ctx context.Context, task *Task, runErr e
 				if status == model.JobRunStatusCancelled || status == model.JobRunStatusTimeout {
 					st = status
 				}
-				if err := store.UpdateStepRun(persistCtx, tf.execCtx.StepRunIDs[step.Name], map[string]any{"status": st, "end_time": now}); err != nil {
-					tf.logger.Errorw("finalize pending step failed", "error", err)
+				if len(tf.execCtx.StepAttemptIDs[step.Name]) == 0 {
+					if err := store.UpdateStepRun(persistCtx, tf.execCtx.StepRunIDs[step.Name], map[string]any{"status": st, "end_time": now}); err != nil {
+						tf.logger.Errorw("finalize pending step failed", "error", err)
+						return
+					}
 				}
 			}
 			if st >= 4 {
@@ -156,8 +205,13 @@ func (tf *TaskFramework) finishRecords(ctx context.Context, task *Task, runErr e
 			FinishOpenStepRuns(context.Context, []string, int) error
 		}); ok {
 			ids := make([]string, 0, len(tf.execCtx.StepRunIDs))
-			for _, stepID := range tf.execCtx.StepRunIDs {
-				ids = append(ids, stepID)
+			for _, attempts := range tf.execCtx.StepAttemptIDs {
+				ids = append(ids, attempts...)
+			}
+			if len(ids) == 0 {
+				for _, stepID := range tf.execCtx.StepRunIDs {
+					ids = append(ids, stepID)
+				}
 			}
 			stepStatus := 8
 			if status == model.JobRunStatusCancelled || status == model.JobRunStatusTimeout {
@@ -174,14 +228,14 @@ func (tf *TaskFramework) finishRecords(ctx context.Context, task *Task, runErr e
 	}
 }
 
-func (tf *TaskFramework) recordStep(ctx context.Context, task *Task, step *spec.Step, status int, start time.Time, err error) {
+func (tf *TaskFramework) recordStep(ctx context.Context, task *Task, step *spec.Step, status int, start time.Time, err error) error {
 	states, _ := task.Get("stepStatuses")
 	if values, ok := states.(map[string]int); ok {
 		values[step.Name] = status
 	}
 	store := tf.getJobRunStore()
 	if store == nil {
-		return
+		return nil
 	}
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
@@ -194,6 +248,40 @@ func (tf *TaskFramework) recordStep(ctx context.Context, task *Task, step *spec.
 		updates["exit_code"] = 0
 	}
 	if e := store.UpdateStepRun(persistCtx, tf.execCtx.StepRunIDs[step.Name], updates); e != nil {
-		tf.logger.Errorw("finalize step failed", "error", e)
+		task.Set("recordError", e)
+		return retry.Block(fmt.Errorf("finalize step attempt: %w", e))
 	}
+	if states, ok := task.Get("attemptStatuses"); ok {
+		if values, ok := states.(map[string]int); ok {
+			values[tf.execCtx.StepRunIDs[step.Name]] = status
+		}
+	}
+	return nil
+}
+
+func (tf *TaskFramework) skipPreviousAttempts(ctx context.Context, task *Task, beforeAttempt int) error {
+	value, _ := task.Get("attemptStatuses")
+	states, _ := value.(map[string]int)
+	store := tf.getJobRunStore()
+	if store == nil {
+		return nil
+	}
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	for _, ids := range tf.execCtx.StepAttemptIDs {
+		for index, stepID := range ids {
+			if index+1 >= beforeAttempt {
+				break
+			}
+			if _, exists := states[stepID]; exists {
+				continue
+			}
+			if err := store.UpdateStepRun(persistCtx, stepID, map[string]any{"status": 8, "end_time": time.Now(), "error_message": "attempt not used"}); err != nil {
+				task.Set("recordError", err)
+				return retry.Block(err)
+			}
+			states[stepID] = 8
+		}
+	}
+	return nil
 }

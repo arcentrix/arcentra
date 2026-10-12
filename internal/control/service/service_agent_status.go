@@ -2,12 +2,18 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"strings"
+	"time"
+
+	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/shared/agentidentity"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"strings"
-	"time"
+	"google.golang.org/protobuf/proto"
 )
 
 func authenticatedAgent(ctx context.Context, requested string) (string, error) {
@@ -56,32 +62,54 @@ func executionStatusUpdates(next int, message string, started, ended int64, prev
 	return updates
 }
 
-type agentStatusRepository interface {
-	PatchStatusIfCurrent(context.Context, string, int, map[string]any) error
+type agentStepStatusRepository interface {
+	PatchReportedStatus(context.Context, *model.StepRun, map[string]any) error
 }
 
-func patchAgentStatus(ctx context.Context, repository any, runID string, current int, updates map[string]any) error {
-	writer, ok := repository.(agentStatusRepository)
+func patchAgentStepStatus(ctx context.Context, repository any, expected *model.StepRun, updates map[string]any) error {
+	writer, ok := repository.(agentStepStatusRepository)
 	if !ok {
 		return status.Error(codes.Unimplemented, "atomic status repository unavailable")
 	}
-	return writer.PatchStatusIfCurrent(ctx, runID, current, updates)
+	return writer.PatchReportedStatus(ctx, expected, updates)
+}
+
+// terminalReportDigest 绑定完整结果与执行身份，避免把恢复生成的终态误认为已提交回执
+func terminalReportDigest(request proto.Message, claim string, executionScope ...string) (string, error) {
+	encoded, err := (proto.MarshalOptions{Deterministic: true}).Marshal(proto.Clone(request))
+	if err != nil {
+		return "", status.Error(codes.InvalidArgument, "invalid terminal report")
+	}
+	digest := sha256.New()
+	for _, value := range append([]string{"arcentra-terminal-report-v1", string(request.ProtoReflect().Descriptor().FullName()), claim}, executionScope...) {
+		_, _ = digest.Write(binary.BigEndian.AppendUint64(nil, uint64(len(value))))
+		_, _ = digest.Write([]byte(value))
+	}
+	_, _ = digest.Write(encoded)
+	return hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+func validateTerminalReplay(stored, reported string) error {
+	if stored == "" || stored != reported {
+		return status.Error(codes.FailedPrecondition, "terminal report does not match a committed receipt")
+	}
+	return nil
 }
 
 func reportClaim(ctx context.Context, current, next int, existing string) (string, bool, error) {
 	md, _ := metadata.FromIncomingContext(ctx)
 	values := md.Get("x-arcentra-claim-id")
-	claim := ""
-	if len(values) > 0 {
-		claim = strings.TrimSpace(values[0])
+	if len(values) != 1 {
+		return "", false, status.Error(codes.InvalidArgument, "exactly one execution claim ID is required")
 	}
+	claim := strings.TrimSpace(values[0])
 	if len(claim) > 64 {
 		return "", false, status.Error(codes.InvalidArgument, "claim ID too long")
 	}
+	if claim == "" {
+		return "", false, status.Error(codes.InvalidArgument, "execution claim ID is required")
+	}
 	if next == 3 {
-		if claim == "" {
-			return "", false, status.Error(codes.InvalidArgument, "execution claim ID is required")
-		}
 		if current == 3 {
 			if existing == claim {
 				return claim, true, nil
