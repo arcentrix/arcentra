@@ -25,8 +25,8 @@ const (
 type ApprovalDecision struct {
 	BaseModel
 	DecisionID string `gorm:"column:decision_id;not null;uniqueIndex;type:varchar(64)" json:"decisionId"`
-	ApprovalID string `gorm:"column:approval_id;not null;index:idx_approval_user,priority:1;type:varchar(64)" json:"approvalId"`
-	UserID     string `gorm:"column:user_id;not null;index:idx_approval_user,priority:2;type:varchar(64)" json:"userId"`
+	ApprovalID string `gorm:"column:approval_id;not null;uniqueIndex:uk_approval_decision_user,priority:1;type:varchar(64)" json:"approvalId"`
+	UserID     string `gorm:"column:user_id;not null;uniqueIndex:uk_approval_decision_user,priority:2;type:varchar(64)" json:"userId"`
 	Decision   string `gorm:"column:decision;not null" json:"decision"`
 	Comment    string `gorm:"column:comment;type:text" json:"comment"`
 }

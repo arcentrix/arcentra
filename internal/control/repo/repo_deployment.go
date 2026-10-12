@@ -36,7 +36,7 @@ type DeploymentRepo struct{ database.IDatabase }
 func NewDeploymentRepo(db database.IDatabase) IDeploymentRepository { return &DeploymentRepo{db} }
 
 var environmentColumns = []string{"environment_id", "project_id", "name", "target_ref", "namespace", "deployment", "container", "active_release_id", "created_at", "updated_at"}
-var releaseColumns = []string{"origin", "execution_job_run_id", "execution_step_run_id", "producer_job_run_id", "producer_step_run_id", "deployment_plan_hash", "last_recovery_by", "last_recovery_at", "version", "release_id", "project_id", "request_id", "environment_id", "pipeline_id", "pipeline_run_id", "artifact_id", "artifact_sha256", "target_fingerprint", "commit_sha", "image", "created_by", "status", "reason", "workload_uid", "baseline_generation", "applied_generation", "observed_generation", "desired_replicas", "updated_replicas", "available_replicas", "last_observed_at", "finished_at", "created_at", "updated_at"}
+var releaseColumns = []string{"approval_id", "approval_evidence_hash", "approval_target", "origin", "execution_job_run_id", "execution_step_run_id", "producer_job_run_id", "producer_step_run_id", "deployment_plan_hash", "last_recovery_by", "last_recovery_at", "version", "release_id", "project_id", "request_id", "environment_id", "pipeline_id", "pipeline_run_id", "artifact_id", "artifact_sha256", "target_fingerprint", "commit_sha", "image", "created_by", "status", "reason", "workload_uid", "baseline_generation", "applied_generation", "observed_generation", "desired_replicas", "updated_replicas", "available_replicas", "last_observed_at", "finished_at", "created_at", "updated_at"}
 
 // CreateEnvironment 创建不可变的目标绑定
 func (r *DeploymentRepo) CreateEnvironment(ctx context.Context, value *model.DeploymentEnvironment) error {
@@ -127,14 +127,30 @@ func (r *DeploymentRepo) CreateRelease(ctx context.Context, value *model.Deploym
 		if claim.RowsAffected != 1 {
 			return ErrDeploymentConflict
 		}
-		return tx.Create(value).Error
+		if err := tx.Create(value).Error; err != nil {
+			return err
+		}
+		if value.ApprovalID != nil {
+			approval := value.ApprovalRequest
+			if approval == nil || approval.ApprovalID != *value.ApprovalID || approval.DeploymentReleaseID == nil || *approval.DeploymentReleaseID != value.ReleaseID || approval.PipelineRunID != value.PipelineRunID || approval.EvidenceHash == "" || approval.EvidenceHash != value.ApprovalEvidenceHash || approval.Status != model.ApprovalStatusPending {
+				return ErrDeploymentConflict
+			}
+			if _, err := model.ApprovalCandidates(approval); err != nil {
+				return err
+			}
+			return tx.Create(approval).Error
+		}
+		if value.ApprovalRequest != nil || value.ApprovalEvidenceHash != "" {
+			return ErrDeploymentConflict
+		}
+		return nil
 	})
 	if err == nil {
 		return value, nil
 	}
 	old, readErr := r.GetReleaseByRequest(ctx, value.ProjectID, value.RequestID)
 	if readErr == nil {
-		if old.EnvironmentID == value.EnvironmentID && old.PipelineID == value.PipelineID && old.PipelineRunID == value.PipelineRunID && old.ArtifactID == value.ArtifactID && old.ArtifactSHA256 == value.ArtifactSHA256 && old.Image == value.Image && old.CommitSHA == value.CommitSHA && old.TargetFingerprint == value.TargetFingerprint && old.CreatedBy == value.CreatedBy && old.Origin == value.Origin && old.ExecutionJobRunID == value.ExecutionJobRunID && sameDeploymentStep(old.ExecutionStepRunID, value.ExecutionStepRunID) && old.ProducerJobRunID == value.ProducerJobRunID && old.ProducerStepRunID == value.ProducerStepRunID && old.DeploymentPlanHash == value.DeploymentPlanHash {
+		if old.EnvironmentID == value.EnvironmentID && old.PipelineID == value.PipelineID && old.PipelineRunID == value.PipelineRunID && old.ArtifactID == value.ArtifactID && old.ArtifactSHA256 == value.ArtifactSHA256 && old.Image == value.Image && old.CommitSHA == value.CommitSHA && old.TargetFingerprint == value.TargetFingerprint && old.CreatedBy == value.CreatedBy && old.Origin == value.Origin && old.ExecutionJobRunID == value.ExecutionJobRunID && sameDeploymentStep(old.ExecutionStepRunID, value.ExecutionStepRunID) && old.ProducerJobRunID == value.ProducerJobRunID && old.ProducerStepRunID == value.ProducerStepRunID && old.DeploymentPlanHash == value.DeploymentPlanHash && sameDeploymentStep(old.ApprovalID, value.ApprovalID) {
 			return old, nil
 		}
 		return nil, ErrDeploymentConflict
@@ -166,6 +182,11 @@ func (r *DeploymentRepo) Transition(ctx context.Context, value *model.Deployment
 		}
 		changed = update.RowsAffected == 1
 		if changed && model.IsDeploymentTerminal(next) {
+			if value.Status == "queued" && value.ApprovalID != nil {
+				if err := tx.Model(&model.ApprovalRequest{}).Where("approval_id = ? AND deployment_release_id = ? AND status = ?", *value.ApprovalID, value.ReleaseID, model.ApprovalStatusPending).Updates(map[string]any{"status": model.ApprovalStatusCanceled, "reason": "Deployment cancelled before apply", "version": gorm.Expr("version + ?", 1)}).Error; err != nil {
+					return err
+				}
+			}
 			return tx.Model(&model.DeploymentEnvironment{}).Where("project_id = ? AND environment_id = ? AND active_release_id = ?", value.ProjectID, value.EnvironmentID, value.ReleaseID).Update("active_release_id", "").Error
 		}
 		return nil

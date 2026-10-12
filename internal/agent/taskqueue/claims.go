@@ -9,6 +9,7 @@ import (
 
 	steprunv1 "github.com/arcentrix/arcentra/api/steprun/v1"
 	"github.com/arcentrix/arcentra/internal/agent/config"
+	"github.com/arcentrix/arcentra/internal/shared/agentidentity"
 	agentgrpc "github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"google.golang.org/grpc/codes"
@@ -18,6 +19,12 @@ import (
 
 const executionClaimMetadataKey = "x-arcentra-claim-id"
 
+type jobExecutionClaimContextKey struct{}
+
+func withJobExecutionClaim(ctx context.Context, jobRunID string) context.Context {
+	return context.WithValue(ctx, jobExecutionClaimContextKey{}, executionClaimID(ctx, "job", jobRunID))
+}
+
 // executionClaims 仅在当前进程保留认领身份，响应丢失重试不会获得新的执行权
 var executionClaims sync.Map
 
@@ -25,7 +32,12 @@ func executionClaimID(ctx context.Context, kind, runID string) string {
 	key := kind + "/" + receiptKey(ctx, kind, runID)
 	claim, ok := executionClaims.Load(key)
 	if !ok {
-		claim, _ = executionClaims.LoadOrStore(key, id.GetUUID())
+		candidate := id.GetUUID()
+		if parent, _ := ctx.Value(jobExecutionClaimContextKey{}).(string); kind == "step" && parent != "" {
+			candidate = agentidentity.StepClaimID(parent, runID)
+		}
+		// 待交付收据可能使用新的报告上下文，认领必须保留到原回执被确认
+		claim, _ = executionClaims.LoadOrStore(key, candidate)
 	}
 	return claim.(string)
 }
@@ -48,6 +60,12 @@ func claimStepRun(ctx context.Context, client *agentgrpc.ClientWrapper, conf *co
 		err := reportStepRunStatus(ctx, client, conf, stepRunID, steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING, 0, "", start, 0, nil)
 		if err == nil {
 			return nil
+		}
+		if agentidentity.IsCancelledStepClaim(err, stepRunID, executionClaimID(ctx, "step", stepRunID)) {
+			return reportCancelledStepClaim(ctx, client, conf, stepRunID, start, context.Canceled)
+		}
+		if ctx.Err() != nil {
+			return reportCancelledStepClaim(ctx, client, conf, stepRunID, start, ctx.Err())
 		}
 		switch status.Code(err) {
 		case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted, codes.Internal:

@@ -37,6 +37,7 @@ type StepRun struct {
 	StepIndex            int        `gorm:"column:step_index" json:"stepIndex"`
 	AgentID              string     `gorm:"column:agent_id" json:"agentId"`
 	ClaimID              string     `gorm:"column:claim_id;type:varchar(64);default:''" json:"-"`
+	CancellationClaimID  string     `gorm:"column:cancellation_claim_id;type:varchar(64);not null;default:''" json:"-"` // 原作业认领，仅由控制面取消事务写入
 	TerminalReportDigest string     `gorm:"column:terminal_report_digest;type:varchar(64);not null;default:''" json:"-"`
 	Status               int        `gorm:"column:status" json:"status"`       // 1:等待 2:入队 3:运行中 4:成功 5:失败 6:已取消 7:超时 8:已跳过
 	Priority             int        `gorm:"column:priority" json:"priority"`   // 1:最高 5:普通 10:最低

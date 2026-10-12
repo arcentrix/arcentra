@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -247,9 +248,9 @@ func Run(app *Agent, cleanup func()) {
 func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 	appConf := app.AgentConf
 
-	// Check for dynamic registration token first, then fall back to legacy token+agentID
-	hasRegistrationToken := appConf.Grpc.RegistrationToken != ""
-	hasLegacyConfig := appConf.Grpc.Token != "" && appConf.Agent.ID != ""
+	// 完整配置的原始身份优先，不能用注册令牌绕过失败的身份认证
+	hasRegistrationToken := strings.TrimSpace(appConf.Grpc.RegistrationToken) != ""
+	hasLegacyConfig := strings.TrimSpace(appConf.Grpc.Token) != "" && strings.TrimSpace(appConf.Agent.ID) != ""
 
 	if appConf.Grpc.ServerAddr == "" {
 		log.Warn("Agent not registered, skipping heartbeat startup. " +
@@ -261,6 +262,12 @@ func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 		log.Warn("Agent not registered, skipping heartbeat startup. " +
 			"Please configure grpc.registrationToken or (agent.id + grpc.token) in configuration file")
 		return
+	}
+	if hasRegistrationToken && !hasLegacyConfig {
+		if err := taskqueue.CheckTerminalOutboxForEnrollment(context.Background(), appConf.Agent.WorkspaceDir); err != nil {
+			log.Errorw("agent registration blocked", "error", err)
+			return
+		}
 	}
 
 	// 等待 gRPC 客户端连接成功

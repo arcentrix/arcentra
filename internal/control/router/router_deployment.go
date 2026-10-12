@@ -154,7 +154,7 @@ func deploymentServiceError(c *fiber.Ctx, err error) error {
 		return deploymentError(c, 400, err.Error())
 	case errors.Is(err, service.ErrDeploymentSource):
 		return deploymentError(c, 422, err.Error())
-	case errors.Is(err, service.ErrDeploymentTargetChanged), errors.Is(err, repo.ErrDeploymentConflict), errors.Is(err, service.ErrDeploymentCancel), errors.Is(err, cluster.ErrConflict), errors.Is(err, cluster.ErrInvalidTarget), errors.Is(err, cluster.ErrSuperseded):
+	case errors.Is(err, service.ErrDeploymentApproval), errors.Is(err, service.ErrDeploymentTargetChanged), errors.Is(err, repo.ErrDeploymentConflict), errors.Is(err, service.ErrDeploymentCancel), errors.Is(err, cluster.ErrConflict), errors.Is(err, cluster.ErrInvalidTarget), errors.Is(err, cluster.ErrSuperseded):
 		return deploymentError(c, 409, err.Error())
 	case errors.Is(err, cluster.ErrUnconfigured):
 		return deploymentError(c, 503, "deployment target is not configured for this exact project and workload")

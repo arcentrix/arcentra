@@ -157,7 +157,7 @@ type lifecycleFixture struct {
 	projectID, pipelineID, environmentID string
 }
 
-func newLifecycleFixture(t *testing.T) *lifecycleFixture {
+func newLifecycleFixture(t *testing.T, policies ...*cluster.PipelineApprovalPolicy) *lifecycleFixture {
 	t.Helper()
 	t.Setenv("ARCENTRA_ARTIFACT_ROOT", filepath.Join(t.TempDir(), "managed"))
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "lifecycle.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
@@ -170,17 +170,28 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 	}
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err = db.AutoMigrate(&model.Project{}, &model.Pipeline{}, &model.PipelineRun{}, &model.JobRun{}, &model.StepRun{}, &model.StepRunLog{}, &model.ProjectArtifact{}, &model.DeploymentEnvironment{}, &model.DeploymentRelease{}, &model.ApprovalRequest{}); err != nil {
+	if err = db.AutoMigrate(&model.Project{}, &model.Pipeline{}, &model.PipelineRun{}, &model.JobRun{}, &model.StepRun{}, &model.StepRunLog{}, &model.ProjectArtifact{}, &model.DeploymentEnvironment{}, &model.DeploymentRelease{}, &model.ApprovalRequest{}, &model.ApprovalDecision{}); err != nil {
 		t.Fatal(err)
 	}
 	adapter := processTestDB{db}
-	repos := &repo.Repositories{Pipeline: repo.NewPipelineRepo(adapter), JobRun: repo.NewJobRunRepo(adapter), StepRun: repo.NewStepRunRepo(adapter), Log: repo.NewLogRepository(db), Artifact: repo.NewArtifactRepo(adapter), Deployment: repo.NewDeploymentRepo(adapter), Approval: repo.NewApprovalRepo(adapter)}
+	repos := &repo.Repositories{Pipeline: repo.NewPipelineRepo(adapter), JobRun: repo.NewJobRunRepo(adapter), StepRun: repo.NewStepRunRepo(adapter), Log: repo.NewLogRepository(db), Artifact: repo.NewArtifactRepo(adapter), Deployment: repo.NewDeploymentRepo(adapter), Approval: repo.NewApprovalRepo(adapter), ApprovalDecision: repo.NewApprovalDecisionRepo(adapter)}
 	f := &lifecycleFixture{db: db, repos: repos, projectID: "lifecycle-project", pipelineID: id.GetUild()}
 	f.allowed.Store(true)
 	kube, clusterAdapter := newLifecycleKubernetes(t)
 	f.kube = kube
-	f.deployment = service.NewDeploymentService(repos.Deployment, repos.Pipeline, repos.Artifact, service.NewArtifactService(repos.Artifact, nil, artifact.Root()), repos.Approval, service.DeploymentTargets{"staging": {ProjectID: f.projectID, Tier: "staging", AllowPipelineDeployments: true, Target: cluster.Target{Namespace: "staging", Deployment: "web", Container: "app"}, Adapter: clusterAdapter}})
+	var approvalPolicy *cluster.PipelineApprovalPolicy
+	if len(policies) > 0 {
+		approvalPolicy = policies[0]
+	}
+	f.deployment = service.NewDeploymentService(repos.Deployment, repos.Pipeline, repos.Artifact, service.NewArtifactService(repos.Artifact, nil, artifact.Root()), repos.Approval, service.DeploymentTargets{"staging": {PipelineApproval: approvalPolicy, ProjectID: f.projectID, Tier: "staging", AllowPipelineDeployments: true, Target: cluster.Target{Namespace: "staging", Deployment: "web", Container: "app"}, Adapter: clusterAdapter}})
 	f.configureService()
+	approvalAuthorize := func(ctx context.Context, actor, project, pipeline, environment string) error {
+		if ctx.Err() != nil || actor == "lifecycle-actor" || actor == "" || project != f.projectID || pipeline != f.pipelineID || environment != f.environmentID {
+			return errors.New("fixture approval permission denied")
+		}
+		return nil
+	}
+	f.deployment.ConfigureDeploymentApprovals(repos.ApprovalDecision, approvalAuthorize, approvalAuthorize)
 	environment, err := f.deployment.CreateEnvironment(context.Background(), f.projectID, service.DeploymentEnvironmentInput{Name: "Staging", TargetRef: "staging", Namespace: "staging", Deployment: "web", Container: "app"})
 	if err != nil {
 		t.Fatal(err)

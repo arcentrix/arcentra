@@ -298,6 +298,9 @@ func (s *DeploymentService) PreparePipelineRelease(ctx context.Context, executio
 	if err != nil || run.DeploymentTargetFingerprint == "" || run.DeploymentTargetFingerprint != fingerprint {
 		return nil, ErrDeploymentTargetChanged
 	}
+	if err := s.ValidatePipelineApprovalPlan(ctx, execution.ProjectID, plan, execution.ActorID); err != nil {
+		return nil, err
+	}
 	request := pipelineDeploymentRequest(execution)
 	old, err := s.records.GetReleaseByRequest(ctx, execution.ProjectID, request)
 	if err == nil {
@@ -323,11 +326,18 @@ func (s *DeploymentService) PreparePipelineRelease(ctx context.Context, executio
 	}
 	stepID := execution.StepRunID
 	entry := &model.DeploymentRelease{Origin: "pipeline_job", ReleaseID: uuid.NewString(), Version: 1, ProjectID: execution.ProjectID, RequestID: request, EnvironmentID: plan.EnvironmentID, PipelineID: execution.PipelineID, PipelineRunID: execution.PipelineRunID, ExecutionJobRunID: execution.JobRunID, ExecutionStepRunID: &stepID, ProducerJobRunID: producer.JobRunID, ProducerStepRunID: step.StepRunID, DeploymentPlanHash: run.DeploymentPlanHash, ArtifactID: artifactID, ArtifactSHA256: artifact.SHA256, CommitSHA: run.DefinitionCommitSha, Image: image, CreatedBy: execution.ActorID, TargetFingerprint: run.DeploymentTargetFingerprint, Status: "queued", Reason: "Authorized pipeline deployment prepared; awaiting durable step linkage"}
+	if err := s.prepareDeploymentApproval(ctx, entry, plan); err != nil {
+		return nil, err
+	}
 	return s.records.CreateRelease(ctx, entry)
 }
 
 func (s *DeploymentService) verifyQueuedRelease(ctx context.Context, entry *model.DeploymentRelease, actor string) error {
 	if entry.Origin != "pipeline_job" {
+		env, err := s.records.GetEnvironment(ctx, entry.ProjectID, entry.EnvironmentID)
+		if err != nil || s.targets[env.TargetRef].PipelineApproval != nil {
+			return ErrDeploymentApproval
+		}
 		run, err := s.verifyRun(ctx, entry.ProjectID, entry.PipelineID, entry.PipelineRunID)
 		if err != nil || deploymentDefinitionRevision(run) != entry.CommitSHA {
 			return ErrDeploymentSource
@@ -357,6 +367,9 @@ func (s *DeploymentService) verifyQueuedRelease(ctx context.Context, entry *mode
 	if err != nil || image != entry.Image || artifact.SHA256 != entry.ArtifactSHA256 {
 		return ErrPipelineDeploymentSource
 	}
+	if err := s.verifyDeploymentApproval(ctx, entry); err != nil {
+		return err
+	}
 	return s.pipelinePermission(ctx, actor, entry.ProjectID, entry.PipelineID, entry.EnvironmentID, true)
 }
 
@@ -381,6 +394,16 @@ func (s *DeploymentService) ExecutePipelineDeployment(ctx context.Context, execu
 	}
 	if entry.Status == "applying" {
 		return entry, ErrPipelineDeploymentUncertain
+	}
+	if entry.Status == "queued" {
+		if err := s.waitDeploymentApproval(ctx, entry, plan); err != nil {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if cancelled, cancelErr := s.Cancel(cleanup, entry.ProjectID, entry.ReleaseID); cancelErr == nil {
+				entry = cancelled
+			}
+			return entry, err
+		}
 	}
 	for {
 		if ctx.Err() != nil {
@@ -497,6 +520,11 @@ func (s *DeploymentService) RecoverAuthorized(ctx context.Context, project, id, 
 	}
 	if model.IsDeploymentTerminal(entry.Status) {
 		return entry, nil
+	}
+	if entry.Origin == "pipeline_job" {
+		if err := s.verifyDeploymentApproval(ctx, entry); err != nil {
+			return nil, err
+		}
 	}
 	changed, err := s.records.Transition(ctx, entry, entry.Status, map[string]any{"last_recovery_by": actor, "last_recovery_at": time.Now().UTC()})
 	if err != nil {

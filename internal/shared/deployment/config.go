@@ -25,16 +25,17 @@ type Config struct {
 // TargetConfig 精确限定项目和工作负载，不接受 kubeconfig 执行插件
 type TargetConfig struct {
 	// Tier 为操作员设置的发布权限等级，省略时按生产环境处理
-	AllowPipelineDeployments bool   `mapstructure:"allowPipelineDeployments" json:"allowPipelineDeployments"`
-	Tier                     string `mapstructure:"tier" json:"tier"`
-	Ref                      string `mapstructure:"ref" json:"ref"`
-	ProjectID                string `mapstructure:"projectId" json:"projectId"`
-	Server                   string `mapstructure:"server" json:"-"`
-	CAFile                   string `mapstructure:"caFile" json:"-"`
-	BearerTokenFile          string `mapstructure:"bearerTokenFile" json:"-"`
-	Namespace                string `mapstructure:"namespace" json:"namespace"`
-	Deployment               string `mapstructure:"deployment" json:"deployment"`
-	Container                string `mapstructure:"container" json:"container"`
+	PipelineApproval         *PipelineApprovalPolicy `mapstructure:"pipelineApproval" json:"pipelineApproval,omitempty"`
+	AllowPipelineDeployments bool                    `mapstructure:"allowPipelineDeployments" json:"allowPipelineDeployments"`
+	Tier                     string                  `mapstructure:"tier" json:"tier"`
+	Ref                      string                  `mapstructure:"ref" json:"ref"`
+	ProjectID                string                  `mapstructure:"projectId" json:"projectId"`
+	Server                   string                  `mapstructure:"server" json:"-"`
+	CAFile                   string                  `mapstructure:"caFile" json:"-"`
+	BearerTokenFile          string                  `mapstructure:"bearerTokenFile" json:"-"`
+	Namespace                string                  `mapstructure:"namespace" json:"namespace"`
+	Deployment               string                  `mapstructure:"deployment" json:"deployment"`
+	Container                string                  `mapstructure:"container" json:"container"`
 }
 
 var errConfiguration = errors.New("invalid deployment target configuration; check HTTPS server, exact target, and mounted CA/token files")

@@ -1,16 +1,5 @@
 // Copyright 2026 Arcentra Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package service
 
@@ -18,162 +7,162 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
-	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
-// ApprovalService provides approval request operations.
+// ApprovalService 提供审批查询、候选人校验和原子决策入口
 type ApprovalService struct {
-	approvalRepo repo.IApprovalRepository
-	decisionRepo repo.IApprovalDecisionRepository
-	policyRepo   repo.IApprovalPolicyRepository
+	approvalRepo      repo.IApprovalRepository
+	decisionRepo      repo.IApprovalDecisionRepository
+	policyRepo        repo.IApprovalPolicyRepository
+	decisionValidator func(context.Context, *model.ApprovalRequest, string, string) error
 }
 
-// NewApprovalService creates a new ApprovalService.
-func NewApprovalService(
-	approvalRepo repo.IApprovalRepository,
-	decisionRepo repo.IApprovalDecisionRepository,
-	policyRepo repo.IApprovalPolicyRepository,
-) *ApprovalService {
-	return &ApprovalService{
-		approvalRepo: approvalRepo,
-		decisionRepo: decisionRepo,
-		policyRepo:   policyRepo,
+// NewApprovalService 创建审批服务，所有数据库事务由仓储执行
+func NewApprovalService(approvals repo.IApprovalRepository, decisions repo.IApprovalDecisionRepository, policies repo.IApprovalPolicyRepository) *ApprovalService {
+	return &ApprovalService{approvalRepo: approvals, decisionRepo: decisions, policyRepo: policies}
+}
+
+// SetDecisionValidator 在服务启动时设置部署审批的实时权限与证据校验器
+func (s *ApprovalService) SetDecisionValidator(validator func(context.Context, *model.ApprovalRequest, string, string) error) {
+	s.decisionValidator = validator
+}
+
+// GetApproval 返回审批请求，并安全地持久化已经到期的待审批状态
+func (s *ApprovalService) GetApproval(ctx context.Context, id string) (*model.ApprovalRequest, error) {
+	if s.approvalRepo == nil {
+		return nil, errors.New("approval repository not configured")
 	}
-}
-
-// GetApproval returns an approval request by ID.
-func (s *ApprovalService) GetApproval(ctx context.Context, approvalID string) (*model.ApprovalRequest, error) {
-	req, err := s.approvalRepo.GetByApprovalID(ctx, approvalID)
+	value, err := s.approvalRepo.GetByApprovalID(ctx, id)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("approval request not found")
-		}
-		log.Errorw("failed to get approval request", "approvalId", approvalID, "error", err)
-		return nil, errors.New("failed to get approval request")
+		return nil, err
 	}
-	return req, nil
+	if value == nil {
+		return nil, repo.ErrApprovalNotFound
+	}
+	if value.Status == model.ApprovalStatusPending && value.ExpiresAt != nil && !time.Now().Before(*value.ExpiresAt) {
+		return s.approvalRepo.Expire(ctx, id)
+	}
+	return value, nil
 }
 
-// Approve approves a pending approval request.
-func (s *ApprovalService) Approve(ctx context.Context, approvalID, approvedBy, reason string) error {
-	req, err := s.approvalRepo.GetByApprovalID(ctx, approvalID)
+// Approve 使用已认证操作者提交同意票，不允许匿名或客户端指定身份
+func (s *ApprovalService) Approve(ctx context.Context, id, actor, reason string) error {
+	_, err := s.Decide(ctx, id, actor, model.ApprovalDecisionApprove, reason)
+	return err
+}
+
+// Reject 使用已认证操作者提交拒绝票
+func (s *ApprovalService) Reject(ctx context.Context, id, actor, reason string) error {
+	_, err := s.Decide(ctx, id, actor, model.ApprovalDecisionReject, reason)
+	return err
+}
+
+// Decide 校验最新部署授权，再由仓储提交唯一且不可逆的审批决策
+func (s *ApprovalService) Decide(ctx context.Context, id, actor, decision, reason string) (*model.ApprovalRequest, error) {
+	if actor == "" || strings.TrimSpace(actor) != actor || len(actor) > 64 || len(reason) > 2048 || (decision != model.ApprovalDecisionApprove && decision != model.ApprovalDecisionReject) {
+		return nil, repo.ErrApprovalInvalid
+	}
+	value, err := s.GetApproval(ctx, id)
 	if err != nil {
-		return errors.New("approval request not found")
+		return nil, err
 	}
-	if req.Status != model.ApprovalStatusPending {
-		return errors.New("approval request is not pending")
+	if !model.IsApprovalCandidate(value, actor) {
+		return nil, repo.ErrApprovalForbidden
 	}
-	if req.ExpiresAt != nil && time.Now().After(*req.ExpiresAt) {
-		_ = s.approvalRepo.UpdateByApprovalID(ctx, approvalID, map[string]any{
-			"status": model.ApprovalStatusExpired,
-		})
-		return errors.New("approval request has expired")
-	}
-	if s.decisionRepo != nil {
-		if oldDecision, getErr := s.decisionRepo.GetByApprovalAndUser(ctx, approvalID, approvedBy); getErr == nil && oldDecision != nil {
-			return errors.New("approval already decided by this user")
-		}
-		decision := &model.ApprovalDecision{
-			DecisionID: uuid.NewString(),
-			ApprovalID: approvalID,
-			UserID:     approvedBy,
-			Decision:   model.ApprovalDecisionApprove,
-			Comment:    reason,
-		}
-		if createErr := s.decisionRepo.Create(ctx, decision); createErr != nil {
-			log.Errorw("failed to create approval decision", "approvalId", approvalID, "error", createErr)
-			return errors.New("failed to create approval decision")
+	// 终态只允许仓储返回同方向的已提交投票，绝不再次启动发布
+	if value.Status == model.ApprovalStatusPending {
+		if err := s.validateDeploymentDecision(ctx, value, actor, decision); err != nil {
+			return nil, err
 		}
 	}
-
-	approvedCount := req.ApprovedCount + 1
-	requiredCount := req.RequiredApproverCount
-	if requiredCount <= 0 {
-		requiredCount = 1
-	}
-	nextStatus := model.ApprovalStatusPending
-	if approvedCount >= requiredCount {
-		nextStatus = model.ApprovalStatusApproved
-	}
-	updates := map[string]any{
-		"status":         nextStatus,
-		"approved_count": approvedCount,
-		"approved_by":    approvedBy,
-		"reason":         reason,
-	}
-	if err := s.approvalRepo.UpdateByApprovalID(ctx, approvalID, updates); err != nil {
-		log.Errorw("failed to approve request", "approvalId", approvalID, "error", err)
-		return errors.New("failed to approve request")
-	}
-	log.Infow("approval request approved", "approvalId", approvalID, "approvedBy", approvedBy)
-	return nil
+	return s.approvalRepo.Decide(ctx, id, actor, decision, reason)
 }
 
-// Reject rejects a pending approval request.
-func (s *ApprovalService) Reject(ctx context.Context, approvalID, rejectedBy, reason string) error {
-	req, err := s.approvalRepo.GetByApprovalID(ctx, approvalID)
+func (s *ApprovalService) validateDeploymentDecision(ctx context.Context, value *model.ApprovalRequest, actor, decision string) error {
+	if value.DeploymentReleaseID == nil {
+		return nil
+	}
+	if s.decisionValidator == nil {
+		return errors.New("deployment approval validator not configured")
+	}
+	return s.decisionValidator(ctx, value, actor, decision)
+}
+
+// DecisionEligibility 返回当前用户的历史投票，并校验是否仍能提交新票
+func (s *ApprovalService) DecisionEligibility(ctx context.Context, value *model.ApprovalRequest, actor, decision string) (*model.ApprovalDecision, error) {
+	if decision != model.ApprovalDecisionApprove && decision != model.ApprovalDecisionReject {
+		return nil, repo.ErrApprovalInvalid
+	}
+	if value == nil || !model.IsApprovalCandidate(value, actor) {
+		return nil, repo.ErrApprovalForbidden
+	}
+	if s.decisionRepo == nil {
+		return nil, errors.New("approval decision repository not configured")
+	}
+	old, err := s.decisionRepo.GetByApprovalAndUser(ctx, value.ApprovalID, actor)
+	if err != nil && !errors.Is(err, repo.ErrApprovalNotFound) {
+		return nil, err
+	}
+	if old != nil {
+		return old, repo.ErrApprovalConflict
+	}
+	if value.Status != model.ApprovalStatusPending {
+		return nil, repo.ErrApprovalConflict
+	}
+	if value.ExpiresAt != nil && !time.Now().Before(*value.ExpiresAt) {
+		return nil, repo.ErrApprovalExpired
+	}
+	return nil, s.validateDeploymentDecision(ctx, value, actor, decision)
+}
+
+// ListByPipelineRun 返回指定执行的审批请求并处理超时
+func (s *ApprovalService) ListByPipelineRun(ctx context.Context, id string) ([]*model.ApprovalRequest, error) {
+	if s.approvalRepo == nil {
+		return nil, errors.New("approval repository not configured")
+	}
+	values, err := s.approvalRepo.ListByPipelineRunID(ctx, id)
 	if err != nil {
-		return errors.New("approval request not found")
+		return nil, err
 	}
-	if req.Status != model.ApprovalStatusPending {
-		return errors.New("approval request is not pending")
-	}
-	if s.decisionRepo != nil {
-		if oldDecision, getErr := s.decisionRepo.GetByApprovalAndUser(ctx, approvalID, rejectedBy); getErr == nil && oldDecision != nil {
-			return errors.New("approval already decided by this user")
+	for i, value := range values {
+		if value == nil || value.PipelineRunID != id {
+			return nil, repo.ErrApprovalConflict
 		}
-		decision := &model.ApprovalDecision{
-			DecisionID: uuid.NewString(),
-			ApprovalID: approvalID,
-			UserID:     rejectedBy,
-			Decision:   model.ApprovalDecisionReject,
-			Comment:    reason,
-		}
-		if createErr := s.decisionRepo.Create(ctx, decision); createErr != nil {
-			log.Errorw("failed to create reject decision", "approvalId", approvalID, "error", createErr)
-			return errors.New("failed to create reject decision")
+		if value.Status == model.ApprovalStatusPending && value.ExpiresAt != nil && !time.Now().Before(*value.ExpiresAt) {
+			values[i], err = s.approvalRepo.Expire(ctx, value.ApprovalID)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
-
-	rejectedCount := req.RejectedCount + 1
-	updates := map[string]any{
-		"status":         model.ApprovalStatusRejected,
-		"rejected_count": rejectedCount,
-		"approved_by":    rejectedBy,
-		"reason":         reason,
-	}
-	if err := s.approvalRepo.UpdateByApprovalID(ctx, approvalID, updates); err != nil {
-		log.Errorw("failed to reject request", "approvalId", approvalID, "error", err)
-		return errors.New("failed to reject request")
-	}
-	log.Infow("approval request rejected", "approvalId", approvalID, "rejectedBy", rejectedBy)
-	return nil
+	return values, nil
 }
 
-// ListByPipelineRun lists all approval requests for a given pipeline run.
-func (s *ApprovalService) ListByPipelineRun(ctx context.Context, pipelineRunID string) ([]*model.ApprovalRequest, error) {
-	return s.approvalRepo.ListByPipelineRunID(ctx, pipelineRunID)
-}
-
-// CreateApprovalRequest 创建审批请求
-func (s *ApprovalService) CreateApprovalRequest(ctx context.Context, req *model.ApprovalRequest) error {
-	if req.ApprovalID == "" {
-		req.ApprovalID = uuid.NewString()
+// CreateApprovalRequest 创建具有明确候选人快照的审批请求
+func (s *ApprovalService) CreateApprovalRequest(ctx context.Context, value *model.ApprovalRequest) error {
+	if value == nil || s.approvalRepo == nil {
+		return repo.ErrApprovalInvalid
 	}
-	if req.RequiredApproverCount <= 0 {
-		req.RequiredApproverCount = 1
+	if value.ApprovalID == "" {
+		value.ApprovalID = uuid.NewString()
 	}
-	if req.Mode == "" {
-		req.Mode = "any"
+	if value.RequiredApproverCount <= 0 {
+		value.RequiredApproverCount = 1
 	}
-	req.Status = model.ApprovalStatusPending
-	return s.approvalRepo.Create(ctx, req)
+	if value.Mode == "" {
+		value.Mode = "any"
+	}
+	if _, err := model.ApprovalCandidates(value); err != nil {
+		return repo.ErrApprovalInvalid
+	}
+	value.Status, value.ApprovedCount, value.RejectedCount, value.Version = model.ApprovalStatusPending, 0, 0, 1
+	return s.approvalRepo.Create(ctx, value)
 }
 
 // MatchPolicyByScope 按作用域匹配审批策略
@@ -186,7 +175,7 @@ func (s *ApprovalService) MatchPolicyByScope(ctx context.Context, scopeType, sco
 		return nil, err
 	}
 	if len(policies) == 0 {
-		return nil, gorm.ErrRecordNotFound
+		return nil, repo.ErrApprovalNotFound
 	}
 	return &policies[0], nil
 }

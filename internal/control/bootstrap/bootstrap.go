@@ -82,6 +82,12 @@ func NewApp(
 	}
 	if rt.Services != nil && rt.Services.Deployment != nil && repos != nil {
 		deploymentService := rt.Services.Deployment
+		deploymentService.ConfigureDeploymentApprovals(repos.ApprovalDecision,
+			service.NewDeploymentApprovalAuthorizer(repos, deploymentService),
+			service.NewDeploymentRejectionAuthorizer(repos, deploymentService))
+		if rt.Services.Approval != nil {
+			rt.Services.Approval.SetDecisionValidator(deploymentService.ValidateApprovalDecision)
+		}
 		deploymentService.ConfigurePipelineDeployments(repos.JobRun, repos.StepRun,
 			service.NewPipelineDeploymentAuthorizer(repos, deploymentService))
 		if pipelineEngine != nil {

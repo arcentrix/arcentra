@@ -107,15 +107,11 @@ Not verified here: a real API server, actual admission controllers, registry pul
 
 Documentation was checked against these official primary sources during implementation. The implementation uses the stable `apps/v1` Deployment API and JSON Patch.
 
-## Approval provenance limitation
+## Approval provenance
 
-The release API verifies every persisted approval request associated with the run.
-An empty list is not proof that a DSL gate executed. Legacy in-memory DSL approval
-requests have no durable run linkage, so this API cannot verify missing/legacy gate
-provenance and does not provide a deployment-approval workflow. An authorized user
-must explicitly prepare/apply a manual release. The opt-in pipeline job rejects every
-DSL approval block instead of implying that it was enforced. Do not rely on this milestone for mandatory deployment approval
-until a durable required-gate snapshot and linkage have been implemented.
+The public manual release API still verifies every persisted approval associated with its completed source run. An empty list is not proof that a legacy DSL gate executed. The bounded pipeline engine now supports exactly one final-job durable manual gate, with trusted operator candidates, exact immutable release evidence and fresh authorization before any PATCH. See [durable deployment approvals](pipeline/durable-deployment-approvals.md).
+
+Targets with an operator `pipelineApproval` policy require that workflow: public manual release preparation and first apply are rejected, including successful runs with no approval records. Legacy plugin/IM gates and predecessor gates do not gain deployment authority. Ordinary targets with no approval policy retain their explicit manual release workflow.
 
 ## Inspecting an uncertain apply
 

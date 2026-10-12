@@ -35,6 +35,7 @@ var commitPattern = regexp.MustCompile(`^(?:[a-f0-9]{40}|[a-f0-9]{64})$`)
 // DeploymentTargetBinding 由管理员在启动时注入精确的项目和工作负载白名单
 type DeploymentTargetBinding struct {
 	AllowPipelineDeployments bool
+	PipelineApproval         *cluster.PipelineApprovalPolicy
 	Fingerprint              string
 	Tier                     string
 	ProjectID                string
@@ -48,21 +49,25 @@ type DeploymentTargets map[string]DeploymentTargetBinding
 
 // DeploymentService 将已成功的构建来源固定为可恢复的发布记录
 type DeploymentService struct {
-	records           repo.IDeploymentRepository
-	pipelines         repo.IPipelineRepository
-	artifacts         repo.IArtifactRepository
-	files             *ArtifactService
-	approvals         repo.IApprovalRepository
-	targets           DeploymentTargets
-	pipelineJobs      repo.IJobRunRepository
-	pipelineSteps     repo.IStepRunRepository
-	pipelineAuthorize PipelineDeploymentAuthorizer
+	records                 repo.IDeploymentRepository
+	pipelines               repo.IPipelineRepository
+	artifacts               repo.IArtifactRepository
+	files                   *ArtifactService
+	approvals               repo.IApprovalRepository
+	targets                 DeploymentTargets
+	pipelineJobs            repo.IJobRunRepository
+	pipelineSteps           repo.IStepRunRepository
+	pipelineAuthorize       PipelineDeploymentAuthorizer
+	approvalDecisions       repo.IApprovalDecisionRepository
+	approvalAuthorize       PipelineDeploymentAuthorizer
+	approvalRejectAuthorize PipelineDeploymentAuthorizer
 }
 
 // NewDeploymentService 创建默认无集群连接的发布服务
 func NewDeploymentService(records repo.IDeploymentRepository, pipelines repo.IPipelineRepository, artifacts repo.IArtifactRepository, files *ArtifactService, approvals repo.IApprovalRepository, targets DeploymentTargets) *DeploymentService {
 	bindings := DeploymentTargets{}
 	for ref, binding := range targets {
+		binding.PipelineApproval = cluster.ClonePipelineApprovalPolicy(binding.PipelineApproval)
 		if binding.Tier == "" {
 			binding.Tier = "prod"
 		}
@@ -86,9 +91,10 @@ type DeploymentEnvironmentInput struct {
 // DeploymentEnvironmentView 附带目标配置状态，配置存在不代表集群健康
 type DeploymentEnvironmentView struct {
 	model.DeploymentEnvironment
-	Configured               bool   `json:"configured"`
-	AllowPipelineDeployments bool   `json:"allowPipelineDeployments"`
-	Tier                     string `json:"tier"`
+	Configured               bool                            `json:"configured"`
+	AllowPipelineDeployments bool                            `json:"allowPipelineDeployments"`
+	Tier                     string                          `json:"tier"`
+	PipelineApproval         *cluster.PipelineApprovalPolicy `json:"pipelineApproval,omitempty"`
 }
 
 // DeploymentReleaseInput 仅选择既有流水线来源，不允许直接输入镜像或修改版本
@@ -137,7 +143,7 @@ func (s *DeploymentService) CreateEnvironment(ctx context.Context, project strin
 		return nil, err
 	}
 	_, err := s.adapter(entry)
-	return &DeploymentEnvironmentView{DeploymentEnvironment: *entry, Configured: err == nil, AllowPipelineDeployments: err == nil && s.targets[entry.TargetRef].AllowPipelineDeployments, Tier: s.environmentTier(entry, err)}, nil
+	return &DeploymentEnvironmentView{DeploymentEnvironment: *entry, Configured: err == nil, AllowPipelineDeployments: err == nil && s.targets[entry.TargetRef].AllowPipelineDeployments, Tier: s.environmentTier(entry, err), PipelineApproval: cluster.ClonePipelineApprovalPolicy(s.targets[entry.TargetRef].PipelineApproval)}, nil
 }
 
 // Environments 读取环境，不探测集群或推断健康
@@ -149,7 +155,7 @@ func (s *DeploymentService) Environments(ctx context.Context, project string, pa
 	out := &DeploymentEnvironmentPage{List: []DeploymentEnvironmentView{}, Total: total, Page: page, PageSize: size}
 	for _, entry := range values {
 		_, err := s.adapter(&entry)
-		out.List = append(out.List, DeploymentEnvironmentView{DeploymentEnvironment: entry, Configured: err == nil, AllowPipelineDeployments: err == nil && s.targets[entry.TargetRef].AllowPipelineDeployments, Tier: s.environmentTier(&entry, err)})
+		out.List = append(out.List, DeploymentEnvironmentView{DeploymentEnvironment: entry, Configured: err == nil, AllowPipelineDeployments: err == nil && s.targets[entry.TargetRef].AllowPipelineDeployments, Tier: s.environmentTier(&entry, err), PipelineApproval: cluster.ClonePipelineApprovalPolicy(s.targets[entry.TargetRef].PipelineApproval)})
 	}
 	return out, nil
 }
@@ -253,6 +259,9 @@ func (s *DeploymentService) CreateRelease(ctx context.Context, project, actor st
 	}
 	if _, err = s.adapter(environment); err != nil {
 		return nil, err
+	}
+	if s.targets[environment.TargetRef].PipelineApproval != nil {
+		return nil, ErrDeploymentApproval
 	}
 	run, err := s.verifyRun(ctx, project, input.PipelineID, input.PipelineRunID)
 	if err != nil {
@@ -384,7 +393,13 @@ func (s *DeploymentService) advance(ctx context.Context, project, id, actor stri
 					return ErrDeploymentTargetChanged
 				}
 				if current.Origin == "pipeline_job" {
-					return s.authorizePipelineRelease(checkCtx, current, actor, automatic)
+					if err := s.verifyDeploymentApproval(checkCtx, current); err != nil {
+						return err
+					}
+					if err := s.authorizePipelineRelease(checkCtx, current, actor, automatic); err != nil {
+						return err
+					}
+					return s.finalDeploymentApprovalDeadline(checkCtx, current)
 				}
 				return s.pipelinePermission(checkCtx, actor, current.ProjectID, current.PipelineID, current.EnvironmentID, false)
 			})
@@ -449,7 +464,12 @@ func (s *DeploymentService) DeploymentAction(ctx context.Context, project, id st
 }
 
 func deploymentTargetFingerprint(ref string, binding DeploymentTargetBinding, endpoint string) string {
-	sum := sha256.Sum256([]byte(strings.Join([]string{ref, binding.ProjectID, binding.Target.Namespace, binding.Target.Deployment, binding.Target.Container, binding.Tier, strings.TrimRight(endpoint, "/")}, "\x00")))
+	identity := strings.Join([]string{ref, binding.ProjectID, binding.Target.Namespace, binding.Target.Deployment, binding.Target.Container, binding.Tier, strings.TrimRight(endpoint, "/")}, "\x00")
+	if binding.PipelineApproval != nil {
+		policy, _ := sonic.MarshalString(cluster.ClonePipelineApprovalPolicy(binding.PipelineApproval))
+		identity += "\x00pipeline-approval-v1\x00" + policy
+	}
+	sum := sha256.Sum256([]byte(identity))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -488,7 +508,7 @@ func (s *DeploymentService) Environment(ctx context.Context, project, id string)
 		return nil, ErrDeploymentNotFound
 	}
 	_, err = s.adapter(entry)
-	return &DeploymentEnvironmentView{DeploymentEnvironment: *entry, Configured: err == nil, AllowPipelineDeployments: err == nil && s.targets[entry.TargetRef].AllowPipelineDeployments, Tier: s.environmentTier(entry, err)}, nil
+	return &DeploymentEnvironmentView{DeploymentEnvironment: *entry, Configured: err == nil, AllowPipelineDeployments: err == nil && s.targets[entry.TargetRef].AllowPipelineDeployments, Tier: s.environmentTier(entry, err), PipelineApproval: cluster.ClonePipelineApprovalPolicy(s.targets[entry.TargetRef].PipelineApproval)}, nil
 }
 
 func deploymentDefinitionRevision(run *model.PipelineRun) string {

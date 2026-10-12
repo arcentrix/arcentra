@@ -3,7 +3,10 @@
 
 package model
 
-import "time"
+import (
+	"gorm.io/datatypes"
+	"time"
+)
 
 // DeploymentEnvironment 保存不可变的项目发布目标，不包含集群地址或凭据
 type DeploymentEnvironment struct {
@@ -24,6 +27,11 @@ func (DeploymentEnvironment) TableName() string { return "deployment_environment
 // DeploymentRelease 保存不可变制品来源和可恢复的部署观察记录
 type DeploymentRelease struct {
 	BaseModel
+	// ApprovalID 与唯一持久化审批记录交叉绑定
+	ApprovalID           *string          `gorm:"column:approval_id;type:varchar(64);uniqueIndex:uk_deployment_approval" json:"approvalId,omitempty"`
+	ApprovalEvidenceHash string           `gorm:"column:approval_evidence_hash;type:varchar(64)" json:"approvalEvidenceHash,omitempty"`
+	ApprovalTarget       datatypes.JSON   `gorm:"column:approval_target;type:json" json:"approvalTarget,omitempty"`
+	ApprovalRequest      *ApprovalRequest `gorm:"-" json:"-"`
 	// Origin 区分显式发布与经授权的流水线部署步骤
 	Origin            string `gorm:"column:origin;type:varchar(32);not null;default:'manual'" json:"origin"`
 	ExecutionJobRunID string `gorm:"column:execution_job_run_id;type:varchar(64)" json:"executionJobRunId,omitempty"`

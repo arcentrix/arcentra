@@ -306,3 +306,32 @@ func TestCopilotWrongSecretKeyFailsBeforeContentRead(t *testing.T) {
 		t.Fatalf("%v reads=%d calls=%d", err, logs.reads, p.calls)
 	}
 }
+
+// 项目 SCM 凭据既可能整体出现，也可能仅出现拆分后的认证值
+func TestCopilotRedactsProjectSCMCredentials(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		kind       int
+		credential string
+		values     []string
+	}{
+		{"token", model.AuthTypeToken, "opaque-scm-token-Xk92Qa", []string{"opaque-scm-token-Xk92Qa"}},
+		{"password", model.AuthTypePassword, "scm-user-Xk92:opaque-password-Qa32", []string{"scm-user-Xk92:opaque-password-Qa32", "opaque-password-Qa32"}},
+		{"ssh", model.AuthTypeSSHKey, "opaque-ssh-key-9vJwRa", []string{"opaque-ssh-key-9vJwRa"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, _, _ := copilotFixture(t)
+			r, err := s.redactor(context.Background(), &model.Project{ProjectID: "p", AuthType: tc.kind, Credential: tc.credential}, &model.PipelineRun{PipelineID: "pipe"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, value := range tc.values {
+				for _, encoded := range []string{value, base64.StdEncoding.EncodeToString([]byte(value))} {
+					if strings.Contains(r.Redact("source snippet "+encoded), encoded) {
+						t.Fatal("SCM credential not redacted")
+					}
+				}
+			}
+		})
+	}
+}

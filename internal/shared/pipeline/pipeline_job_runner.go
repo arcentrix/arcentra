@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arcentrix/arcentra/internal/shared/deployment"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/bytedance/sonic"
 )
@@ -75,7 +76,7 @@ func (r *JobRunner) Run(ctx context.Context) error {
 	}
 
 	// Handle approval if required
-	if r.job.Approval != nil && r.job.Approval.Required {
+	if r.job.Approval != nil && r.job.Approval.Required && !(deployment.IsPipelineDeploymentApproval(r.job.Approval) && r.ctx.RunDeployment != nil && len(r.job.Steps) == 1 && r.job.Steps[0].Uses == "builtin:kubernetes") {
 		if err := r.handleApproval(ctx); err != nil {
 			return fmt.Errorf("approval failed: %w", err)
 		}

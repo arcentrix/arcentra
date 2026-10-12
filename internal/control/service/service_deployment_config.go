@@ -41,11 +41,14 @@ func ConfigureDeployment(ctx context.Context, s *DeploymentService, config clust
 		if _, exists := bindings[target.Ref]; exists || workloads[key] {
 			return errors.New("duplicate deployment target or workload binding")
 		}
+		if err := cluster.ValidatePipelineApprovalPolicy(target.PipelineApproval); err != nil {
+			return err
+		}
 		adapter, err := cluster.NewConfiguredAdapter(ctx, target)
 		if err != nil {
 			return err
 		}
-		binding := DeploymentTargetBinding{AllowPipelineDeployments: target.AllowPipelineDeployments, ProjectID: target.ProjectID, Tier: target.Tier, Target: cluster.Target{Namespace: target.Namespace, Deployment: target.Deployment, Container: target.Container}, Adapter: adapter}
+		binding := DeploymentTargetBinding{PipelineApproval: cluster.ClonePipelineApprovalPolicy(target.PipelineApproval), AllowPipelineDeployments: target.AllowPipelineDeployments, ProjectID: target.ProjectID, Tier: target.Tier, Target: cluster.Target{Namespace: target.Namespace, Deployment: target.Deployment, Container: target.Container}, Adapter: adapter}
 		binding.Fingerprint = deploymentTargetFingerprint(target.Ref, binding, target.Server)
 		bindings[target.Ref] = binding
 		workloads[key] = true

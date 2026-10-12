@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"maps"
 	"runtime"
+	"strings"
 	"time"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
@@ -132,10 +133,19 @@ func (s *AgentServiceImpl) Register(ctx context.Context, _ *agentv1.RegisterRequ
 	if err != nil {
 		return nil, err
 	}
+	registrationToken := s.agentConf.Grpc.RegistrationToken
+	if strings.TrimSpace(s.agentConf.Agent.ID) != "" && strings.TrimSpace(s.agentConf.Grpc.Token) != "" {
+		// 显式身份优先，认证失败直接返回；禁止用遗留注册令牌创建替代身份
+		registrationToken = ""
+	} else if strings.TrimSpace(registrationToken) != "" {
+		if err := taskqueue.CheckTerminalOutboxForEnrollment(ctx, s.agentConf.Agent.WorkspaceDir); err != nil {
+			return nil, err
+		}
+	}
 	regReq := &agentv1.RegisterRequest{
 		AgentId:               s.agentConf.Agent.ID,
 		Token:                 s.agentConf.Grpc.Token,
-		RegistrationToken:     s.agentConf.Grpc.RegistrationToken,
+		RegistrationToken:     registrationToken,
 		AgentName:             s.agentConf.Agent.Name,
 		Ip:                    net.GetLocalIP(),
 		Os:                    runtime.GOOS,
