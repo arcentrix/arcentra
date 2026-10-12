@@ -40,8 +40,14 @@ func ProvideEngine(
 	logger *log.Logger,
 	appConf *config.AppConfig,
 	services *service.Services,
-) *Process {
-	return NewProcess(repos, pluginMgr, taskQueue, st, logger, appConf, services.Secret)
+) (*Process, error) {
+	engine := NewProcess(repos, pluginMgr, taskQueue, st, logger, appConf, services.Secret)
+	engine.initLocalLogPublisher(services.LogAggregator)
+	if engine.logInitErr != nil {
+		engine.Stop()
+		return nil, engine.logInitErr
+	}
+	return engine, nil
 }
 
 // ProvideTaskQueueProducer creates a Kafka-backed task queue for the control

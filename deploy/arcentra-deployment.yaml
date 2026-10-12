@@ -1,3 +1,6 @@
+# IMPORTANT: this example has no persistent data volume. Configure a private,
+# per-instance PVC mounted at /var/lib/arcentra before relying on WAL/log-spool
+# recovery across Pod replacement. Do not share a spool between replicas.
 # Copyright 2026 Arcentra Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");

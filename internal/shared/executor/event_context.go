@@ -20,18 +20,26 @@ import (
 
 // EventContext carries attributes for CloudEvents extensions.
 type EventContext struct {
-	PipelineID string
-	StepID     string
-	StepName   string
-	PluginName string
-	AgentID    string
-	TraceID    string
-	SpanID     string
+	PipelineRunID string
+	JobRunID      string
+	PipelineID    string
+	StepID        string
+	StepName      string
+	PluginName    string
+	AgentID       string
+	TraceID       string
+	SpanID        string
 }
 
 // Extensions builds extension attributes.
 func (c EventContext) Extensions() map[string]any {
 	ext := make(map[string]any)
+	if c.PipelineRunID != "" {
+		ext["pipelineRunId"] = c.PipelineRunID
+	}
+	if c.JobRunID != "" {
+		ext["jobRunId"] = c.JobRunID
+	}
 	if c.PipelineID != "" {
 		ext["pipelineId"] = c.PipelineID
 	}
@@ -82,5 +90,11 @@ func buildEventContext(req *ExecutionRequest) EventContext {
 			ctx.PluginName = req.Step.Uses
 		}
 	}
+	if req.StepRunID != "" {
+		ctx.StepID = req.StepRunID
+	}
+	ctx.PipelineRunID = req.PipelineRunID
+	ctx.JobRunID = req.JobRunID
+	ctx.AgentID = req.AgentID
 	return ctx
 }

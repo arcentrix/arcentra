@@ -17,13 +17,13 @@ package model
 // Role 角色表（系统内置与组织自定义统一模型）
 type Role struct {
 	BaseModel
-	RoleID      string `gorm:"column:role_id;not null;uniqueIndex" json:"roleId"`
+	RoleID      string `gorm:"column:role_id;not null;uniqueIndex;type:varchar(64)" json:"roleId"`
 	Name        string `gorm:"column:name;not null" json:"name"`
 	DisplayName string `gorm:"column:display_name;not null;default:''" json:"displayName"`
 	Description string `gorm:"column:description;not null;default:''" json:"description"`
-	ScopeType   string `gorm:"column:scope_type;not null;default:'platform';index" json:"scopeType"`
+	ScopeType   string `gorm:"column:scope_type;not null;default:'platform';index;type:varchar(32)" json:"scopeType"`
 	IsSystem    int    `gorm:"column:is_system;not null;default:0" json:"isSystem"`
-	OrgID       string `gorm:"column:org_id;index" json:"orgId"`
+	OrgID       string `gorm:"column:org_id;index;type:varchar(64)" json:"orgId"`
 	IsEnabled   int    `gorm:"column:is_enabled;not null;default:1" json:"isEnabled"`
 }
 

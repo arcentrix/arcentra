@@ -15,7 +15,12 @@
 package router
 
 import (
+	"errors"
 	"strings"
+
+	"github.com/bytedance/sonic"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/service"
@@ -31,7 +36,7 @@ func (rt *Router) pipelineRouter(r fiber.Router, authMiddleware fiber.Handler, s
 	{
 		pipeline.Post("/",
 			authMiddleware, subjectMiddleware,
-			rt.permission("pipeline:create", middleware.ResolvePlatformScope()),
+			rt.permission("pipeline:create", rt.resolveCreatePipelineScope()),
 			rt.createPipeline,
 		)
 		pipeline.Put("/:pipelineID",
@@ -45,7 +50,7 @@ func (rt *Router) pipelineRouter(r fiber.Router, authMiddleware fiber.Handler, s
 			rt.getPipeline,
 		)
 		pipeline.Get("/", authMiddleware, subjectMiddleware,
-			rt.permission("pipeline:read", middleware.ResolvePlatformScope()), rt.listPipelines)
+			rt.collectionAccess(), rt.listPipelines)
 		pipeline.Delete("/:pipelineID",
 			authMiddleware, subjectMiddleware,
 			rt.permission("pipeline:delete", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
@@ -81,6 +86,12 @@ func (rt *Router) pipelineRouter(r fiber.Router, authMiddleware fiber.Handler, s
 		pipeline.Get("/runs/:runID", authMiddleware, subjectMiddleware,
 			rt.permission("pipeline:read", middleware.ResolvePlatformScope()), rt.getPipelineRun)
 
+		pipeline.Get("/:pipelineID/runs/:runID", authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:read", middleware.ResolveFromPathPipelineID("pipelineID", rt)), rt.getScopedPipelineRun)
+		pipeline.Get("/:pipelineID/runs/:runID/jobs", authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:read", middleware.ResolveFromPathPipelineID("pipelineID", rt)), rt.listPipelineRunJobs)
+		pipeline.Get("/:pipelineID/runs/:runID/logs", authMiddleware, subjectMiddleware,
+			rt.permission("pipeline:read", middleware.ResolveFromPathPipelineID("pipelineID", rt)), rt.getPipelineRunLogs)
 		pipeline.Post("/:pipelineID/runs/:runID/stop",
 			authMiddleware, subjectMiddleware,
 			rt.permission("pipeline:cancel", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
@@ -141,6 +152,7 @@ func (rt *Router) createPipeline(c *fiber.Ctx) error {
 	}
 
 	return http.Detail(c, map[string]any{
+		"pipelineId": resp.GetPipelineId(),
 		"pipelineID": resp.GetPipelineId(),
 		"message":    resp.GetMessage(),
 	})
@@ -201,30 +213,18 @@ func (rt *Router) getPipeline(c *fiber.Ctx) error {
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
 		return http.Err(c, e.code, e.msg)
 	}
-	return http.Detail(c, resp.GetPipeline())
+	return pipelineProtoDetail(c, resp.GetPipeline())
 }
 
 func (rt *Router) listPipelines(c *fiber.Ctx) error {
-	req := &pipelinev1.ListPipelinesRequest{
-		ProjectId: strings.TrimSpace(c.Query("projectId")),
-		Name:      strings.TrimSpace(c.Query("name")),
-		Page:      int32(maxIntWithOne(rt.HTTP.QueryInt(c, "page"))),
-		PageSize:  int32(maxIntWithOne(rt.HTTP.QueryInt(c, "pageSize"))),
-		Status:    parsePipelineStatus(c.Query("status")),
-	}
-	resp, err := rt.pipelineService().ListPipelines(c.Context(), req)
+	page, size := normalizedCollectionPage(c.QueryInt("page", 1), c.QueryInt("pageSize", 20))
+	request := &pipelinev1.ListPipelinesRequest{ProjectId: strings.TrimSpace(c.Query("projectId")), Name: strings.TrimSpace(c.Query("name")), Status: parsePipelineStatus(c.Query("status")), Page: int32(page), PageSize: int32(size)}
+	list, total, err := rt.authorizedPipelineList(c, request)
 	if err != nil {
-		return http.Err(c, http.Failed.Code, err.Error())
+		log.Errorw("list authorized pipelines failed", "error", err)
+		return http.Err(c, http.InternalError.Code, http.InternalError.Msg)
 	}
-	if !resp.GetSuccess() {
-		return http.Err(c, http.Failed.Code, resp.GetMessage())
-	}
-	return http.Detail(c, map[string]any{
-		"list":     resp.GetPipelines(),
-		"total":    resp.GetTotal(),
-		"page":     resp.GetPage(),
-		"pageSize": resp.GetPageSize(),
-	})
+	return http.Detail(c, map[string]any{"list": pipelineProtoList(list), "total": total, "page": page, "pageSize": size})
 }
 
 func (rt *Router) deletePipeline(c *fiber.Ctx) error {
@@ -255,7 +255,7 @@ func (rt *Router) getPipelineSpec(c *fiber.Ctx) error {
 		return http.Err(c, e.code, e.msg)
 	}
 	return http.Detail(c, map[string]any{
-		"spec":             resp.GetSpec(),
+		"spec":             pipelineProtoValue(resp.GetSpec()),
 		"format":           resp.GetFormat().String(),
 		"headCommitSha":    resp.GetHeadCommitSha(),
 		"branch":           resp.GetBranch(),
@@ -269,15 +269,19 @@ func (rt *Router) validatePipelineSpec(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	var req struct {
-		Spec   *pipelinev1.Spec `json:"spec"`
-		Format string           `json:"format"`
+		Spec   map[string]any `json:"spec"`
+		Format string         `json:"format"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
+	parsedSpec, parseErr := parseHTTPPipelineSpec(req.Spec)
+	if parseErr != nil {
+		return http.Err(c, http.BadRequest.Code, parseErr.Error())
+	}
 	resp, err := rt.pipelineService().ValidatePipelineSpec(c.Context(), &pipelinev1.ValidatePipelineSpecRequest{
 		PipelineId: pipelineID,
-		Spec:       req.Spec,
+		Spec:       parsedSpec,
 		Format:     parseSpecFormat(req.Format),
 	})
 	if err != nil {
@@ -298,12 +302,12 @@ func (rt *Router) savePipelineSpec(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	var req struct {
-		Spec                  *pipelinev1.Spec `json:"spec"`
-		Format                string           `json:"format"`
-		ExpectedHeadCommitSha string           `json:"expectedHeadCommitSha"`
-		CommitMessage         string           `json:"commitMessage"`
-		RequestID             string           `json:"requestId"`
-		Editor                string           `json:"editor"`
+		Spec                  map[string]any `json:"spec"`
+		Format                string         `json:"format"`
+		ExpectedHeadCommitSha string         `json:"expectedHeadCommitSha"`
+		CommitMessage         string         `json:"commitMessage"`
+		RequestID             string         `json:"requestId"`
+		Editor                string         `json:"editor"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
@@ -312,9 +316,13 @@ func (rt *Router) savePipelineSpec(c *fiber.Ctx) error {
 	if editor == "" {
 		editor = auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
 	}
+	parsedSpec, parseErr := parseHTTPPipelineSpec(req.Spec)
+	if parseErr != nil {
+		return http.Err(c, http.BadRequest.Code, parseErr.Error())
+	}
 	resp, err := rt.pipelineService().SavePipelineSpec(c.Context(), &pipelinev1.SavePipelineSpecRequest{
 		PipelineId:            pipelineID,
-		Spec:                  req.Spec,
+		Spec:                  parsedSpec,
 		Format:                parseSpecFormat(req.Format),
 		ExpectedHeadCommitSha: req.ExpectedHeadCommitSha,
 		CommitMessage:         req.CommitMessage,
@@ -366,6 +374,7 @@ func (rt *Router) triggerPipeline(c *fiber.Ctx) error {
 		return http.Err(c, e.code, e.msg)
 	}
 	return http.Detail(c, map[string]any{
+		"runId":   resp.GetRunId(),
 		"runID":   resp.GetRunId(),
 		"message": resp.GetMessage(),
 	})
@@ -380,7 +389,7 @@ func (rt *Router) listPipelineRuns(c *fiber.Ctx) error {
 		PipelineId: pipelineID,
 		Status:     parsePipelineStatus(c.Query("status")),
 		Page:       int32(maxIntWithOne(rt.HTTP.QueryInt(c, "page"))),
-		PageSize:   int32(maxIntWithOne(rt.HTTP.QueryInt(c, "pageSize"))),
+		PageSize:   int32(c.QueryInt("pageSize", 20)),
 	})
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
@@ -389,7 +398,7 @@ func (rt *Router) listPipelineRuns(c *fiber.Ctx) error {
 		return http.Err(c, http.Failed.Code, resp.GetMessage())
 	}
 	return http.Detail(c, map[string]any{
-		"list":     resp.GetRuns(),
+		"list":     pipelineProtoList(resp.GetRuns()),
 		"total":    resp.GetTotal(),
 		"page":     resp.GetPage(),
 		"pageSize": resp.GetPageSize(),
@@ -408,7 +417,7 @@ func (rt *Router) getPipelineRun(c *fiber.Ctx) error {
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
 		return http.Err(c, e.code, e.msg)
 	}
-	return http.Detail(c, resp.GetRun())
+	return pipelineProtoDetail(c, resp.GetRun())
 }
 
 func (rt *Router) stopPipeline(c *fiber.Ctx) error {
@@ -580,4 +589,71 @@ func maxIntWithOne(a int) int {
 		return a
 	}
 	return 1
+}
+
+func pipelineProtoValue(message proto.Message) any {
+	data, err := (protojson.MarshalOptions{UseEnumNumbers: true, EmitUnpopulated: true}).Marshal(message)
+	if err != nil {
+		return nil
+	}
+	var value any
+	if err := sonic.Unmarshal(data, &value); err != nil {
+		return nil
+	}
+	return value
+}
+
+func pipelineProtoList[T proto.Message](messages []T) []any {
+	out := make([]any, 0, len(messages))
+	for _, message := range messages {
+		out = append(out, pipelineProtoValue(message))
+	}
+	return out
+}
+
+func pipelineProtoDetail(c *fiber.Ctx, message proto.Message) error {
+	return http.Detail(c, pipelineProtoValue(message))
+}
+
+func parseHTTPPipelineSpec(value map[string]any) (*pipelinev1.Spec, error) {
+	data, err := sonic.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	spec := &pipelinev1.Spec{}
+	if err := protojson.Unmarshal(data, spec); err != nil {
+		return nil, err
+	}
+	return spec, nil
+}
+
+func pipelineRunHTTPError(c *fiber.Ctx, err error) error {
+	if errors.Is(err, service.ErrPipelineRunNotFound) {
+		return http.Err(c, http.NotFound.Code, "pipeline run or step not found")
+	}
+	return http.Err(c, http.Failed.Code, err.Error())
+}
+
+func (rt *Router) getScopedPipelineRun(c *fiber.Ctx) error {
+	run, err := rt.pipelineService().GetScopedPipelineRun(c.Context(), c.Params("pipelineID"), c.Params("runID"))
+	if err != nil {
+		return pipelineRunHTTPError(c, err)
+	}
+	return pipelineProtoDetail(c, run)
+}
+
+func (rt *Router) listPipelineRunJobs(c *fiber.Ctx) error {
+	jobs, err := rt.pipelineService().ListPipelineRunJobs(c.Context(), c.Params("pipelineID"), c.Params("runID"))
+	if err != nil {
+		return pipelineRunHTTPError(c, err)
+	}
+	return http.Detail(c, map[string]any{"list": jobs, "total": len(jobs)})
+}
+
+func (rt *Router) getPipelineRunLogs(c *fiber.Ctx) error {
+	entries, truncated, err := rt.pipelineService().GetPipelineRunLogs(c.Context(), c.Params("pipelineID"), c.Params("runID"), strings.TrimSpace(c.Query("stepRunId")), int32(c.QueryInt("fromLine", 0)), c.QueryInt("limit", 1000))
+	if err != nil {
+		return pipelineRunHTTPError(c, err)
+	}
+	return http.Detail(c, map[string]any{"entries": entries, "truncated": truncated})
 }

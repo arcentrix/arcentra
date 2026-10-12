@@ -15,12 +15,15 @@
 package grpc
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/safe"
@@ -50,7 +53,8 @@ type Conf struct {
 }
 
 type ServerWrapper struct {
-	svr *grpc.Server
+	svr           *grpc.Server
+	streamService *service.StreamServiceImpl
 }
 
 // NewGrpcServer 创建 gRPC 服务
@@ -90,9 +94,10 @@ func (s *ServerWrapper) Register(services *service.Services,
 	kafkaSettings service.KafkaSettings,
 ) {
 	agentv1.RegisterAgentServiceServer(s.svr, service.NewAgentServiceImpl(services.Agent, services.StorageRepo))
-	gatewayv1.RegisterGatewayServiceServer(s.svr, service.NewGatewayServiceImpl())
+	gatewayv1.RegisterGatewayServiceServer(s.svr, service.NewGatewayServiceImpl(repo.NewGatewayEventRepository(db)))
 	steprunv1.RegisterStepRunServiceServer(s.svr, service.NewStepRunServiceImpl(services.StepRunRepo))
-	streamv1.RegisterStreamServiceServer(s.svr, service.NewStreamService(redisClient, db, kafkaSettings))
+	s.streamService = service.NewStreamService(redisClient, db, kafkaSettings, services.LogAggregator)
+	streamv1.RegisterStreamServiceServer(s.svr, s.streamService)
 	pipelinev1.RegisterPipelineServiceServer(s.svr, service.NewPipelineServiceImpl(services))
 	// reflection（调试）
 	reflection.Register(s.svr)
@@ -124,11 +129,18 @@ func (s *ServerWrapper) Start(cfg Conf) error {
 	<-ch
 
 	log.Info("Shutting down gRPC server...")
-	s.svr.GracefulStop()
+	s.Stop()
 	return nil
 }
 
 // Stop 手动停止
 func (s *ServerWrapper) Stop() {
 	s.svr.GracefulStop()
+	if s.streamService != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := s.streamService.Close(ctx); err != nil {
+			log.Errorw("failed to stop log consumer", "error", err)
+		}
+	}
 }

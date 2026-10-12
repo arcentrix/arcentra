@@ -18,14 +18,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 
 	"github.com/bytedance/sonic"
 )
-
-const artifactsBuildIDLatest = "latest"
 
 // ArtifactsUploadArgs 制品上传参数
 type ArtifactsUploadArgs struct {
@@ -44,170 +39,73 @@ type ArtifactsDownloadArgs struct {
 	Path  string   `json:"path,omitempty"`  // 单个文件路径
 }
 
-// handleArtifactsUpload handles artifact upload
-func (m *Manager) handleArtifactsUpload(_ context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
-	var uploadParams ArtifactsUploadArgs
-	if err := sonic.Unmarshal(params, &uploadParams); err != nil {
+// handleArtifactsUpload 将当前作业的制品保存到本次流水线运行目录
+func (m *Manager) handleArtifactsUpload(ctx context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
+	var args ArtifactsUploadArgs
+	if err := sonic.Unmarshal(params, &args); err != nil {
 		return nil, fmt.Errorf("failed to parse upload params: %w", err)
 	}
-
-	if len(uploadParams.Paths) == 0 {
+	if len(args.Paths) == 0 {
 		return nil, fmt.Errorf("paths are required")
 	}
 
-	// 获取artifacts目录
-	if opts == nil || opts.ExecutionContext == nil {
-		return nil, fmt.Errorf("execution context is required")
+	workspace, artifacts, artifactsDir, err := openTransferRoots(ctx, opts, "artifacts", "", true)
+	if err != nil {
+		return nil, err
 	}
+	defer func() { _ = workspace.Close() }()
+	defer func() { _ = artifacts.Close() }()
 
-	execCtx := opts.ExecutionContext
-
-	// 获取artifacts目录路径
-	workspaceRoot := execCtx.GetWorkspaceRoot()
-	pipelineName := execCtx.GetPipeline().Namespace
-	buildID := artifactsBuildIDLatest // TODO: Get build ID from context if available
-
-	artifactsDir := filepath.Join(workspaceRoot, pipelineName, buildID, "artifacts")
-	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create artifacts directory: %w", err)
+	paths, err := expandTransferPaths(ctx, workspace, args.Paths)
+	if err != nil {
+		return nil, err
 	}
-
-	// 上传文件
-	uploadedFiles := make([]string, 0)
-	for _, path := range uploadParams.Paths {
-		srcPath := filepath.Join(opts.Workspace, path)
-		dstPath := filepath.Join(artifactsDir, path)
-
-		// 确保目标目录存在
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
-			return nil, fmt.Errorf("create destination directory: %w", err)
+	for _, name := range paths {
+		if err := copyRootPath(ctx, workspace, artifacts, name); err != nil {
+			return nil, fmt.Errorf("upload %s: %w", name, err)
 		}
-
-		// 复制文件或目录
-		if err := m.copyPath(srcPath, dstPath); err != nil {
-			return nil, fmt.Errorf("copy %s: %w", path, err)
-		}
-
-		uploadedFiles = append(uploadedFiles, path)
 	}
 
-	result := map[string]any{
+	return sonic.Marshal(map[string]any{
 		"success":        true,
-		"uploaded_files": uploadedFiles,
+		"uploaded_files": paths,
 		"artifacts_dir":  artifactsDir,
-	}
-
-	return sonic.Marshal(result)
+	})
 }
 
-// handleArtifactsDownload handles artifact download
-func (m *Manager) handleArtifactsDownload(_ context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
-	var downloadParams ArtifactsDownloadArgs
-	if err := sonic.Unmarshal(params, &downloadParams); err != nil {
+// handleArtifactsDownload 从指定作业下载本次流水线运行的制品并保留目录结构
+func (m *Manager) handleArtifactsDownload(ctx context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
+	var args ArtifactsDownloadArgs
+	if err := sonic.Unmarshal(params, &args); err != nil {
 		return nil, fmt.Errorf("failed to parse download params: %w", err)
 	}
 
-	// 获取artifacts目录
-	if opts == nil || opts.ExecutionContext == nil {
-		return nil, fmt.Errorf("execution context is required")
+	workspace, artifacts, _, err := openTransferRoots(ctx, opts, "artifacts", args.Job, false)
+	if err != nil {
+		return nil, err
 	}
+	defer func() { _ = workspace.Close() }()
+	defer func() { _ = artifacts.Close() }()
 
-	execCtx := opts.ExecutionContext
-
-	workspaceRoot := execCtx.GetWorkspaceRoot()
-	pipelineName := execCtx.GetPipeline().Namespace
-	buildID := "latest" // TODO: Get build ID from context if available
-
-	artifactsDir := filepath.Join(workspaceRoot, pipelineName, buildID, "artifacts")
-
-	// 确定要下载的路径
-	paths := downloadParams.Paths
-	if len(paths) == 0 && downloadParams.Path != "" {
-		paths = []string{downloadParams.Path}
+	requested := args.Paths
+	if len(requested) == 0 && args.Path != "" {
+		requested = []string{args.Path}
 	}
-	if len(paths) == 0 {
-		// 下载所有文件
-		paths = []string{"*"}
+	if len(requested) == 0 {
+		requested = []string{"*"}
 	}
-
-	// 下载文件
-	downloadedFiles := make([]string, 0)
-	for _, path := range paths {
-		srcPath := filepath.Join(artifactsDir, path)
-		dstPath := filepath.Join(opts.Workspace, filepath.Base(path))
-
-		if err := m.copyPath(srcPath, dstPath); err != nil {
-			return nil, fmt.Errorf("copy %s: %w", path, err)
+	paths, err := expandTransferPaths(ctx, artifacts, requested)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range paths {
+		if err := copyRootPath(ctx, artifacts, workspace, name); err != nil {
+			return nil, fmt.Errorf("download %s: %w", name, err)
 		}
-
-		downloadedFiles = append(downloadedFiles, path)
 	}
 
-	result := map[string]any{
+	return sonic.Marshal(map[string]any{
 		"success":          true,
-		"downloaded_files": downloadedFiles,
-	}
-
-	return sonic.Marshal(result)
-}
-
-// copyPath copies a file or directory
-func (m *Manager) copyPath(src, dst string) error {
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-
-	if srcInfo.IsDir() {
-		return m.copyDir(src, dst)
-	}
-
-	return m.copyFile(src, dst)
-}
-
-// copyFile copies a file
-func (m *Manager) copyFile(src, dst string) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = srcFile.Close() }()
-
-	dstFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dstFile.Close() }()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
-}
-
-// copyDir copies a directory recursively
-func (m *Manager) copyDir(src, dst string) error {
-	if err := os.MkdirAll(dst, 0o755); err != nil {
-		return err
-	}
-
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		srcPath := filepath.Join(src, entry.Name())
-		dstPath := filepath.Join(dst, entry.Name())
-
-		if entry.IsDir() {
-			if err := m.copyDir(srcPath, dstPath); err != nil {
-				return err
-			}
-		} else {
-			if err := m.copyFile(srcPath, dstPath); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
+		"downloaded_files": paths,
+	})
 }

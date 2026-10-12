@@ -19,7 +19,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 
-// PayloadToExecutionRequest converts StepRunTaskPayload to ExecutionRequest for executor.Manager.
+// PayloadToExecutionRequest 将队列步骤载荷转换为执行请求并保留运行标识
 func PayloadToExecutionRequest(payload *taskqueue.StepRunTaskPayload, defaultJobTimeoutSec int) *executor.ExecutionRequest {
 	if payload == nil {
 		return nil
@@ -50,6 +50,11 @@ func PayloadToExecutionRequest(payload *taskqueue.StepRunTaskPayload, defaultJob
 		Namespace: payload.PipelineID,
 	}
 	req := executor.NewExecutionRequest(step, job, pipeline)
+	req.PipelineRunID = payload.PipelineRunID
+	req.JobRunID = payload.JobID
+	req.StepRunID = payload.StepRunID
+	req.StepIndex = payload.StepIndex
+	req.AgentID = payload.AgentID
 	req.Workspace = payload.Workspace
 	req.Env = payload.Env
 	if req.Env == nil {

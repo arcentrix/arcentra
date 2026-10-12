@@ -37,6 +37,13 @@ type Executor interface {
 
 // ExecutionRequest 执行请求
 type ExecutionRequest struct {
+	// 运行标识用于关联状态、事件与构建日志
+	PipelineRunID string
+	JobRunID      string
+	StepRunID     string
+	AgentID       string
+	StepIndex     int32
+
 	// Step 信息
 	Step *StepInfo
 
@@ -49,6 +56,9 @@ type ExecutionRequest struct {
 	// 执行环境
 	Workspace string
 	Env       map[string]string
+
+	// OutputHandler 接收执行中的标准输出与错误输出
+	OutputHandler func(stream, content string)
 
 	// 执行选项
 	Options *ExecutionOptions
@@ -203,7 +213,7 @@ func (r *ExecutionResult) WithMetadata(key string, value any) *ExecutionResult {
 // ParseTimeout 解析超时字符串，无效或空时使用 defaultSec 作为默认秒数。
 func ParseTimeout(raw string, defaultSec int) time.Duration {
 	if strings.TrimSpace(raw) != "" {
-		if d, err := time.ParseDuration(raw); err == nil {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
 			return d
 		}
 	}
@@ -227,6 +237,9 @@ func BuildCommandFromStepArgs(step *StepInfo) string {
 		}
 	}
 	if value, ok := step.Args["commands"]; ok {
+		if list, ok := value.([]string); ok {
+			return strings.Join(list, "\n")
+		}
 		if list, ok := value.([]any); ok {
 			parts := make([]string, 0, len(list))
 			for i := range list {

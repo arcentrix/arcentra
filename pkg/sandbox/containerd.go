@@ -15,582 +15,647 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
-	"os"
+	"maps"
+	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/arcentrix/arcentra/pkg/log"
-	"github.com/arcentrix/arcentra/pkg/safe"
 	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/cio"
-	"github.com/containerd/containerd/containers"
+	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/namespaces"
-	"github.com/containerd/containerd/oci"
-	"github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
 )
 
-// Containerd implements Sandbox interface using containerd
+const cleanupTimeout = 20 * time.Second
+const maxCapturedBytes = 4 * 1024 * 1024
+
+// Containerd 提供显式生命周期的离线 containerd 执行后端
+// 此后端尚未接入 Agent，不能作为不可信多租户代码的安全保证
 type Containerd struct {
-	client     *containerd.Client
+	backend    runtimeBackend
 	namespace  string
-	logger     log.Logger
-	config     *ContainerdConfig
-	containers map[string]containerd.Container
+	config     ContainerdConfig
+	mu         sync.RWMutex
+	containers map[string]*containerState
+	creating   sync.WaitGroup
+	closing    bool
+	closed     bool
+	closeMu    sync.Mutex
 }
 
-// ContainerdConfig containerd sandbox configuration
+type containerState struct {
+	container    runtimeContainer
+	gate         chan struct{}
+	mu           sync.Mutex
+	activeCancel context.CancelFunc
+	stopping     bool
+	task         runtimeTask
+	processes    map[string]runtimeProcess
+	stopped      bool
+	removed      bool
+	logs         *boundedBuffer
+}
+
+func (s *containerState) acquire(ctx context.Context) error {
+	select {
+	case s.gate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func (s *containerState) release() { <-s.gate }
+func (s *containerState) cancelActive() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stopping = true
+	if s.activeCancel != nil {
+		s.activeCancel()
+	}
+}
+
+// ContainerdConfig 定义 containerd 连接与默认执行配置
 type ContainerdConfig struct {
-	// UnixSocket is the containerd unix socket path
-	UnixSocket string
-
-	// Namespace is the containerd namespace
-	Namespace string
-
-	// DefaultImage is the default container image
+	UnixSocket   string
+	Namespace    string
 	DefaultImage string
-
-	// NetworkMode is the default network mode
+	// NetworkMode 仅支持 none，空值也表示 none
 	NetworkMode string
-
-	// Resources are default resource limits
-	Resources *Resources
+	Resources   *Resources
 }
 
-// NewContainerdSandbox creates a new containerd sandbox instance
-func NewContainerdSandbox(config *ContainerdConfig, logger log.Logger) (*Containerd, error) {
+func normalizeConfig(config *ContainerdConfig) (ContainerdConfig, error) {
 	if config == nil {
-		return nil, fmt.Errorf("config is required")
+		return ContainerdConfig{}, fmt.Errorf("config is required")
 	}
-
-	if config.UnixSocket == "" {
-		config.UnixSocket = "/run/containerd/containerd.sock"
+	cfg := *config
+	if cfg.UnixSocket == "" {
+		cfg.UnixSocket = "/run/containerd/containerd.sock"
 	}
-
-	if config.Namespace == "" {
-		config.Namespace = "arcentra"
+	if cfg.Namespace == "" {
+		cfg.Namespace = "arcentra"
 	}
+	if cfg.NetworkMode == "" {
+		cfg.NetworkMode = "none"
+	}
+	if err := validateNetwork(cfg.NetworkMode); err != nil {
+		return cfg, err
+	}
+	if _, err := resourceSpec(cfg.Resources); err != nil {
+		return cfg, err
+	}
+	if cfg.Resources != nil {
+		copy := *cfg.Resources
+		cfg.Resources = &copy
+	}
+	return cfg, nil
+}
 
-	client, err := containerd.New(config.UnixSocket)
+// NewContainerdSandbox 连接 containerd 并验证配置，不启动或安装运行时
+func NewContainerdSandbox(config *ContainerdConfig, _ log.Logger) (*Containerd, error) {
+	cfg, err := normalizeConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	if runtime.GOOS != "linux" {
+		return nil, fmt.Errorf("containerd sandbox requires Linux")
+	}
+	client, err := containerd.New(cfg.UnixSocket, containerd.WithTimeout(5*time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("connect to containerd: %w", err)
 	}
-
-	sb := &Containerd{
-		client:     client,
-		namespace:  config.Namespace,
-		logger:     logger,
-		config:     config,
-		containers: make(map[string]containerd.Container),
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	serving, err := client.IsServing(ctx)
+	if err != nil || !serving {
+		_ = client.Close()
+		if err == nil {
+			err = fmt.Errorf("containerd is not serving")
+		}
+		return nil, fmt.Errorf("check containerd: %w", err)
 	}
-
-	logger.Infow("containerd sandbox initialized",
-		"socket", config.UnixSocket,
-		"namespace", config.Namespace)
-
-	return sb, nil
+	return newSandbox(cfg, &containerdBackend{client: client}), nil
 }
 
-// Create creates a new sandbox container
+func newSandbox(config ContainerdConfig, backend runtimeBackend) *Containerd {
+	return &Containerd{backend: backend, namespace: config.Namespace, config: config, containers: make(map[string]*containerState)}
+}
+
+// Create 创建容器元数据和 snapshot，必须显式提供 init 命令
 func (s *Containerd) Create(ctx context.Context, opts *CreateOptions) (string, error) {
 	if opts == nil {
 		return "", fmt.Errorf("options are required")
 	}
-
-	image := opts.Image
+	s.mu.Lock()
+	if s.closing {
+		s.mu.Unlock()
+		return "", fmt.Errorf("sandbox is closing")
+	}
+	s.creating.Add(1)
+	s.mu.Unlock()
+	defer s.creating.Done()
+	image := strings.TrimSpace(opts.Image)
 	if image == "" {
-		image = s.config.DefaultImage
+		image = strings.TrimSpace(s.config.DefaultImage)
 	}
 	if image == "" {
 		return "", fmt.Errorf("image is required")
 	}
-
-	ctx = namespaces.WithNamespace(ctx, s.namespace)
-
-	// Pull image if needed
-	img, err := s.client.GetImage(ctx, image)
-	if err != nil {
-		s.logger.Infow("pulling image", "image", image)
-		img, err = s.client.Pull(ctx, image, containerd.WithPullUnpack)
-		if err != nil {
-			return "", fmt.Errorf("pull image %s: %w", image, err)
-		}
+	network := opts.NetworkMode
+	if network == "" {
+		network = s.config.NetworkMode
 	}
-
-	// Generate container ID
-	containerID := generateContainerID()
-
-	// Prepare container spec
-	specOpts := []oci.SpecOpts{
-		oci.WithImageConfig(img),
-		oci.WithProcessArgs(append(opts.Command, opts.Args...)...),
+	if err := validateNetwork(network); err != nil {
+		return "", err
 	}
-
-	// Set environment variables
-	if len(opts.Env) > 0 {
-		env := make([]string, 0, len(opts.Env))
-		for k, v := range opts.Env {
-			env = append(env, fmt.Sprintf("%s=%s", k, v))
-		}
-		specOpts = append(specOpts, oci.WithEnv(env))
-	}
-
-	// Set working directory
-	if opts.WorkingDir != "" {
-		specOpts = append(specOpts, oci.WithProcessCwd(opts.WorkingDir))
-	}
-
-	// Set hostname
-	if opts.Hostname != "" {
-		specOpts = append(specOpts, oci.WithHostname(opts.Hostname))
-	}
-
-	// Configure network
-	networkMode := opts.NetworkMode
-	if networkMode == "" {
-		networkMode = s.config.NetworkMode
-	}
-	if networkMode == "" {
-		networkMode = "bridge"
-	}
-
-	switch networkMode {
-	case "none":
-		// No network namespace - container will have no network interfaces
-		specOpts = append(specOpts, func(_ context.Context, _ oci.Client, _ *containers.Container, spec *specs.Spec) error {
-			if spec.Linux == nil {
-				spec.Linux = &specs.Linux{}
-			}
-			spec.Linux.Namespaces = append(spec.Linux.Namespaces, specs.LinuxNamespace{
-				Type: specs.NetworkNamespace,
-				Path: "",
-			})
-			return nil
-		})
-	case "host":
-		specOpts = append(specOpts, oci.WithHostNamespace(specs.NetworkNamespace), oci.WithHostHostsFile, oci.WithHostResolvconf)
-	case "bridge":
-		// Default bridge network (containerd default)
-		// Additional network configuration can be added here
-	default:
-		return "", fmt.Errorf("unsupported network mode: %s", networkMode)
-	}
-
-	// Configure resources
 	resources := opts.Resources
 	if resources == nil {
 		resources = s.config.Resources
 	}
-	if resources != nil {
-		specOpts = append(specOpts, s.withResources(resources))
-	}
-
-	// Configure mounts
-	if len(opts.Mounts) > 0 {
-		mounts := make([]specs.Mount, 0, len(opts.Mounts))
-		for _, m := range opts.Mounts {
-			mountType := m.Type
-			if mountType == "" {
-				mountType = "bind"
-			}
-			mounts = append(mounts, specs.Mount{
-				Source:      m.Source,
-				Destination: m.Target,
-				Type:        mountType,
-				Options:     s.getMountOptions(m.ReadOnly),
-			})
-		}
-		specOpts = append(specOpts, oci.WithMounts(mounts))
-	}
-
-	// Create container
-	container, err := s.client.NewContainer(ctx, containerID,
-		containerd.WithImage(img),
-		containerd.WithNewSnapshot(containerID+"-snapshot", img),
-		containerd.WithNewSpec(specOpts...),
-	)
+	options, err := createSpecOptions(opts, resources)
 	if err != nil {
-		return "", fmt.Errorf("create container: %w", err)
+		return "", err
 	}
-
-	s.containers[containerID] = container
-
-	s.logger.Debugw("container created", "container_id", containerID, "image", image)
-
-	return containerID, nil
+	labels := maps.Clone(opts.Labels)
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels["io.arcentra.sandbox"] = "true"
+	id := "arcentra-" + uuid.NewString()
+	ctx = namespaces.WithNamespace(ctx, s.namespace)
+	container, createErr := s.backend.create(ctx, id, image, options, labels)
+	if container == nil {
+		if createErr == nil {
+			createErr = fmt.Errorf("runtime returned no container")
+		}
+		return "", createErr
+	}
+	state := &containerState{container: container, gate: make(chan struct{}, 1), processes: make(map[string]runtimeProcess), logs: &boundedBuffer{}}
+	s.mu.Lock()
+	s.containers[id] = state
+	s.mu.Unlock()
+	if createErr != nil {
+		if cleanupErr := s.Remove(ctx, id); cleanupErr != nil {
+			return id, errors.Join(createErr, cleanupErr)
+		}
+		return "", createErr
+	}
+	return id, nil
 }
 
-// Start starts a sandbox container
-func (s *Containerd) Start(ctx context.Context, containerID string) error {
-	container, err := s.getContainer(containerID)
+// Start 启动容器 init 进程，已停止的容器不能复用
+func (s *Containerd) Start(ctx context.Context, id string) error {
+	state, err := s.getContainer(id)
 	if err != nil {
 		return err
 	}
-
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
-
-	task, err := container.NewTask(ctx, cio.NewCreator(cio.WithStdio))
+	if err = state.acquire(ctx); err != nil {
+		return err
+	}
+	defer state.release()
+	state.mu.Lock()
+	stopping := state.stopping
+	state.mu.Unlock()
+	if state.removed || state.stopped || stopping {
+		return fmt.Errorf("container is removed or stopped")
+	}
+	if state.task != nil {
+		status, err := state.task.Status(ctx)
+		if err != nil {
+			return fmt.Errorf("inspect existing init task: %w", err)
+		}
+		if status.Status != containerd.Running {
+			state.stopped = true
+			return fmt.Errorf("init task is %s; remove and recreate the container", status.Status)
+		}
+		return nil
+	}
+	task, err := state.container.newTask(ctx, state.logs, state.logs)
 	if err != nil {
-		return fmt.Errorf("create task: %w", err)
+		state.stopped = true
+		return fmt.Errorf("create task (Remove required to reconcile uncertain creation): %w", err)
 	}
-
-	if err := task.Start(ctx); err != nil {
-		return fmt.Errorf("start task: %w", err)
+	state.task = task
+	if err = task.Start(ctx); err != nil {
+		cleanup, cancel := cleanupContext(ctx)
+		defer cancel()
+		killErr := stopTask(cleanup, task, 0)
+		_, deleteErr := task.Delete(cleanup)
+		if deleteErr == nil || errdefs.IsNotFound(deleteErr) {
+			state.task = nil
+			deleteErr = nil
+		}
+		state.stopped = true
+		return errors.Join(fmt.Errorf("start task: %w", err), killErr, deleteErr)
 	}
-
-	s.logger.Debugw("container started", "container_id", containerID)
-
 	return nil
 }
 
-// Execute executes a command in the sandbox container
-func (s *Containerd) Execute(ctx context.Context, containerID string, cmd []string, opts *ExecuteOptions) (*ExecuteResult, error) {
-	result := &ExecuteResult{
-		StartTime: time.Now(),
-	}
-
-	if len(cmd) == 0 {
-		result.ExitCode = -1
-		result.Stderr = "command is required"
+// Execute 在已启动容器中执行命令并捕获有界输出
+// 取消、超时或执行状态不确定时终止容器内全部进程，调用方随后必须 Remove
+func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts *ExecuteOptions) (result *ExecuteResult, resultErr error) {
+	result = &ExecuteResult{StartTime: time.Now(), ExitCode: -1}
+	stdout, stderr := &boundedBuffer{}, &boundedBuffer{}
+	stdoutStream, stderrStream := &outputStream{capture: stdout}, &outputStream{capture: stderr}
+	defer func() {
+		result.Stdout, result.Stderr = stdout.String(), stderr.String()
+		result.OutputTruncated = stdout.Truncated() || stderr.Truncated()
+		resultErr = errors.Join(resultErr, stdoutStream.Error(), stderrStream.Error())
 		result.EndTime = time.Now()
 		result.Duration = result.EndTime.Sub(result.StartTime)
-		return result, fmt.Errorf("command is required")
-	}
-
-	container, err := s.getContainer(containerID)
-	if err != nil {
-		result.ExitCode = -1
-		result.Stderr = err.Error()
-		result.EndTime = time.Now()
-		result.Duration = result.EndTime.Sub(result.StartTime)
-		return result, err
-	}
-
+	}()
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
-
-	// Set execution timeout
 	if opts != nil && opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 	}
-
-	// Prepare task options
+	state, err := s.getContainer(id)
+	if err != nil {
+		return result, err
+	}
+	if err = state.acquire(ctx); err != nil {
+		return result, err
+	}
+	defer state.release()
+	if state.removed || state.stopped || state.task == nil {
+		return result, fmt.Errorf("container must be started and running before Execute")
+	}
+	if len(state.processes) != 0 {
+		return result, fmt.Errorf("container has an unreaped process; Remove is required")
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	state.mu.Lock()
+	if state.stopping {
+		state.mu.Unlock()
+		cancel()
+		return result, fmt.Errorf("container is stopping")
+	}
+	state.activeCancel = cancel
+	state.mu.Unlock()
+	defer func() { state.mu.Lock(); state.activeCancel = nil; state.mu.Unlock(); cancel() }()
+	base, err := state.container.spec(runCtx)
+	if err != nil {
+		return result, fmt.Errorf("read container spec: %w", err)
+	}
+	processSpec, err := executionSpec(base, cmd, opts)
+	if err != nil {
+		return result, err
+	}
 	var stdin io.Reader
-	var stdout, stderr io.Writer
+	stdoutStream.logs, stderrStream.logs = state.logs, state.logs
 	if opts != nil {
 		stdin = opts.Stdin
-		stdout = opts.Stdout
-		stderr = opts.Stderr
+		if opts.Stdout != nil {
+			stdoutStream.sink = opts.Stdout
+		}
+		if opts.Stderr != nil {
+			stderrStream.sink = opts.Stderr
+		}
 	}
-	taskOpts := []cio.Opt{
-		cio.WithStreams(stdin, stdout, stderr),
-	}
-	if opts != nil && opts.TTY {
-		taskOpts = append(taskOpts, cio.WithTerminal)
-	}
-
-	// Create task
-	task, err := container.NewTask(ctx, cio.NewCreator(taskOpts...))
+	execID := "exec-" + uuid.NewString()
+	process, err := state.task.exec(runCtx, execID, processSpec, stdin, stdoutStream, stderrStream)
 	if err != nil {
-		result.ExitCode = -1
-		result.Stderr = fmt.Sprintf("create task: %v", err)
-		result.EndTime = time.Now()
-		result.Duration = result.EndTime.Sub(result.StartTime)
-		return result, err
+		cleanup, cleanupCancel := cleanupContext(ctx)
+		defer cleanupCancel()
+		state.stopped = true
+		return result, errors.Join(fmt.Errorf("create exec process: %w", err), stopTask(cleanup, state.task, 0))
 	}
-	defer func() { _, _ = task.Delete(ctx) }()
-
-	// Start task
-	if err = task.Start(ctx); err != nil {
-		result.ExitCode = -1
-		result.Stderr = fmt.Sprintf("start task: %v", err)
-		result.EndTime = time.Now()
-		result.Duration = result.EndTime.Sub(result.StartTime)
-		return result, err
-	}
-
-	// Wait for task to complete
-	statusC, err := task.Wait(ctx)
+	state.processes[execID] = process
+	defer func() {
+		cleanup, cleanupCancel := cleanupContext(ctx)
+		defer cleanupCancel()
+		if resultErr != nil {
+			// 杀掉整个容器，避免 shell 子进程在步骤取消后继续运行
+			stopErr := stopTask(cleanup, state.task, 0)
+			state.stopped = true
+			resultErr = errors.Join(resultErr, stopErr)
+		}
+		_, deleteErr := process.Delete(cleanup)
+		if deleteErr == nil || errdefs.IsNotFound(deleteErr) {
+			delete(state.processes, execID)
+		} else {
+			resultErr = errors.Join(resultErr, fmt.Errorf("delete exec process: %w", deleteErr))
+		}
+	}()
+	// 必须先订阅退出状态再启动，确保快速退出也可观察
+	wait, err := process.Wait(runCtx)
 	if err != nil {
-		result.ExitCode = -1
-		result.Stderr = fmt.Sprintf("wait task: %v", err)
-		result.EndTime = time.Now()
-		result.Duration = result.EndTime.Sub(result.StartTime)
-		return result, err
+		return result, fmt.Errorf("wait exec process: %w", err)
 	}
-
-	// Get exit status
-	status := <-statusC
-	result.ExitCode = int32(status.ExitCode())
-	result.EndTime = time.Now()
-	result.Duration = result.EndTime.Sub(result.StartTime)
-
-	s.logger.Debugw("command executed",
-		"container_id", containerID,
-		"command", strings.Join(cmd, " "), "exit_code",
-		result.ExitCode, "duration", result.Duration)
-
-	return result, nil
+	if err = process.Start(runCtx); err != nil {
+		return result, fmt.Errorf("start exec process: %w", err)
+	}
+	select {
+	case <-runCtx.Done():
+		return result, runCtx.Err()
+	case status, ok := <-wait:
+		if runCtx.Err() != nil {
+			return result, runCtx.Err()
+		}
+		if !ok {
+			return result, fmt.Errorf("exec exit channel closed without a result")
+		}
+		code, _, waitErr := status.Result()
+		if waitErr != nil {
+			return result, fmt.Errorf("wait exec exit: %w", waitErr)
+		}
+		result.ExitCode = int32(code)
+		return result, nil
+	}
 }
 
-// Stop stops a running sandbox container
-func (s *Containerd) Stop(ctx context.Context, containerID string, timeout time.Duration) error {
-	container, err := s.getContainer(containerID)
+// Stop 停止全部容器进程，优雅退出超时后强制终止
+func (s *Containerd) Stop(ctx context.Context, id string, timeout time.Duration) error {
+	state, err := s.getContainer(id)
+	if errdefs.IsNotFound(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-
+	state.cancelActive()
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
-
-	task, err := container.Task(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("get task: %w", err)
-	}
-
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-
-	if err := task.Kill(ctx, unix.SIGTERM); err != nil {
-		return fmt.Errorf("kill task: %w", err)
-	}
-
-	// Wait for task to exit with timeout
-	done := make(chan error, 1)
-	safe.Go(func() {
-		_, err := task.Wait(ctx)
-		done <- err
-	})
-
-	select {
-	case err := <-done:
-		if err != nil {
-			// Force kill if graceful shutdown failed
-			_ = task.Kill(ctx, unix.SIGKILL)
-		}
-		return err
-	case <-time.After(timeout):
-		// Force kill on timeout
-		_ = task.Kill(ctx, unix.SIGKILL)
-		return fmt.Errorf("stop timeout after %v", timeout)
-	}
-}
-
-// Remove removes a sandbox container
-func (s *Containerd) Remove(ctx context.Context, containerID string) error {
-	container, err := s.getContainer(containerID)
-	if err != nil {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout+cleanupTimeout)
+	defer cancel()
+	if err = state.acquire(cleanup); err != nil {
 		return err
 	}
-
-	ctx = namespaces.WithNamespace(ctx, s.namespace)
-
-	// Delete task if exists
-	task, err := container.Task(ctx, nil)
-	if err == nil {
-		_, _ = task.Delete(ctx)
+	defer state.release()
+	if state.removed {
+		return nil
 	}
-
-	// Delete container
-	if err := container.Delete(ctx, containerd.WithSnapshotCleanup); err != nil {
-		return fmt.Errorf("delete container: %w", err)
+	if err = state.reconcileTask(cleanup); err != nil {
+		return err
 	}
-
-	delete(s.containers, containerID)
-
-	s.logger.Debugw("container removed", "container_id", containerID)
-
+	if state.task == nil {
+		return nil
+	}
+	if err = stopTask(cleanup, state.task, timeout); err != nil {
+		return err
+	}
+	state.stopped = true
 	return nil
 }
 
-// GetLogs retrieves logs from a sandbox container
-func (s *Containerd) GetLogs(ctx context.Context, containerID string, _ *LogOptions) (io.ReadCloser, error) {
-	container, err := s.getContainer(containerID)
+func stopTask(ctx context.Context, task runtimeTask, grace time.Duration) error {
+	status, err := task.Status(ctx)
+	if errdefs.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect task before stop: %w", err)
+	}
+	if status.Status == containerd.Stopped || (status.Status == containerd.Created && task.Pid() == 0) {
+		return nil
+	}
+	if status.Status == containerd.Created {
+		grace = 0
+	}
+	wait, err := task.Wait(ctx)
+	if err != nil {
+		return fmt.Errorf("wait task before stop: %w", err)
+	}
+	signal := unix.SIGTERM
+	if grace <= 0 {
+		signal = unix.SIGKILL
+	}
+	if err = task.Kill(ctx, signal, containerd.WithKillAll); err != nil && !errdefs.IsNotFound(err) {
+		return fmt.Errorf("kill task: %w", err)
+	}
+	if grace > 0 {
+		timer := time.NewTimer(grace)
+		defer timer.Stop()
+		select {
+		case status, ok := <-wait:
+			return exitWaitError(status, ok)
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			if err = task.Kill(ctx, unix.SIGKILL, containerd.WithKillAll); err != nil && !errdefs.IsNotFound(err) {
+				return fmt.Errorf("force kill task: %w", err)
+			}
+		}
+	}
+	select {
+	case status, ok := <-wait:
+		return exitWaitError(status, ok)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func exitWaitError(status containerd.ExitStatus, ok bool) error {
+	if !ok {
+		return fmt.Errorf("task exit channel closed without a result")
+	}
+	if err := status.Error(); err != nil && !errdefs.IsNotFound(err) {
+		return fmt.Errorf("wait task exit: %w", err)
+	}
+	return nil
+}
+
+// Remove 终止进程并删除容器和 snapshot，失败时保留记录以便重试
+func (s *Containerd) Remove(ctx context.Context, id string) error {
+	state, err := s.getContainer(id)
+	if errdefs.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	state.cancelActive()
+	ctx = namespaces.WithNamespace(ctx, s.namespace)
+	cleanup, cancel := cleanupContext(ctx)
+	defer cancel()
+	if err = state.acquire(cleanup); err != nil {
+		return err
+	}
+	defer state.release()
+	if state.removed {
+		return nil
+	}
+	if err = state.reconcileTask(cleanup); err != nil {
+		return err
+	}
+	if state.task != nil {
+		if err = stopTask(cleanup, state.task, 0); err != nil {
+			return err
+		}
+		state.stopped = true
+		var cleanupErr error
+		for execID, process := range state.processes {
+			if _, err := process.Delete(cleanup); err != nil && !errdefs.IsNotFound(err) {
+				cleanupErr = errors.Join(cleanupErr, err)
+			} else {
+				delete(state.processes, execID)
+			}
+		}
+		if cleanupErr != nil {
+			return fmt.Errorf("remove exec processes: %w", cleanupErr)
+		}
+		if _, err = state.task.Delete(cleanup); err != nil && !errdefs.IsNotFound(err) {
+			return fmt.Errorf("delete task: %w", err)
+		}
+		state.task = nil
+	}
+	if err = state.container.remove(cleanup); err != nil && !errdefs.IsNotFound(err) {
+		return fmt.Errorf("remove container: %w", err)
+	}
+	state.removed = true
+	s.mu.Lock()
+	delete(s.containers, id)
+	s.mu.Unlock()
+	return nil
+}
+
+// GetLogs 返回内存中至多 4 MiB 的合并日志快照，不支持跟随或时间过滤
+func (s *Containerd) GetLogs(_ context.Context, id string, opts *LogOptions) (io.ReadCloser, error) {
+	if opts != nil && (opts.Follow || opts.Tail != 0 || !opts.Since.IsZero() || !opts.Until.IsZero() || opts.Timestamps) {
+		return nil, fmt.Errorf("log following, tail, timestamps and time filters are unsupported")
+	}
+	state, err := s.getContainer(id)
 	if err != nil {
 		return nil, err
 	}
-
-	ctx = namespaces.WithNamespace(ctx, s.namespace)
-
-	// Get task to verify container is running
-	_, err = container.Task(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("get task: %w", err)
-	}
-
-	// Get log file path
-	// Note: containerd stores logs in different locations depending on configuration
-	// This is a simplified implementation. In production, you should use containerd's log API
-	logPath := fmt.Sprintf("/var/log/containers/%s.log", containerID)
-
-	file, err := os.Open(logPath)
-	if err != nil {
-		return nil, fmt.Errorf("open log file: %w", err)
-	}
-
-	return file, nil
+	return io.NopCloser(strings.NewReader(state.logs.String())), nil
 }
 
-// Cleanup cleans up resources
+// Cleanup 清理当前已跟踪的容器，保留清理失败的记录并返回错误
 func (s *Containerd) Cleanup(ctx context.Context) error {
-	ctx = namespaces.WithNamespace(ctx, s.namespace)
-
-	for containerID := range s.containers {
-		// Try to stop and remove container
-		_ = s.Stop(ctx, containerID, 5*time.Second)
-		_ = s.Remove(ctx, containerID)
+	s.mu.RLock()
+	ids := make([]string, 0, len(s.containers))
+	for id := range s.containers {
+		ids = append(ids, id)
 	}
-
-	s.containers = make(map[string]containerd.Container)
-
-	s.logger.Infow("sandbox cleanup completed")
-
-	return nil
+	s.mu.RUnlock()
+	slices.Sort(ids)
+	var result error
+	for _, id := range ids {
+		if err := s.Remove(ctx, id); err != nil {
+			result = errors.Join(result, fmt.Errorf("cleanup %s: %w", id, err))
+		}
+	}
+	return result
 }
 
-// Close closes the sandbox client connection
+// Close 禁止创建新容器并清理资源，清理失败时可再次调用
 func (s *Containerd) Close() error {
-	if err := s.Cleanup(context.Background()); err != nil {
-		s.logger.Warnw("cleanup failed during close", "error", err)
-	}
-
-	if s.client != nil {
-		return s.client.Close()
-	}
-
-	return nil
-}
-
-// getContainer gets a container by ID
-func (s *Containerd) getContainer(containerID string) (containerd.Container, error) {
-	container, ok := s.containers[containerID]
-	if !ok {
-		return nil, fmt.Errorf("container not found: %s", containerID)
-	}
-	return container, nil
-}
-
-// withResources configures resource limits
-func (s *Containerd) withResources(resources *Resources) oci.SpecOpts {
-	return func(_ context.Context, _ oci.Client, _ *containers.Container, spec *specs.Spec) error {
-		if spec.Linux == nil {
-			spec.Linux = &specs.Linux{}
-		}
-		if spec.Linux.Resources == nil {
-			spec.Linux.Resources = &specs.LinuxResources{}
-		}
-
-		// CPU limits
-		if resources.CPU != "" {
-			quota, period := parseCPU(resources.CPU)
-			if quota > 0 && period > 0 {
-				if spec.Linux.Resources.CPU == nil {
-					spec.Linux.Resources.CPU = &specs.LinuxCPU{}
-				}
-				spec.Linux.Resources.CPU.Quota = &quota
-				spec.Linux.Resources.CPU.Period = &period
-			}
-		}
-
-		if resources.CPUShares > 0 {
-			if spec.Linux.Resources.CPU == nil {
-				spec.Linux.Resources.CPU = &specs.LinuxCPU{}
-			}
-			shares := uint64(resources.CPUShares)
-			spec.Linux.Resources.CPU.Shares = &shares
-		}
-
-		// Memory limits
-		if resources.Memory != "" {
-			memory := parseMemory(resources.Memory)
-			if memory > 0 {
-				if spec.Linux.Resources.Memory == nil {
-					spec.Linux.Resources.Memory = &specs.LinuxMemory{}
-				}
-				spec.Linux.Resources.Memory.Limit = &memory
-			}
-		}
-
-		if resources.MemoryReservation != "" {
-			reservation := parseMemory(resources.MemoryReservation)
-			if reservation > 0 {
-				if spec.Linux.Resources.Memory == nil {
-					spec.Linux.Resources.Memory = &specs.LinuxMemory{}
-				}
-				spec.Linux.Resources.Memory.Reservation = &reservation
-			}
-		}
-
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
 		return nil
 	}
+	s.closing = true
+	s.mu.Unlock()
+	s.creating.Wait()
+	if err := s.Cleanup(context.Background()); err != nil {
+		return err
+	}
+	if err := s.backend.close(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	return nil
 }
 
-// getMountOptions returns mount options based on read-only flag
-func (s *Containerd) getMountOptions(readOnly bool) []string {
-	if readOnly {
-		return []string{"ro"}
+func (s *Containerd) getContainer(id string) (*containerState, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	state, ok := s.containers[id]
+	if !ok {
+		return nil, fmt.Errorf("container %s: %w", id, errdefs.ErrNotFound)
 	}
-	return []string{"rw"}
+	return state, nil
 }
 
-// parseCPU parses CPU string (e.g., "1", "0.5", "1000m") to quota and period
-func parseCPU(cpu string) (int64, uint64) {
-	cpu = strings.TrimSpace(cpu)
-
-	// Handle millicores (e.g., "1000m")
-	if strings.HasSuffix(cpu, "m") {
-		millicores := strings.TrimSuffix(cpu, "m")
-		var m int64
-		_, _ = fmt.Sscanf(millicores, "%d", &m)
-		return m * 10000, 10000000 // quota = millicores * 10000, period = 10000000 (10ms)
-	}
-
-	// Handle decimal (e.g., "0.5", "1.5")
-	var f float64
-	if _, err := fmt.Sscanf(cpu, "%f", &f); err == nil {
-		return int64(f * 100000), 100000 // quota = cores * 100000, period = 100000 (1ms)
-	}
-
-	// Handle integer (e.g., "1", "2")
-	var i int64
-	if _, err := fmt.Sscanf(cpu, "%d", &i); err == nil {
-		return i * 100000, 100000
-	}
-
-	return 0, 0
+func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 }
 
-// parseMemory parses memory string (e.g., "1G", "512M", "1024m") to bytes
-func parseMemory(memory string) int64 {
-	memory = strings.TrimSpace(memory)
-	memory = strings.ToUpper(memory)
-
-	var size int64
-	var unit string
-
-	if strings.HasSuffix(memory, "G") {
-		_, _ = fmt.Sscanf(memory, "%d%s", &size, &unit)
-		return size * 1024 * 1024 * 1024
-	}
-	if strings.HasSuffix(memory, "M") {
-		_, _ = fmt.Sscanf(memory, "%d%s", &size, &unit)
-		return size * 1024 * 1024
-	}
-	if strings.HasSuffix(memory, "K") {
-		_, _ = fmt.Sscanf(memory, "%d%s", &size, &unit)
-		return size * 1024
-	}
-
-	// No unit, assume bytes
-	_, _ = fmt.Sscanf(memory, "%d", &size)
-	return size
+type boundedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+	total  int64
 }
 
-// generateContainerID generates a unique container ID
-func generateContainerID() string {
-	return fmt.Sprintf("arcentra-%d", time.Now().UnixNano())
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := len(p)
+	b.total += int64(n)
+	if remaining := maxCapturedBytes - b.buffer.Len(); remaining > 0 {
+		if len(p) > remaining {
+			p = p[:remaining]
+		}
+		_, _ = b.buffer.Write(p)
+	}
+	return n, nil
 }
+func (b *boundedBuffer) String() string { b.mu.Lock(); defer b.mu.Unlock(); return b.buffer.String() }
+
+func (b *boundedBuffer) Truncated() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.total > maxCapturedBytes
+}
+
+func (s *containerState) reconcileTask(ctx context.Context) error {
+	if s.task != nil {
+		return nil
+	}
+	task, err := s.container.loadTask(ctx)
+	if errdefs.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reconcile init task: %w", err)
+	}
+	s.task = task
+	return nil
+}
+
+// 保留输出订阅者错误，但继续排空管道，防止日志接收失败阻塞容器
+type outputStream struct {
+	mu            sync.Mutex
+	capture, logs *boundedBuffer
+	sink          io.Writer
+	err           error
+}
+
+func (w *outputStream) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, _ = w.capture.Write(p)
+	if w.logs != nil {
+		_, _ = w.logs.Write(p)
+	}
+	if w.sink != nil && w.err == nil {
+		n, err := w.sink.Write(p)
+		if err == nil && n != len(p) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			w.err = fmt.Errorf("output stream: %w", err)
+		}
+	}
+	return len(p), nil
+}
+func (w *outputStream) Error() error { w.mu.Lock(); defer w.mu.Unlock(); return w.err }

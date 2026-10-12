@@ -73,6 +73,8 @@ func NewPipelineExecutorFromContext(execCtx *ExecutionContext, logger log.Logger
 
 // Execute executes the pipeline using DAG-based reconciliation
 func (pe *Executor) Execute(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	pe.emitPipelineEvent(plugin.EventTypePipelineStarted, "started")
 	// Build DAG from pipeline jobs
 	graph, tasks, err := BuildDAG(pe.execCtx.Pipeline.Jobs)
@@ -86,6 +88,7 @@ func (pe *Executor) Execute(ctx context.Context) error {
 
 	// Create reconciler
 	reconciler := NewReconciler(graph, tasks, taskFramework, pe.logger)
+	defer func() { cancel(); reconciler.Wait() }()
 
 	// Channel to trigger reconcile
 	reconcileCh := make(chan struct{}, 1)
@@ -131,6 +134,10 @@ func (pe *Executor) Execute(ctx context.Context) error {
 				return nil
 			}
 		case <-ticker.C:
+			// A resumed pipeline must schedule pending work even without a completion event.
+			if _, err := reconciler.Reconcile(ctx); err != nil {
+				return fmt.Errorf("reconcile: %w", err)
+			}
 			// Fallback: periodic check
 			if reconciler.IsCompleted() {
 				if reconciler.HasFailures() {

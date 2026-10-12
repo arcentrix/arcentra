@@ -65,7 +65,7 @@ func (s *Services) Repos() *repo.Repositories {
 
 // NewServices 初始化所有 service
 func NewServices(
-	db database.IDatabase,
+	_ database.IDatabase,
 	cacheStore cache.ICache,
 	repos *repo.Repositories,
 ) *Services {
@@ -93,7 +93,7 @@ func NewServices(
 	scmService := NewScmService(repos.Project, repos.Pipeline)
 	userExt := NewUserExt(repos.UserExt)
 	roleService := NewRoleService(repos.Role)
-	logAggregator := NewLogAggregator(nil, db.Database())
+	logAggregator := NewLogAggregator(repos.Log)
 	approvalService := NewApprovalService(repos.Approval, repos.ApprovalDecision, repos.ApprovalPolicy)
 	approvalPolicyService := NewApprovalPolicyService(repos.ApprovalPolicy)
 	roleGrantService := NewRoleGrantService(repos.RoleGrant)

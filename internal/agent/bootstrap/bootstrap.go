@@ -19,11 +19,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/internal/agent/config"
+	agentoutbox "github.com/arcentrix/arcentra/internal/agent/outbox"
 	"github.com/arcentrix/arcentra/internal/agent/router"
 	"github.com/arcentrix/arcentra/internal/agent/service"
 	"github.com/arcentrix/arcentra/internal/agent/taskqueue"
@@ -41,6 +44,10 @@ import (
 )
 
 type Agent struct {
+	draining      bool
+	workerMu      sync.Mutex
+	stopping      bool
+	logPublisher  *executor.ReliableKafkaLogPublisher
 	HTTPApp       *fiber.App
 	GrpcClient    *grpc.ClientWrapper
 	MetricsServer *metrics.Server
@@ -66,60 +73,49 @@ func NewAgent(
 	ob *outbox.Outbox,
 	execManager *executor.Manager,
 ) (*Agent, func(), error) {
+	if err := taskqueue.ValidateExecutionConfig(agentConf); err != nil {
+		return nil, nil, err
+	}
 	httpApp := rt.Router()
 
 	// Create agent service
 	agentService := service.NewAgentServiceImpl(agentConf, grpcClient, metricsServer)
-	taskQueue, err := taskqueue.StartWorker(context.Background(), agentConf, grpcClient, execManager)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// 注册步骤执行处理器（Agent 作为 worker 执行步骤执行）
+	app := &Agent{HTTPApp: httpApp, GrpcClient: grpcClient, MetricsServer: metricsServer, Logger: logger, AgentConf: agentConf, AgentService: agentService, ShutdownMgr: shutdownMgr, Outbox: ob, ExecManager: execManager}
 	cleanup := func() {
-		// stop metrics server
+		app.workerMu.Lock()
+		defer app.workerMu.Unlock()
+		if app.stopping {
+			return
+		}
+		app.stopping = true
+		if app.TaskQueue != nil {
+			if err := app.TaskQueue.Stop(); err != nil {
+				log.Errorw("failed to stop task queue", "error", err)
+			}
+		}
+		if app.logPublisher != nil {
+			app.logPublisher.Close()
+		}
+		if app.Outbox != nil {
+			if err := app.Outbox.Close(); err != nil {
+				log.Errorw("failed to close outbox", "error", err)
+			}
+		}
 		if metricsServer != nil {
-			log.Info("Shutting down metrics server...")
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := metricsServer.Stop(shutdownCtx); err != nil {
-				log.Errorw("Failed to stop metrics server", zap.Error(err))
+				log.Errorw("failed to stop metrics server", zap.Error(err))
 			}
 		}
-
-		// stop global cron scheduler
 		cron.Stop()
-		log.Info("cron scheduler stopped")
-		// close gRPC client connection
 		if grpcClient != nil {
 			if err := grpcClient.Close(); err != nil {
 				log.Errorw("failed to close gRPC client", "error", err)
 			}
 		}
-		if taskQueue != nil {
-			if err := taskQueue.Stop(); err != nil {
-				log.Errorw("failed to stop task queue", "error", err)
-			}
-		}
-		if ob != nil {
-			if err := ob.Close(); err != nil {
-				log.Errorw("failed to close outbox", "error", err)
-			}
-		}
 	}
 
-	app := &Agent{
-		HTTPApp:       httpApp,
-		GrpcClient:    grpcClient,
-		MetricsServer: metricsServer,
-		Logger:        logger,
-		AgentConf:     agentConf,
-		AgentService:  agentService,
-		ShutdownMgr:   shutdownMgr,
-		TaskQueue:     taskQueue,
-		Outbox:        ob,
-		ExecManager:   execManager,
-	}
 	return app, cleanup, nil
 }
 
@@ -176,6 +172,7 @@ func Run(app *Agent, cleanup func()) {
 	// set signal listener (graceful shutdown)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	defer signal.Stop(quit)
 
 	// start HTTP server (async)
 	safe.Go(func() {
@@ -203,6 +200,15 @@ func Run(app *Agent, cleanup func()) {
 		log.Info("Received shutdown request via HTTP endpoint, shutting down gracefully...")
 	}
 
+	// 先停止工作队列，让运行中的步骤使用有效连接报告终态
+	app.workerMu.Lock()
+	app.draining = true
+	if app.TaskQueue != nil {
+		if err := app.TaskQueue.Stop(); err != nil {
+			log.Warnw("stop agent workers", "error", err)
+		}
+	}
+	app.workerMu.Unlock()
 	// close components in order
 	resp, err := app.AgentService.Unregister(context.Background(), &agentv1.UnregisterRequest{})
 	if err != nil {
@@ -211,7 +217,11 @@ func Run(app *Agent, cleanup func()) {
 	if resp != nil && resp.Success {
 		log.Info("Agent unregistered successfully")
 	} else {
-		log.Errorw("Agent unregistration failed", "error", resp.Message)
+		message := "no response"
+		if resp != nil {
+			message = resp.Message
+		}
+		log.Errorw("Agent unregistration failed", "error", message)
 	}
 
 	// close HTTP server
@@ -278,6 +288,10 @@ func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 				if h := app.AgentService.StorageHolder(); h != nil && h.Get() != nil {
 					taskqueue.SetStorage(h.Get())
 				}
+				if err := app.startWorkers(); err != nil {
+					log.Errorw("agent worker startup failed", "error", err)
+					return
+				}
 				log.Info("agent registration successful, starting heartbeat")
 				resp, err := app.AgentService.Heartbeat(context.Background(), nil)
 				if err != nil {
@@ -287,7 +301,11 @@ func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 				if resp != nil && resp.Success {
 					log.Info("heartbeat successful")
 				} else {
-					log.Warnw("heartbeat failed", "error", resp.Message)
+					message := "no response"
+					if resp != nil {
+						message = resp.Message
+					}
+					log.Warnw("heartbeat failed", "error", message)
 					return
 				}
 				return
@@ -299,4 +317,39 @@ func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 	}
 
 	log.Warnw("wait gRPC client connection timeout, heartbeat not started", "timeout", maxWaitTime)
+}
+
+func (app *Agent) startWorkers() error {
+	app.workerMu.Lock()
+	defer app.workerMu.Unlock()
+	if app.stopping || app.draining || app.TaskQueue != nil {
+		return nil
+	}
+	if app.ExecManager == nil {
+		app.ExecManager = agentoutbox.ProvideExecutorManager(nil)
+	}
+	if app.Outbox == nil {
+		ob, err := agentoutbox.NewRegisteredOutbox(app.AgentConf, app.GrpcClient)
+		if err != nil {
+			return fmt.Errorf("initialize registered agent outbox: %w", err)
+		}
+		app.Outbox = ob
+	}
+	if app.Outbox != nil {
+		app.ExecManager.SetEventPublisher(agentoutbox.NewPublisher(app.Outbox), executor.EventEmitterConfig{})
+	}
+	if app.AgentConf.MessageQueue.Kafka.BootstrapServers != "" && app.logPublisher == nil {
+		pub, err := executor.NewReliableKafkaLogPublisher(app.AgentConf.MessageQueue.Kafka, "arcentra-agent-logs-"+app.AgentConf.Agent.ID, app.AgentConf.LogSpool, filepath.Join(app.AgentConf.Agent.WorkspaceDir, ".build-log-spool"))
+		if err != nil {
+			return err
+		}
+		app.logPublisher = pub
+		app.ExecManager.SetLogPublisher(pub)
+	}
+	queue, err := taskqueue.StartWorker(context.Background(), app.AgentConf, app.GrpcClient, app.ExecManager)
+	if err != nil {
+		return err
+	}
+	app.TaskQueue = queue
+	return nil
 }

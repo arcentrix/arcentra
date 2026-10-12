@@ -16,10 +16,13 @@ package taskqueue
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -34,17 +37,25 @@ import (
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
+	"github.com/expr-lang/expr"
+	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 )
 
 var (
 	runningStepRunCancel sync.Map
 	runningJobRunCancel  sync.Map
 	storageInstance      storage.IStorage
+	storageMu            sync.RWMutex
+	cancelledJobs        sync.Map
+	pendingJobReports    sync.Map
+	pendingStepReports   sync.Map
 )
 
-// SetStorage sets the object-storage client used by job workers for artifact
-// upload/download. Called after the agent registers and receives StorageConfig.
+// SetStorage 设置 Agent 使用的对象存储客户端
 func SetStorage(st storage.IStorage) {
+	storageMu.Lock()
+	defer storageMu.Unlock()
 	storageInstance = st
 }
 
@@ -52,7 +63,7 @@ func SetStorage(st storage.IStorage) {
 // are executed via executor.Manager (events go through Outbox when SetEventPublisher is used);
 // otherwise the legacy executeStepRun (shell only) is used.
 func StartWorker(
-	_ context.Context,
+	workerCtx context.Context,
 	agentConf *config.AgentConfig,
 	grpcClient *grpc.ClientWrapper,
 	execManager *executor.Manager,
@@ -60,13 +71,21 @@ func StartWorker(
 	if agentConf == nil {
 		return nil, nil
 	}
+	if err := ValidateExecutionConfig(agentConf); err != nil {
+		return nil, err
+	}
 	cfg := agentConf.MessageQueue.Kafka
 	if cfg.BootstrapServers == "" {
 		return nil, nil
 	}
 	queueCfg := agentConf.TaskQueue
 	delaySlotDuration := time.Duration(queueCfg.DelaySlotDuration) * time.Second
+	if agentConf.Agent.ID == "" {
+		return nil, fmt.Errorf("agent must register before starting workers")
+	}
 	options := []nova.QueueOption{
+		nova.WithTopicPrefix(taskqueue.AgentTopicPrefix(agentConf.Agent.ID)),
+		nova.WithGroupID("arcentra-agent-" + agentConf.Agent.ID),
 		nova.WithKafka(cfg.BootstrapServers,
 			nova.WithKafkaAuth(cfg.SecurityProtocol, cfg.Sasl.Mechanism, cfg.Sasl.Username, cfg.Sasl.Password),
 			nova.WithKafkaSSL(cfg.Ssl.CaFile, cfg.Ssl.CertFile, cfg.Ssl.KeyFile, cfg.Ssl.Password),
@@ -92,22 +111,35 @@ func StartWorker(
 		if task == nil {
 			return nil
 		}
+		if workerCtx.Err() != nil {
+			return workerCtx.Err()
+		}
 		switch task.Type {
 		case taskqueue.TaskTypeJobRun:
 			var payload taskqueue.JobRunTaskPayload
 			if err := sonic.Unmarshal(task.Payload, &payload); err != nil {
-				return fmt.Errorf("unmarshal job run payload: %w", err)
+				log.Warnw("discarding malformed job task", "error", err)
+				return nil
+			}
+			if payload.AgentID != agentConf.Agent.ID {
+				log.Warnw("discarding job addressed to a different agent", "jobRunID", payload.JobRunID)
+				return nil
 			}
 			log.Infow("received job run task",
 				"jobRunId", payload.JobRunID,
 				"jobName", payload.JobName,
 				"steps", len(payload.Steps),
 			)
-			return executeJobRun(ctx, agentConf, grpcClient, execManager, &payload)
+			return acknowledgeCompleted(executeJobRun(ctx, agentConf, grpcClient, execManager, &payload))
 		case taskqueue.TaskTypeStepRun:
 			var payload taskqueue.StepRunTaskPayload
 			if err := sonic.Unmarshal(task.Payload, &payload); err != nil {
-				return fmt.Errorf("unmarshal step run payload: %w", err)
+				log.Warnw("discarding malformed step task", "error", err)
+				return nil
+			}
+			if payload.AgentID != agentConf.Agent.ID {
+				log.Warnw("discarding step addressed to a different agent", "stepRunID", payload.StepRunID)
+				return nil
 			}
 			log.Infow("received step run task",
 				"stepRunId", payload.StepRunID,
@@ -115,20 +147,56 @@ func StartWorker(
 				"stepName", payload.StepName,
 			)
 			if execManager != nil {
-				return executeStepRunViaExecutor(ctx, agentConf, grpcClient, execManager, &payload)
+				return acknowledgeCompleted(executeStepRunViaExecutor(ctx, agentConf, grpcClient, execManager, &payload))
 			}
-			return executeStepRun(ctx, agentConf, grpcClient, &payload)
+			return acknowledgeCompleted(executeStepRun(ctx, agentConf, grpcClient, &payload))
 		default:
 			log.Debugw("unknown task type", "type", task.Type)
 			return nil
 		}
 	})
 
+	controlOptions := append([]nova.QueueOption{}, options...)
+	controlOptions = append(controlOptions, nova.WithTopicPrefix(taskqueue.AgentControlTopicPrefix(agentConf.Agent.ID)), nova.WithGroupID("arcentra-agent-control-"+agentConf.Agent.ID))
+	control, err := nova.NewTaskQueue(controlOptions...)
+	if err != nil {
+		_ = queue.Stop()
+		return nil, fmt.Errorf("create control queue: %w", err)
+	}
+	if err := control.Start(nova.HandlerFunc(func(_ context.Context, task *nova.Task) error {
+		if task == nil || task.Type != taskqueue.TaskTypeJobCancel {
+			return nil
+		}
+		var payload taskqueue.JobCancelTaskPayload
+		if err := sonic.Unmarshal(task.Payload, &payload); err != nil {
+			return err
+		}
+		if payload.AgentID != agentConf.Agent.ID || payload.JobRunID == "" {
+			return fmt.Errorf("invalid cancellation target")
+		}
+		CancelJobRun(payload.JobRunID)
+		return nil
+	})); err != nil {
+		_ = queue.Stop()
+		_ = control.Stop()
+		return nil, fmt.Errorf("start control queue: %w", err)
+	}
 	if err := queue.Start(handler); err != nil {
+		_ = control.Stop()
+		_ = queue.Stop()
 		return nil, fmt.Errorf("start task queue: %w", err)
 	}
+	return &workerQueues{TaskQueue: queue, control: control}, nil
+}
 
-	return queue, nil
+type workerQueues struct {
+	nova.TaskQueue
+	control nova.TaskQueue
+}
+
+func (q *workerQueues) Stop() error {
+	// 工作队列先停止，使已开始的任务能在控制队列和 RPC 关闭前上报结束状态
+	return errors.Join(q.TaskQueue.Stop(), q.control.Stop())
 }
 
 func withMessageFormat(value string) nova.QueueOption {
@@ -152,49 +220,110 @@ func withMessageCodec(value string) nova.QueueOption {
 }
 
 func executeStepRunViaExecutor(
-	ctx context.Context,
-	agentConf *config.AgentConfig,
-	grpcClient *grpc.ClientWrapper,
-	execManager *executor.Manager,
-	payload *taskqueue.StepRunTaskPayload,
+	ctx context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper,
+	execManager *executor.Manager, payload *taskqueue.StepRunTaskPayload,
+	override ...executor.Executor,
 ) error {
-	if payload == nil {
-		return nil
-	}
-	stepCtx, cancel := context.WithCancel(ctx)
-	runningStepRunCancel.Store(payload.StepRunID, cancel)
-	defer func() {
-		runningStepRunCancel.Delete(payload.StepRunID)
-		cancel()
-	}()
-
-	start := time.Now()
-	_ = reportStepRunStatus(grpcClient, agentConf, payload.StepRunID, steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING, 0, "", start, 0, nil)
-
-	req := PayloadToExecutionRequest(payload, agentConf.Agent.JobTimeout)
-	result, execErr := execManager.Execute(stepCtx, req)
-	end := time.Now().Unix()
-	metrics := map[string]string{"executor": "agent-shell"}
-	if result != nil && result.Metadata != nil {
-		if v, ok := result.Metadata["outputBytes"]; ok {
-			if s, ok := v.(string); ok {
-				metrics["outputBytes"] = s
-			}
+	if payload != nil {
+		if pending, ok := pendingStepReports.Load(payload.StepRunID); ok {
+			return pending.(*executionReceipt).deliver(&pendingStepReports, payload.StepRunID)
 		}
 	}
-	if result != nil && len(result.Output) > 0 {
-		metrics["outputBytes"] = fmt.Sprintf("%d", len(result.Output))
+	if payload == nil || payload.StepRunID == "" {
+		return grpcstatus.Error(codes.InvalidArgument, "missing step run ID")
+	}
+	stepCtx, cancel := context.WithCancel(ctx)
+	if _, loaded := runningStepRunCancel.LoadOrStore(payload.StepRunID, cancel); loaded {
+		cancel()
+		return fmt.Errorf("step run %s is already running", payload.StepRunID)
+	}
+	defer func() { runningStepRunCancel.Delete(payload.StepRunID); cancel() }()
+	start := time.Now()
+	defaultTimeout := 0
+	if agentConf != nil {
+		defaultTimeout = agentConf.Agent.JobTimeout
+	}
+	if timeout := parseTimeout(payload.Timeout, defaultTimeout); timeout > 0 {
+		var timeoutCancel context.CancelFunc
+		stepCtx, timeoutCancel = context.WithTimeout(stepCtx, timeout)
+		defer timeoutCancel()
+	}
+	if err := claimStepRun(stepCtx, grpcClient, agentConf, payload.StepRunID, start); err != nil {
+		return err
+	}
+	req := PayloadToExecutionRequest(payload, defaultTimeout)
+	if agentConf != nil {
+		req.AgentID = agentConf.Agent.ID
+		req.Env = mergeEnv(agentConf.Agent.EnvVars, payload.Env)
+	}
+	if strings.TrimSpace(req.Workspace) == "" {
+		runID, jobID := payload.PipelineRunID, payload.JobID
+		if runID == "" {
+			runID = "steps"
+		}
+		if jobID == "" {
+			jobID = payload.StepRunID
+		}
+		workspace, err := prepareWorkspace(agentConf, &taskqueue.JobRunTaskPayload{PipelineRunID: runID, JobRunID: jobID})
+		if err != nil {
+			end := time.Now().Unix()
+			return retainStepReport(payload.StepRunID, err, func() error {
+				return reportStepRunStatus(grpcClient, agentConf, payload.StepRunID, steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, 1, err.Error(), start, end, nil)
+			})
+		}
+		req.Workspace = workspace
+	}
+	if execManager == nil {
+		execManager = executor.NewExecutorManager()
+		execManager.Register(executor.NewShellExecutor())
+	}
+	var result *executor.ExecutionResult
+	var execErr error
+	if len(override) > 0 && override[0] != nil {
+		result, execErr = execManager.ExecuteWithExecutor(stepCtx, req, override[0])
+	} else {
+		result, execErr = execManager.Execute(stepCtx, req)
+	}
+	metrics := map[string]string{"workspace": req.Workspace}
+	if result != nil {
+		metrics["executor"] = result.ExecutorName
+		metrics["outputBytes"] = fmt.Sprint(len(result.Output) + len(result.ErrorOutput))
+		if value, ok := result.Metadata["outputBytes"]; ok {
+			metrics["outputBytes"] = fmt.Sprint(value)
+		}
 	}
 	status, exitCode, errMsg := resultToStepRunStatus(stepCtx, result, execErr)
-	_ = reportStepRunStatus(grpcClient, agentConf, payload.StepRunID, status, exitCode, errMsg, start, end, metrics)
-	return execErr
+	end := time.Now().Unix()
+	if execErr == nil && status != steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS {
+		execErr = fmt.Errorf("step failed: %s", errMsg)
+	}
+	return retainStepReport(payload.StepRunID, execErr, func() error {
+		return reportStepRunStatus(grpcClient, agentConf, payload.StepRunID, status, exitCode, errMsg, start, end, metrics)
+	})
 }
 
 func resultToStepRunStatus(ctx context.Context, result *executor.ExecutionResult, execErr error) (steprunv1.StepRunStatus, int32, string) {
-	if ctx.Err() == context.DeadlineExceeded {
+	executionCause := ctx.Err()
+	if executionCause == nil {
+		executionCause = executor.ExecutionContextCause(execErr)
+	}
+	if errors.Is(executionCause, context.DeadlineExceeded) {
 		return steprunv1.StepRunStatus_STEP_RUN_STATUS_TIMEOUT, 1, "timeout"
 	}
-	if ctx.Err() == context.Canceled {
+	if errors.Is(executionCause, context.Canceled) {
+		return steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED, 1, "cancelled"
+	}
+	if errors.Is(execErr, executor.ErrBuildLogPersistence) {
+		exitCode := int32(1)
+		if result != nil && result.ExitCode != 0 {
+			exitCode = result.ExitCode
+		}
+		return steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, exitCode, execErr.Error()
+	}
+	if errors.Is(execErr, context.DeadlineExceeded) {
+		return steprunv1.StepRunStatus_STEP_RUN_STATUS_TIMEOUT, 1, "timeout"
+	}
+	if errors.Is(execErr, context.Canceled) {
 		return steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED, 1, "cancelled"
 	}
 	if result == nil {
@@ -204,12 +333,17 @@ func resultToStepRunStatus(ctx context.Context, result *executor.ExecutionResult
 		}
 		return steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, 1, errMsg
 	}
-	if result.Success {
+	if result.Success && execErr == nil {
 		return steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS, result.ExitCode, ""
 	}
-	return steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, result.ExitCode, result.Error
+	errMsg := result.Error
+	if errMsg == "" && execErr != nil {
+		errMsg = execErr.Error()
+	}
+	return steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, result.ExitCode, errMsg
 }
 
+// CancelStepRun 取消正在执行的步骤
 func CancelStepRun(stepRunID string) bool {
 	value, ok := runningStepRunCancel.Load(stepRunID)
 	if !ok {
@@ -223,8 +357,19 @@ func CancelStepRun(stepRunID string) bool {
 	return true
 }
 
-// CancelJobRun cancels a running job by its jobRunID.
+// CancelJobRun 取消作业并保存待执行作业的取消信号
 func CancelJobRun(jobRunID string) bool {
+	if jobRunID == "" {
+		return false
+	}
+	now := time.Now()
+	cancelledJobs.Range(func(key, value any) bool {
+		if expires, ok := value.(time.Time); ok && now.After(expires) {
+			cancelledJobs.Delete(key)
+		}
+		return true
+	})
+	cancelledJobs.Store(jobRunID, now.Add(24*time.Hour))
 	value, ok := runningJobRunCancel.Load(jobRunID)
 	if !ok {
 		return false
@@ -237,112 +382,200 @@ func CancelJobRun(jobRunID string) bool {
 	return true
 }
 
-// executeJobRun handles a complete job: executes all steps sequentially,
-// reports per-step status, and reports job-level terminal status.
-func executeJobRun(
-	ctx context.Context,
-	agentConf *config.AgentConfig,
-	grpcClient *grpc.ClientWrapper,
-	execManager *executor.Manager,
-	payload *taskqueue.JobRunTaskPayload,
-) error {
-	if payload == nil {
-		return nil
+// executeJobRun 顺序执行作业步骤，完整报告未执行步骤与作业的终态
+func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper, execManager *executor.Manager, payload *taskqueue.JobRunTaskPayload) error {
+	if payload != nil {
+		if pending, ok := pendingJobReports.Load(payload.JobRunID); ok {
+			return pending.(*executionReceipt).deliver(&pendingJobReports, payload.JobRunID)
+		}
 	}
-
+	if payload == nil || payload.JobRunID == "" {
+		return grpcstatus.Error(codes.InvalidArgument, "missing job run ID")
+	}
 	jobCtx, cancel := context.WithCancel(ctx)
-	runningJobRunCancel.Store(payload.JobRunID, cancel)
-	defer func() {
-		runningJobRunCancel.Delete(payload.JobRunID)
+	if _, loaded := runningJobRunCancel.LoadOrStore(payload.JobRunID, cancel); loaded {
 		cancel()
-	}()
-
-	if payload.Timeout != "" {
-		if d, err := time.ParseDuration(payload.Timeout); err == nil && d > 0 {
-			var timeoutCancel context.CancelFunc
-			jobCtx, timeoutCancel = context.WithTimeout(jobCtx, d)
-			defer timeoutCancel()
-		}
+		return fmt.Errorf("job run %s is already running", payload.JobRunID)
 	}
-
+	defer func() { runningJobRunCancel.Delete(payload.JobRunID); cancel() }()
+	if expires, ok := cancelledJobs.Load(payload.JobRunID); ok && time.Now().Before(expires.(time.Time)) {
+		cancel()
+	}
+	defaultTimeout := 0
+	if agentConf != nil {
+		defaultTimeout = agentConf.Agent.JobTimeout
+	}
+	if timeout := parseTimeout(payload.Timeout, defaultTimeout); timeout > 0 {
+		var timeoutCancel context.CancelFunc
+		jobCtx, timeoutCancel = context.WithTimeout(jobCtx, timeout)
+		defer timeoutCancel()
+	}
 	start := time.Now()
-	reportJobRunStatus(
-		grpcClient, agentConf, payload.JobRunID,
-		agentv1.AgentStatus_AGENT_STATUS_BUSY,
-		int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING),
-		"", start, 0,
-	)
-
-	workspace := payload.Workspace
-	if workspace == "" {
-		workspace = "."
+	if jobCtx.Err() == nil {
+		if err := reportJobRunStatus(grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_BUSY, int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING), "", start, 0); err != nil {
+			return fmt.Errorf("claim job run: %w", err)
+		}
 	}
-
-	if err := handleSourceClone(jobCtx, payload.Source, workspace); err != nil {
-		end := time.Now().Unix()
-		reportJobRunStatus(grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_IDLE,
-			int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED), err.Error(), start, end)
-		return fmt.Errorf("source clone failed: %w", err)
+	workspace, jobErr := prepareWorkspace(agentConf, payload)
+	if jobErr == nil {
+		jobErr = handleSourceClone(jobCtx, payload.Source, workspace)
 	}
-
-	handleArtifactDownload(jobCtx, payload.ArtifactURIs, workspace, storageInstance)
-
-	var jobErr error
+	storageMu.RLock()
+	st := storageInstance
+	storageMu.RUnlock()
+	if jobErr == nil {
+		jobErr = handleArtifactDownload(jobCtx, payload.ArtifactURIs, workspace, st)
+	}
+	artifacts := &artifactExecutor{job: payload, storage: st, uploaded: make(map[string]string)}
 	for _, step := range payload.Steps {
-		if jobCtx.Err() != nil {
-			break
+		if jobCtx.Err() != nil || jobErr != nil {
+			status := steprunv1.StepRunStatus_STEP_RUN_STATUS_SKIPPED
+			reason := "previous step or workspace preparation failed"
+			if jobCtx.Err() != nil {
+				status = steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED
+				reason = jobCtx.Err().Error()
+			}
+			end := time.Now().Unix()
+			_ = retainStepReport(step.StepRunID, nil, func() error {
+				return reportStepRunStatus(grpcClient, agentConf, step.StepRunID, status, 0, reason, start, end, nil)
+			})
+			continue
 		}
-		stepStart := time.Now()
-		_ = reportStepRunStatus(grpcClient, agentConf, step.StepRunID,
-			steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING, 0, "", stepStart, 0, nil)
-
-		stepPayload := &taskqueue.StepRunTaskPayload{
-			PipelineID:    payload.PipelineID,
-			PipelineRunID: payload.PipelineRunID,
-			JobID:         payload.JobRunID,
-			JobName:       payload.JobName,
-			StepName:      step.Name,
-			StepIndex:     step.StepIndex,
-			StepRunID:     step.StepRunID,
-			Uses:          step.Uses,
-			Action:        step.Action,
-			Args:          step.Args,
-			Env:           mergeEnv(payload.Env, step.Env),
-			Workspace:     payload.Workspace,
-			Timeout:       step.Timeout,
+		env := mergeEnv(payload.Env, step.Env)
+		allowed, conditionErr := evaluateStepCondition(step.When, payload.JobName, step.Name, env, payload.Variables)
+		if conditionErr != nil {
+			conditionErr = redactJobError(payload, conditionErr)
+			stepStart := time.Now()
+			_ = retainStepReport(step.StepRunID, conditionErr, func() error {
+				return reportStepRunStatus(grpcClient, agentConf, step.StepRunID, steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, 1, conditionErr.Error(), stepStart, stepStart.Unix(), nil)
+			})
+			if !step.ContinueOnError {
+				jobErr = conditionErr
+			}
+			continue
 		}
-
+		if !allowed {
+			stepStart := time.Now()
+			_ = retainStepReport(step.StepRunID, nil, func() error {
+				return reportStepRunStatus(grpcClient, agentConf, step.StepRunID, steprunv1.StepRunStatus_STEP_RUN_STATUS_SKIPPED, 0, "condition evaluated to false", stepStart, stepStart.Unix(), nil)
+			})
+			continue
+		}
+		stepPayload := &taskqueue.StepRunTaskPayload{PipelineID: payload.PipelineID, PipelineRunID: payload.PipelineRunID, JobID: payload.JobRunID, JobName: payload.JobName, StepName: step.Name, StepIndex: step.StepIndex, StepRunID: step.StepRunID, Uses: step.Uses, Action: step.Action, Args: step.Args, Env: env, Workspace: workspace, Timeout: step.Timeout, AgentID: payload.AgentID}
 		var stepErr error
-		if execManager != nil {
+		if strings.EqualFold(strings.TrimSpace(step.Uses), "builtin:artifacts") {
+			stepErr = executeStepRunViaExecutor(jobCtx, agentConf, grpcClient, execManager, stepPayload, artifacts)
+		} else if execManager != nil {
 			stepErr = executeStepRunViaExecutor(jobCtx, agentConf, grpcClient, execManager, stepPayload)
 		} else {
 			stepErr = executeStepRun(jobCtx, agentConf, grpcClient, stepPayload)
 		}
-
+		if pending, ok := pendingStepReports.Load(step.StepRunID); ok {
+			// 上报失败不改变执行结果；作业终态上报前会重试所有待交付步骤
+			stepErr = pending.(*executionReceipt).executionErr
+		}
 		if stepErr != nil && !step.ContinueOnError {
 			jobErr = fmt.Errorf("step %s failed: %w", step.Name, stepErr)
-			break
 		}
 	}
-
-	end := time.Now().Unix()
-	status := int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS)
+	if jobCtx.Err() != nil {
+		jobErr = jobCtx.Err()
+	}
+	status := steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS
+	switch {
+	case errors.Is(executor.ExecutionContextCause(jobErr), context.DeadlineExceeded):
+		status = steprunv1.StepRunStatus_STEP_RUN_STATUS_TIMEOUT
+	case errors.Is(executor.ExecutionContextCause(jobErr), context.Canceled):
+		status = steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED
+	case errors.Is(jobErr, executor.ErrBuildLogPersistence):
+		status = steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED
+	case errors.Is(jobErr, context.DeadlineExceeded):
+		status = steprunv1.StepRunStatus_STEP_RUN_STATUS_TIMEOUT
+	case errors.Is(jobErr, context.Canceled):
+		status = steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED
+	case jobErr != nil:
+		status = steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED
+	}
+	jobErr = redactJobError(payload, jobErr)
 	errMsg := ""
 	if jobErr != nil {
-		status = int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED)
 		errMsg = jobErr.Error()
 	}
-	if jobCtx.Err() == context.DeadlineExceeded {
-		status = int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_TIMEOUT)
-		errMsg = "job timeout"
-	}
-	if jobCtx.Err() == context.Canceled {
-		status = int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED)
-		errMsg = "job cancelled"
-	}
+	end := time.Now().Unix()
+	receipt := &executionReceipt{executionErr: jobErr, report: func() error {
+		for _, step := range payload.Steps {
+			if pending, ok := pendingStepReports.Load(step.StepRunID); ok {
+				if err := pending.(*executionReceipt).deliver(&pendingStepReports, step.StepRunID); err != nil {
+					var completed *completedExecutionError
+					if !errors.As(err, &completed) {
+						return err
+					}
+				}
+			}
+		}
+		return reportJobRunStatus(grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_IDLE, int32(status), errMsg, start, end, artifacts.uploaded)
+	}}
+	pendingJobReports.Store(payload.JobRunID, receipt)
+	return receipt.deliver(&pendingJobReports, payload.JobRunID)
+}
 
-	reportJobRunStatus(grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_IDLE, status, errMsg, start, end)
-	return jobErr
+func prepareWorkspace(conf *config.AgentConfig, payload *taskqueue.JobRunTaskPayload) (string, error) {
+	workspace := strings.TrimSpace(payload.Workspace)
+	if workspace == "" {
+		base := "workspaces"
+		if conf != nil && conf.Agent.WorkspaceDir != "" {
+			base = conf.Agent.WorkspaceDir
+		}
+		// 运行标识不能改变工作目录的层级
+		for _, id := range []string{payload.PipelineRunID, payload.JobRunID} {
+			if id == "" || filepath.Base(id) != id || id == "." || id == ".." {
+				return "", fmt.Errorf("invalid run ID for workspace")
+			}
+		}
+		workspace = filepath.Join(base, payload.PipelineRunID, payload.JobRunID)
+	}
+	absolute, err := filepath.Abs(workspace)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace: %w", err)
+	}
+	if err := os.MkdirAll(absolute, 0o755); err != nil {
+		return "", fmt.Errorf("create workspace: %w", err)
+	}
+	return absolute, nil
+}
+
+func evaluateStepCondition(condition, jobName, stepName string, env, variables map[string]string) (bool, error) {
+	if strings.TrimSpace(condition) == "" {
+		return true, nil
+	}
+	values := make(map[string]any, len(env)+3)
+	for key, value := range env {
+		values[key] = value
+	}
+	values["env"] = env
+	values["variables"] = variables
+	values["job"] = map[string]any{"name": jobName}
+	values["step"] = map[string]any{"name": stepName}
+	program, err := expr.Compile(condition, expr.Env(values), expr.AsBool())
+	if err != nil {
+		return false, fmt.Errorf("compile step condition: %w", err)
+	}
+	result, err := expr.Run(program, values)
+	if err != nil {
+		return false, fmt.Errorf("evaluate step condition: %w", err)
+	}
+	allowed, ok := result.(bool)
+	if !ok {
+		return false, fmt.Errorf("step condition must return bool")
+	}
+	return allowed, nil
+}
+
+// RunningStepRunsCount 返回当前执行中的步骤数
+func RunningStepRunsCount() int32 {
+	var count int32
+	runningStepRunCancel.Range(func(_, _ any) bool { count++; return true })
+	return count
 }
 
 // reportJobRunStatus reports job run status to the control plane using the
@@ -356,11 +589,12 @@ func reportJobRunStatus(
 	errMsg string,
 	start time.Time,
 	endUnix int64,
-) {
+	artifactURIs ...map[string]string,
+) error {
 	if grpcClient == nil || grpcClient.AgentClient == nil {
-		return
+		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := grpcClient.WithTimeoutAndAuth(context.Background())
 	defer cancel()
 
 	agentID := ""
@@ -375,9 +609,21 @@ func reportJobRunStatus(
 		StartTime:    start.Unix(),
 		EndTime:      endUnix,
 	}
-	if _, err := grpcClient.AgentClient.ReportJobRunStatus(ctx, req); err != nil {
-		log.Warnw("report job run status failed", "jobRunId", jobRunID, "error", err)
+	if len(artifactURIs) > 0 {
+		req.ArtifactUris = artifactURIs[0]
 	}
+	ctx = withExecutionClaim(ctx, "job", jobRunID)
+	resp, err := grpcClient.AgentClient.ReportJobRunStatus(ctx, req)
+	if err != nil {
+		return err
+	}
+	if resp == nil || !resp.Success {
+		return fmt.Errorf("job status report rejected")
+	}
+	if status >= int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS) {
+		completeExecutionClaim("job", jobRunID)
+	}
+	return nil
 }
 
 // mergeEnv merges job-level and step-level environment variables.
@@ -396,95 +642,10 @@ func mergeEnv(jobEnv, stepEnv map[string]string) map[string]string {
 	return merged
 }
 
-func executeStepRun(
-	ctx context.Context,
-	agentConf *config.AgentConfig,
-	grpcClient *grpc.ClientWrapper,
-	payload *taskqueue.StepRunTaskPayload,
-) error {
-	if payload == nil {
-		return nil
-	}
-	stepCtx, cancel := context.WithCancel(ctx)
-	runningStepRunCancel.Store(payload.StepRunID, cancel)
-	defer func() {
-		runningStepRunCancel.Delete(payload.StepRunID)
-		cancel()
-	}()
-
-	start := time.Now()
-	_ = reportStepRunStatus(grpcClient, agentConf, payload.StepRunID, steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING, 0, "", start, 0, nil)
-
-	timeout := parseTimeout(payload.Timeout, agentConf.Agent.JobTimeout)
-	runCtx := stepCtx
-	var timeoutCancel context.CancelFunc
-	if timeout > 0 {
-		runCtx, timeoutCancel = context.WithTimeout(stepCtx, timeout)
-		defer timeoutCancel()
-	}
-
-	cmdText := buildCommandFromPayload(payload)
-	if strings.TrimSpace(cmdText) == "" {
-		err := fmt.Errorf("empty command for step run %s", payload.StepRunID)
-		_ = reportStepRunStatus(
-			grpcClient,
-			agentConf,
-			payload.StepRunID,
-			steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED,
-			1,
-			err.Error(),
-			start,
-			time.Now().Unix(),
-			map[string]string{"executor": "agent-shell"},
-		)
-		return err
-	}
-
-	cmd := exec.CommandContext(runCtx, "sh", "-lc", cmdText)
-	if strings.TrimSpace(payload.Workspace) != "" {
-		cmd.Dir = payload.Workspace
-	}
-	for k, v := range payload.Env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
-	output, err := cmd.CombinedOutput()
-	end := time.Now().Unix()
-	metrics := map[string]string{
-		"executor":    "agent-shell",
-		"outputBytes": fmt.Sprintf("%d", len(output)),
-	}
-	if err != nil {
-		status := steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED
-		if runCtx.Err() == context.DeadlineExceeded {
-			status = steprunv1.StepRunStatus_STEP_RUN_STATUS_TIMEOUT
-		}
-		if runCtx.Err() == context.Canceled {
-			status = steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED
-		}
-		exitCode := int32(1)
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = int32(exitErr.ExitCode())
-		}
-		errMsg := strings.TrimSpace(string(output))
-		if errMsg == "" {
-			errMsg = err.Error()
-		}
-		_ = reportStepRunStatus(grpcClient, agentConf, payload.StepRunID, status, exitCode, errMsg, start, end, metrics)
-		return err
-	}
-
-	_ = reportStepRunStatus(
-		grpcClient,
-		agentConf,
-		payload.StepRunID,
-		steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS,
-		0,
-		"",
-		start,
-		end,
-		metrics,
-	)
-	return nil
+func executeStepRun(ctx context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper, payload *taskqueue.StepRunTaskPayload) error {
+	manager := executor.NewExecutorManager()
+	manager.Register(executor.NewShellExecutor())
+	return executeStepRunViaExecutor(ctx, agentConf, grpcClient, manager, payload)
 }
 
 func reportStepRunStatus(
@@ -513,45 +674,29 @@ func reportStepRunStatus(
 		EndTime:      endUnix,
 		Metrics:      metrics,
 	}
-	_, err := grpcClient.AgentClient.ReportStepRunStatus(ctx, req)
-	return err
+	ctx = withExecutionClaim(ctx, "step", stepRunID)
+	resp, err := grpcClient.AgentClient.ReportStepRunStatus(ctx, req)
+	if err != nil {
+		return err
+	}
+	if resp == nil || !resp.Success {
+		return fmt.Errorf("step status report rejected")
+	}
+	if status >= steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS {
+		completeExecutionClaim("step", stepRunID)
+	}
+	return nil
 }
 
 func buildCommandFromPayload(payload *taskqueue.StepRunTaskPayload) string {
 	if payload == nil {
 		return ""
 	}
-	for _, key := range []string{"run", "script", "command"} {
-		if value, ok := payload.Args[key]; ok {
-			if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
-				return text
-			}
-		}
-	}
-	if value, ok := payload.Args["commands"]; ok {
-		if list, ok := value.([]any); ok {
-			parts := make([]string, 0, len(list))
-			for i := range list {
-				if text, ok := list[i].(string); ok && strings.TrimSpace(text) != "" {
-					parts = append(parts, text)
-				}
-			}
-			return strings.Join(parts, "\n")
-		}
-	}
-	return ""
+	return executor.BuildCommandFromStepArgs(&executor.StepInfo{Args: payload.Args})
 }
 
 func parseTimeout(raw string, defaultSeconds int) time.Duration {
-	if strings.TrimSpace(raw) != "" {
-		if timeout, err := time.ParseDuration(raw); err == nil {
-			return timeout
-		}
-	}
-	if defaultSeconds > 0 {
-		return time.Duration(defaultSeconds) * time.Second
-	}
-	return 0
+	return executor.ParseTimeout(raw, defaultSeconds)
 }
 
 // handleSourceClone clones the source repository into the workspace directory
@@ -560,53 +705,145 @@ func handleSourceClone(ctx context.Context, src *taskqueue.SourcePayload, worksp
 	if src == nil || src.Type == "" {
 		return nil
 	}
-	if !strings.EqualFold(src.Type, "git") || src.Repo == "" {
+	if !strings.EqualFold(src.Type, "git") {
+		return fmt.Errorf("unsupported source type %q", src.Type)
+	}
+	if src.Repo == "" {
+		return fmt.Errorf("git source repository is required")
+	}
+	if repoURL, err := url.Parse(src.Repo); err == nil && repoURL.User != nil {
+		return fmt.Errorf("git source URL must not contain credentials; use source.auth instead")
+	}
+	if src.Commit != "" && !regexp.MustCompile(`^[a-fA-F0-9]{7,64}$`).MatchString(src.Commit) {
+		return fmt.Errorf("source commit must be a hexadecimal commit ID")
+	}
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		return err
+	}
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	username, password := src.Auth["username"], src.Auth["password"]
+	if password == "" {
+		password = src.Auth["token"]
+		if password != "" && username == "" {
+			username = "oauth2"
+		}
+	}
+	if password != "" {
+		// 认证内容仅放入子进程环境，避免写进命令行、仓库配置或脚本文件
+		file, err := os.CreateTemp("", "arcentra-askpass-*")
+		if err != nil {
+			return err
+		}
+		name := file.Name()
+		defer os.Remove(name)
+		script := "#!/bin/sh\ncase \"$1\" in *Username*) printf '%s\\n' \"$ARCENTRA_GIT_USERNAME\" ;; *) printf '%s\\n' \"$ARCENTRA_GIT_PASSWORD\" ;; esac\n"
+		if _, err := file.WriteString(script); err != nil {
+			_ = file.Close()
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+		if err := os.Chmod(name, 0o700); err != nil {
+			return err
+		}
+		env = append(env, "GIT_ASKPASS="+name, "ARCENTRA_GIT_USERNAME="+username, "ARCENTRA_GIT_PASSWORD="+password)
+	}
+	run := func(args ...string) error {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir, cmd.Env = workspace, env
+		cmd.WaitDelay = 2 * time.Second
+		output, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			message := string(output)
+			for _, secret := range []string{password, src.Auth["token"]} {
+				if secret != "" {
+					message = strings.ReplaceAll(message, secret, "[REDACTED]")
+				}
+			}
+			return fmt.Errorf("git source operation failed: %s: %w", message, err)
+		}
 		return nil
 	}
-
-	_ = os.MkdirAll(workspace, 0o755)
-
 	args := []string{"clone", "--depth", "1"}
 	if src.Branch != "" {
 		args = append(args, "--branch", src.Branch)
 	}
-	args = append(args, src.Repo, workspace)
-
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = workspace
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("git clone failed: %s: %w", string(output), err)
+	args = append(args, "--", src.Repo, ".")
+	if err := run(args...); err != nil {
+		return err
 	}
-	log.Infow("source clone complete", "repo", src.Repo, "branch", src.Branch, "workspace", workspace)
+	if src.Commit != "" {
+		if err := run("fetch", "--depth", "1", "origin", src.Commit); err != nil {
+			return err
+		}
+		if err := run("checkout", "--detach", src.Commit); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-// handleArtifactDownload downloads upstream job artifacts from object storage
-// into the workspace. Each entry in uris maps "jobName/artifactName" to an
-// object key (or URI) in the configured bucket.
-func handleArtifactDownload(ctx context.Context, uris map[string]string, workspace string, st storage.IStorage) {
-	if len(uris) == 0 || st == nil {
-		return
-	}
+// retainStepReport 缓存所有步骤终态上报，避免临时 RPC 故障丢失跳过或失败结果
+func retainStepReport(stepRunID string, executionErr error, report func() error) error {
+	receipt := &executionReceipt{executionErr: executionErr, report: report}
+	pendingStepReports.Store(stepRunID, receipt)
+	return receipt.deliver(&pendingStepReports, stepRunID)
+}
 
-	artifactsDir := filepath.Join(workspace, ".artifacts")
-	_ = os.MkdirAll(artifactsDir, 0o755)
+// executionReceipt 保留终态上报以避免队列重试重复执行 Shell
+// 持久化重放仍需要控制面的运行尝试标识
+type executionReceipt struct {
+	executionErr error
+	report       func() error
+}
 
-	for key, objectName := range uris {
-		if objectName == "" {
-			continue
-		}
-		data, err := st.Download(ctx, objectName)
-		if err != nil {
-			log.Warnw("artifact download failed", "key", key, "object", objectName, "error", err)
-			continue
-		}
-		localPath := filepath.Join(artifactsDir, strings.ReplaceAll(key, "/", "_"))
-		if err := os.WriteFile(localPath, data, 0o644); err != nil {
-			log.Warnw("artifact write failed", "key", key, "localPath", localPath, "error", err)
-			continue
-		}
-		log.Infow("artifact downloaded", "key", key, "localPath", localPath)
+func (r *executionReceipt) deliver(pending *sync.Map, key string) error {
+	if err := r.report(); err != nil {
+		return err
 	}
+	pending.Delete(key)
+	if r.executionErr != nil {
+		return &completedExecutionError{r.executionErr}
+	}
+	return nil
+}
+
+type completedExecutionError struct{ error }
+
+func (e *completedExecutionError) Unwrap() error { return e.error }
+func acknowledgeCompleted(err error) error {
+	if err == nil {
+		return nil
+	}
+	var completed *completedExecutionError
+	if errors.As(err, &completed) {
+		return nil
+	}
+	switch grpcstatus.Code(err) {
+	case codes.FailedPrecondition, codes.PermissionDenied, codes.InvalidArgument, codes.NotFound:
+		log.Warnw("discarding rejected execution task", "error", err)
+		return nil
+	}
+	return err
+}
+
+// ValidateExecutionConfig 拒绝无法实际强制执行的隔离或安全配置
+func ValidateExecutionConfig(conf *config.AgentConfig) error {
+	if conf == nil {
+		return fmt.Errorf("agent configuration is required")
+	}
+	if strings.ToLower(strings.TrimSpace(conf.Agent.Mode)) != "baremetal" || conf.Agent.Sandbox.Enable {
+		return fmt.Errorf("this agent supports only explicit agent.mode=baremetal with agent.sandbox.enable=false; sandbox execution is not implemented")
+	}
+	if len(conf.Agent.DeniedCommands) > 0 || len(conf.Agent.ResourceLimits) > 0 {
+		return fmt.Errorf("baremetal executor cannot enforce deniedCommands or resourceLimits; use a dedicated trusted host and remove unsupported restrictions explicitly")
+	}
+	if conf.Agent.EnableDocker {
+		return fmt.Errorf("Docker execution is not implemented by this worker")
+	}
+	return nil
 }

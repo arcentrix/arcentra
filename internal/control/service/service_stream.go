@@ -16,6 +16,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"slices"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	steprunv1 "github.com/arcentrix/arcentra/api/steprun/v1"
 	streamv1 "github.com/arcentrix/arcentra/api/stream/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/logstream"
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
@@ -39,11 +41,14 @@ import (
 // StreamServiceImpl Stream 服务实现
 type StreamServiceImpl struct {
 	streamv1.UnimplementedStreamServiceServer
-	logAggregator *LogAggregator
-	redis         *redis.Client
-	mysql         *gorm.DB
-	logConsumer   *kafka.Consumer
-	kafkaCfg      KafkaSettings
+	logAggregator     *LogAggregator
+	redis             *redis.Client
+	mysql             *gorm.DB
+	logConsumer       *kafka.Consumer
+	logCancel         context.CancelFunc
+	logDone           chan struct{}
+	ownsLogAggregator bool
+	kafkaCfg          KafkaSettings
 }
 
 const (
@@ -73,19 +78,32 @@ type SslSettings struct {
 }
 
 // NewStreamService 创建Stream服务实例
-func NewStreamService(redis *redis.Client, mysql *gorm.DB, kafkaSettings KafkaSettings) *StreamServiceImpl {
-	service := &StreamServiceImpl{
-		logAggregator: NewLogAggregator(redis, mysql),
-		redis:         redis,
-		mysql:         mysql,
-		kafkaCfg:      kafkaSettings,
+func NewStreamService(redis *redis.Client, mysql *gorm.DB, kafkaSettings KafkaSettings, aggregators ...*LogAggregator) *StreamServiceImpl {
+	var aggregator *LogAggregator
+	if len(aggregators) > 0 {
+		aggregator = aggregators[0]
 	}
-	service.startKafkaLogConsumer(kafkaSettings)
+	ownsAggregator := aggregator == nil
+	if ownsAggregator {
+		aggregator = NewLogAggregator(repo.NewLogRepository(mysql))
+	}
+	consumerCtx, consumerCancel := context.WithCancel(context.Background())
+	service := &StreamServiceImpl{
+		logAggregator:     aggregator,
+		ownsLogAggregator: ownsAggregator,
+		logCancel:         consumerCancel,
+		logDone:           make(chan struct{}),
+		redis:             redis,
+		mysql:             mysql,
+		kafkaCfg:          kafkaSettings,
+	}
+	service.startKafkaLogConsumer(consumerCtx, kafkaSettings)
 	return service
 }
 
-func (s *StreamServiceImpl) startKafkaLogConsumer(cfg KafkaSettings) {
+func (s *StreamServiceImpl) startKafkaLogConsumer(ctx context.Context, cfg KafkaSettings) {
 	if cfg.BootstrapServers == "" {
+		close(s.logDone)
 		return
 	}
 
@@ -107,45 +125,121 @@ func (s *StreamServiceImpl) startKafkaLogConsumer(cfg KafkaSettings) {
 		kafka.WithConsumerGroupID(streamConsumerGroup+"-build-logs"),
 		kafka.WithConsumerOptions(clientOptions...),
 		kafka.WithConsumerAutoOffsetReset("earliest"),
+		kafka.WithConsumerEnableAutoCommit(false),
 	)
 	if err != nil {
 		log.Warnw("failed to create kafka log consumer", "error", err)
+		close(s.logDone)
 		return
 	}
 
 	s.logConsumer = consumer
 
 	safe.Go(func() {
+		defer close(s.logDone)
+		defer func() { _ = consumer.Close() }()
 		if err := consumer.Subscribe([]string{"BUILD_LOGS"}); err != nil {
 			log.Warnw("failed to subscribe build logs topic", "error", err)
 			return
 		}
-
-		for {
+		for ctx.Err() == nil {
 			msg, err := consumer.ReadMessage(200 * time.Millisecond)
 			if err != nil {
 				continue
 			}
-			var payload logstream.BuildLogMessage
-			if err := sonic.Unmarshal(msg.Value, &payload); err != nil {
-				log.Warnw("failed to unmarshal build log message", "error", err)
+			topic := "BUILD_LOGS"
+			if msg.TopicPartition.Topic != nil {
+				topic = *msg.TopicPartition.Topic
+			}
+			entry, err := decodeBuildLogEntry(msg.Value, topic, msg.TopicPartition.Partition, int64(msg.TopicPartition.Offset))
+			if err != nil {
+				log.Warnw("discarding invalid build log message", "error", err)
+				if err := consumer.CommitMessage(msg); err != nil {
+					log.Warnw("failed to commit invalid build log", "error", err)
+				}
 				continue
 			}
-			entry := &LogEntry{
-				StepRunID:  payload.StepRunID,
-				Timestamp:  payload.Timestamp,
-				LineNumber: payload.LineNumber,
-				Level:      payload.Level,
-				Content:    payload.Content,
-				Stream:     payload.Stream,
-				PluginName: payload.PluginName,
-				AgentID:    payload.AgentID,
+			if !retryLogOperation(ctx, "buffer build log", func(opCtx context.Context) error { return s.logAggregator.PushLogContext(opCtx, entry) }) {
+				return
 			}
-			if err := s.logAggregator.PushLog(entry); err != nil {
-				log.Warnw("failed to push log entry", "error", err)
+			if !retryLogOperation(ctx, "persist build log", func(opCtx context.Context) error { return s.logAggregator.FlushStep(opCtx, entry.StepRunID) }) {
+				return
+			}
+			// 数据库成功后才确认消费，进程重启后的重复投递由 LogID 去重
+			if err := consumer.CommitMessage(msg); err != nil {
+				// 继续轮询以允许重新加入消费者组；重放的消息会由数据库去重
+				log.Warnw("failed to commit persisted build log; replay is safe", "error", err)
 			}
 		}
 	})
+}
+
+func decodeBuildLogEntry(value []byte, topic string, partition int32, offset int64) (*LogEntry, error) {
+	var payload logstream.BuildLogMessage
+	if err := sonic.Unmarshal(value, &payload); err != nil {
+		return nil, fmt.Errorf("decode build log: %w", err)
+	}
+	if strings.TrimSpace(payload.StepRunID) == "" {
+		return nil, fmt.Errorf("build log step run id is required")
+	}
+	if err := logstream.ValidateEventID(payload.EventID); err != nil {
+		return nil, err
+	}
+
+	// 旧版消息保持原有标识；新消息的标识不依赖 Kafka 的分区或偏移量
+	identity := fmt.Sprintf("%s:%d:%d", topic, partition, offset)
+	if payload.EventID != "" {
+		// 使用带版本的独立命名空间和转义字段，防止不同步骤或字段分隔符发生碰撞
+		identity = fmt.Sprintf("build-log-event:v1:%q:%q:%q:%q:%q", payload.ProjectID,
+			payload.PipelineID, payload.PipelineRunID, payload.StepRunID, payload.EventID)
+	}
+	messageID := sha256.Sum256([]byte(identity))
+	return &LogEntry{
+		LogID:     fmt.Sprintf("%x", messageID),
+		StepRunID: payload.StepRunID, Timestamp: payload.Timestamp,
+		LineNumber: payload.LineNumber, Level: payload.Level,
+		Content: payload.Content, Stream: payload.Stream,
+		PluginName: payload.PluginName, AgentID: payload.AgentID,
+	}, nil
+}
+
+func retryLogOperation(ctx context.Context, operation string, action func(context.Context) error) bool {
+	for ctx.Err() == nil {
+		opCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := action(opCtx)
+		cancel()
+		if err == nil {
+			return true
+		}
+		log.Warnw(operation+" failed; retrying without committing Kafka offset", "error", err)
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		case <-timer.C:
+		}
+	}
+	return false
+}
+
+// Close 停止日志消费并等待退出，未持久化的 Kafka 消息保持未确认
+func (s *StreamServiceImpl) Close(ctx context.Context) error {
+	if s.logCancel != nil {
+		s.logCancel()
+	}
+	if s.logDone == nil {
+		return nil
+	}
+	select {
+	case <-s.logDone:
+		if s.ownsLogAggregator {
+			return s.logAggregator.Close(ctx)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // GetLogAggregator 获取日志聚合器

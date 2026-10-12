@@ -17,9 +17,9 @@ package model
 // Menu 菜单表
 type Menu struct {
 	BaseModel
-	MenuID       string `gorm:"column:menu_id;not null;uniqueIndex" json:"menuId"`
-	ParentID     string `gorm:"column:parent_id;index" json:"parentId"`
-	Name         string `gorm:"column:name;not null;uniqueIndex" json:"name"`
+	MenuID       string `gorm:"column:menu_id;not null;uniqueIndex;type:varchar(64)" json:"menuId"`
+	ParentID     string `gorm:"column:parent_id;index;type:varchar(64)" json:"parentId"`
+	Name         string `gorm:"column:name;not null;uniqueIndex;type:varchar(128)" json:"name"`
 	Title        string `gorm:"column:title;not null;default:''" json:"title"`
 	Path         string `gorm:"column:path" json:"path"`
 	Component    string `gorm:"column:component" json:"component"`
@@ -29,8 +29,8 @@ type Menu struct {
 	Icon         string `gorm:"column:icon" json:"icon"`
 	Order        int    `gorm:"column:order;default:0" json:"order"`
 	Meta         string `gorm:"column:meta_json;type:json" json:"meta"`
-	PermissionID string `gorm:"column:permission_id;index" json:"permissionId"`
-	ScopeType    string `gorm:"column:scope_type;not null;default:'platform';index" json:"scopeType"`
+	PermissionID string `gorm:"column:permission_id;index;type:varchar(64)" json:"permissionId"`
+	ScopeType    string `gorm:"column:scope_type;not null;default:'platform';index;type:varchar(32)" json:"scopeType"`
 	IsVisible    int    `gorm:"column:is_visible;default:1" json:"isVisible"`
 	IsEnabled    int    `gorm:"column:is_enabled;default:1" json:"isEnabled"`
 	Description  string `gorm:"column:description" json:"description"`

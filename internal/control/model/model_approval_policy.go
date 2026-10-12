@@ -19,9 +19,9 @@ import "gorm.io/datatypes"
 // ApprovalPolicy 表示审批策略
 type ApprovalPolicy struct {
 	BaseModel
-	PolicyID       string         `gorm:"column:policy_id;not null;uniqueIndex" json:"policyId"`
-	ScopeType      string         `gorm:"column:scope_type;not null;index:idx_scope,priority:1" json:"scopeType"`
-	ScopeID        string         `gorm:"column:scope_id;not null;index:idx_scope,priority:2" json:"scopeId"`
+	PolicyID       string         `gorm:"column:policy_id;not null;uniqueIndex;type:varchar(64)" json:"policyId"`
+	ScopeType      string         `gorm:"column:scope_type;not null;index:idx_approval_policy_scope,priority:1;type:varchar(32)" json:"scopeType"`
+	ScopeID        string         `gorm:"column:scope_id;not null;index:idx_approval_policy_scope,priority:2;type:varchar(64)" json:"scopeId"`
 	Name           string         `gorm:"column:name;not null" json:"name"`
 	MatchRule      datatypes.JSON `gorm:"column:match_rule;type:json;not null" json:"matchRule"`
 	ApproverRule   datatypes.JSON `gorm:"column:approver_rule;type:json;not null" json:"approverRule"`

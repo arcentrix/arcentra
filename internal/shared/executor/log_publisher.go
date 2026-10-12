@@ -22,6 +22,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/logstream"
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/bytedance/sonic"
+	"github.com/google/uuid"
 )
 
 const buildLogsTopic = "BUILD_LOGS"
@@ -88,7 +89,7 @@ func convertKafkaConfig(cfg kafka.Config) kafka.Config {
 // Publish sends a build log message to Kafka.
 func (p *KafkaLogPublisher) Publish(ctx context.Context, msg *logstream.BuildLogMessage) error {
 	if p == nil || p.producer == nil || msg == nil {
-		return nil
+		return fmt.Errorf("build log producer and message are required")
 	}
 	payload, err := sonic.Marshal(msg)
 	if err != nil {
@@ -108,15 +109,18 @@ func (p *KafkaLogPublisher) Close() {
 // BuildLogMessageFromEvent builds a build log message from EventContext.
 func BuildLogMessageFromEvent(ctx EventContext, content, stream string) *logstream.BuildLogMessage {
 	return &logstream.BuildLogMessage{
-		PipelineID: ctx.PipelineID,
-		StepName:   ctx.StepName,
-		StepRunID:  ctx.StepID,
-		PluginName: ctx.PluginName,
-		AgentID:    ctx.AgentID,
-		Timestamp:  time.Now().Unix(),
-		LineNumber: 0,
-		Level:      "info",
-		Stream:     stream,
-		Content:    content,
+		EventID:       uuid.NewString(),
+		PipelineID:    ctx.PipelineID,
+		PipelineRunID: ctx.PipelineRunID,
+		JobID:         ctx.JobRunID,
+		StepName:      ctx.StepName,
+		StepRunID:     ctx.StepID,
+		PluginName:    ctx.PluginName,
+		AgentID:       ctx.AgentID,
+		Timestamp:     time.Now().Unix(),
+		LineNumber:    0,
+		Level:         "info",
+		Stream:        stream,
+		Content:       content,
 	}
 }

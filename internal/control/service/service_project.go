@@ -38,8 +38,8 @@ func NewProjectService(projectRepo repo.IProjectRepository) *ProjectService {
 
 // CreateProject creates a project.
 func (s *ProjectService) CreateProject(ctx context.Context, req *model.CreateProjectReq, createdBy string) (*model.Project, error) {
-	if req.OrgID == "" {
-		return nil, errors.New("organization id cannot be empty")
+	if err := validateCreateProject(req, createdBy); err != nil {
+		return nil, err
 	}
 
 	exists, err := s.projectRepo.NameExists(ctx, req.OrgID, req.Name)
@@ -83,9 +83,6 @@ func (s *ProjectService) CreateProject(ctx context.Context, req *model.CreatePro
 		triggerMode = model.TriggerModeManual
 	}
 	visibility := req.Visibility
-	if visibility == 0 && req.Visibility != 0 {
-		visibility = model.VisibilityPrivate
-	}
 	accessLevel := req.AccessLevel
 	if accessLevel == "" {
 		accessLevel = model.AccessLevelTeam
@@ -138,6 +135,9 @@ func (s *ProjectService) CreateProject(ctx context.Context, req *model.CreatePro
 
 // UpdateProject updates a project.
 func (s *ProjectService) UpdateProject(ctx context.Context, projectID string, req *model.UpdateProjectReq) (*model.Project, error) {
+	if err := validateUpdateProject(req); err != nil {
+		return nil, err
+	}
 	exists, err := s.projectRepo.Exists(ctx, projectID)
 	if err != nil {
 		log.Errorw("check project exists failed", "projectID", projectID, "error", err)

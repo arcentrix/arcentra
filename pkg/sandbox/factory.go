@@ -16,12 +16,13 @@ package sandbox
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	"github.com/arcentrix/arcentra/pkg/log"
 )
 
-// NewSandboxFromConfig creates a sandbox instance from agent configuration
+// NewSandboxFromConfig 根据 Agent 配置创建独立沙箱后端，不启用 Agent 执行路径
 func NewSandboxFromConfig(cfg *config.AgentConfig, logger log.Logger) (Sandbox, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
@@ -31,7 +32,7 @@ func NewSandboxFromConfig(cfg *config.AgentConfig, logger log.Logger) (Sandbox, 
 		return nil, fmt.Errorf("sandbox is not enabled")
 	}
 
-	runtime := cfg.Agent.Sandbox.Runtime
+	runtime := strings.ToLower(strings.TrimSpace(cfg.Agent.Sandbox.Runtime))
 	if runtime == "" {
 		runtime = "containerd"
 	}
@@ -46,8 +47,11 @@ func NewSandboxFromConfig(cfg *config.AgentConfig, logger log.Logger) (Sandbox, 
 	}
 }
 
-// NewContainerdSandboxFromConfig creates a containerd sandbox from configuration
+// NewContainerdSandboxFromConfig 根据配置创建 containerd 沙箱后端
 func NewContainerdSandboxFromConfig(cfg *config.ContainerdConfig, logger log.Logger) (Sandbox, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("containerd config is required")
+	}
 	sandboxConfig := &ContainerdConfig{
 		UnixSocket:   cfg.UnixSocket,
 		Namespace:    "arcentra",

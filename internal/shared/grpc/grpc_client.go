@@ -17,11 +17,8 @@ package grpc
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
@@ -31,6 +28,7 @@ import (
 	streamv1 "github.com/arcentrix/arcentra/api/stream/v1"
 	"github.com/arcentrix/arcentra/internal/shared/grpc/interceptor"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/safe"
 	"github.com/arcentrix/arcentra/pkg/trace/inject"
 
 	"google.golang.org/grpc"
@@ -61,6 +59,7 @@ type ClientWrapper struct {
 
 	// reconnection management
 	mu                  sync.RWMutex
+	stopOnce            sync.Once
 	stopReconnect       chan struct{}
 	reconnecting        bool
 	reconnectAttempts   int  // current reconnection attempt count
@@ -135,24 +134,27 @@ func (c *ClientWrapper) initClients() {
 
 // GetConn get connection for advanced usage
 func (c *ClientWrapper) GetConn() *grpc.ClientConn {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.conn
 }
 
 // Start gRPC client and monitor connection state
 func (c *ClientWrapper) Start(cfg ClientConf) error {
+	c.mu.Lock()
+	if c.config.Token != "" {
+		cfg.Token = c.config.Token
+	}
 	c.config = cfg
+	c.mu.Unlock()
 	log.Infow("gRPC client started", "address", cfg.ServerAddr)
 
 	// Start connection state monitoring
-	go c.monitorConnection()
+	safe.Go(c.monitorConnection)
 
-	// wait for exit signal
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	<-ch
-
-	log.Info("Shutting down gRPC client...")
-	return c.Close()
+	// 生命周期由 Bootstrap 管理，避免收到信号时先关闭连接而丢失终态报告
+	<-c.stopReconnect
+	return nil
 }
 
 // monitorConnection monitors connection state and handles reconnection
@@ -288,32 +290,50 @@ func (c *ClientWrapper) reconnect() error {
 // Close client connection
 func (c *ClientWrapper) Close() error {
 	// Stop reconnection monitoring
-	close(c.stopReconnect)
+	c.stopOnce.Do(func() {
+		if c.stopReconnect != nil {
+			close(c.stopReconnect)
+		}
+	})
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.conn != nil {
-		return c.conn.Close()
+		err := c.conn.Close()
+		c.conn = nil
+		return err
 	}
 	return nil
 }
 
+// UpdateToken 更新动态注册后使用的认证令牌
+func (c *ClientWrapper) UpdateToken(token string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.config.Token = token
+}
+
 // WithAuthContext create context with auth
 func (c *ClientWrapper) WithAuthContext(ctx context.Context) context.Context {
-	if c.config.Token == "" {
+	c.mu.RLock()
+	token := c.config.Token
+	c.mu.RUnlock()
+	if token == "" {
 		return ctx
 	}
-	md := metadata.New(map[string]string{
-		"authorization": fmt.Sprintf("bearer %s", c.config.Token),
-	})
+	existing, _ := metadata.FromOutgoingContext(ctx)
+	md := existing.Copy()
+	md.Set("authorization", "bearer "+token)
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
 // WithTimeout create context with timeout (use default timeout if not configured)
 // return context and cancel function, caller should ensure calling cancel
 func (c *ClientWrapper) WithTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	c.mu.RLock()
 	timeout := time.Duration(c.config.ReadWriteTimeout) * time.Second
+	c.mu.RUnlock()
 	if timeout <= 0 {
 		// use default 30 seconds if not configured
 		timeout = 30 * time.Second

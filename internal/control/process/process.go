@@ -18,17 +18,23 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/config"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/control/service"
+	"github.com/arcentrix/arcentra/internal/shared/executor"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/validation"
 	"github.com/arcentrix/arcentra/internal/shared/storage"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/arcentrix/arcentra/pkg/safe"
+	"google.golang.org/protobuf/proto"
 )
 
 const defaultMaxConcurrentRuns = 10
@@ -36,20 +42,26 @@ const defaultMaxConcurrentRuns = 10
 // Process manages pipeline run orchestration. It bridges the trigger layer
 // (HTTP/gRPC/Cron/Webhook) with the execution process (Executor DAG).
 type Process struct {
-	repos       *repo.Repositories
-	pluginMgr   *plugin.Manager
-	taskQueue   nova.TaskQueue
-	storage     storage.IStorage
-	logger      *log.Logger
-	appConf     *config.AppConfig
-	secretSvc   *service.SecretService
-	auditWriter *AuditWriter
+	repos        *repo.Repositories
+	pluginMgr    *plugin.Manager
+	taskQueue    nova.TaskQueue
+	storage      storage.IStorage
+	logger       *log.Logger
+	appConf      *config.AppConfig
+	secretSvc    *service.SecretService
+	auditWriter  *AuditWriter
+	logPublisher executor.LogPublisher
+	closeLogs    func()
+	logInitErr   error
 
-	runs   sync.Map      // runID -> *Coordinator
-	sem    chan struct{} // concurrency limiter
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	mu        sync.Mutex
+	stopped   bool
+	nextAgent atomic.Uint64
+	runs      sync.Map      // runID -> *Coordinator
+	sem       chan struct{} // concurrency limiter
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 // NewProcess creates a pipeline process.
@@ -64,7 +76,7 @@ func NewProcess(
 ) *Process {
 	ctx, cancel := context.WithCancel(context.Background())
 	maxRuns := defaultMaxConcurrentRuns
-	return &Process{
+	engine := &Process{
 		repos:     repos,
 		pluginMgr: pluginMgr,
 		taskQueue: taskQueue,
@@ -76,6 +88,8 @@ func NewProcess(
 		ctx:       ctx,
 		cancel:    cancel,
 	}
+	engine.initLogPublisher()
+	return engine
 }
 
 // SetAuditWriter injects the audit writer into the process. Called during
@@ -91,31 +105,44 @@ func (e *Process) Submit(run *model.PipelineRun, parsedSpec *spec.Pipeline) erro
 		return fmt.Errorf("run and spec must not be nil")
 	}
 
-	select {
-	case <-e.ctx.Done():
-		return fmt.Errorf("process is shutting down")
-	default:
+	if err := validation.NewSchemaValidator().Validate(parsedSpec); err != nil {
+		return err
 	}
-
+	parsedSpec = proto.Clone(parsedSpec).(*spec.Pipeline)
+	if _, _, err := pipeline.BuildDAG(parsedSpec.Jobs); err != nil {
+		return fmt.Errorf("invalid pipeline DAG: %w", err)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.logInitErr != nil {
+		return fmt.Errorf("initialize durable build logs: %w", e.logInitErr)
+	}
+	if e.stopped {
+		return fmt.Errorf("process is shutting down")
+	}
+	runCtx, runCancel := context.WithCancel(e.ctx)
 	rc := NewCoordinator(run, parsedSpec, e)
-	e.runs.Store(run.RunID, rc)
+	rc.SetCancel(runCancel)
+	if _, loaded := e.runs.LoadOrStore(run.RunID, rc); loaded {
+		runCancel()
+		return fmt.Errorf("run %s is already submitted", run.RunID)
+	}
 
 	e.wg.Add(1)
 	safe.Go(func() {
 		defer e.wg.Done()
 		defer e.runs.Delete(run.RunID)
+		defer runCancel()
 
 		// Acquire semaphore
 		select {
 		case e.sem <- struct{}{}:
 			defer func() { <-e.sem }()
-		case <-e.ctx.Done():
+		case <-runCtx.Done():
+			// 即使尚未获得并发名额，也必须持久化取消状态
+			_ = rc.Execute(runCtx)
 			return
 		}
-
-		runCtx, runCancel := context.WithCancel(e.ctx)
-		rc.SetCancel(runCancel)
-		defer runCancel()
 
 		if err := rc.Execute(runCtx); err != nil {
 			log.Errorw("pipeline run failed", "runId", run.RunID, "error", err)
@@ -126,7 +153,7 @@ func (e *Process) Submit(run *model.PipelineRun, parsedSpec *spec.Pipeline) erro
 }
 
 // CancelRun cancels a running pipeline run and propagates cancellation
-// to the Agent via gRPC if any job is executing remotely.
+// to the Agent through its independent control queue.
 func (e *Process) CancelRun(runID string) error {
 	val, ok := e.runs.Load(runID)
 	if !ok {
@@ -142,31 +169,25 @@ func (e *Process) CancelRun(runID string) error {
 }
 
 // cancelRemoteJobRuns queries running JobRuns for a pipeline run and sends
-// CancelJobRun gRPC calls to the corresponding Agents.
+// cancellation commands to the corresponding Agents.
 func (e *Process) cancelRemoteJobRuns(runID string) {
 	if e.repos.JobRun == nil {
 		return
 	}
-	ctx := context.Background()
-	jobRuns, err := e.repos.JobRun.ListByPipelineRunID(ctx, runID)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	jobs, err := e.repos.JobRun.ListByPipelineRunID(ctx, runID)
 	if err != nil {
-		log.Warnw("failed to list job runs for cancel propagation", "runId", runID, "error", err)
+		log.Warnw("list jobs for cancellation failed", "error", err)
 		return
 	}
-	for _, jr := range jobRuns {
-		if !model.IsJobRunRunning(jr.Status) || jr.AgentID == "" {
+	for _, job := range jobs {
+		if model.IsJobRunTerminal(job.Status) || job.AgentID == "" {
 			continue
 		}
-		agent, err := e.repos.Agent.Get(ctx, jr.AgentID)
-		if err != nil || agent == nil || agent.Address == "" {
-			log.Warnw("skip cancel: agent not reachable", "agentId", jr.AgentID, "jobRunId", jr.JobRunID)
-			continue
+		if err := e.cancelJobRunOnAgent(ctx, job.AgentID, job.JobRunID, "pipeline run cancelled"); err != nil {
+			log.Warnw("cancel agent job failed", "jobRunId", job.JobRunID, "error", err)
 		}
-		safe.Go(func() {
-			if err := cancelJobRunOnAgent(agent.Address, jr.JobRunID, "pipeline run cancelled"); err != nil {
-				log.Warnw("cancel job run on agent failed", "agentId", jr.AgentID, "jobRunId", jr.JobRunID, "error", err)
-			}
-		})
 	}
 }
 
@@ -197,7 +218,13 @@ func (e *Process) ResumeRun(runID string) error {
 // and waiting for them to finish.
 func (e *Process) Stop() {
 	log.Info("Pipeline process shutting down...")
+	e.mu.Lock()
+	e.stopped = true
 	e.cancel()
+	e.mu.Unlock()
 	e.wg.Wait()
+	if e.closeLogs != nil {
+		e.closeLogs()
+	}
 	log.Info("Pipeline process stopped")
 }

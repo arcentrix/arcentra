@@ -15,7 +15,11 @@
 package router
 
 import (
+	"errors"
 	"strconv"
+	"strings"
+
+	"github.com/arcentrix/arcentra/internal/control/authz"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/auth"
@@ -30,64 +34,64 @@ func (rt *Router) projectRouter(r fiber.Router, authMW fiber.Handler, subjectMW 
 	{
 		// 创建项目
 		projectGroup.Post("/", authMW, subjectMW,
-			rt.permission("org:create_project", middleware.ResolvePlatformScope()),
+			rt.permission("org:create_project", resolveCreateProjectScope()),
 			rt.createProject)
 
 		// 更新项目
 		projectGroup.Put("/:projectID", authMW, subjectMW,
-			rt.permission("project:update", middleware.ResolveFromPathProjectID("projectID")),
+			rt.permission("project:update", rt.resolveProjectScope()),
 			rt.updateProject)
 
 		// 删除项目
 		projectGroup.Delete("/:projectID", authMW, subjectMW,
-			rt.permission("project:update", middleware.ResolveFromPathProjectID("projectID")),
+			rt.permission("project:update", rt.resolveProjectScope()),
 			rt.deleteProject)
 
 		// 获取项目详情
 		projectGroup.Get("/:projectID", authMW, subjectMW,
-			rt.permission("project:read", middleware.ResolveFromPathProjectID("projectID")),
+			rt.permission("project:read", rt.resolveProjectScope()),
 			rt.getProjectByID)
 
 		// 查询项目列表
 		projectGroup.Get("/", authMW, subjectMW,
-			rt.permission("project:read", middleware.ResolvePlatformScope()),
+			rt.collectionAccess(),
 			rt.listProjects)
 
 		// 获取组织下的所有项目
 		projectGroup.Get("/org/:orgID", authMW, subjectMW,
-			rt.permission("org:read", middleware.ResolvePlatformScope()),
+			rt.permission("org:read", resolveProjectOrganizationScope()),
 			rt.getProjectsByOrgID)
 
 		// 获取用户的项目列表
 		projectGroup.Get("/user/my-projects", authMW, subjectMW,
-			rt.permission("project:read", middleware.ResolvePlatformScope()),
+			rt.collectionAccess(),
 			rt.getUserProjects)
 
 		// 启用/禁用项目
 		projectGroup.Post("/:projectID/enable", authMW, subjectMW,
-			rt.permission("project:update", middleware.ResolveFromPathProjectID("projectID")),
+			rt.permission("project:update", rt.resolveProjectScope()),
 			rt.enableProject)
 		projectGroup.Post("/:projectID/disable", authMW, subjectMW,
-			rt.permission("project:update", middleware.ResolveFromPathProjectID("projectID")),
+			rt.permission("project:update", rt.resolveProjectScope()),
 			rt.disableProject)
 
 		// 更新项目统计信息
 		projectGroup.Post("/:projectID/statistics", authMW, subjectMW,
-			rt.permission("project:update", middleware.ResolveFromPathProjectID("projectID")),
+			rt.permission("project:update", rt.resolveProjectScope()),
 			rt.updateProjectStatistics)
 
 		// 项目成员管理
 		projectGroup.Get("/:projectID/members", authMW, subjectMW,
-			rt.permission("project:manage_member", middleware.ResolveFromPathProjectID("projectID")),
+			rt.permission("project:manage_member", rt.resolveProjectScope()),
 			rt.getProjectMembers)
 		projectGroup.Post("/:projectID/members", authMW, subjectMW,
-			rt.permission("project:manage_member", middleware.ResolveFromPathProjectID("projectID")),
+			rt.permission("project:manage_member", rt.resolveProjectScope()),
 			rt.addProjectMember)
 		projectGroup.Put("/:projectID/members/:userID", authMW, subjectMW,
-			rt.permission("project:manage_member", middleware.ResolveFromPathProjectID("projectID")),
+			rt.permission("project:manage_member", rt.resolveProjectScope()),
 			rt.updateProjectMemberRole)
 		projectGroup.Delete("/:projectID/members/:userID", authMW, subjectMW,
-			rt.permission("project:manage_member", middleware.ResolveFromPathProjectID("projectID")),
+			rt.permission("project:manage_member", rt.resolveProjectScope()),
 			rt.removeProjectMember)
 	}
 }
@@ -182,7 +186,7 @@ func (rt *Router) listProjects(c *fiber.Ctx) error {
 	var query model.ProjectQueryReq
 
 	// 解析查询参数
-	query.OrgID = c.Query("orgID")
+	query.OrgID = c.Query("orgId", c.Query("orgID"))
 	query.Name = c.Query("name")
 	query.Language = c.Query("language")
 	query.Tags = c.Query("tags")
@@ -211,9 +215,8 @@ func (rt *Router) listProjects(c *fiber.Ctx) error {
 		}
 	}
 
-	projectService := rt.Services.Project
-
-	projects, total, err := projectService.ListProjects(c.Context(), &query)
+	query.PageNum, query.PageSize = normalizedCollectionPage(query.PageNum, query.PageSize)
+	projects, total, err := rt.authorizedProjectList(c, &query)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -266,34 +269,8 @@ func (rt *Router) getProjectsByOrgID(c *fiber.Ctx) error {
 
 // getUserProjects 获取用户的项目列表
 func (rt *Router) getUserProjects(c *fiber.Ctx) error {
-	// 获取当前用户ID
-	claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey)
-	if err != nil {
-		log.Errorw("authentication failed", "error", err)
-		return http.Err(c, http.AuthenticationFailed.Code, http.AuthenticationFailed.Msg)
-	}
-
-	pageNum, _ := strconv.Atoi(c.Query("pageNum", "1"))
-	pageSize, _ := strconv.Atoi(c.Query("pageSize", "20"))
-	orgID := c.Query("orgID", "")
-	role := c.Query("role", "")
-
-	projectService := rt.Services.Project
-
-	projects, total, err := projectService.GetProjectsByUserID(c.Context(), claims.UserID, pageNum, pageSize, orgID, role)
-	if err != nil {
-		log.Errorw("get projects by user id failed", "error", err)
-		return http.Err(c, http.Failed.Code, err.Error())
-	}
-
-	response := map[string]any{
-		"list":     projects,
-		"total":    total,
-		"pageNum":  pageNum,
-		"pageSize": pageSize,
-	}
-
-	return http.Detail(c, response)
+	// 当前用户及团队的角色授权决定可见项目，忽略任何用户 ID 查询参数
+	return rt.listProjects(c)
 }
 
 // enableProject 启用项目
@@ -388,13 +365,16 @@ func (rt *Router) addProjectMember(c *fiber.Ctx) error {
 	}
 
 	var req struct {
-		UserID string `json:"userID" validate:"required"`
+		UserID string `json:"userId" validate:"required"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		log.Errorw("add project member failed", "error", err)
 		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
 
+	if strings.TrimSpace(req.UserID) == "" {
+		return http.Err(c, http.BadRequest.Code, "user id is required")
+	}
 	member := &model.ProjectMember{
 		ProjectID: projectID,
 		UserID:    req.UserID,
@@ -446,4 +426,49 @@ func (rt *Router) removeProjectMember(c *fiber.Ctx) error {
 	}
 
 	return http.Operation(c)
+}
+
+// resolveProjectScope 补齐项目所属组织，避免组织角色在项目接口丢失作用域
+func (rt *Router) resolveProjectScope() middleware.ScopeResolver {
+	return func(c *fiber.Ctx) (authz.ResourceRef, error) {
+		if rt.Services == nil || rt.Services.Project == nil {
+			return authz.ResourceRef{}, errors.New("project service is not configured")
+		}
+		projectID := strings.TrimSpace(c.Params("projectID"))
+		if projectID == "" {
+			return authz.ResourceRef{}, errors.New("project id is required")
+		}
+		project, err := rt.Services.Project.GetProjectByID(c.Context(), projectID)
+		if err != nil {
+			return authz.ResourceRef{}, err
+		}
+		if project == nil {
+			return authz.ResourceRef{}, errors.New("project not found")
+		}
+		return authz.ResourceRef{ProjectID: project.ProjectID, OrgID: project.OrgID}, nil
+	}
+}
+
+func resolveCreateProjectScope() middleware.ScopeResolver {
+	return func(c *fiber.Ctx) (authz.ResourceRef, error) {
+		var req model.CreateProjectReq
+		if err := c.BodyParser(&req); err != nil {
+			return authz.ResourceRef{}, err
+		}
+		orgID := strings.TrimSpace(req.OrgID)
+		if orgID == "" {
+			return authz.ResourceRef{}, errors.New("organization id is required")
+		}
+		return authz.ResourceRef{OrgID: orgID}, nil
+	}
+}
+
+func resolveProjectOrganizationScope() middleware.ScopeResolver {
+	return func(c *fiber.Ctx) (authz.ResourceRef, error) {
+		orgID := strings.TrimSpace(c.Params("orgID"))
+		if orgID == "" {
+			return authz.ResourceRef{}, errors.New("organization id is required")
+		}
+		return authz.ResourceRef{OrgID: orgID}, nil
+	}
 }

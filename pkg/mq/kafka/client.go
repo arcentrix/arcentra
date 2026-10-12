@@ -103,16 +103,19 @@ func baseConfig(conf Config) (*kafka.ConfigMap, error) {
 		return nil, err
 	}
 
-	config := &kafka.ConfigMap{
-		"bootstrap.servers":        conf.BootstrapServers,
-		"security.protocol":        conf.SecurityProtocol,
-		"sasl.mechanism":           conf.Sasl.Mechanism,
-		"sasl.username":            conf.Sasl.Username,
-		"sasl.password":            conf.Sasl.Password,
-		"ssl.ca.location":          conf.Ssl.CaFile,
-		"ssl.certificate.location": conf.Ssl.CertFile,
-		"ssl.key.location":         conf.Ssl.KeyFile,
-		"ssl.key.password":         conf.Ssl.Password,
+	protocol := strings.TrimSpace(conf.SecurityProtocol)
+	if protocol == "" {
+		protocol = "PLAINTEXT"
+	}
+	config := &kafka.ConfigMap{"bootstrap.servers": conf.BootstrapServers, "security.protocol": protocol}
+	optional := map[string]string{
+		"sasl.mechanism": conf.Sasl.Mechanism, "sasl.username": conf.Sasl.Username, "sasl.password": conf.Sasl.Password,
+		"ssl.ca.location": conf.Ssl.CaFile, "ssl.certificate.location": conf.Ssl.CertFile, "ssl.key.location": conf.Ssl.KeyFile, "ssl.key.password": conf.Ssl.Password,
+	}
+	for key, value := range optional {
+		if value != "" {
+			(*config)[key] = value
+		}
 	}
 
 	return config, nil

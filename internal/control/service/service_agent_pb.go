@@ -16,6 +16,7 @@ package service
 
 import (
 	"context"
+	"crypto/hmac"
 	"errors"
 	"fmt"
 	"strings"
@@ -187,7 +188,7 @@ func (a *AgentServiceImpl) legacyRegister(ctx context.Context, req *agentv1.Regi
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to verify token")
 	}
-	if req.Token != expectedToken {
+	if !hmac.Equal([]byte(req.Token), []byte(expectedToken)) {
 		return nil, status.Errorf(codes.Unauthenticated, "invalid token")
 	}
 
@@ -358,32 +359,43 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 	if stepRunID == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "stepRunID is required")
 	}
-	updates := map[string]any{
-		"status":        int(req.Status),
-		"exit_code":     req.ExitCode,
-		"error_message": strings.TrimSpace(req.ErrorMessage),
+	agentID, err := authenticatedAgent(ctx, req.AgentId)
+	if err != nil {
+		return nil, err
 	}
-	if req.StartTime > 0 {
-		startAt := time.Unix(req.StartTime, 0)
-		updates["start_time"] = startAt
+	entity, err := a.agentService.stepRunRepo.GetByStepRunID(ctx, stepRunID)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "load step run failed")
 	}
-	if req.EndTime > 0 {
-		endAt := time.Unix(req.EndTime, 0)
-		updates["end_time"] = endAt
+	if entity == nil {
+		return nil, status.Error(codes.NotFound, "step run not found")
 	}
-	if len(req.Metrics) > 0 {
-		encoded, err := sonic.Marshal(req.Metrics)
-		if err == nil {
-			updates["secrets"] = string(encoded)
-		}
+	if entity.AgentID != agentID {
+		return nil, status.Error(codes.PermissionDenied, "step run belongs to another agent")
 	}
-	if err := a.agentService.stepRunRepo.PatchByStepRunID(ctx, stepRunID, updates); err != nil {
-		log.Debugw("step run patch miss, trying job run", "id", stepRunID, "error", err)
+	claimID, alreadyClaimed, err := reportClaim(ctx, entity.Status, int(req.Status), entity.ClaimID)
+	if err != nil {
+		return nil, err
 	}
-
-	// Also update JobRun table if the ID belongs to a job run.
-	if a.agentService.jobRunRepo != nil {
-		_ = a.agentService.jobRunRepo.UpdateByJobRunID(ctx, stepRunID, updates)
+	if alreadyClaimed {
+		return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "claim confirmed"}, nil
+	}
+	if err := validateReportedStatus(entity.Status, int(req.Status), true); err != nil {
+		return nil, err
+	}
+	if entity.Status >= 4 {
+		return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "already completed"}, nil
+	}
+	updates := executionStatusUpdates(int(req.Status), req.ErrorMessage, req.StartTime, req.EndTime, entity.StartTime)
+	if int(req.Status) == 3 {
+		updates["claim_id"] = claimID
+	}
+	updates["exit_code"] = req.ExitCode
+	if workspace := strings.TrimSpace(req.Metrics["workspace"]); workspace != "" {
+		updates["workspace"] = workspace
+	}
+	if err := patchAgentStatus(ctx, a.agentService.stepRunRepo, stepRunID, entity.Status, updates); err != nil {
+		return nil, status.Error(codes.Internal, "update step run failed")
 	}
 
 	return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "ok"}, nil
@@ -401,28 +413,48 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 	if jobRunID == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "jobRunID is required")
 	}
-	updates := map[string]any{
-		"status":        int(req.Status),
-		"error_message": strings.TrimSpace(req.ErrorMessage),
+	agentID, err := authenticatedAgent(ctx, req.AgentId)
+	if err != nil {
+		return nil, err
 	}
-	if req.StartTime > 0 {
-		updates["start_time"] = time.Unix(req.StartTime, 0)
+	entity, err := a.agentService.jobRunRepo.GetByJobRunID(ctx, jobRunID)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "load job run failed")
 	}
-	if req.EndTime > 0 {
-		updates["end_time"] = time.Unix(req.EndTime, 0)
+	if entity == nil {
+		return nil, status.Error(codes.NotFound, "job run not found")
+	}
+	if entity.AgentID != agentID {
+		return nil, status.Error(codes.PermissionDenied, "job run belongs to another agent")
+	}
+	claimID, alreadyClaimed, err := reportClaim(ctx, entity.Status, int(req.Status), entity.ClaimID)
+	if err != nil {
+		return nil, err
+	}
+	if alreadyClaimed {
+		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "claim confirmed"}, nil
+	}
+	if err := validateReportedStatus(entity.Status, int(req.Status), false); err != nil {
+		return nil, err
+	}
+	if model.IsJobRunTerminal(entity.Status) {
+		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "already completed"}, nil
+	}
+	updates := executionStatusUpdates(int(req.Status), req.ErrorMessage, req.StartTime, req.EndTime, entity.StartTime)
+	if int(req.Status) == 3 {
+		updates["claim_id"] = claimID
 	}
 	if len(req.ArtifactUris) > 0 {
-		if encoded, err := sonic.Marshal(req.ArtifactUris); err == nil {
-			updates["artifact_uris"] = string(encoded)
+		encoded, err := sonic.Marshal(req.ArtifactUris)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, "invalid artifact URIs")
 		}
+		updates["artifact_uris"] = string(encoded)
 	}
-	if req.AgentId != "" {
-		updates["agent_id"] = strings.TrimSpace(req.AgentId)
+	if err := patchAgentStatus(ctx, a.agentService.jobRunRepo, jobRunID, entity.Status, updates); err != nil {
+		return nil, status.Error(codes.Internal, "update job run failed")
 	}
-	if err := a.agentService.jobRunRepo.UpdateByJobRunID(ctx, jobRunID, updates); err != nil {
-		log.Errorw("report job run status failed", "jobRunId", jobRunID, "error", err)
-		return nil, status.Errorf(codes.Internal, "update job run failed")
-	}
+
 	return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "ok"}, nil
 }
 

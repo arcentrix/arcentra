@@ -15,78 +15,109 @@
 package executor
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const nameShell = "shell"
+const maxCapturedOutput = 4 * 1024 * 1024
 
-// ShellExecutor 执行 run/script/command 类步骤的 shell 执行器。
+// ShellExecutor 执行 run、script、command 或 commands 步骤
 type ShellExecutor struct{}
 
-// NewShellExecutor 创建 ShellExecutor。
-func NewShellExecutor() *ShellExecutor {
-	return &ShellExecutor{}
-}
+// NewShellExecutor 创建 Shell 执行器
+func NewShellExecutor() *ShellExecutor { return &ShellExecutor{} }
 
-// Name 返回执行器名称。
-func (e *ShellExecutor) Name() string {
-	return nameShell
-}
+// Name 返回执行器名称
+func (e *ShellExecutor) Name() string { return nameShell }
 
-// CanExecute 检查步骤是否包含可执行命令（Args 中含 run/script/command/commands）。
+// CanExecute 判断步骤是否包含本地 Shell 命令
 func (e *ShellExecutor) CanExecute(req *ExecutionRequest) bool {
-	if req == nil || req.Step == nil || req.Step.Args == nil {
-		return false
-	}
-	return strings.TrimSpace(BuildCommandFromStepArgs(req.Step)) != ""
+	return req != nil && req.Step != nil && !req.Step.RunRemotely && strings.TrimSpace(BuildCommandFromStepArgs(req.Step)) != ""
 }
 
-// Execute 使用 sh -lc 执行步骤命令。
+// Execute 执行 Shell 命令，继承环境并在取消时结束子进程
 func (e *ShellExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
 	result := NewExecutionResult(e.Name())
 	if req == nil || req.Step == nil {
-		result.Complete(false, 1, nil)
-		result.Error = "nil request or step"
-		return result, nil
+		err := fmt.Errorf("nil request or step")
+		result.Complete(false, 1, err)
+		return result, err
 	}
 	cmdText := BuildCommandFromStepArgs(req.Step)
 	if strings.TrimSpace(cmdText) == "" {
-		result.Complete(false, 1, nil)
-		result.Error = "empty command"
-		return result, nil
+		err := fmt.Errorf("empty command")
+		result.Complete(false, 1, err)
+		return result, err
 	}
 	runCtx := ctx
-	var cancel context.CancelFunc
 	if req.Options != nil && req.Options.Timeout > 0 {
+		var cancel context.CancelFunc
 		runCtx, cancel = context.WithTimeout(ctx, req.Options.Timeout)
 		defer cancel()
 	}
-	cmd := exec.CommandContext(runCtx, "sh", "-lc", cmdText)
-	if strings.TrimSpace(req.Workspace) != "" {
-		cmd.Dir = req.Workspace
-	}
+	cmd := exec.CommandContext(runCtx, "sh", "-ec", cmdText)
+	cmd.Dir = req.Workspace
+	cmd.Env = os.Environ()
 	for k, v := range req.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
-	output, err := cmd.CombinedOutput()
-	outStr := string(output)
+	configureProcessCancellation(cmd)
+	cmd.WaitDelay = 2 * time.Second
+	stdout, stderr := &boundedOutput{}, &boundedOutput{}
+	if req.OutputHandler != nil {
+		stdout.onWrite = func(p []byte) { req.OutputHandler("stdout", string(p)) }
+		stderr.onWrite = func(p []byte) { req.OutputHandler("stderr", string(p)) }
+		result.WithMetadata("logsStreamed", true)
+	}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	err := cmd.Run()
+	result.Output, result.ErrorOutput = stdout.String(), stderr.String()
+	result.WithMetadata("outputBytes", strconv.FormatInt(stdout.total+stderr.total, 10))
+	if stdout.total > maxCapturedOutput || stderr.total > maxCapturedOutput {
+		result.WithMetadata("outputTruncated", true)
+	}
+	if runCtx.Err() != nil {
+		err = runCtx.Err()
+	}
 	if err != nil {
-		result.Complete(false, 1, err)
+		exitCode := int32(1)
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			result.ExitCode = int32(exitErr.ExitCode())
+			exitCode = int32(exitErr.ExitCode())
 		}
-		result.Output = outStr
-		result.ErrorOutput = outStr
-		if strings.TrimSpace(outStr) == "" {
-			result.Error = err.Error()
-		} else {
-			result.Error = strings.TrimSpace(outStr)
-		}
+		result.Complete(false, exitCode, err)
 		return result, err
 	}
 	result.Complete(true, 0, nil)
-	result.Output = outStr
 	return result, nil
 }
+
+type boundedOutput struct {
+	buffer  bytes.Buffer
+	total   int64
+	onWrite func([]byte)
+}
+
+func (b *boundedOutput) Write(p []byte) (int, error) {
+	n := len(p)
+	if b.onWrite != nil {
+		b.onWrite(p)
+	}
+	b.total += int64(n)
+	if remaining := maxCapturedOutput - b.Len(); remaining > 0 {
+		if len(p) > remaining {
+			p = p[:remaining]
+		}
+		_, _ = b.buffer.Write(p)
+	}
+	return n, nil
+}
+
+func (b *boundedOutput) Len() int       { return b.buffer.Len() }
+func (b *boundedOutput) String() string { return b.buffer.String() }

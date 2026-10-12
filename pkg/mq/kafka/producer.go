@@ -90,6 +90,7 @@ func NewProducer(bootstrapServers string, clientID string, opts ...ProducerOptio
 		opt(&conf)
 	}
 
+	conf.Normalize()
 	config, err := baseConfig(conf.Config)
 	if err != nil {
 		return nil, err

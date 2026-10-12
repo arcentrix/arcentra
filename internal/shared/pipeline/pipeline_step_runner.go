@@ -16,10 +16,10 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/builtin"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/plugin"
@@ -46,6 +46,7 @@ func (r *StepRunner) Run(ctx context.Context) error {
 
 	// Evaluate when condition with step context
 	stepContext := map[string]any{
+		"env": r.ctx.ResolveStepEnv(r.job, r.step),
 		"job": map[string]any{
 			"name": r.job.Name,
 		},
@@ -85,7 +86,13 @@ func (r *StepRunner) Run(ctx context.Context) error {
 			if r.job.Retry != nil && r.job.Retry.Delay != "" {
 				delay, err := time.ParseDuration(r.job.Retry.Delay)
 				if err == nil {
-					time.Sleep(delay)
+					timer := time.NewTimer(delay)
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						return ctx.Err()
+					case <-timer.C:
+					}
 				}
 			}
 		}
@@ -97,12 +104,6 @@ func (r *StepRunner) Run(ctx context.Context) error {
 		}
 
 		r.ctx.LogStep(r.job.Name, r.step.Name, fmt.Sprintf("attempt %d failed: %v", attempt, lastErr))
-	}
-
-	// Handle continue_on_error
-	if lastErr != nil && r.step.ContinueOnError {
-		r.ctx.LogStep(r.job.Name, r.step.Name, "failed but continueOnError=true")
-		return nil
 	}
 
 	return fmt.Errorf("step failed after %d attempts: %w", retries, lastErr)
@@ -172,6 +173,9 @@ func (r *StepRunner) executeOnAgent(ctx context.Context) error {
 
 // executeLocally executes step locally using plugin or builtin
 func (r *StepRunner) executeLocally(ctx context.Context) error {
+	if r.step.Uses == "shell" || r.step.Uses == "builtin:shell" {
+		return r.executeShell(ctx)
+	}
 	// Check if it's a builtin function
 	if r.ctx.BuiltinManager != nil {
 		b, isBuiltin := r.ctx.BuiltinManager.IsBuiltin(r.step.Uses)
@@ -310,7 +314,7 @@ func (r *StepRunner) executePlugin(ctx context.Context) error {
 	resolvedParams := r.ctx.ResolveVariables(spec.StructAsMap(r.step.Args))
 
 	// Prepare params JSON
-	paramsJSON, err := json.Marshal(resolvedParams)
+	paramsJSON, err := sonic.Marshal(resolvedParams)
 	if err != nil {
 		return fmt.Errorf("marshal params: %w", err)
 	}
@@ -320,7 +324,7 @@ func (r *StepRunner) executePlugin(ctx context.Context) error {
 		"workspace": r.ctx.StepWorkspace(r.job.Name, r.step.Name),
 		"env":       env,
 	}
-	optsJSON, err := json.Marshal(opts)
+	optsJSON, err := sonic.Marshal(opts)
 	if err != nil {
 		return fmt.Errorf("marshal opts: %w", err)
 	}
@@ -328,10 +332,31 @@ func (r *StepRunner) executePlugin(ctx context.Context) error {
 	// Call plugin method
 	// Note: ctx is kept for future use (e.g., timeout control)
 	_ = ctx
-	_, err = pluginClient.Execute(action, paramsJSON, optsJSON)
+	result, err := pluginClient.Execute(action, paramsJSON, optsJSON)
 	if err != nil {
 		return fmt.Errorf("plugin execution failed: %w", err)
 	}
 
-	return nil
+	return checkPluginResult(result)
+}
+
+func (r *StepRunner) executeShell(ctx context.Context) error {
+	req := &executor.ExecutionRequest{PipelineRunID: r.ctx.PipelineRunID, JobRunID: r.ctx.JobRunID, StepRunID: r.ctx.StepRunIDs[r.step.Name],
+		Pipeline:  &executor.PipelineInfo{Namespace: r.ctx.PipelineIDRef},
+		Job:       &executor.JobInfo{Name: r.job.Name},
+		Step:      &executor.StepInfo{Name: r.step.Name, Uses: r.step.Uses, Action: r.step.Action, Args: r.ctx.ResolveVariables(spec.StructAsMap(r.step.Args))},
+		Workspace: r.ctx.JobWorkspace(r.job.Name), Env: r.ctx.ResolveStepEnv(r.job, r.step)}
+	manager := executor.NewExecutorManager()
+	manager.SetLogPublisher(r.ctx.LogPublisher)
+	result, err := manager.ExecuteWithExecutor(ctx, req, executor.NewShellExecutor())
+	if result != nil {
+		if store, ok := r.ctx.JobRunStore.(jobRunStoreIface); ok {
+			persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if saveErr := store.UpdateStepRun(persistCtx, req.StepRunID, map[string]any{"exit_code": int(result.ExitCode)}); saveErr != nil {
+				r.ctx.Logger.Warnw("persist shell exit code failed", "error", saveErr)
+			}
+		}
+	}
+	return err
 }

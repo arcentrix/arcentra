@@ -74,7 +74,7 @@ func (e *HTTPExecutor) CanExecute(req *ExecutionRequest) bool {
 func (e *HTTPExecutor) Execute(ctx context.Context, req *ExecutionRequest) (*ExecutionResult, error) {
 	result := NewExecutionResult(e.Name())
 
-	if req.Step == nil {
+	if req == nil || req.Step == nil {
 		err := fmt.Errorf("step is nil")
 		result.Complete(false, -1, err)
 		return result, err
@@ -157,7 +157,7 @@ func (e *HTTPExecutor) getHTTPClient(cfg *HTTPConfig) *resty.Client {
 	return client
 }
 
-func (e *HTTPExecutor) buildHTTPRequest(req *resty.Request, cfg *HTTPConfig, method string, env map[string]string) *resty.Request {
+func (e *HTTPExecutor) buildHTTPRequest(req *resty.Request, cfg *HTTPConfig, method string, _ map[string]string) *resty.Request {
 	if len(cfg.Headers) > 0 {
 		req.SetHeaders(cfg.Headers)
 	}
@@ -166,9 +166,6 @@ func (e *HTTPExecutor) buildHTTPRequest(req *resty.Request, cfg *HTTPConfig, met
 	}
 	if cfg.Body != "" && (method == "POST" || method == "PUT" || method == "PATCH") {
 		req.SetBody(cfg.Body)
-	}
-	for k, v := range env {
-		req.SetHeader(fmt.Sprintf("X-Env-%s", k), v)
 	}
 	return req
 }
@@ -199,12 +196,15 @@ func (e *HTTPExecutor) executeHTTP(req *resty.Request, method, url string) (*res
 }
 
 func (e *HTTPExecutor) checkExpectedStatus(statusCode int, expected []int32) bool {
+	if len(expected) == 0 {
+		return statusCode >= 200 && statusCode < 300
+	}
 	for _, code := range expected {
 		if statusCode == int(code) {
 			return true
 		}
 	}
-	return statusCode >= 200 && statusCode < 300
+	return false
 }
 
 // HTTPConfig HTTP 配置

@@ -94,7 +94,7 @@ deps: ## sync go dependencies
 # -----------------------------------------------------------------------------
 .PHONY: buf-install
 buf-install: ## install buf if missing
-	@command -v buf >/dev/null 2>&1 || go install github.com/bufbuild/buf/cmd/buf@latest
+	@command -v buf >/dev/null 2>&1 || go install github.com/bufbuild/buf/cmd/buf@v1.66.1
 
 .PHONY: buf
 buf: buf-install ## generate protobuf code
@@ -102,12 +102,12 @@ buf: buf-install ## generate protobuf code
 
 .PHONY: wire-install
 wire-install: ## install wire
-	@command -v wire >/dev/null 2>&1 || go install github.com/google/wire/cmd/wire@latest
+	@command -v wire >/dev/null 2>&1 || go install github.com/google/wire/cmd/wire@v0.7.0
 
 .PHONY: wire
-wire: wire-install ## generate dependency injection code
+wire: buf wire-install ## generate dependency injection code
 	test -d $(CMD_PATH)
-	cd $(CMD_PATH) && wire
+	if [ -f $(CMD_PATH)/wire.go ]; then cd $(CMD_PATH) && wire; fi
 
 # -----------------------------------------------------------------------------
 # Lint
@@ -144,7 +144,7 @@ test: ## run tests
 # Build
 # -----------------------------------------------------------------------------
 .PHONY: build
-build: wire buf ## build binary (TARGET required)
+build: wire ## build binary (TARGET required)
 	@echo "Building $(TARGET)..."
 	go build -ldflags "$(LDFLAGS)" -o $(TARGET) $(CMD_PATH)
 
@@ -153,7 +153,7 @@ build-target: ## build release binary (no codegen, used by CI/Docker)
 	go build -trimpath -ldflags "$(LDFLAGS) -s -w" -o $(TARGET) $(CMD_PATH)
 
 .PHONY: run
-run: wire buf ## run program
+run: wire ## run program
 	go run -ldflags "$(LDFLAGS)" $(CMD_PATH)
 
 # -----------------------------------------------------------------------------

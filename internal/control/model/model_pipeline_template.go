@@ -32,8 +32,8 @@ type PipelineTemplateLibrary struct {
 	DefaultRef      string     `gorm:"column:default_ref;type:varchar(255);not null;default:main" json:"defaultRef"`
 	AuthType        int        `gorm:"column:auth_type;type:tinyint;not null;default:0" json:"authType"`
 	CredentialID    string     `gorm:"column:credential_id;type:varchar(36);not null;default:''" json:"credentialId"`
-	Scope           string     `gorm:"column:scope;type:varchar(32);not null;default:system;index:idx_scope" json:"scope"`
-	ScopeID         string     `gorm:"column:scope_id;type:varchar(36);not null;default:'';index:idx_scope" json:"scopeId"`
+	Scope           string     `gorm:"column:scope;type:varchar(32);not null;default:system;index:idx_template_library_scope" json:"scope"`
+	ScopeID         string     `gorm:"column:scope_id;type:varchar(36);not null;default:'';index:idx_template_library_scope" json:"scopeId"`
 	SyncInterval    int        `gorm:"column:sync_interval;not null;default:0" json:"syncInterval"`
 	LastSyncStatus  int        `gorm:"column:last_sync_status;type:tinyint;not null;default:0" json:"lastSyncStatus"`
 	LastSyncMessage string     `gorm:"column:last_sync_message;type:text" json:"lastSyncMessage"`
@@ -64,8 +64,8 @@ type PipelineTemplate struct {
 	SpecContent string         `gorm:"column:spec_content;type:mediumtext;not null" json:"specContent"`
 	Version     string         `gorm:"column:version;type:varchar(64);not null;uniqueIndex:uk_lib_name_ver" json:"version"`
 	CommitSha   string         `gorm:"column:commit_sha;type:varchar(64);not null;default:''" json:"commitSha"`
-	Scope       string         `gorm:"column:scope;type:varchar(32);not null;default:system;index:idx_scope" json:"scope"`
-	ScopeID     string         `gorm:"column:scope_id;type:varchar(36);not null;default:'';index:idx_scope" json:"scopeId"`
+	Scope       string         `gorm:"column:scope;type:varchar(32);not null;default:system;index:idx_template_scope" json:"scope"`
+	ScopeID     string         `gorm:"column:scope_id;type:varchar(36);not null;default:'';index:idx_template_scope" json:"scopeId"`
 	IsLatest    int            `gorm:"column:is_latest;type:tinyint(1);not null;default:0;index:idx_latest" json:"isLatest"`
 	IsPublished int            `gorm:"column:is_published;type:tinyint(1);not null;default:1" json:"isPublished"`
 }

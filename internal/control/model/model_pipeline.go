@@ -21,7 +21,7 @@ import (
 // Pipeline 流水线定义表
 type Pipeline struct {
 	BaseModel
-	PipelineID        string     `gorm:"column:pipeline_id" json:"pipelineId"`
+	PipelineID        string     `gorm:"column:pipeline_id;type:varchar(64);uniqueIndex:uk_pipeline_business_id" json:"pipelineId"`
 	ProjectID         string     `gorm:"column:project_id" json:"projectId"`
 	Name              string     `gorm:"column:name" json:"name"`
 	Description       string     `gorm:"column:description" json:"description"`
@@ -42,6 +42,7 @@ type Pipeline struct {
 	SuccessRuns       int        `gorm:"column:success_runs" json:"successRuns"`
 	FailedRuns        int        `gorm:"column:failed_runs" json:"failedRuns"`
 	CreatedBy         string     `gorm:"column:created_by" json:"createdBy"`
+	IsDeleted         int        `gorm:"column:is_deleted;default:0" json:"-"`
 	IsEnabled         int        `gorm:"column:is_enabled" json:"isEnabled"` // 0: disabled, 1: enabled
 }
 
@@ -52,9 +53,9 @@ func (Pipeline) TableName() string {
 // PipelineRun 流水线执行记录表
 type PipelineRun struct {
 	BaseModel
-	RunID               string     `gorm:"column:run_id" json:"runId"`
-	PipelineID          string     `gorm:"column:pipeline_id" json:"pipelineId"`
-	RequestID           string     `gorm:"column:request_id" json:"requestId"`
+	RunID               string     `gorm:"column:run_id;type:varchar(64);uniqueIndex:uk_pipeline_run_business_id" json:"runId"`
+	PipelineID          string     `gorm:"column:pipeline_id;type:varchar(64);uniqueIndex:uk_pipeline_run_request,priority:1;index" json:"pipelineId"`
+	RequestID           string     `gorm:"column:request_id;type:varchar(128);default:null;uniqueIndex:uk_pipeline_run_request,priority:2" json:"requestId"`
 	PipelineName        string     `gorm:"column:pipeline_name" json:"pipelineName"`
 	Branch              string     `gorm:"column:branch" json:"branch"`
 	CommitSha           string     `gorm:"column:commit_sha" json:"commitSha"`

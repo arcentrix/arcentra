@@ -28,12 +28,12 @@ const (
 // AuditLog 表示审计日志
 type AuditLog struct {
 	BaseModel
-	LogID        string         `gorm:"column:log_id;not null;uniqueIndex" json:"logId"`
-	ActorUserID  string         `gorm:"column:actor_user_id;not null;default:'';index" json:"actorUserId"`
+	LogID        string         `gorm:"column:log_id;not null;uniqueIndex;type:varchar(64)" json:"logId"`
+	ActorUserID  string         `gorm:"column:actor_user_id;not null;default:'';index;type:varchar(64)" json:"actorUserId"`
 	ActorIP      string         `gorm:"column:actor_ip;not null;default:''" json:"actorIp"`
-	Action       string         `gorm:"column:action;not null;index" json:"action"`
-	ResourceType string         `gorm:"column:resource_type;not null;default:'';index:idx_resource,priority:1" json:"resourceType"`
-	ResourceID   string         `gorm:"column:resource_id;not null;default:'';index:idx_resource,priority:2" json:"resourceId"`
+	Action       string         `gorm:"column:action;not null;index;type:varchar(32)" json:"action"`
+	ResourceType string         `gorm:"column:resource_type;not null;default:'';index:idx_resource,priority:1;type:varchar(32)" json:"resourceType"`
+	ResourceID   string         `gorm:"column:resource_id;not null;default:'';index:idx_resource,priority:2;type:varchar(64)" json:"resourceId"`
 	ScopeType    string         `gorm:"column:scope_type;not null;default:''" json:"scopeType"`
 	ScopeID      string         `gorm:"column:scope_id;not null;default:''" json:"scopeId"`
 	Result       string         `gorm:"column:result;not null" json:"result"`

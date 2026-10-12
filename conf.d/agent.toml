@@ -1,3 +1,6 @@
+# SECURITY: This template requests sandbox isolation and is intentionally rejected
+# until an isolated Agent executor is supported. For trusted-code host execution,
+# explicitly use agent.baremetal.example.toml and read docs/pipeline/implementation.md.
 # grpc configuration
 [grpc]
 # server address (host:port format, e.g., "localhost:9090")
@@ -142,7 +145,7 @@ mechanism = "PLAIN"
 # sasl username
 username = "admin"
 # sasl password
-password = "teThLWZqm6RVYYQt8D66"
+password = "CHANGE_ME_KAFKA_PASSWORD"
 
 [messageQueue.kafka.ssl]
 # ssl ca file

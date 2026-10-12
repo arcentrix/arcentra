@@ -29,8 +29,8 @@ const (
 // ProjectMember 项目成员表
 type ProjectMember struct {
 	BaseModel
-	ProjectID string `gorm:"column:project_id;not null;index:idx_project_user,unique" json:"projectId"`
-	UserID    string `gorm:"column:user_id;not null;index:idx_project_user,unique;index:idx_user" json:"userId"`
+	ProjectID string `gorm:"column:project_id;not null;index:idx_project_user,unique;type:varchar(64)" json:"projectId"`
+	UserID    string `gorm:"column:user_id;not null;index:idx_project_user,unique;index:idx_project_member_user;type:varchar(64)" json:"userId"`
 }
 
 func (pm *ProjectMember) TableName() string {

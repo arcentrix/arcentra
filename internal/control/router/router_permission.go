@@ -16,6 +16,7 @@ package router
 
 import (
 	"context"
+	"errors"
 
 	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
@@ -23,28 +24,35 @@ import (
 
 func (rt *Router) permission(action string, resolver middleware.ScopeResolver) fiber.Handler {
 	if rt.Services == nil || rt.Services.Authorizer == nil {
-		return func(c *fiber.Ctx) error {
-			return c.Next()
-		}
+		return middleware.RequirePermission(nil, action, resolver)
 	}
 	return middleware.RequirePermission(rt.Services.Authorizer, action, resolver)
 }
 
 func (rt *Router) resolvePipelineScope(ctx context.Context, pipelineID string) (orgID, projectID string, err error) {
 	if rt.Services == nil || rt.Services.PipelineRepo == nil {
-		return "", "", nil
+		return "", "", errors.New("pipeline repository is not configured")
 	}
 	pipeline, err := rt.Services.PipelineRepo.Get(ctx, pipelineID)
 	if err != nil {
 		return "", "", err
 	}
+	if pipeline == nil {
+		return "", "", errors.New("pipeline not found")
+	}
 	projectID = pipeline.ProjectID
-	if projectID == "" || rt.Services.ProjectRepo == nil {
-		return "", projectID, nil
+	if projectID == "" {
+		return "", "", errors.New("pipeline has no project scope")
+	}
+	if rt.Services.ProjectRepo == nil {
+		return "", "", errors.New("project repository is not configured")
 	}
 	project, err := rt.Services.ProjectRepo.Get(ctx, projectID)
 	if err != nil {
 		return "", projectID, err
+	}
+	if project == nil {
+		return "", "", errors.New("project not found")
 	}
 	return project.OrgID, projectID, nil
 }
@@ -57,19 +65,25 @@ func (rt *Router) ResolveProjectScopeByPipelineID(ctx context.Context, pipelineI
 // ResolveProjectScopeByApprovalID 解析审批单对应的作用域信息
 func (rt *Router) ResolveProjectScopeByApprovalID(ctx context.Context, approvalID string) (orgID, projectID string, err error) {
 	if rt.Services == nil || rt.Services.Approval == nil {
-		return "", "", nil
+		return "", "", errors.New("approval service is not configured")
 	}
 	approval, err := rt.Services.Approval.GetApproval(ctx, approvalID)
 	if err != nil {
 		return "", "", err
 	}
+	if approval == nil {
+		return "", "", errors.New("approval not found")
+	}
 	runID := approval.PipelineRunID
 	if runID == "" || rt.Services.PipelineRepo == nil {
-		return "", "", nil
+		return "", "", errors.New("approval has no resolvable pipeline run")
 	}
 	run, err := rt.Services.PipelineRepo.GetRun(ctx, runID)
 	if err != nil {
 		return "", "", err
+	}
+	if run == nil {
+		return "", "", errors.New("pipeline run not found")
 	}
 	return rt.resolvePipelineScope(ctx, run.PipelineID)
 }

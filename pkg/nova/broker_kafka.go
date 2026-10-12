@@ -68,10 +68,11 @@ func NewKafkaConfig(bootstrapServers string, opts ...KafkaOption) *KafkaConfig {
 
 // kafkaBroker is the Kafka broker implementation
 type kafkaBroker struct {
-	producer *mqkafka.Producer
-	consumer *mqkafka.Consumer
-	config   *KafkaConfig
-	mu       sync.RWMutex
+	producer      *mqkafka.Producer
+	consumer      *mqkafka.Consumer
+	delayConsumer *mqkafka.Consumer
+	config        *KafkaConfig
+	mu            sync.RWMutex
 }
 
 // newKafkaBroker creates a Kafka broker
@@ -89,6 +90,17 @@ func newKafkaBroker(config *queueConfig) (MessageQueueBroker, DelayManager, erro
 		)
 		kafkaConfig.DelaySlotCount = config.DelaySlotCount
 		kafkaConfig.DelaySlotDuration = config.DelaySlotDuration
+	}
+
+	if strings.TrimSpace(kafkaConfig.TopicPrefix) == "" {
+		kafkaConfig.TopicPrefix = config.TopicPrefix
+	}
+	kafkaConfig.TopicPrefix = normalizeQueuePrefix(kafkaConfig.TopicPrefix)
+	if kafkaConfig.DelaySlotCount <= 0 {
+		kafkaConfig.DelaySlotCount = DefaultDelaySlotCount
+	}
+	if kafkaConfig.DelaySlotDuration <= 0 {
+		kafkaConfig.DelaySlotDuration = DefaultDelaySlotDuration
 	}
 
 	clientOptions := []mqkafka.Option{
@@ -142,21 +154,19 @@ func newKafkaBroker(config *queueConfig) (MessageQueueBroker, DelayManager, erro
 		return nil, nil, fmt.Errorf("failed to create consumer: %w", err)
 	}
 
-	broker := &kafkaBroker{
-		producer: producer,
-		consumer: consumer,
-		config:   kafkaConfig,
-	}
-
-	// Create delay manager
+	// 延迟消息与普通作业必须由独立消费者读取，避免互相覆盖订阅或抢走消息
 	targetTopic := fmt.Sprintf("%s_TASKS", kafkaConfig.TopicPrefix)
-	delayManager := NewDelayTopicManager(
-		producer,
-		consumer,
-		targetTopic,
-		kafkaConfig.DelaySlotCount,
-		kafkaConfig.DelaySlotDuration,
-	)
+	delayConsumer, err := mqkafka.NewConsumer(kafkaConfig.BootstrapServers, targetTopic, programName+"-delay",
+		mqkafka.WithConsumerGroupID(consumerGroupID+"-delay"),
+		mqkafka.WithConsumerOptions(clientOptions...), mqkafka.WithConsumerEnableAutoCommit(false),
+		mqkafka.WithConsumerSessionTimeoutMs(kafkaConfig.SessionTimeout), mqkafka.WithConsumerMaxPollIntervalMs(kafkaConfig.MaxPollInterval))
+	if err != nil {
+		_ = consumer.Close()
+		producer.Close()
+		return nil, nil, fmt.Errorf("create delay consumer: %w", err)
+	}
+	broker := &kafkaBroker{producer: producer, consumer: consumer, delayConsumer: delayConsumer, config: kafkaConfig}
+	delayManager := NewDelayTopicManager(producer, delayConsumer, targetTopic, kafkaConfig.DelaySlotCount, kafkaConfig.DelaySlotDuration)
 
 	return broker, delayManager, nil
 }
@@ -225,16 +235,35 @@ func (b *kafkaBroker) Subscribe(ctx context.Context, topics []string, handler Me
 				Headers: headers,
 			}
 
-			// Process message
-			if err := handler(ctx, message); err != nil {
-				// Log error but continue processing
-				continue
+			// 在当前消息成功处理和提交前不读取下一条，避免后续 offset 跳过失败作业
+			if err := retryDelivery(ctx, func() error { return handler(ctx, message) }); err != nil {
+				var poison permanentDeliveryError
+				if !errors.As(err, &poison) {
+					return err
+				}
+				// 成功保留原始毒消息后再推进 offset，避免丢失或阻塞后续任务
+				if err := retryDelivery(ctx, func() error {
+					return b.ProducerMessage(ctx, b.config.TopicPrefix+"_DEAD_LETTER", message.Key, message.Value, map[string]string{"error": poison.Error()})
+				}); err != nil {
+					return err
+				}
+			}
+			if !b.config.AutoCommit {
+				if err := retryDelivery(ctx, func() error {
+					err := b.consumer.CommitMessage(msg)
+					if lostConsumerAssignment(err) {
+						return permanentDeliveryError{cause: err}
+					}
+					return err
+				}); err != nil {
+					var lost permanentDeliveryError
+					if !errors.As(err, &lost) {
+						return err
+					}
+					// 已失去分区归属时必须恢复 poll 以重新加入组；重放由作业 claim 防重
+				}
 			}
 
-			// Manually commit offset
-			if !b.config.AutoCommit {
-				_ = b.consumer.CommitMessage(msg)
-			}
 		}
 	}
 }
@@ -250,10 +279,18 @@ func (b *kafkaBroker) Close() error {
 		if err := b.consumer.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("failed to close consumer: %w", err))
 		}
+		b.consumer = nil
 	}
 
+	if b.delayConsumer != nil {
+		if err := b.delayConsumer.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		b.delayConsumer = nil
+	}
 	if b.producer != nil {
 		b.producer.Close()
+		b.producer = nil
 	}
 
 	if len(errs) > 0 {
@@ -261,4 +298,16 @@ func (b *kafkaBroker) Close() error {
 	}
 
 	return nil
+}
+
+func lostConsumerAssignment(err error) bool {
+	var kafkaErr ckafka.Error
+	if !errors.As(err, &kafkaErr) {
+		return false
+	}
+	switch kafkaErr.Code() {
+	case ckafka.ErrIllegalGeneration, ckafka.ErrUnknownMemberID, ckafka.ErrRebalanceInProgress, ckafka.ErrAssignmentLost, ckafka.ErrState:
+		return true
+	}
+	return false
 }

@@ -18,6 +18,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -673,41 +675,23 @@ func TestPluginExecutor_Execute_PluginNotFound(t *testing.T) {
 }
 
 func TestPluginExecutor_Execute_HTTPExecution(t *testing.T) {
-	mockPluginMgr := &mockPluginManager{
-		plugins: map[string]plugin.Plugin{},
-	}
-
-	exec := NewPluginExecutor(mockPluginMgr.toPluginManager(), log.Logger{})
-
-	// 测试 HTTP 执行：args 中包含 url 字段
-	req := &ExecutionRequest{
-		Step: &StepInfo{
-			Name:        "http-step",
-			Uses:        "http-plugin",
-			RunRemotely: false,
-			Args: map[string]any{
-				"url":    "https://api.example.com/test",
-				"method": "GET",
-			},
-		},
-		Workspace: "/tmp/workspace",
-		Env:       map[string]string{"KEY": testMetadataValue},
-	}
-
-	// HTTP 执行会失败（因为没有真实的 HTTP 服务器），但应该走 HTTP 执行路径
-	result, err := exec.Execute(context.Background(), req)
-	// HTTP 执行可能会失败（连接错误），但应该尝试执行 HTTP 请求
-	// 检查是否返回了 HTTP 相关的错误或结果
-	if err == nil && result != nil {
-		// 如果成功，应该是 HTTP 执行的结果
-		if result.ExecutorName != testExecutorHTTP {
-			t.Errorf("expected executor name '%s', got '%s'", testExecutorHTTP, result.ExecutorName)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/test" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-	} else if err != nil {
-		// HTTP 执行失败是预期的（没有真实服务器），但错误应该来自 HTTP 执行器
-		if result != nil && result.ExecutorName != testExecutorHTTP {
-			t.Errorf("expected executor name '%s', got '%s'", testExecutorHTTP, result.ExecutorName)
+		if r.Header.Get("X-Env-KEY") != "" {
+			t.Error("executor environment leaked into HTTP headers")
 		}
+		_, _ = w.Write([]byte("local-response"))
+	}))
+	defer server.Close()
+	executor := NewPluginExecutor(nil, log.Logger{})
+	result, err := executor.Execute(context.Background(), &ExecutionRequest{Step: &StepInfo{Name: "http-step", Uses: "http-plugin", Args: map[string]any{"url": server.URL + "/test", "method": "GET"}}, Env: map[string]string{"KEY": testMetadataValue}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result == nil || !result.Success || result.ExecutorName != testExecutorHTTP || result.ExitCode != 200 {
+		t.Fatalf("unexpected HTTP execution result: %+v", result)
 	}
 }
 

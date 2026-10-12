@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/builtin"
@@ -67,6 +68,15 @@ type ExecutionContext struct {
 	// ArtifactURIs stores upstream job artifact URIs keyed by "jobName/artifactName".
 	// Populated after each Job completes; downstream jobs read from here.
 	ArtifactURIs map[string]string
+	artifactMu   *sync.RWMutex
+
+	// SelectAgent 根据作业选择可用 Agent
+	SelectAgent func(context.Context, *spec.Job) (string, error)
+	// CancelJob 通知远程 Agent 停止作业
+	CancelJob func(context.Context, string, string, string) error
+	// StepRunIDs 保存当前作业的步骤执行标识
+	StepRunIDs map[string]string
+	JobRunID   string
 
 	// LogPublisher publishes build log messages to the BUILD_LOGS topic.
 	// Set by the control-plane process for local step log visibility.
@@ -81,6 +91,9 @@ func NewExecutionContext(
 	logger log.Logger,
 ) *ExecutionContext {
 	env := make(map[string]string)
+	if p != nil && p.Runtime != nil {
+		maps.Copy(env, p.Runtime.Env)
+	}
 	if p != nil && p.Variables != nil {
 		maps.Copy(env, p.Variables)
 	}
@@ -93,6 +106,8 @@ func NewExecutionContext(
 		EventEmitter:   nil,
 		Logger:         logger,
 		Env:            env,
+		ArtifactURIs:   make(map[string]string),
+		artifactMu:     &sync.RWMutex{},
 	}
 }
 
@@ -125,7 +140,8 @@ func (c *ExecutionContext) JobWorkspace(jobName string) string {
 
 // StepWorkspace returns workspace path for step
 func (c *ExecutionContext) StepWorkspace(jobName, stepName string) string {
-	p := filepath.Join(c.JobWorkspace(jobName), stepName)
+	p := c.JobWorkspace(jobName)
+	_ = stepName // 同一个作业内所有步骤共享检出的代码与构建产物
 	_ = os.MkdirAll(p, 0o755)
 	return p
 }
@@ -331,3 +347,31 @@ func (c *ExecutionContext) SendNotification(_ context.Context, item *spec.Notify
 	_, err = pluginClient.Execute(action, paramsJSON, nil)
 	return err
 }
+
+// ForJob 为并行作业创建隔离环境，同时共享受锁保护的产物索引
+func (c *ExecutionContext) ForJob() *ExecutionContext {
+	child := *c
+	child.Env = maps.Clone(c.Env)
+	child.StepRunIDs = make(map[string]string)
+	return &child
+}
+
+// ArtifactSnapshot 返回可安全遍历的产物快照
+func (c *ExecutionContext) ArtifactSnapshot() map[string]string {
+	c.artifactMu.RLock()
+	defer c.artifactMu.RUnlock()
+	return maps.Clone(c.ArtifactURIs)
+}
+
+// RecordArtifact 记录产物供后续作业使用
+func (c *ExecutionContext) RecordArtifact(key, uri string) {
+	c.artifactMu.Lock()
+	defer c.artifactMu.Unlock()
+	if c.ArtifactURIs == nil {
+		c.ArtifactURIs = make(map[string]string)
+	}
+	c.ArtifactURIs[key] = uri
+}
+
+// GetPipelineRunID 返回当前流水线执行标识
+func (c *ExecutionContext) GetPipelineRunID() string { return c.PipelineRunID }

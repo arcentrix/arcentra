@@ -23,12 +23,13 @@ import (
 // and executes all its Steps sequentially.
 type JobRun struct {
 	BaseModel
-	JobRunID       string     `gorm:"column:job_run_id" json:"jobRunId"`
+	JobRunID       string     `gorm:"column:job_run_id;type:varchar(64);uniqueIndex:uk_job_run_business_id" json:"jobRunId"`
 	PipelineID     string     `gorm:"column:pipeline_id" json:"pipelineId"`
-	PipelineRunID  string     `gorm:"column:pipeline_run_id" json:"pipelineRunId"`
+	PipelineRunID  string     `gorm:"column:pipeline_run_id;type:varchar(64);index:idx_job_run_pipeline_run" json:"pipelineRunId"`
 	StageID        string     `gorm:"column:stage_id" json:"stageId"`
 	JobName        string     `gorm:"column:job_name" json:"jobName"`
 	AgentID        string     `gorm:"column:agent_id" json:"agentId"`
+	ClaimID        string     `gorm:"column:claim_id;type:varchar(64);default:''" json:"-"`
 	Status         int        `gorm:"column:status" json:"status"`
 	Priority       int        `gorm:"column:priority" json:"priority"`
 	Env            string     `gorm:"column:env;type:json" json:"env"`
@@ -58,6 +59,7 @@ const (
 	JobRunStatusFailed    = 5
 	JobRunStatusCancelled = 6
 	JobRunStatusTimeout   = 7
+	JobRunStatusSkipped   = 8
 )
 
 // IsJobRunTerminal returns true when the status represents a final state.
@@ -65,7 +67,8 @@ func IsJobRunTerminal(status int) bool {
 	return status == JobRunStatusSuccess ||
 		status == JobRunStatusFailed ||
 		status == JobRunStatusCancelled ||
-		status == JobRunStatusTimeout
+		status == JobRunStatusTimeout ||
+		status == JobRunStatusSkipped
 }
 
 // IsJobRunRunning returns true when the job is actively executing.

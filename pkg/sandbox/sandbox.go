@@ -20,164 +20,89 @@ import (
 	"time"
 )
 
-// Sandbox defines the interface for sandbox execution environments
-// Sandbox provides isolated execution environment for running tasks
+// Sandbox 定义容器执行后端，调用顺序为 Create、Start、Execute、Stop 或 Remove
+// 接口本身不代表多租户安全保证，也不会自动接入 Agent 执行路径
 type Sandbox interface {
-	// Create creates a new sandbox container
-	// Returns container ID and error
-	Create(ctx context.Context, opts *CreateOptions) (string, error)
-
-	// Start starts a sandbox container
-	Start(ctx context.Context, containerID string) error
-
-	// Execute executes a command in the sandbox container
-	// Returns execution result including exit code, stdout, stderr
-	Execute(ctx context.Context, containerID string, cmd []string, opts *ExecuteOptions) (*ExecuteResult, error)
-
-	// Stop stops a running sandbox container
-	Stop(ctx context.Context, containerID string, timeout time.Duration) error
-
-	// Remove removes a sandbox container
-	Remove(ctx context.Context, containerID string) error
-
-	// GetLogs retrieves logs from a sandbox container
-	GetLogs(ctx context.Context, containerID string, opts *LogOptions) (io.ReadCloser, error)
-
-	// Cleanup cleans up resources (containers, images, etc.)
-	Cleanup(ctx context.Context) error
-
-	// Close closes the sandbox client connection
+	Create(context.Context, *CreateOptions) (string, error)
+	Start(context.Context, string) error
+	Execute(context.Context, string, []string, *ExecuteOptions) (*ExecuteResult, error)
+	Stop(context.Context, string, time.Duration) error
+	Remove(context.Context, string) error
+	GetLogs(context.Context, string, *LogOptions) (io.ReadCloser, error)
+	Cleanup(context.Context) error
 	Close() error
 }
 
-// CreateOptions options for creating a sandbox container
+// CreateOptions 定义容器初始化配置
+// Mounts 只能来自可信宿主配置，不能直接接受不可信流水线输入
 type CreateOptions struct {
-	// Image is the container image to use
 	Image string
-
-	// Command is the command to run in the container
-	Command []string
-
-	// Args are the arguments for the command
-	Args []string
-
-	// Env are environment variables
-	Env map[string]string
-
-	// WorkingDir is the working directory in the container
+	// Command 必須显式指定长期运行的容器 init 命令
+	Command    []string
+	Args       []string
+	Env        map[string]string
 	WorkingDir string
-
-	// NetworkMode is the network mode (bridge, host, none)
+	// NetworkMode 仅支持 none，空值使用默认离线模式
 	NetworkMode string
-
-	// Resources are resource limits
-	Resources *Resources
-
-	// Mounts are volume mounts
-	Mounts []Mount
-
-	// Labels are container labels
-	Labels map[string]string
-
-	// Hostname is the container hostname
-	Hostname string
-
-	// Privileged enables privileged mode
+	Resources   *Resources
+	Mounts      []Mount
+	Labels      map[string]string
+	Hostname    string
+	// Privileged 当前不支持，true 会返回错误
 	Privileged bool
 }
 
-// Resources defines resource limits for a container
+// Resources 定义 CPU、内存限制和可选权重，非法值会返回错误
+// 空字段不施加对应限制，MemoryReservation 仅是软保留而非最低可用内存保证
 type Resources struct {
-	// CPU is CPU limit (e.g., "1", "0.5", "1000m")
-	CPU string
-
-	// Memory is memory limit (e.g., "1G", "512M", "1024m")
-	Memory string
-
-	// CPUShares is CPU shares (relative weight)
-	CPUShares int64
-
-	// MemoryReservation is memory reservation
+	CPU               string
+	Memory            string
+	CPUShares         int64
 	MemoryReservation string
 }
 
-// Mount defines a volume mount
+// Mount 定义可信宿主上的绑定挂载，不支持 volume 或 tmpfs
+// ReadOnly 不应被视为对子挂载和所有文件系统配置的完整安全保证
 type Mount struct {
-	// Source is the source path on the host
-	Source string
-
-	// Target is the target path in the container
-	Target string
-
-	// Type is the mount type (bind, volume, tmpfs)
-	Type string
-
-	// ReadOnly indicates if the mount is read-only
+	Source   string
+	Target   string
+	Type     string
 	ReadOnly bool
 }
 
-// ExecuteOptions options for executing a command in a container
+// ExecuteOptions 定义单次命令环境、目录、数字用户和输出流
+// User 仅支持 UID 或 UID:GID，只有 UID 时 GID 也使用该值
+// 流由调用方拥有，读写实现不得无限阻塞
 type ExecuteOptions struct {
-	// Env are additional environment variables
-	Env map[string]string
-
-	// WorkingDir is the working directory
+	Env        map[string]string
 	WorkingDir string
-
-	// User is the user to run as (e.g., "root", "1000:1000")
-	User string
-
-	// TTY enables TTY mode
-	TTY bool
-
-	// Stdin is the stdin reader
-	Stdin io.Reader
-
-	// Stdout is the stdout writer
-	Stdout io.Writer
-
-	// Stderr is the stderr writer
-	Stderr io.Writer
-
-	// Timeout is the execution timeout
+	User       string
+	// TTY 当前不支持，true 会返回错误
+	TTY     bool
+	Stdin   io.Reader
+	Stdout  io.Writer
+	Stderr  io.Writer
 	Timeout time.Duration
 }
 
-// ExecuteResult result of executing a command
+// ExecuteResult 返回退出状态和各自至多 4 MiB 的标准输出与标准错误
+// 非零退出码与传输错误分开，调用方必须同时检查 error 和 ExitCode
 type ExecuteResult struct {
-	// ExitCode is the exit code
-	ExitCode int32
-
-	// Stdout is the stdout output
-	Stdout string
-
-	// Stderr is the stderr output
-	Stderr string
-
-	// StartTime is when execution started
-	StartTime time.Time
-
-	// EndTime is when execution ended
-	EndTime time.Time
-
-	// Duration is the execution duration
-	Duration time.Duration
+	ExitCode        int32
+	Stdout          string
+	Stderr          string
+	OutputTruncated bool
+	StartTime       time.Time
+	EndTime         time.Time
+	Duration        time.Duration
 }
 
-// LogOptions options for retrieving logs
+// LogOptions 保留日志查询选项，当前后端只支持全部为零的内存快照查询
+// 非零选项返回错误，日志不持久化且删除容器后不可查询
 type LogOptions struct {
-	// Follow follows log output
-	Follow bool
-
-	// Tail is the number of lines to show from the end
-	Tail int
-
-	// Since is the timestamp to show logs since
-	Since time.Time
-
-	// Until is the timestamp to show logs until
-	Until time.Time
-
-	// Timestamps includes timestamps in log output
+	Follow     bool
+	Tail       int
+	Since      time.Time
+	Until      time.Time
 	Timestamps bool
 }

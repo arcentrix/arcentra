@@ -53,6 +53,7 @@ type WAL struct {
 	currentFile  *os.File
 	currentStart uint64
 	mu           sync.Mutex
+	appendMu     sync.Mutex
 	ctx          context.Context
 	cancel       context.CancelFunc
 	eg           *errgroup.Group
@@ -82,6 +83,14 @@ func NewWAL(cfg *Config) (*WAL, error) {
 	if err != nil {
 		cancel()
 		return nil, err
+	}
+	committedSeq, err := w.commit.Read()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("read WAL committed sequence: %w", err)
+	}
+	if committedSeq > maxSeq {
+		maxSeq = committedSeq
 	}
 	w.nextSeq = maxSeq + 1
 	w.writtenSeq = maxSeq
@@ -145,8 +154,13 @@ func (w *WAL) appendRecord(data []byte, seq uint64) error {
 	defer w.mu.Unlock()
 	if w.currentFile == nil || w.segmentCount >= w.cfg.SegmentMaxSeq {
 		if w.currentFile != nil {
-			_ = w.currentFile.Sync()
-			_ = w.currentFile.Close()
+			if err := w.currentFile.Sync(); err != nil {
+				return err
+			}
+			if err := w.currentFile.Close(); err != nil {
+				w.currentFile = nil
+				return err
+			}
 			w.currentFile = nil
 		}
 		startSeq := seq
@@ -169,15 +183,14 @@ func (w *WAL) appendRecord(data []byte, seq uint64) error {
 
 func (w *WAL) flushCurrent() {
 	w.mu.Lock()
-	f := w.currentFile
-	ws := atomic.LoadUint64(&w.writtenSeq)
-	w.mu.Unlock()
-	if f != nil {
-		if err := f.Sync(); err != nil {
+	defer w.mu.Unlock()
+	if w.currentFile != nil {
+		if err := w.currentFile.Sync(); err != nil {
 			log.Errorw("wal fsync failed", "error", err)
+			return
 		}
 	}
-	atomic.StoreUint64(&w.flushedSeq, ws)
+	atomic.StoreUint64(&w.flushedSeq, atomic.LoadUint64(&w.writtenSeq))
 }
 
 // diskUsageBytes returns total size of segment files.
@@ -199,6 +212,18 @@ func (w *WAL) diskUsageBytes() (int64, error) {
 
 // Append enqueues a record for writing. Returns when enqueued; actual flush is async.
 func (w *WAL) Append(ctx context.Context, r *Record) (uint64, error) {
+	// 序列分配与入队必须保持相同顺序，避免并发写入使 durable boundary 倒退
+	w.appendMu.Lock()
+	defer w.appendMu.Unlock()
+	if r == nil {
+		return 0, fmt.Errorf("WAL record is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if w.ctx.Err() != nil {
+		return 0, ErrClosed
+	}
 	usage, err := w.diskUsageBytes()
 	if err == nil && usage >= w.cfg.MaxDiskUsageMB*1024*1024 {
 		return 0, ErrDiskFull
@@ -210,10 +235,17 @@ func (w *WAL) Append(ctx context.Context, r *Record) (uint64, error) {
 	select {
 	case w.writeCh <- writeReq{record: data, seq: seq, done: done}:
 	case <-ctx.Done():
+		atomic.AddUint64(&w.nextSeq, ^uint64(0))
 		return 0, ctx.Err()
+	case <-w.ctx.Done():
+		atomic.AddUint64(&w.nextSeq, ^uint64(0))
+		return 0, ErrClosed
 	}
 	select {
 	case err := <-done:
+		if err != nil {
+			atomic.AddUint64(&w.nextSeq, ^uint64(0))
+		}
 		return seq, err
 	case <-ctx.Done():
 		return 0, ctx.Err()
@@ -358,17 +390,25 @@ func (w *WAL) scanMaxSeq() (uint64, error) {
 
 // DeleteSegmentsUpTo deletes segments whose maxSeq <= lastAcked.
 func (w *WAL) DeleteSegmentsUpTo(lastAcked uint64) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	segs, err := w.listSegments()
 	if err != nil {
 		return err
 	}
 	for _, path := range segs {
+		// 活跃段仍可能追加记录，删除打开的 inode 会使后续记录不可恢复
+		if w.currentFile != nil && path == w.currentFile.Name() {
+			continue
+		}
 		maxSeq, err := w.segmentMaxSeq(path)
 		if err != nil {
 			continue
 		}
 		if maxSeq <= lastAcked {
-			_ = os.Remove(path)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
 		}
 	}
 	return nil
@@ -447,6 +487,8 @@ func (w *WAL) Commit() *CommitStore {
 
 // Close stops the writer and waits for cleanup.
 func (w *WAL) Close() error {
+	w.appendMu.Lock()
+	defer w.appendMu.Unlock()
 	w.cancel()
 	err := w.eg.Wait()
 	w.mu.Lock()

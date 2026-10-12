@@ -143,7 +143,7 @@ func (ur *UserRepo) GetUserByUsername(username string) (string, error) {
 func (ur *UserRepo) Login(login *model.Login) (*model.User, error) {
 	var user model.User
 	scope := func(db *gorm.DB) *gorm.DB {
-		return db.Table(user.TableName()).Select("user_id, username, full_name, avatar, email, phone, password")
+		return db.Table(user.TableName()).Select("user_id, username, full_name, avatar, email, phone, password, is_enabled").Where("is_enabled = ?", 1)
 	}
 
 	err := ur.Database().Scopes(scope).Where(
@@ -164,16 +164,9 @@ func (ur *UserRepo) Register(register *model.Register) error {
 	if err == nil {
 		return errors.New(http.UserAlreadyExist.Msg)
 	}
-	return ur.Database().Exec(
-		"INSERT INTO user (user_id, username, full_name, email, avatar, password, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		register.UserID,
-		register.Username,
-		register.FullName,
-		register.Email,
-		register.Avatar,
-		register.Password,
-		register.CreatedAt,
-	).Error
+	return ur.Database().WithContext(context.Background()).Create(&model.User{
+		UserID: register.UserID, Username: register.Username, FullName: register.FullName, Email: register.Email, Avatar: register.Avatar, Password: register.Password, IsEnabled: 1,
+	}).Error
 }
 
 func (ur *UserRepo) Logout(userKey string) error {

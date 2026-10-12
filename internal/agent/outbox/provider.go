@@ -21,6 +21,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/agent/service"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/grpc"
+	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/outbox"
 )
 
@@ -29,15 +30,23 @@ import (
 func ProvideExecutorManager(o *outbox.Outbox) *executor.Manager {
 	m := executor.NewExecutorManager()
 	m.Register(executor.NewShellExecutor())
+	m.Register(executor.NewPluginExecutor(nil, log.Logger{}))
 	if o != nil {
 		m.SetEventPublisher(NewPublisher(o), executor.EventEmitterConfig{})
 	}
 	return m
 }
 
-// ProvideOutbox creates an Outbox from agent config and gRPC client.
-// Returns (nil, nil) when agent ID is not set (outbox disabled).
+// ProvideOutbox 为已有固定身份的 Agent 创建发件箱，动态注册时延后初始化
 func ProvideOutbox(ac *config.AgentConfig, grpcClient *grpc.ClientWrapper) (*outbox.Outbox, error) {
+	if ac == nil || ac.Agent.ID == "" || ac.Grpc.RegistrationToken != "" {
+		return nil, nil
+	}
+	return NewRegisteredOutbox(ac, grpcClient)
+}
+
+// NewRegisteredOutbox 使用注册响应中的最终身份创建发件箱
+func NewRegisteredOutbox(ac *config.AgentConfig, grpcClient *grpc.ClientWrapper) (*outbox.Outbox, error) {
 	if ac == nil || ac.Agent.ID == "" {
 		return nil, nil
 	}

@@ -1,405 +1,462 @@
-// Copyright 2025 Arcentra Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2026 Arcentra Authors.
+// SPDX-License-Identifier: Apache-2.0
 
 package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/safe"
-	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
 )
 
-// LogAggregator 日志聚合器
-type LogAggregator struct {
-	mysql         *gorm.DB
-	mu            sync.RWMutex
-	streams       map[string]*LogStream       // stepRunID -> LogStream
-	subscribers   map[string][]chan *LogEntry // stepRunID -> subscribers channels
-	bufferSize    int
-	flushInterval time.Duration
-	tableName     string
-}
-
-// LogStream 日志流
-type LogStream struct {
-	stepRunID string
-	buffer    []*LogEntry
-	mu        sync.Mutex
-	lastFlush time.Time
-	lineCount int32
-	closed    bool
-}
-
-// LogEntry 日志条目
+// LogEntry 日志条目，沿用 WebSocket 历史字段协议
 type LogEntry struct {
+	LogID      string `json:"-"`
 	StepRunID  string `json:"step_run_id"`
 	Timestamp  int64  `json:"timestamp"`
 	LineNumber int32  `json:"line_number"`
 	Level      string `json:"level"`
 	Content    string `json:"content"`
-	Stream     string `json:"stream"` // stdout/stderr
+	Stream     string `json:"stream"`
 	PluginName string `json:"plugin_name"`
 	AgentID    string `json:"agent_id"`
 }
 
-// NewLogAggregator 创建日志聚合器
-func NewLogAggregator(_ *redis.Client, mysql *gorm.DB) *LogAggregator {
+// LogAggregator 聚合实时日志并在持久化成功前保留缓冲区
+type LogAggregator struct {
+	repository    repo.ILogRepository
+	mu            sync.RWMutex
+	streams       map[string]*LogStream
+	subscribers   map[string][]chan *LogEntry
+	bufferSize    int
+	flushInterval time.Duration
+	done          chan struct{}
+	stopOnce      sync.Once
+	closed        bool
+}
+
+// LogStream 保存单个步骤的待写日志和行号
+type LogStream struct {
+	stepRunID    string
+	buffer       []*LogEntry
+	mu           sync.Mutex
+	lineCount    int32
+	initialized  bool
+	lastActivity time.Time
+	closed       bool
+}
+
+// NewLogAggregator 创建使用仓储接口的日志聚合器
+func NewLogAggregator(repository repo.ILogRepository) *LogAggregator {
 	la := &LogAggregator{
-		mysql:         mysql,
+		repository:    repository,
 		streams:       make(map[string]*LogStream),
 		subscribers:   make(map[string][]chan *LogEntry),
-		bufferSize:    100,             // 缓冲100条日志后写入
-		flushInterval: 3 * time.Second, // 3秒强制刷新
-		tableName:     "step_run_logs",
+		bufferSize:    100,
+		flushInterval: 3 * time.Second,
+		done:          make(chan struct{}),
 	}
-
+	safe.Go(la.periodicFlush)
 	return la
 }
 
-// PushLog 推送日志到聚合器
+// PushLog 推送日志，持久化错误会返回且保留已接受的日志供重试
 func (la *LogAggregator) PushLog(entry *LogEntry) error {
-	la.mu.RLock()
-	stream, exists := la.streams[entry.StepRunID]
-	la.mu.RUnlock()
-
-	if !exists {
-		// 创建新的流
-		stream = &LogStream{
-			stepRunID: entry.StepRunID,
-			buffer:    make([]*LogEntry, 0, la.bufferSize),
-			lastFlush: time.Now(),
-		}
-		la.mu.Lock()
-		la.streams[entry.StepRunID] = stream
-		la.mu.Unlock()
-
-		// 启动定期刷新
-		go la.periodicFlush(entry.StepRunID)
-	}
-
-	stream.mu.Lock()
-	defer stream.mu.Unlock()
-
-	if stream.closed {
-		return fmt.Errorf("log stream for step run %s is closed", entry.StepRunID)
-	}
-
-	stream.buffer = append(stream.buffer, entry)
-	stream.lineCount++
-
-	// 广播到所有订阅者（异步，不阻塞）
-	go la.broadcastToSubscribers(entry.StepRunID, entry)
-
-	// 达到缓冲大小，触发刷新
-	if len(stream.buffer) >= la.bufferSize {
-		la.flushStream(stream)
-		return nil
-	}
-
-	return nil
-}
-
-// PushBatch 批量推送日志
-func (la *LogAggregator) PushBatch(entries []*LogEntry) error {
-	for _, entry := range entries {
-		if err := la.PushLog(entry); err != nil {
-			log.Errorw("failed to push log", "stepRunId", entry.StepRunID, "error", err)
-		}
-	}
-	return nil
-}
-
-// flushStream 刷新日志流到存储
-func (la *LogAggregator) flushStream(stream *LogStream) {
-	if len(stream.buffer) == 0 {
-		return
-	}
-
-	// 复制缓冲区以释放锁
-	logs := make([]*LogEntry, len(stream.buffer))
-	copy(logs, stream.buffer)
-	stream.buffer = stream.buffer[:0]
-	stream.lastFlush = time.Now()
-
-	// 异步写入，避免阻塞
-	safe.Go(func() {
-		// 写入 MySQL
-		if err := la.writeToMySQL(logs); err != nil {
-			log.Errorw("failed to write logs to mysql", "logCount", len(logs), "error", err)
-		}
-	})
-}
-
-// writeToMySQL 写入 MySQL
-func (la *LogAggregator) writeToMySQL(logs []*LogEntry) error {
-	if la.mysql == nil {
-		return fmt.Errorf("mysql client is nil")
-	}
-
-	sqlDB, err := la.mysql.DB()
-	if err != nil {
-		return fmt.Errorf("failed to get SQL DB from GORM: %w", err)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	return la.PushLogContext(ctx, entry)
+}
 
-	// 批量插入
-	insertSQL := fmt.Sprintf(`
-		INSERT INTO %s (
-			step_run_id, timestamp, line_number, level, content, stream, plugin_name, agent_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, la.tableName)
-
-	// 使用事务批量插入
-	tx, err := sqlDB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+// PushLogContext 使用调用方上下文接收日志
+func (la *LogAggregator) PushLogContext(ctx context.Context, entry *LogEntry) error {
+	if entry == nil || strings.TrimSpace(entry.StepRunID) == "" {
+		return errors.New("step run id is required for a log entry")
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	stmt, err := tx.PrepareContext(ctx, insertSQL)
-	if err != nil {
-		return fmt.Errorf("prepare statement: %w", err)
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	defer func() { _ = stmt.Close() }()
-
-	for _, logEntry := range logs {
-		_, err := stmt.ExecContext(ctx,
-			logEntry.StepRunID,
-			logEntry.Timestamp,
-			logEntry.LineNumber,
-			logEntry.Level,
-			logEntry.Content,
-			logEntry.Stream,
-			logEntry.PluginName,
-			logEntry.AgentID,
-		)
+	if la.repository == nil {
+		return errors.New("log repository is not configured")
+	}
+	copyEntry := *entry
+	if copyEntry.LogID == "" {
+		copyEntry.LogID = id.GetUUID()
+	}
+	if copyEntry.Timestamp == 0 {
+		copyEntry.Timestamp = time.Now().Unix()
+	}
+	la.mu.Lock()
+	if la.closed {
+		la.mu.Unlock()
+		return errors.New("log aggregator is closed")
+	}
+	stream := la.streams[copyEntry.StepRunID]
+	if stream == nil {
+		stream = &LogStream{stepRunID: copyEntry.StepRunID, buffer: make([]*LogEntry, 0, la.bufferSize)}
+		la.streams[copyEntry.StepRunID] = stream
+	}
+	stream.mu.Lock()
+	la.mu.Unlock()
+	if stream.closed {
+		stream.mu.Unlock()
+		return fmt.Errorf("log stream for step run %s is closed", copyEntry.StepRunID)
+	}
+	if !stream.initialized {
+		lastLine, err := la.repository.LastLineNumber(ctx, copyEntry.StepRunID)
 		if err != nil {
-			return fmt.Errorf("insert log to mysql: %w", err)
+			stream.mu.Unlock()
+			return fmt.Errorf("initialize log sequence: %w", err)
+		}
+		stream.lineCount = lastLine
+		stream.initialized = true
+	}
+	for _, buffered := range stream.buffer {
+		if buffered.LogID == copyEntry.LogID {
+			err := la.flushStream(ctx, stream)
+			stream.mu.Unlock()
+			return err
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
+	if identities, ok := la.repository.(repo.ILogIdentityRepository); ok {
+		persisted, err := identities.HasLogID(ctx, copyEntry.LogID)
+		if err != nil {
+			stream.mu.Unlock()
+			return fmt.Errorf("check persisted log identity: %w", err)
+		}
+		if persisted {
+			stream.mu.Unlock()
+			return nil
+		}
 	}
+	if copyEntry.LineNumber <= 0 {
+		copyEntry.LineNumber = stream.lineCount + 1
+	}
+	if copyEntry.LineNumber > stream.lineCount {
+		stream.lineCount = copyEntry.LineNumber
+	}
+	stream.buffer = append(stream.buffer, &copyEntry)
+	stream.lastActivity = time.Now()
+	var err error
+	if len(stream.buffer) >= la.bufferSize {
+		err = la.flushStream(ctx, stream)
+	}
+	stream.mu.Unlock()
+	la.broadcastToSubscribers(copyEntry.StepRunID, &copyEntry)
+	return err
+}
 
+// PushBatch 批量接收日志并返回所有失败原因
+func (la *LogAggregator) PushBatch(entries []*LogEntry) error {
+	var errs []error
+	for _, entry := range entries {
+		if err := la.PushLog(entry); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// flushStream 由持有 stream.mu 的调用者同步执行，失败时不清空缓冲
+func (la *LogAggregator) flushStream(ctx context.Context, stream *LogStream) error {
+	if len(stream.buffer) == 0 {
+		return nil
+	}
+	if la.repository == nil {
+		return errors.New("log repository is not configured")
+	}
+	entries := make([]*model.StepRunLog, 0, len(stream.buffer))
+	for _, entry := range stream.buffer {
+		entries = append(entries, &model.StepRunLog{
+			LogID: entry.LogID, StepRunID: entry.StepRunID, Timestamp: entry.Timestamp,
+			LineNumber: entry.LineNumber, Level: entry.Level, Content: entry.Content,
+			Stream: entry.Stream, PluginName: entry.PluginName, AgentID: entry.AgentID,
+		})
+	}
+	if err := la.repository.CreateBatch(ctx, entries); err != nil {
+		return fmt.Errorf("persist step run logs: %w", err)
+	}
+	stream.buffer = stream.buffer[:0]
 	return nil
 }
 
-// periodicFlush 定期刷新日志流
-func (la *LogAggregator) periodicFlush(stepRunID string) {
+// FlushStep 等待指定步骤的缓冲日志持久化
+func (la *LogAggregator) FlushStep(ctx context.Context, stepRunID string) error {
+	la.mu.RLock()
+	stream := la.streams[stepRunID]
+	la.mu.RUnlock()
+	if stream == nil {
+		return nil
+	}
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
+	return la.flushStream(ctx, stream)
+}
+
+// Flush 等待当前所有步骤的日志持久化，可在失败后安全重试
+func (la *LogAggregator) Flush(ctx context.Context) error {
+	la.mu.RLock()
+	streams := make([]*LogStream, 0, len(la.streams))
+	for _, stream := range la.streams {
+		streams = append(streams, stream)
+	}
+	la.mu.RUnlock()
+	var errs []error
+	for _, stream := range streams {
+		stream.mu.Lock()
+		err := la.flushStream(ctx, stream)
+		stream.mu.Unlock()
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (la *LogAggregator) periodicFlush() {
 	ticker := time.NewTicker(la.flushInterval)
 	defer ticker.Stop()
-
-	for range ticker.C {
-		la.mu.RLock()
-		stream, exists := la.streams[stepRunID]
-		la.mu.RUnlock()
-
-		if !exists {
+	for {
+		select {
+		case <-la.done:
 			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := la.Flush(ctx)
+			cancel()
+			if err != nil {
+				log.Errorw("failed to persist buffered logs; retaining for retry", "error", err)
+			}
+			la.releaseIdleStreams(time.Now().Add(-5 * time.Minute))
 		}
+	}
+}
 
+// releaseIdleStreams 仅释放已落库的闲置流，后续日志从数据库恢复行号
+func (la *LogAggregator) releaseIdleStreams(before time.Time) {
+	la.mu.Lock()
+	defer la.mu.Unlock()
+	for stepRunID, stream := range la.streams {
 		stream.mu.Lock()
-		if stream.closed {
-			stream.mu.Unlock()
-			return
-		}
-
-		if time.Since(stream.lastFlush) >= la.flushInterval {
-			la.flushStream(stream)
+		if len(stream.buffer) == 0 && stream.lastActivity.Before(before) {
+			stream.closed = true
+			delete(la.streams, stepRunID)
 		}
 		stream.mu.Unlock()
 	}
 }
 
-// CloseStream 关闭日志流
+// CloseStream 关闭前同步持久化，写入失败时保留可重试的流
 func (la *LogAggregator) CloseStream(stepRunID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	la.mu.Lock()
-	stream, exists := la.streams[stepRunID]
-	if !exists {
-		la.mu.Unlock()
-		return fmt.Errorf("log stream for step run %s not found", stepRunID)
-	}
-	delete(la.streams, stepRunID)
-	la.mu.Unlock()
-
-	stream.mu.Lock()
-	defer stream.mu.Unlock()
-
-	if !stream.closed {
-		stream.closed = true
-		// 刷新剩余日志
-		la.flushStream(stream)
+	defer la.mu.Unlock()
+	stream := la.streams[stepRunID]
+	if stream == nil {
 		return nil
 	}
-
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
+	if err := la.flushStream(ctx, stream); err != nil {
+		return err
+	}
+	stream.closed = true
+	delete(la.streams, stepRunID)
 	return nil
 }
 
-// GetLogsByStepRunID 从 MySQL 获取步骤执行日志
-func (la *LogAggregator) GetLogsByStepRunID(stepRunID string, fromLine int32, limit int) ([]*LogEntry, error) {
-	if la.mysql == nil {
-		return nil, fmt.Errorf("mysql client is nil")
-	}
-
-	sqlDB, err := la.mysql.DB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get SQL DB from GORM: %w", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// 构建查询 SQL
-	querySQL := fmt.Sprintf(`
-		SELECT step_run_id, timestamp, line_number, level, content, stream, plugin_name, agent_id
-		FROM %s
-		WHERE step_run_id = ?
-	`, la.tableName)
-
-	args := []interface{}{stepRunID}
-	if fromLine > 0 {
-		querySQL += " AND line_number >= ?"
-		args = append(args, fromLine)
-	}
-
-	querySQL += " ORDER BY line_number ASC"
-
-	if limit > 0 {
-		querySQL += " LIMIT ?"
-		args = append(args, limit)
-	}
-
-	rows, err := sqlDB.QueryContext(ctx, querySQL, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query logs from mysql: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var logs []*LogEntry
-	for rows.Next() {
-		var entry LogEntry
-		if err := rows.Scan(
-			&entry.StepRunID,
-			&entry.Timestamp,
-			&entry.LineNumber,
-			&entry.Level,
-			&entry.Content,
-			&entry.Stream,
-			&entry.PluginName,
-			&entry.AgentID,
-		); err != nil {
-			log.Warnw("failed to scan log entry", "error", err)
-			continue
+// Close 停止后台刷新和订阅，并同步刷新日志；失败后可再次调用
+func (la *LogAggregator) Close(ctx context.Context) error {
+	la.mu.Lock()
+	la.closed = true
+	la.stopOnce.Do(func() { close(la.done) })
+	for stepRunID, subscribers := range la.subscribers {
+		for _, subscriber := range subscribers {
+			close(subscriber)
 		}
-		logs = append(logs, &entry)
+		delete(la.subscribers, stepRunID)
 	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows error: %w", err)
-	}
-
-	return logs, nil
+	la.mu.Unlock()
+	return la.Flush(ctx)
 }
 
-// Subscribe 订阅步骤执行日志（创建一个channel接收实时日志）
+// GetLogsByStepRunID 获取步骤的持久化和缓冲日志
+func (la *LogAggregator) GetLogsByStepRunID(stepRunID string, fromLine int32, limit int) ([]*LogEntry, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return la.GetLogsByStepRunIDContext(ctx, stepRunID, fromLine, limit)
+}
+
+// GetLogsByStepRunIDContext 使用调用方上下文读取步骤日志
+func (la *LogAggregator) GetLogsByStepRunIDContext(ctx context.Context, stepRunID string, fromLine int32, limit int) ([]*LogEntry, error) {
+	return la.getLogs(ctx, []string{stepRunID}, fromLine, limit, true)
+}
+
+// GetLogsForStepRunIDs 合并限定步骤的历史和缓冲日志，按时间、步骤、行号稳定排序
+func (la *LogAggregator) GetLogsForStepRunIDs(ctx context.Context, stepRunIDs []string, fromLine int32, limit int) ([]*LogEntry, error) {
+	return la.getLogs(ctx, stepRunIDs, fromLine, limit, false)
+}
+
+func (la *LogAggregator) getLogs(ctx context.Context, stepRunIDs []string, fromLine int32, limit int, byLine bool) ([]*LogEntry, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+	entries := make([]*LogEntry, 0)
+	ids := make([]string, 0, len(stepRunIDs))
+	seenSteps := make(map[string]bool, len(stepRunIDs))
+	streams := make([]*LogStream, 0, len(stepRunIDs))
+	la.mu.RLock()
+	for _, stepRunID := range stepRunIDs {
+		if stepRunID == "" || seenSteps[stepRunID] {
+			continue
+		}
+		seenSteps[stepRunID] = true
+		ids = append(ids, stepRunID)
+		if stream := la.streams[stepRunID]; stream != nil {
+			streams = append(streams, stream)
+		}
+	}
+	la.mu.RUnlock()
+	if len(ids) == 0 {
+		return entries, nil
+	}
+	// 先复制缓冲再查询数据库，避免恰好刷新时漏掉日志
+	for _, stream := range streams {
+		stream.mu.Lock()
+		for _, entry := range stream.buffer {
+			if entry.LineNumber >= fromLine {
+				copyEntry := *entry
+				entries = append(entries, &copyEntry)
+			}
+		}
+		stream.mu.Unlock()
+	}
+	if la.repository == nil {
+		return nil, errors.New("log repository is not configured")
+	}
+	var persisted []*model.StepRunLog
+	var err error
+	if byLine {
+		persisted, err = la.repository.ListByStepRunID(ctx, ids[0], fromLine, limit)
+	} else {
+		persisted, err = la.repository.ListByStepRunIDs(ctx, ids, fromLine, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	seenLogs := make(map[string]int, len(entries))
+	for index, entry := range entries {
+		seenLogs[entry.LogID] = index
+	}
+	for _, entry := range persisted {
+		logEntry := &LogEntry{
+			LogID: entry.LogID, StepRunID: entry.StepRunID, Timestamp: entry.Timestamp,
+			LineNumber: entry.LineNumber, Level: entry.Level, Content: entry.Content,
+			Stream: entry.Stream, PluginName: entry.PluginName, AgentID: entry.AgentID,
+		}
+		if index, exists := seenLogs[entry.LogID]; entry.LogID != "" && exists {
+			entries[index] = logEntry
+			continue
+		}
+		if entry.LogID != "" {
+			seenLogs[entry.LogID] = len(entries)
+		}
+		entries = append(entries, logEntry)
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		left, right := entries[i], entries[j]
+		if byLine && left.LineNumber != right.LineNumber {
+			return left.LineNumber < right.LineNumber
+		}
+		if left.Timestamp != right.Timestamp {
+			return left.Timestamp < right.Timestamp
+		}
+		if left.StepRunID != right.StepRunID {
+			return left.StepRunID < right.StepRunID
+		}
+		if left.LineNumber != right.LineNumber {
+			return left.LineNumber < right.LineNumber
+		}
+		return left.LogID < right.LogID
+	})
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+	return entries, nil
+}
+
+// Subscribe 订阅实时日志，慢订阅者可以通过历史接口补取
 func (la *LogAggregator) Subscribe(ctx context.Context, stepRunID string) <-chan *LogEntry {
 	logChan := make(chan *LogEntry, 100)
-
 	la.mu.Lock()
+	if la.closed {
+		close(logChan)
+		la.mu.Unlock()
+		return logChan
+	}
 	la.subscribers[stepRunID] = append(la.subscribers[stepRunID], logChan)
 	la.mu.Unlock()
-
-	// 清理订阅
 	safe.Go(func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-la.done:
+		}
 		la.unsubscribe(stepRunID, logChan)
 	})
-
 	return logChan
 }
 
-// unsubscribe 取消订阅
 func (la *LogAggregator) unsubscribe(stepRunID string, logChan chan *LogEntry) {
 	la.mu.Lock()
 	defer la.mu.Unlock()
-
 	subs := la.subscribers[stepRunID]
 	for i, ch := range subs {
 		if ch == logChan {
-			// 从切片中移除
 			la.subscribers[stepRunID] = append(subs[:i], subs[i+1:]...)
 			close(logChan)
 			break
 		}
 	}
-
-	// 如果没有订阅者了，删除key
 	if len(la.subscribers[stepRunID]) == 0 {
 		delete(la.subscribers, stepRunID)
 	}
 }
 
-// broadcastToSubscribers 广播日志到所有订阅者
 func (la *LogAggregator) broadcastToSubscribers(stepRunID string, entry *LogEntry) {
+	// 发送期间保持读锁，取消订阅只能在发送完成后关闭 channel
 	la.mu.RLock()
-	subscribers := la.subscribers[stepRunID]
-	la.mu.RUnlock()
-
-	if len(subscribers) == 0 {
-		return
-	}
-
-	// 异步发送到所有订阅者
-	for _, ch := range subscribers {
+	defer la.mu.RUnlock()
+	for _, ch := range la.subscribers[stepRunID] {
+		copyEntry := *entry
 		select {
-		case ch <- entry:
-			// 发送成功
+		case ch <- &copyEntry:
 		default:
-			// channel满了，跳过（避免阻塞）
-			log.Warnw("subscriber channel full for step run, skipping log entry", "stepRunId", stepRunID)
 		}
 	}
 }
 
-// GetStats 获取统计信息
+// GetStats 返回聚合器缓冲统计
 func (la *LogAggregator) GetStats() map[string]interface{} {
 	la.mu.RLock()
 	defer la.mu.RUnlock()
-
-	stats := map[string]interface{}{
-		"active_streams": len(la.streams),
-		"streams":        make(map[string]interface{}),
-	}
-
+	streams := make(map[string]interface{}, len(la.streams))
 	for stepRunID, stream := range la.streams {
 		stream.mu.Lock()
-		stats["streams"].(map[string]interface{})[stepRunID] = map[string]interface{}{
-			"buffer_size": len(stream.buffer),
-			"line_count":  stream.lineCount,
-			"closed":      stream.closed,
-		}
+		streams[stepRunID] = map[string]interface{}{"buffer_size": len(stream.buffer), "line_count": stream.lineCount, "closed": stream.closed}
 		stream.mu.Unlock()
 	}
-
-	return stats
+	return map[string]interface{}{"active_streams": len(la.streams), "streams": streams}
 }

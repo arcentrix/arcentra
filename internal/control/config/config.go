@@ -28,6 +28,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/logstream"
 	"github.com/arcentrix/arcentra/pkg/metrics"
 	"github.com/arcentrix/arcentra/pkg/pprof"
 	"github.com/arcentrix/arcentra/pkg/trace"
@@ -62,19 +63,20 @@ type AuthzConfig struct {
 }
 
 type AppConfig struct {
-	Log          log.Conf             `mapstructure:"log" json:"Log"`
-	Grpc         grpc.Conf            `mapstructure:"grpc" json:"Grpc"`
-	HTTP         http.HTTP            `mapstructure:"http" json:"Http"`
-	Database     database.Database    `mapstructure:"database" json:"Database"`
-	Redis        cache.Redis          `mapstructure:"redis" json:"Redis"`
-	Events       EventsConfig         `mapstructure:"events" json:"Events"`
-	MessageQueue MessageQueueConfig   `mapstructure:"messageQueue" json:"MessageQueue"`
-	Metrics      metrics.Config       `mapstructure:"metrics" json:"Metrics"`
-	Pprof        pprof.Config         `mapstructure:"pprof" json:"Pprof"`
-	Trace        trace.Config         `mapstructure:"trace" json:"Trace"`
-	Authz        AuthzConfig          `mapstructure:"authz" json:"Authz"`
-	TaskQueue    nova.TaskQueueConfig `mapstructure:"taskQueue" json:"TaskQueue"`
-	Pipeline     PipelineConfig       `mapstructure:"pipeline" json:"Pipeline"`
+	LogSpool     logstream.SpoolConfig `mapstructure:"logSpool" json:"logSpool"`
+	Log          log.Conf              `mapstructure:"log" json:"Log"`
+	Grpc         grpc.Conf             `mapstructure:"grpc" json:"Grpc"`
+	HTTP         http.HTTP             `mapstructure:"http" json:"Http"`
+	Database     database.Database     `mapstructure:"database" json:"Database"`
+	Redis        cache.Redis           `mapstructure:"redis" json:"Redis"`
+	Events       EventsConfig          `mapstructure:"events" json:"Events"`
+	MessageQueue MessageQueueConfig    `mapstructure:"messageQueue" json:"MessageQueue"`
+	Metrics      metrics.Config        `mapstructure:"metrics" json:"Metrics"`
+	Pprof        pprof.Config          `mapstructure:"pprof" json:"Pprof"`
+	Trace        trace.Config          `mapstructure:"trace" json:"Trace"`
+	Authz        AuthzConfig           `mapstructure:"authz" json:"Authz"`
+	TaskQueue    nova.TaskQueueConfig  `mapstructure:"taskQueue" json:"TaskQueue"`
+	Pipeline     PipelineConfig        `mapstructure:"pipeline" json:"Pipeline"`
 }
 
 // PipelineConfig holds pipeline process settings.

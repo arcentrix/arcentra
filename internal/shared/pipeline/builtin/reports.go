@@ -18,62 +18,45 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/bytedance/sonic"
 )
 
-// ReportsDotenvArgs contains arguments for dotenv reports
+// ReportsDotenvArgs 定义 dotenv 报告文件参数
 type ReportsDotenvArgs struct {
-	Dotenv []string `json:"dotenv"` // List of dotenv file paths
+	Dotenv []string `json:"dotenv"` // 相对于作业工作目录的 dotenv 文件路径
 }
 
-// handleReportsDotenv handles dotenv report generation
-func (m *Manager) handleReportsDotenv(_ context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
-	var dotenvParams ReportsDotenvArgs
-	if err := sonic.Unmarshal(params, &dotenvParams); err != nil {
+// handleReportsDotenv 将 dotenv 报告保存到当前运行和作业的独立目录
+func (m *Manager) handleReportsDotenv(ctx context.Context, params json.RawMessage, opts *Options) (json.RawMessage, error) {
+	var args ReportsDotenvArgs
+	if err := sonic.Unmarshal(params, &args); err != nil {
 		return nil, fmt.Errorf("failed to parse dotenv params: %w", err)
 	}
-
-	if len(dotenvParams.Dotenv) == 0 {
+	if len(args.Dotenv) == 0 {
 		return nil, fmt.Errorf("dotenv files are required")
 	}
 
-	// 获取reports目录
-	if opts == nil || opts.ExecutionContext == nil {
-		return nil, fmt.Errorf("execution context is required")
+	workspace, reports, reportsDir, err := openTransferRoots(ctx, opts, "reports", "", true)
+	if err != nil {
+		return nil, err
 	}
+	defer func() { _ = workspace.Close() }()
+	defer func() { _ = reports.Close() }()
 
-	execCtx := opts.ExecutionContext
-
-	workspaceRoot := execCtx.GetWorkspaceRoot()
-	pipelineName := execCtx.GetPipeline().Namespace
-	buildID := "latest" // TODO: Get build ID from context if available
-
-	reportsDir := filepath.Join(workspaceRoot, pipelineName, buildID, "reports")
-	if err := os.MkdirAll(reportsDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create reports directory: %w", err)
+	paths, err := expandTransferPaths(ctx, workspace, args.Dotenv)
+	if err != nil {
+		return nil, err
 	}
-
-	// 复制dotenv文件到reports目录
-	reportedFiles := make([]string, 0)
-	for _, dotenvPath := range dotenvParams.Dotenv {
-		srcPath := filepath.Join(opts.Workspace, dotenvPath)
-		dstPath := filepath.Join(reportsDir, filepath.Base(dotenvPath))
-
-		if err := m.copyFile(srcPath, dstPath); err != nil {
-			return nil, fmt.Errorf("copy dotenv file %s: %w", dotenvPath, err)
+	for _, name := range paths {
+		if err := copyRootFile(ctx, workspace, reports, name); err != nil {
+			return nil, fmt.Errorf("copy dotenv file %s: %w", name, err)
 		}
-
-		reportedFiles = append(reportedFiles, dotenvPath)
 	}
 
-	result := map[string]any{
+	return sonic.Marshal(map[string]any{
 		"success":        true,
-		"reported_files": reportedFiles,
+		"reported_files": paths,
 		"reports_dir":    reportsDir,
-	}
-
-	return sonic.Marshal(result)
+	})
 }

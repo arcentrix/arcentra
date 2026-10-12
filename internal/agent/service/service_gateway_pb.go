@@ -22,6 +22,7 @@ import (
 	grpcclient "github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/pkg/outbox"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -71,39 +72,7 @@ func (s *GatewayServiceImpl) send(
 	events []outbox.Event,
 	client gatewayv1.GatewayServiceClient,
 ) (outbox.SendResult, error) {
-	if len(events) == 0 {
-		return outbox.SendResult{}, nil
-	}
-	if client == nil {
-		return outbox.SendResult{}, fmt.Errorf("gateway client not ready")
-	}
-	stream, err := client.PushEvents(ctx)
-	if err != nil {
-		return outbox.SendResult{}, fmt.Errorf("push events stream: %w", err)
-	}
-	handshake := &gatewayv1.PushEventsRequest{
-		Payload: &gatewayv1.PushEventsRequest_Handshake{
-			Handshake: &gatewayv1.AgentHandshake{
-				AgentId:      s.agentID,
-				LastKnownSeq: lastKnownSeq,
-			},
-		},
-	}
-	if sendErr := stream.Send(handshake); sendErr != nil {
-		return outbox.SendResult{}, fmt.Errorf("send handshake: %w", sendErr)
-	}
-	batch := buildEventBatch(events, s.agentID, s.pipelineID)
-	req := &gatewayv1.PushEventsRequest{
-		Payload: &gatewayv1.PushEventsRequest_Batch{Batch: batch},
-	}
-	if sendErr := stream.Send(req); sendErr != nil {
-		return outbox.SendResult{}, fmt.Errorf("send batch: %w", sendErr)
-	}
-	resp, err := stream.CloseAndRecv()
-	if err != nil {
-		return outbox.SendResult{}, fmt.Errorf("close and recv: %w", err)
-	}
-	return parsePushEventsResponse(resp)
+	return sendGatewayEvents(ctx, client, s.agentID, s.pipelineID, lastKnownSeq, events)
 }
 
 // Send implements outbox.Sender; obtains conn from wrapper at call time.
@@ -116,7 +85,9 @@ func (s *GatewaySenderFromWrapper) Send(ctx context.Context, lastKnownSeq uint64
 		return outbox.SendResult{}, fmt.Errorf("grpc not connected")
 	}
 	client := gatewayv1.NewGatewayServiceClient(conn)
-	return s.sendWithClient(ctx, lastKnownSeq, events, client)
+	authCtx, cancel := s.wrapper.WithTimeoutAndAuth(ctx)
+	defer cancel()
+	return s.sendWithClient(authCtx, lastKnownSeq, events, client)
 }
 
 func (s *GatewaySenderFromWrapper) sendWithClient(
@@ -125,75 +96,114 @@ func (s *GatewaySenderFromWrapper) sendWithClient(
 	events []outbox.Event,
 	client gatewayv1.GatewayServiceClient,
 ) (outbox.SendResult, error) {
+	return sendGatewayEvents(ctx, client, s.agentID, s.pipelineID, lastKnownSeq, events)
+}
+
+func sendGatewayEvents(ctx context.Context, client gatewayv1.GatewayServiceClient, agentID, pipelineID string, lastKnownSeq uint64, events []outbox.Event) (outbox.SendResult, error) {
 	if len(events) == 0 {
-		return outbox.SendResult{}, nil
+		return outbox.SendResult{LastSeq: lastKnownSeq}, nil
 	}
-	stream, err := client.PushEvents(ctx)
+	if client == nil {
+		return outbox.SendResult{}, fmt.Errorf("gateway client not ready")
+	}
+	batches, err := buildEventBatches(events, agentID, pipelineID)
+	if err != nil {
+		return outbox.SendResult{}, err
+	}
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := client.PushEvents(streamCtx)
 	if err != nil {
 		return outbox.SendResult{}, fmt.Errorf("push events stream: %w", err)
 	}
-	handshake := &gatewayv1.PushEventsRequest{
-		Payload: &gatewayv1.PushEventsRequest_Handshake{
-			Handshake: &gatewayv1.AgentHandshake{
-				AgentId:      s.agentID,
-				LastKnownSeq: lastKnownSeq,
-			},
-		},
+	handshake := &gatewayv1.PushEventsRequest{Payload: &gatewayv1.PushEventsRequest_Handshake{
+		Handshake: &gatewayv1.AgentHandshake{AgentId: agentID, LastKnownSeq: lastKnownSeq},
+	}}
+	if err := stream.Send(handshake); err != nil {
+		return outbox.SendResult{}, fmt.Errorf("send handshake: %w", err)
 	}
-	if sendErr := stream.Send(handshake); sendErr != nil {
-		return outbox.SendResult{}, fmt.Errorf("send handshake: %w", sendErr)
+	for _, batch := range batches {
+		if err := stream.Send(batch); err != nil {
+			return outbox.SendResult{}, fmt.Errorf("send event batch: %w", err)
+		}
 	}
-	batch := buildEventBatch(events, s.agentID, s.pipelineID)
-	req := &gatewayv1.PushEventsRequest{
-		Payload: &gatewayv1.PushEventsRequest_Batch{Batch: batch},
-	}
-	if sendErr := stream.Send(req); sendErr != nil {
-		return outbox.SendResult{}, fmt.Errorf("send batch: %w", sendErr)
-	}
-	resp, err := stream.CloseAndRecv()
+	response, err := stream.CloseAndRecv()
 	if err != nil {
 		return outbox.SendResult{}, fmt.Errorf("close and recv: %w", err)
 	}
-	return parsePushEventsResponse(resp)
+	result, err := parsePushEventsResponse(response)
+	if err != nil {
+		return outbox.SendResult{}, err
+	}
+	if result.LastSeq < lastKnownSeq {
+		return outbox.SendResult{}, fmt.Errorf("gateway checkpoint regressed")
+	}
+	// A global server cursor may include other streams. Never discard local records
+	// that were not sent and checked for conflicts in this stream.
+	if lastSent := events[len(events)-1].Seq; result.LastSeq > lastSent {
+		result.LastSeq = lastSent
+	}
+	return result, nil
 }
 
-func buildEventBatch(events []outbox.Event, agentID, pipelineID string) *gatewayv1.EventBatch {
-	if len(events) == 0 {
-		return nil
-	}
-	batch := &gatewayv1.EventBatch{
-		BatchId: fmt.Sprintf("batch-%d", events[0].Seq),
-		Events:  make([]*gatewayv1.Event, 0, len(events)),
-	}
-	for _, e := range events {
-		payload, _ := structpb.NewStruct(e.Payload)
-		if payload == nil {
-			payload, _ = structpb.NewStruct(map[string]any{})
+func buildEventBatches(events []outbox.Event, agentID, pipelineID string) ([]*gatewayv1.PushEventsRequest, error) {
+	batches := make([]*gatewayv1.PushEventsRequest, 0)
+	var batch *gatewayv1.EventBatch
+	var request *gatewayv1.PushEventsRequest
+	for _, event := range events {
+		if err := outbox.ValidateEventPayload(event.Payload); err != nil {
+			return nil, fmt.Errorf("event %d: %w", event.Seq, err)
 		}
-		batch.Events = append(batch.Events, &gatewayv1.Event{
-			EventId:   e.EventID,
-			EventType: e.EventType,
-			Payload:   payload,
-			Meta: &gatewayv1.Meta{
-				AgentId:    agentID,
-				PipelineId: pipelineID,
-				StepId:     e.StepID,
-				Timestamp:  timestamppb.Now(),
-				Seq:        e.Seq,
-			},
-		})
+		payload, err := structpb.NewStruct(event.Payload)
+		if err != nil {
+			return nil, fmt.Errorf("event %d payload: %w", event.Seq, err)
+		}
+		value := &gatewayv1.Event{EventId: event.EventID, EventType: event.EventType, Payload: payload,
+			Meta: &gatewayv1.Meta{AgentId: agentID, PipelineId: eventPipelineID(event.Payload, pipelineID),
+				StepId: event.StepID, Timestamp: timestamppb.Now(), Seq: event.Seq},
+		}
+		if batch == nil {
+			batch = &gatewayv1.EventBatch{BatchId: fmt.Sprintf("batch-%d", event.Seq)}
+			request = &gatewayv1.PushEventsRequest{Payload: &gatewayv1.PushEventsRequest_Batch{Batch: batch}}
+		}
+		batch.Events = append(batch.Events, value)
+		if len(batch.Events) > outbox.MaxGatewayBatchEvents || proto.Size(request) > outbox.MaxGatewayMessageBytes {
+			batch.Events = batch.Events[:len(batch.Events)-1]
+			if len(batch.Events) == 0 {
+				return nil, fmt.Errorf("event %d: %w", event.Seq, outbox.ErrEventPayloadTooLarge)
+			}
+			batches = append(batches, request)
+			batch = &gatewayv1.EventBatch{BatchId: fmt.Sprintf("batch-%d", event.Seq), Events: []*gatewayv1.Event{value}}
+			request = &gatewayv1.PushEventsRequest{Payload: &gatewayv1.PushEventsRequest_Batch{Batch: batch}}
+			if proto.Size(request) > outbox.MaxGatewayMessageBytes {
+				return nil, fmt.Errorf("event %d: %w", event.Seq, outbox.ErrEventPayloadTooLarge)
+			}
+		}
 	}
-	return batch
+	if batch != nil {
+		batches = append(batches, request)
+	}
+	return batches, nil
 }
 
 func parsePushEventsResponse(resp *gatewayv1.PushEventsResponse) (outbox.SendResult, error) {
 	if resp == nil || resp.Ack == nil {
-		return outbox.SendResult{}, nil
+		return outbox.SendResult{}, fmt.Errorf("gateway response is missing an acknowledgment")
 	}
 	ack := resp.Ack
+	if ack.Status != gatewayv1.IngestAck_STATUS_ACCEPTED && ack.Status != gatewayv1.IngestAck_STATUS_PARTIAL_ACCEPTED {
+		return outbox.SendResult{}, fmt.Errorf("gateway rejected events: %s", ack.Status.String())
+	}
 	return outbox.SendResult{
 		LastSeq:     ack.LastAcceptedSeq,
 		ExpectedSeq: ack.ExpectedSeq,
 		RejectedSeq: append([]uint64(nil), ack.RejectedSeqs...),
 	}, nil
+}
+
+func eventPipelineID(payload map[string]any, fallback string) string {
+	if value, ok := payload["pipelineId"].(string); ok && value != "" {
+		return value
+	}
+	return fallback
 }

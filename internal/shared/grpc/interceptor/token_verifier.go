@@ -166,8 +166,8 @@ func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string,
 		}
 
 		// Verify agent exists
-		_, err = v.agentRepo.Get(ctx, agentID)
-		if err != nil {
+		agent, lookupErr := v.agentRepo.Get(ctx, agentID)
+		if lookupErr != nil || agent == nil || agent.IsEnabled != 1 {
 			log.Debugw("agent not found", "agentId", agentID, "error", err)
 			return "", fmt.Errorf("agent not found: %s", agentID)
 		}
@@ -179,7 +179,7 @@ func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string,
 		}
 
 		// Compare tokens
-		if token != expectedToken {
+		if !hmac.Equal([]byte(token), []byte(expectedToken)) {
 			return "", fmt.Errorf("invalid token signature")
 		}
 
@@ -193,10 +193,10 @@ func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string,
 		if err == nil {
 			// Extract signature from expected token (new format) for comparison
 			_, expectedSignature, _ := v.parseToken(expectedToken)
-			if token == expectedSignature {
+			if hmac.Equal([]byte(token), []byte(expectedSignature)) {
 				// Verify agent exists
-				_, err := v.agentRepo.Get(ctx, agentIDHint)
-				if err == nil {
+				agent, err := v.agentRepo.Get(ctx, agentIDHint)
+				if err == nil && agent != nil && agent.IsEnabled == 1 {
 					return agentIDHint, nil
 				}
 			}
@@ -212,6 +212,9 @@ func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string,
 
 	// Try to find matching agent by verifying token signature
 	for _, agent := range agents {
+		if agent.IsEnabled != 1 {
+			continue
+		}
 		// Skip if we already checked this agent
 		if agentIDHint != "" && agent.AgentID == agentIDHint {
 			continue
@@ -225,7 +228,7 @@ func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string,
 
 		// Extract signature from expected token (new format) for comparison
 		_, expectedSignature, _ := v.parseToken(expectedToken)
-		if token == expectedSignature {
+		if hmac.Equal([]byte(token), []byte(expectedSignature)) {
 			return agent.AgentID, nil
 		}
 	}

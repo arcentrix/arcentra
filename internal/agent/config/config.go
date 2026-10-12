@@ -23,6 +23,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/logstream"
 	"github.com/arcentrix/arcentra/pkg/metrics"
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/nova"
@@ -33,16 +34,17 @@ import (
 
 // AgentConfig holds all configuration settings
 type AgentConfig struct {
-	Grpc         GrpcConfig           `mapstructure:"grpc"`
-	Agent        AgentInfo            `mapstructure:"agent"`
-	Log          log.Conf             `mapstructure:"log"`
-	HTTP         http.HTTP            `mapstructure:"http"`
-	Redis        cache.Redis          `mapstructure:"redis"`
-	TaskQueue    nova.TaskQueueConfig `mapstructure:"taskQueue"`
-	MessageQueue MqConfig             `mapstructure:"messageQueue"`
-	Outbox       OutboxConfig         `mapstructure:"outbox"`
-	Metrics      metrics.Config       `mapstructure:"metrics"`
-	Pprof        pprof.Config         `mapstructure:"pprof"`
+	LogSpool     logstream.SpoolConfig `mapstructure:"logSpool" json:"logSpool"`
+	Grpc         GrpcConfig            `mapstructure:"grpc"`
+	Agent        AgentInfo             `mapstructure:"agent"`
+	Log          log.Conf              `mapstructure:"log"`
+	HTTP         http.HTTP             `mapstructure:"http"`
+	Redis        cache.Redis           `mapstructure:"redis"`
+	TaskQueue    nova.TaskQueueConfig  `mapstructure:"taskQueue"`
+	MessageQueue MqConfig              `mapstructure:"messageQueue"`
+	Outbox       OutboxConfig          `mapstructure:"outbox"`
+	Metrics      metrics.Config        `mapstructure:"metrics"`
+	Pprof        pprof.Config          `mapstructure:"pprof"`
 }
 
 // OutboxConfig holds agent-side outbox (WAL) settings for reliable event sending.

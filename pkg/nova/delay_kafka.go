@@ -68,6 +68,7 @@ func NewDelayTopicManager(
 	ctx, cancel := context.WithCancel(context.Background())
 
 	dm := &DelayTopicManager{
+		eg:           &errgroup.Group{},
 		producer:     producer,
 		consumer:     consumer,
 		targetTopic:  targetTopic,
@@ -198,7 +199,7 @@ func (dm *DelayTopicManager) consumeDelayMessages(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
 		default:
 			msg, err := dm.consumer.ReadMessage(100 * time.Millisecond)
 			if err != nil {
@@ -259,7 +260,7 @@ func (dm *DelayTopicManager) sendToTargetTopic(task *Task, queue string, priorit
 		"priority":  strconv.Itoa(int(priority)),
 		"task_type": task.Type,
 	}
-	if err = dm.producer.Producer(dm.ctx, dm.targetTopic, taskMsg.TaskID, msgData, headers); err != nil {
+	if err = dm.producer.Producer(dm.ctx, queue, taskMsg.TaskID, msgData, headers); err != nil {
 		return fmt.Errorf("failed to produce task message: %w", err)
 	}
 

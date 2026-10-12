@@ -151,13 +151,17 @@ func NewExecutorManagerWithDefaultsAndEvents(
 	appConf *config.AppConfig,
 ) *Manager {
 	manager := NewExecutorManagerWithDefaults(pluginManager, remoteExecutor, logger)
+	if appConf == nil {
+		return manager
+	}
 	publisher := NewEventPublisherFromConfig(appConf)
 	if publisher != nil {
 		manager.SetEventPublisher(publisher, BuildEventEmitterConfig(appConf))
 	}
-	logPublisher, err := NewKafkaLogPublisher(convertKafkaConfig(appConf.MessageQueue.Kafka), "arcentra-agent")
+	logPublisher, err := NewReliableKafkaLogPublisher(convertKafkaConfig(appConf.MessageQueue.Kafka), "arcentra-executor", appConf.LogSpool, "./data/build-log-spool/executor")
 	if err != nil {
-		log.Warnw("failed to create kafka log publisher", "error", err)
+		log.Warnw("failed to create durable log publisher", "error", err)
+		manager.SetLogPublisher(&UnavailableLogPublisher{Cause: err})
 	} else if logPublisher != nil {
 		manager.SetLogPublisher(logPublisher)
 	}

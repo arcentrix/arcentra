@@ -31,9 +31,9 @@ type Project struct {
 	RepoType      string         `gorm:"column:repo_type" json:"repoType"`                 // 仓库类型(git/svn/gitlab/github/gitee)
 	DefaultBranch string         `gorm:"column:default_branch" json:"defaultBranch"`       // 默认分支
 	AuthType      int            `gorm:"column:auth_type" json:"authType"`                 // 认证类型: 0-无, 1-用户名密码, 2-Token, 3-SSH密钥
-	Credential    string         `gorm:"column:credential" json:"credential"`              // 认证凭证(加密存储)
+	Credential    string         `gorm:"column:credential" json:"-"`                       // 认证凭证(加密存储)
 	TriggerMode   int            `gorm:"column:trigger_mode" json:"triggerMode"`           // 触发模式: 1-手动, 2-Webhook, 4-定时, 8-Push触发(可组合)
-	WebhookSecret string         `gorm:"column:webhook_secret" json:"webhookSecret"`       // Webhook密钥
+	WebhookSecret string         `gorm:"column:webhook_secret" json:"-"`                   // Webhook密钥
 	CronExpr      string         `gorm:"column:cron_expr" json:"cronExpr"`                 // 定时任务Cron表达式
 	BuildConfig   datatypes.JSON `gorm:"column:build_config;type:json" json:"buildConfig"` // 构建配置
 	EnvVars       datatypes.JSON `gorm:"column:env_vars;type:json" json:"envVars"`         // 环境变量
@@ -140,7 +140,7 @@ type ProjectWebhook struct {
 	ProjectID   string         `gorm:"column:project_id" json:"projectId"`    // 项目ID
 	Name        string         `gorm:"column:name" json:"name"`               // Webhook名称
 	URL         string         `gorm:"column:url" json:"url"`                 // Webhook URL
-	Secret      string         `gorm:"column:secret" json:"secret"`           // 密钥
+	Secret      string         `gorm:"column:secret" json:"-"`                // 密钥
 	Events      datatypes.JSON `gorm:"column:events;type:json" json:"events"` // 触发事件列表
 	IsEnabled   int            `gorm:"column:is_enabled" json:"isEnabled"`    // 是否启用
 	Description string         `gorm:"column:description" json:"description"` // 描述
