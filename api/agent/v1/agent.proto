@@ -181,6 +181,8 @@ message StorageConfig {
   string secret_key = 6;                  // Secret key
   string base_path = 7;                   // Object key prefix inside the bucket
   bool use_ssl = 8;                       // Whether to use TLS
+  string storage_id = 9;                  // Stable control-plane storage identity
+  string storage_fingerprint = 10;        // Credential-free location fingerprint
 }
 
 // Agent unregistration request
@@ -310,7 +312,21 @@ message ReportJobRunStatusRequest {
   string error_message = 4;               // Error message
   int64 start_time = 5;                   // Start time (Unix timestamp in seconds)
   int64 end_time = 6;                     // End time (Unix timestamp in seconds)
-  map<string, string> artifact_uris = 7;  // Artifact URIs produced by the job
+  map<string, string> artifact_uris = 7;  // Legacy relative object keys produced by the job
+  string artifact_storage_id = 8;         // Storage identity captured before the job starts
+  string artifact_storage_fingerprint = 9; // Credential-free storage location fingerprint
+  repeated ArtifactResult artifacts = 10; // Complete uploaded file metadata
+}
+
+// ArtifactResult identifies one uploaded immutable artifact; it never contains credentials or URLs.
+message ArtifactResult {
+  string step_run_id = 1;
+  string name = 2;
+  string storage_key = 3;
+  int64 size = 4;
+  string media_type = 5;
+  int64 expires_at = 6;                   // Unix seconds, zero means no expiry
+  string sha256 = 7;                      // Digest of immutable uploaded bytes
 }
 
 // Report job run status response

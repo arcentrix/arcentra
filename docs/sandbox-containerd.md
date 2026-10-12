@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-The standalone `pkg/sandbox` backend now has a repaired containerd lifecycle, strict offline/spec validation and injectable tests. **The Agent still rejects sandbox mode.** Neither the pipeline runtime validator nor Agent execution wiring is enabled by this repair.
+The standalone `pkg/sandbox` backend now has a repaired containerd lifecycle, strict offline/spec validation and injectable tests. **The Agent still rejects sandbox mode.** Neither the pipeline runtime validator nor Agent execution wiring is enabled by this repair. A separate [standalone job-session adapter](sandbox-agent-integration.md) now exercises Agent-facing shell, workspace and cleanup contracts without changing either production gate.
 
 Unit/spec success is not proof of actual isolation. The restricted implementation environment has no usable containerd/runc runtime or containerd socket and no mounted cgroup hierarchy. No runtime installation, privileged host change, or Docker workaround was attempted. Real runtime acceptance remains pending on an authorized host.
 

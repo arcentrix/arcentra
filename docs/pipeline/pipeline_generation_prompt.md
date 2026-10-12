@@ -55,7 +55,7 @@ triggers:                  # [可选] 触发器列表
     - "other-job-name"
   env:                     # [可选] Job 级环境变量
     KEY: "value"
-  concurrency: string      # [可选] 并发控制 key，同 key 的 Job 串行执行
+  # concurrency 暂不支持；禁止生成非空值，生产校验会明确拒绝
   timeout: string          # [可选] 最大运行时间，格式 "30m"、"1h"、"300s"
   when: string             # [可选] 条件表达式，为 true 时才执行
   retry:                   # [可选] 失败重试
@@ -140,6 +140,14 @@ triggers:                  # [可选] 触发器列表
 | `${{ params.xxx }}` | 模板参数（仅在模板 spec 中使用） |
 
 ---
+
+## 当前 Agent 执行限制
+
+当前 Kafka Agent 仅串行执行作业，`maxConcurrentJobs` 只能为 1 或默认值 0。不要生成命名 `concurrency` 锁；非空值会被生产校验拒绝。
+
+任何 Step 指定 `runOnAgent: true` 时，整个 Job 都在 Agent 执行。该 Job 仅允许 `shell` / `builtin:shell`（动作省略或 `run` / `script` / `command`）、`builtin:artifacts`（`upload` / `download`）和显式 `http`（动作省略或 `request`，参数使用无内嵌凭据的绝对 HTTP(S) URL）。Agent 不支持原生插件或版本化插件名称，不能通过添加 `run` / `url` 参数绕过该限制。Shell 参数必须提供非空 `run`、`script`、`command` 或 `commands`。
+
+以下插件表是扩展设计参考，不表示这些插件已经能在 Agent 上运行；本地控制平面插件还需实际安装和注册。
 
 ## 常用插件一览
 

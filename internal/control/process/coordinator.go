@@ -191,10 +191,10 @@ func (rc *Coordinator) Execute(ctx context.Context) error {
 
 	rc.updatePipelineStats(persistCtx, updates["status"].(int))
 
-	// Workspace cleanup: remove the run working directory unless kept for debugging.
+	// 清理工作文件，但保留源制品与报告；托管制品由显式保留策略单独管理。
 	if rc.engine.appConf == nil || !rc.engine.appConf.Pipeline.KeepWorkspace {
 		workspace := rc.resolveWorkspace()
-		if err := os.RemoveAll(workspace); err != nil {
+		if err := cleanupRunWorkspace(workspace, filepath.Join(rc.spec.Namespace, rc.run.RunID, "artifacts"), filepath.Join(rc.spec.Namespace, rc.run.RunID, "reports")); err != nil {
 			log.Warnw("failed to clean up workspace", "runId", rc.run.RunID, "path", workspace, "error", err)
 		}
 	}
@@ -234,6 +234,8 @@ func (rc *Coordinator) executeDAG(ctx context.Context) error {
 	execCtx.CancelJob = rc.engine.cancelJobRunOnAgent
 	execCtx.PipelineRunID = rc.run.RunID
 	execCtx.PipelineIDRef = rc.run.PipelineID
+	execCtx.RecordLocalArtifacts = rc.recordLocalArtifacts
+	execCtx.CheckLocalArtifacts = rc.checkLocalArtifacts
 	execCtx.ArtifactURIs = make(map[string]string)
 
 	pipelineExec := pipeline.NewPipelineExecutorFromContext(execCtx, *rc.engine.logger)

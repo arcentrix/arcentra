@@ -286,7 +286,8 @@ func (app *Agent) waitForRegistrationAndStartHeartbeat() {
 					return
 				}
 				if h := app.AgentService.StorageHolder(); h != nil && h.Get() != nil {
-					taskqueue.SetStorage(h.Get())
+					st, reference := h.Snapshot()
+					taskqueue.SetStorage(st, reference)
 				}
 				if err := app.startWorkers(); err != nil {
 					log.Errorw("agent worker startup failed", "error", err)

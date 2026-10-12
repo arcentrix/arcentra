@@ -31,6 +31,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/plugin"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/expr-lang/expr"
 )
 
@@ -67,8 +68,13 @@ type ExecutionContext struct {
 
 	// ArtifactURIs stores upstream job artifact URIs keyed by "jobName/artifactName".
 	// Populated after each Job completes; downstream jobs read from here.
-	ArtifactURIs map[string]string
-	artifactMu   *sync.RWMutex
+	ArtifactURIs       map[string]string
+	ArtifactReferences map[string]taskqueue.ArtifactReference
+	// RecordLocalArtifacts 在本地上传成功后持久化独立制品及元数据
+	RecordLocalArtifacts func(context.Context, string, string, string, []string, string) error
+	// CheckLocalArtifacts 在作业间复制前校验登记内容与过期状态
+	CheckLocalArtifacts func(context.Context, string, []string) error
+	artifactMu          *sync.RWMutex
 
 	// SelectAgent 根据作业选择可用 Agent
 	SelectAgent func(context.Context, *spec.Job) (string, error)
@@ -99,15 +105,16 @@ func NewExecutionContext(
 	}
 
 	return &ExecutionContext{
-		Pipeline:       p,
-		PluginManager:  pluginMgr,
-		BuiltinManager: builtin.NewManager(logger),
-		WorkspaceRoot:  workspace,
-		EventEmitter:   nil,
-		Logger:         logger,
-		Env:            env,
-		ArtifactURIs:   make(map[string]string),
-		artifactMu:     &sync.RWMutex{},
+		Pipeline:           p,
+		PluginManager:      pluginMgr,
+		BuiltinManager:     builtin.NewManager(logger),
+		WorkspaceRoot:      workspace,
+		EventEmitter:       nil,
+		Logger:             logger,
+		Env:                env,
+		ArtifactURIs:       make(map[string]string),
+		ArtifactReferences: make(map[string]taskqueue.ArtifactReference),
+		artifactMu:         &sync.RWMutex{},
 	}
 }
 
@@ -364,14 +371,35 @@ func (c *ExecutionContext) ArtifactSnapshot() map[string]string {
 }
 
 // RecordArtifact 记录产物供后续作业使用
-func (c *ExecutionContext) RecordArtifact(key, uri string) {
+func (c *ExecutionContext) RecordArtifact(key, uri string, reference ...taskqueue.ArtifactReference) {
 	c.artifactMu.Lock()
 	defer c.artifactMu.Unlock()
 	if c.ArtifactURIs == nil {
 		c.ArtifactURIs = make(map[string]string)
 	}
 	c.ArtifactURIs[key] = uri
+	if len(reference) > 0 {
+		if c.ArtifactReferences == nil {
+			c.ArtifactReferences = make(map[string]taskqueue.ArtifactReference)
+		}
+		c.ArtifactReferences[key] = reference[0]
+	}
 }
 
 // GetPipelineRunID 返回当前流水线执行标识
 func (c *ExecutionContext) GetPipelineRunID() string { return c.PipelineRunID }
+
+// ArtifactReferenceSnapshot 返回制品位置绑定的并发安全快照
+func (c *ExecutionContext) ArtifactReferenceSnapshot() map[string]taskqueue.ArtifactReference {
+	c.artifactMu.RLock()
+	defer c.artifactMu.RUnlock()
+	return maps.Clone(c.ArtifactReferences)
+}
+
+// ValidateLocalArtifactRead 检查本地制品下载的登记及有效期
+func (c *ExecutionContext) ValidateLocalArtifactRead(ctx context.Context, job string, names []string) error {
+	if c.CheckLocalArtifacts == nil {
+		return nil
+	}
+	return c.CheckLocalArtifacts(ctx, job, names)
+}

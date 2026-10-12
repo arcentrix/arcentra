@@ -46,6 +46,7 @@ var (
 	runningStepRunCancel sync.Map
 	runningJobRunCancel  sync.Map
 	storageInstance      storage.IStorage
+	storageReference     taskqueue.ArtifactReference
 	storageMu            sync.RWMutex
 	cancelledJobs        sync.Map
 	pendingJobReports    sync.Map
@@ -53,10 +54,14 @@ var (
 )
 
 // SetStorage 设置 Agent 使用的对象存储客户端
-func SetStorage(st storage.IStorage) {
+func SetStorage(st storage.IStorage, reference ...taskqueue.ArtifactReference) {
 	storageMu.Lock()
 	defer storageMu.Unlock()
 	storageInstance = st
+	storageReference = taskqueue.ArtifactReference{}
+	if len(reference) > 0 {
+		storageReference = reference[0]
+	}
 }
 
 // StartWorker starts the task queue worker. When execManager is non-nil, step run tasks
@@ -251,6 +256,12 @@ func executeStepRunViaExecutor(
 	if err := claimStepRun(stepCtx, grpcClient, agentConf, payload.StepRunID, start); err != nil {
 		return err
 	}
+	if err := validateStepExecution(payload.Uses, payload.Action, payload.Args, len(override) > 0 && override[0] != nil); err != nil {
+		end := time.Now().Unix()
+		return retainStepReport(payload.StepRunID, err, func() error {
+			return reportStepRunStatus(grpcClient, agentConf, payload.StepRunID, steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, 1, err.Error(), start, end, nil)
+		})
+	}
 	req := PayloadToExecutionRequest(payload, defaultTimeout)
 	if agentConf != nil {
 		req.AgentID = agentConf.Agent.ID
@@ -281,6 +292,9 @@ func executeStepRunViaExecutor(
 	var execErr error
 	if len(override) > 0 && override[0] != nil {
 		result, execErr = execManager.ExecuteWithExecutor(stepCtx, req, override[0])
+	} else if strings.EqualFold(strings.TrimSpace(payload.Uses), "http") {
+		// 显式 HTTP 步骤不可因 args.run 而被 ShellExecutor 抢先选择
+		result, execErr = execManager.ExecuteWithExecutor(stepCtx, req, executor.NewHTTPExecutor(log.Logger{}))
 	} else {
 		result, execErr = execManager.Execute(stepCtx, req)
 	}
@@ -410,23 +424,30 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 		jobCtx, timeoutCancel = context.WithTimeout(jobCtx, timeout)
 		defer timeoutCancel()
 	}
+	storageMu.RLock()
+	st, reference := storageInstance, storageReference
+	storageMu.RUnlock()
+	artifacts := &artifactExecutor{job: payload, storage: st, reference: reference, uploaded: make(map[string]string)}
 	start := time.Now()
 	if jobCtx.Err() == nil {
-		if err := reportJobRunStatus(grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_BUSY, int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING), "", start, 0); err != nil {
+		if err := reportJobRunStatus(grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_BUSY, int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING), "", start, 0, artifacts); err != nil {
 			return fmt.Errorf("claim job run: %w", err)
 		}
 	}
-	workspace, jobErr := prepareWorkspace(agentConf, payload)
+	jobErr := validateJobExecution(payload)
+	workspace := ""
+	if jobErr == nil {
+		workspace, jobErr = prepareWorkspace(agentConf, payload)
+	}
 	if jobErr == nil {
 		jobErr = handleSourceClone(jobCtx, payload.Source, workspace)
 	}
-	storageMu.RLock()
-	st := storageInstance
-	storageMu.RUnlock()
 	if jobErr == nil {
-		jobErr = handleArtifactDownload(jobCtx, payload.ArtifactURIs, workspace, st)
+		jobErr = validateArtifactReferences(payload.ArtifactURIs, payload.ArtifactReferences, reference, time.Now())
+		if jobErr == nil {
+			jobErr = handleArtifactDownload(jobCtx, payload.ArtifactURIs, workspace, st)
+		}
 	}
-	artifacts := &artifactExecutor{job: payload, storage: st, uploaded: make(map[string]string)}
 	for _, step := range payload.Steps {
 		if jobCtx.Err() != nil || jobErr != nil {
 			status := steprunv1.StepRunStatus_STEP_RUN_STATUS_SKIPPED
@@ -513,7 +534,7 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 				}
 			}
 		}
-		return reportJobRunStatus(grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_IDLE, int32(status), errMsg, start, end, artifacts.uploaded)
+		return reportJobRunStatus(grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_IDLE, int32(status), errMsg, start, end, artifacts)
 	}}
 	pendingJobReports.Store(payload.JobRunID, receipt)
 	return receipt.deliver(&pendingJobReports, payload.JobRunID)
@@ -589,7 +610,7 @@ func reportJobRunStatus(
 	errMsg string,
 	start time.Time,
 	endUnix int64,
-	artifactURIs ...map[string]string,
+	artifacts ...*artifactExecutor,
 ) error {
 	if grpcClient == nil || grpcClient.AgentClient == nil {
 		return nil
@@ -609,8 +630,14 @@ func reportJobRunStatus(
 		StartTime:    start.Unix(),
 		EndTime:      endUnix,
 	}
-	if len(artifactURIs) > 0 {
-		req.ArtifactUris = artifactURIs[0]
+	if len(artifacts) > 0 && artifacts[0] != nil {
+		files := artifacts[0]
+		req.ArtifactStorageId = files.reference.StorageID
+		req.ArtifactStorageFingerprint = files.reference.Fingerprint
+		if status >= int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS) {
+			req.ArtifactUris = files.uploaded
+			req.Artifacts = files.results
+		}
 	}
 	ctx = withExecutionClaim(ctx, "job", jobRunID)
 	resp, err := grpcClient.AgentClient.ReportJobRunStatus(ctx, req)
@@ -845,5 +872,6 @@ func ValidateExecutionConfig(conf *config.AgentConfig) error {
 	if conf.Agent.EnableDocker {
 		return fmt.Errorf("Docker execution is not implemented by this worker")
 	}
-	return nil
+	_, err := conf.Agent.ExecutionCapacity()
+	return err
 }

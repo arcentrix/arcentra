@@ -13,6 +13,7 @@ mode = "baremetal"
 id = ""
 name = "trusted-build-agent"
 interval = 30
+# Current Kafka worker is serial; 0 defaults to 1, values above 1 are rejected
 maxConcurrentJobs = 1
 jobTimeout = 3600
 workspaceDir = "./data/workspaces"

@@ -25,18 +25,19 @@ const (
 // JobRunTaskPayload is the Kafka payload for dispatching a complete job to an Agent.
 // The Agent receives the entire job definition and executes all steps sequentially.
 type JobRunTaskPayload struct {
-	PipelineID    string            `json:"pipelineId"`
-	PipelineRunID string            `json:"pipelineRunId"`
-	JobRunID      string            `json:"jobRunId"`
-	JobName       string            `json:"jobName"`
-	AgentID       string            `json:"agentId,omitempty"`
-	Steps         []StepPayload     `json:"steps"`
-	Env           map[string]string `json:"env,omitempty"`
-	Variables     map[string]string `json:"variables,omitempty"`
-	Workspace     string            `json:"workspace,omitempty"`
-	Timeout       string            `json:"timeout,omitempty"`
-	ArtifactURIs  map[string]string `json:"artifactUris,omitempty"`
-	Source        *SourcePayload    `json:"source,omitempty"`
+	PipelineID         string                       `json:"pipelineId"`
+	PipelineRunID      string                       `json:"pipelineRunId"`
+	JobRunID           string                       `json:"jobRunId"`
+	JobName            string                       `json:"jobName"`
+	AgentID            string                       `json:"agentId,omitempty"`
+	Steps              []StepPayload                `json:"steps"`
+	Env                map[string]string            `json:"env,omitempty"`
+	Variables          map[string]string            `json:"variables,omitempty"`
+	Workspace          string                       `json:"workspace,omitempty"`
+	Timeout            string                       `json:"timeout,omitempty"`
+	ArtifactURIs       map[string]string            `json:"artifactUris,omitempty"`
+	ArtifactReferences map[string]ArtifactReference `json:"artifactReferences,omitempty"`
+	Source             *SourcePayload               `json:"source,omitempty"`
 }
 
 // StepPayload describes a single step inside a JobRunTaskPayload.
@@ -73,4 +74,11 @@ func JobRunKey(payload *JobRunTaskPayload) string {
 		payload.JobRunID,
 	}
 	return strings.Trim(strings.Join(parts, ":"), ":")
+}
+
+// ArtifactReference 绑定上游制品的存储位置和有效期，不包含凭据
+type ArtifactReference struct {
+	StorageID   string `json:"storageId"`
+	Fingerprint string `json:"fingerprint"`
+	ExpiresAt   int64  `json:"expiresAt,omitempty"`
 }

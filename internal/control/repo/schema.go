@@ -46,6 +46,7 @@ func schemaModels() []any {
 		&model.PipelineTemplate{},
 		&model.PipelineTemplateLibrary{},
 		&model.Project{},
+		&model.ProjectArtifact{},
 		&model.ProjectMember{},
 		&model.ProjectVariable{},
 		&model.ProjectWebhook{},

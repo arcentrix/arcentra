@@ -26,8 +26,8 @@ id = "31t3aZMDg"
 name = "agent-001"
 # heartbeat interval in seconds
 interval = 60
-# maximum concurrent jobs
-maxConcurrentJobs = 5
+# Current Kafka worker is serial; 0 defaults to 1, values above 1 are rejected
+maxConcurrentJobs = 1
 # job timeout in seconds
 jobTimeout = 3600
 # workspace directory

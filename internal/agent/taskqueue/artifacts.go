@@ -6,6 +6,9 @@ package taskqueue
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -14,6 +17,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
+
+	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
+	artifactutil "github.com/arcentrix/arcentra/pkg/artifact"
 
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/storage"
@@ -24,9 +31,11 @@ import (
 // artifactExecutor 为当前作业提供对象存储制品操作，不共享可变运行状态
 // uploaded 中的值始终是相对于存储 BasePath 的对象键，而不是下载 URL
 type artifactExecutor struct {
-	job      *taskqueue.JobRunTaskPayload
-	storage  storage.IStorage
-	uploaded map[string]string
+	job       *taskqueue.JobRunTaskPayload
+	storage   storage.IStorage
+	uploaded  map[string]string
+	reference taskqueue.ArtifactReference
+	results   []*agentv1.ArtifactResult
 }
 
 type artifactArguments struct {
@@ -73,13 +82,17 @@ func (e *artifactExecutor) Execute(ctx context.Context, req *executor.ExecutionR
 		}
 		switch strings.ToLower(strings.TrimSpace(req.Step.Action)) {
 		case "upload":
-			if args.ExpireIn != "" || args.When != "" || args.Name != "" || args.Public || args.Untracked {
-				return fmt.Errorf("agent artifact upload supports paths/path only; retention, named bundles, upload policies, public access and untracked filtering are not supported")
+			if (args.When != "" && args.When != "always") || args.Name != "" || args.Public || args.Untracked {
+				return fmt.Errorf("agent artifact upload supports paths/path and expireIn only; named bundles, upload policies, public access and untracked filtering are not supported")
 			}
 			if len(args.Paths) == 0 {
 				return fmt.Errorf("artifact upload paths are required")
 			}
-			paths, err = e.upload(ctx, req.Workspace, args.Paths, stream)
+			expiry, parseErr := artifactutil.ParseExpiry(args.ExpireIn, time.Now())
+			if parseErr != nil {
+				return parseErr
+			}
+			paths, err = e.upload(ctx, req.Workspace, req.StepRunID, args.Paths, expiry, stream)
 		case "download":
 			if args.Job == "" {
 				args.Job = e.job.JobName
@@ -111,8 +124,8 @@ func artifactStorage(st storage.IStorage) (storage.IStreamingStorage, error) {
 	return stream, nil
 }
 
-func (e *artifactExecutor) upload(ctx context.Context, workspace string, patterns []string, st storage.IStreamingStorage) ([]string, error) {
-	for label, id := range map[string]string{"pipeline run": e.job.PipelineRunID, "job run": e.job.JobRunID} {
+func (e *artifactExecutor) upload(ctx context.Context, workspace, stepRunID string, patterns []string, expiry *time.Time, st storage.IStreamingStorage) ([]string, error) {
+	for label, id := range map[string]string{"pipeline run": e.job.PipelineRunID, "job run": e.job.JobRunID, "step run": stepRunID} {
 		if err := artifactIdentifier(id); err != nil {
 			return nil, fmt.Errorf("invalid %s ID: %w", label, err)
 		}
@@ -126,16 +139,30 @@ func (e *artifactExecutor) upload(ctx context.Context, workspace string, pattern
 	if err != nil {
 		return nil, err
 	}
+	if len(files)+len(e.results) > 1000 {
+		return nil, fmt.Errorf("artifact upload exceeds 1000 files per job")
+	}
+	if e.reference.StorageID == "" || e.reference.Fingerprint == "" {
+		return nil, fmt.Errorf("artifact storage identity is not configured; re-register the agent")
+	}
 	if e.uploaded == nil {
 		e.uploaded = make(map[string]string)
 	}
 	for _, name := range files {
+		if len(name) > 512 {
+			return nil, fmt.Errorf("artifact relative path exceeds 512 bytes")
+		}
 		// 上传成功后立即记录，后续步骤失败也能报告已存在的对象
-		key := path.Join("artifacts", e.job.PipelineRunID, e.job.JobRunID, name)
-		if err := uploadArtifactFile(ctx, root, name, key, st); err != nil {
+		metadata, err := uploadArtifactFile(ctx, root, name, path.Join("artifacts", e.job.PipelineRunID, e.job.JobRunID, stepRunID), st)
+		if err != nil {
 			return nil, fmt.Errorf("upload artifact %s: %w", name, err)
 		}
-		e.uploaded[name] = key
+		metadata.StepRunId = stepRunID
+		if expiry != nil {
+			metadata.ExpiresAt = expiry.Unix()
+		}
+		e.results = append(e.results, metadata)
+		e.uploaded[name] = metadata.StorageKey
 	}
 	return files, nil
 }
@@ -145,14 +172,23 @@ func (e *artifactExecutor) download(ctx context.Context, workspace string, args 
 		return nil, fmt.Errorf("invalid source artifact job: %w", err)
 	}
 	available := make(map[string]string)
+	references := make(map[string]taskqueue.ArtifactReference)
 	for name, key := range e.job.ArtifactURIs {
 		if strings.HasPrefix(name, args.Job+"/") {
-			available[strings.TrimPrefix(name, args.Job+"/")] = key
+			relative := strings.TrimPrefix(name, args.Job+"/")
+			available[relative] = key
+			references[relative] = e.job.ArtifactReferences[name]
 		}
 	}
 	if args.Job == e.job.JobName {
 		for name, key := range e.uploaded {
 			available[name] = key
+			references[name] = e.reference
+		}
+		for _, file := range e.results {
+			ref := e.reference
+			ref.ExpiresAt = file.ExpiresAt
+			references[file.Name] = ref
 		}
 	}
 	if len(args.Paths) == 0 {
@@ -161,6 +197,13 @@ func (e *artifactExecutor) download(ctx context.Context, workspace string, args 
 	files, err := selectArtifactFiles(ctx, available, args.Paths)
 	if err != nil {
 		return nil, fmt.Errorf("download from job %s: %w", args.Job, err)
+	}
+	selected := make(map[string]string, len(files))
+	for _, name := range files {
+		selected[name] = available[name]
+	}
+	if err := validateArtifactReferences(selected, references, e.reference, time.Now()); err != nil {
+		return nil, err
 	}
 	root, err := openArtifactWorkspace(ctx, workspace)
 	if err != nil {
@@ -202,14 +245,14 @@ func handleArtifactDownload(ctx context.Context, uris map[string]string, workspa
 }
 
 func artifactIdentifier(value string) error {
-	if value == "" || value == "." || value == ".." || strings.ContainsAny(value, "/\\:\x00") {
+	if len(value) > 64 || value == "" || value == "." || value == ".." || strings.ContainsAny(value, "/\\:\x00\r\n") {
 		return fmt.Errorf("invalid path component %q", value)
 	}
 	return nil
 }
 
 func artifactName(value string) (string, error) {
-	if value == "" || strings.HasPrefix(value, "/") || strings.ContainsAny(value, "\\:\x00") {
+	if len(value) > 1024 || value == "" || strings.HasPrefix(value, "/") || strings.ContainsAny(value, "\\:\x00\r\n") {
 		return "", fmt.Errorf("invalid relative artifact path %q", value)
 	}
 	for _, part := range strings.Split(value, "/") {
@@ -398,30 +441,63 @@ func sortedArtifactNames(files map[string]string) []string {
 	return names
 }
 
-func uploadArtifactFile(ctx context.Context, root *os.Root, name, key string, st storage.IStreamingStorage) error {
+func uploadArtifactFile(ctx context.Context, root *os.Root, name, prefix string, st storage.IStreamingStorage) (*agentv1.ArtifactResult, error) {
 	if err := checkArtifactPath(ctx, root, name, false); err != nil {
-		return err
+		return nil, err
 	}
 	info, err := root.Lstat(filepath.FromSlash(name))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("artifact is not a regular file: %s", name)
+		return nil, fmt.Errorf("artifact is not a regular file: %s", name)
 	}
 	file, err := root.Open(filepath.FromSlash(name))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer file.Close()
-	info, err = file.Stat()
+	actual, err := file.Stat()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if !info.Mode().IsRegular() {
-		return fmt.Errorf("artifact is not a regular file: %s", name)
+	if !actual.Mode().IsRegular() || !os.SameFile(info, actual) {
+		return nil, fmt.Errorf("artifact changed while opening: %s", name)
 	}
-	return st.UploadStream(ctx, key, &artifactReadSeeker{ctx: ctx, ReadSeeker: file}, info.Size(), "application/octet-stream")
+	// 制品快照以受限权限写入临时文件，避免上传时源文件变化破坏摘要与对象身份
+	snapshot, err := os.CreateTemp("", "arcentra-artifact-snapshot-*")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = snapshot.Close(); _ = os.Remove(snapshot.Name()) }()
+	digest := sha256.New()
+	size, err := io.Copy(io.MultiWriter(snapshot, digest), &artifactReader{ctx: ctx, Reader: file})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := snapshot.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	hash := hex.EncodeToString(digest.Sum(nil))
+	key := path.Join(prefix, hash, name)
+	if err := st.UploadStream(ctx, key, &artifactReadSeeker{ctx: ctx, ReadSeeker: snapshot}, size, "application/octet-stream"); err != nil {
+		return nil, artifactStorageError(err)
+	}
+	return &agentv1.ArtifactResult{Name: name, StorageKey: key, Size: size, MediaType: "application/octet-stream", Sha256: hash}, nil
+}
+
+// validateArtifactReferences 拒绝过期、身份缺失或位置不匹配的上游制品
+func validateArtifactReferences(uris map[string]string, references map[string]taskqueue.ArtifactReference, current taskqueue.ArtifactReference, now time.Time) error {
+	for name := range uris {
+		ref := references[name]
+		if current.StorageID == "" || current.Fingerprint == "" || ref.StorageID != current.StorageID || ref.Fingerprint != current.Fingerprint {
+			return fmt.Errorf("artifact %s is unavailable: storage identity is missing or changed", name)
+		}
+		if ref.ExpiresAt != 0 && ref.ExpiresAt <= now.Unix() {
+			return fmt.Errorf("artifact %s has expired", name)
+		}
+	}
+	return nil
 }
 
 // downloadArtifactFile 使用原子重命名提交下载，读取失败或取消不会截断已有制品
@@ -443,7 +519,7 @@ func downloadArtifactFile(ctx context.Context, root *os.Root, name, key string, 
 	}
 	input, err := st.DownloadStream(ctx, key)
 	if err != nil {
-		return err
+		return artifactStorageError(err)
 	}
 	defer input.Close()
 	temporary := path.Join(dir, ".arcentra-artifact-"+rand.Text())
@@ -452,11 +528,11 @@ func downloadArtifactFile(ctx context.Context, root *os.Root, name, key string, 
 		return err
 	}
 	defer func() { _ = output.Close(); _ = root.Remove(filepath.FromSlash(temporary)) }()
-	if _, err := io.Copy(output, &artifactReader{ctx: ctx, Reader: input}); err != nil {
+	if _, err := io.Copy(output, &artifactReader{ctx: ctx, Reader: artifactStorageReader{Reader: input}}); err != nil {
 		return err
 	}
 	if err := input.Close(); err != nil {
-		return err
+		return artifactStorageError(err)
 	}
 	if err := output.Close(); err != nil {
 		return err
@@ -496,4 +572,24 @@ func (r *artifactReadSeeker) Seek(offset int64, whence int) (int64, error) {
 		return 0, err
 	}
 	return r.ReadSeeker.Seek(offset, whence)
+}
+
+// artifactStorageError 不把可能包含访问密钥或签名 URL 的供应商错误写入执行元数据
+func artifactStorageError(err error) error {
+	for _, sentinel := range []error{context.Canceled, context.DeadlineExceeded, io.EOF, io.ErrUnexpectedEOF, io.ErrShortWrite, io.ErrShortBuffer} {
+		if errors.Is(err, sentinel) {
+			return sentinel
+		}
+	}
+	return fmt.Errorf("object storage operation failed")
+}
+
+type artifactStorageReader struct{ io.Reader }
+
+func (r artifactStorageReader) Read(buffer []byte) (int, error) {
+	n, err := r.Reader.Read(buffer)
+	if err != nil {
+		return n, artifactStorageError(err)
+	}
+	return n, nil
 }

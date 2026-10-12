@@ -1,0 +1,23 @@
+package outbox
+
+import (
+	"testing"
+
+	"github.com/arcentrix/arcentra/internal/shared/executor"
+)
+
+func TestAgentManagerHasNoGenericPluginOrHTTPFallback(t *testing.T) {
+	manager := ProvideExecutorManager(nil)
+	for _, step := range []*executor.StepInfo{
+		{Uses: "unknown-plugin"},
+		{Uses: "unknown-plugin", Args: map[string]any{"url": "https://example.invalid"}},
+		{Uses: "http", Args: map[string]any{"url": "https://example.invalid"}},
+	} {
+		if _, err := manager.SelectExecutor(&executor.ExecutionRequest{Step: step}); err == nil {
+			t.Fatalf("generic fallback remains for %+v", step)
+		}
+	}
+	if _, err := manager.SelectExecutor(&executor.ExecutionRequest{Step: &executor.StepInfo{Uses: "shell", Args: map[string]any{"run": "true"}}}); err != nil {
+		t.Fatalf("supported shell removed: %v", err)
+	}
+}

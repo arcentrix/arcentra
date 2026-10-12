@@ -43,7 +43,7 @@ properties:
 
         concurrency:
           type: string
-          description: Concurrency lock key (prevents parallel runs)
+          description: Reserved; nonempty values are rejected by current production validation (no named lock support)
 
         depends_on:
           type: array
@@ -256,7 +256,7 @@ jobs:
     ########################################
     # Job-level Execution Policy
     ########################################
-    concurrency: "prod-deploy"    # 并发控制 key（同 key Job 串行）
+    # concurrency 暂不支持；非空值会被生产校验拒绝，不提供命名互斥锁
     timeout: "30m"                # Job 最大运行时间
 
     ########################################

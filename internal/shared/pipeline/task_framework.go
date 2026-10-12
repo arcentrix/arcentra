@@ -274,7 +274,7 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 	payload := &taskqueue.JobRunTaskPayload{PipelineID: tf.execCtx.PipelineIDRef, PipelineRunID: tf.execCtx.PipelineRunID,
 		JobRunID: tf.execCtx.JobRunID, JobName: task.Job.Name, AgentID: agentID, Steps: steps,
 		Env: tf.execCtx.ResolveStepEnv(task.Job, nil), Variables: tf.execCtx.Pipeline.Variables,
-		Timeout: task.Job.Timeout, ArtifactURIs: tf.execCtx.ArtifactSnapshot()}
+		Timeout: task.Job.Timeout, ArtifactURIs: tf.execCtx.ArtifactSnapshot(), ArtifactReferences: tf.execCtx.ArtifactReferenceSnapshot()}
 	if source := task.Job.Source; source != nil {
 		payload.Source = &taskqueue.SourcePayload{Type: source.Type, Repo: tf.execCtx.ResolveVariable(source.Repo), Branch: tf.execCtx.ResolveVariable(source.Branch)}
 		if source.Auth != nil {
@@ -572,8 +572,15 @@ func (tf *TaskFramework) backflowArtifactURIs(ctx context.Context, task *Task) {
 		tf.logger.Warnw("failed to unmarshal artifact_uris", "jobRunId", jrID, "error", err)
 		return
 	}
+	var references map[string]taskqueue.ArtifactReference
+	if jr.ArtifactReferences != "" {
+		if err := sonic.UnmarshalString(jr.ArtifactReferences, &references); err != nil {
+			tf.logger.Warnw("invalid artifact storage references", "jobRunId", jrID)
+			return
+		}
+	}
 	for key, uri := range uris {
-		tf.execCtx.RecordArtifact(task.Job.Name+"/"+key, uri)
+		tf.execCtx.RecordArtifact(task.Job.Name+"/"+key, uri, references[key])
 	}
 }
 

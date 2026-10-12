@@ -15,3 +15,10 @@ docs/*.md
 
 # Containerd capability-gated validation guide
 !docs/sandbox-containerd.md
+!docs/sandbox-agent-integration.md
+
+# Artifact lifecycle operator guide
+!docs/artifact-lifecycle.md
+
+# Artifact API and immutable metadata guide
+!docs/artifact-api.md

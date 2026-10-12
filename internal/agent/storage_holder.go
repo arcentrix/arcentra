@@ -20,13 +20,14 @@ import (
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/internal/shared/storage"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 
 // StorageHolder provides thread-safe access to a lazily-initialized IStorage
 // instance. The control plane delivers StorageConfig via RegisterResponse;
 // the agent calls SetFromProto to build the storage client.
 type StorageHolder struct {
-	st atomic.Pointer[storage.IStorage]
+	st atomic.Pointer[storageSnapshot]
 }
 
 // NewStorageHolder creates an empty holder. Get() returns nil until configured.
@@ -37,7 +38,7 @@ func NewStorageHolder() *StorageHolder {
 // Get returns the current IStorage, or nil if not yet configured.
 func (h *StorageHolder) Get() storage.IStorage {
 	if p := h.st.Load(); p != nil {
-		return *p
+		return p.storage
 	}
 	return nil
 }
@@ -58,10 +59,23 @@ func (h *StorageHolder) SetFromProto(cfg *agentv1.StorageConfig) {
 		UseTLS:    cfg.GetUseSsl(),
 	})
 	if err != nil {
-		log.Warnw("agent: failed to init storage from control-plane config", "error", err)
+		log.Warn("agent: failed to init storage from control-plane config")
 		return
 	}
-	h.st.Store(&st)
+	h.st.Store(&storageSnapshot{storage: st, reference: taskqueue.ArtifactReference{StorageID: cfg.GetStorageId(), Fingerprint: cfg.GetStorageFingerprint()}})
 	log.Infow("agent: object storage initialised from control-plane",
-		"provider", cfg.GetProvider(), "endpoint", cfg.GetEndpoint(), "bucket", cfg.GetBucket())
+		"provider", cfg.GetProvider(), "storageID", cfg.GetStorageId())
+}
+
+type storageSnapshot struct {
+	storage   storage.IStorage
+	reference taskqueue.ArtifactReference
+}
+
+// Snapshot 原子读取存储客户端及不包含凭据的位置身份
+func (h *StorageHolder) Snapshot() (storage.IStorage, taskqueue.ArtifactReference) {
+	if p := h.st.Load(); p != nil {
+		return p.storage, p.reference
+	}
+	return nil, taskqueue.ArtifactReference{}
 }
