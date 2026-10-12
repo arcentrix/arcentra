@@ -3,6 +3,7 @@ package copilot
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/bytedance/sonic"
 	"io"
 	"net/http"
@@ -167,4 +168,31 @@ func TestRedactionAndPathConfinement(t *testing.T) {
 	if got := Prefix("你好世界", 5); got != "你" {
 		t.Fatal(got)
 	}
+}
+
+func TestSourcePreviewCapacityAndDeadline(t *testing.T) {
+	var previews Previews
+	finishes := []func(){}
+	for i := 0; i < 16; i++ {
+		ctx, finish, err := previews.Begin(context.Background(), fmt.Sprintf("user-%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		finishes = append(finishes, finish)
+		if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 15*time.Second {
+			t.Fatal("preview deadline missing")
+		}
+	}
+	if _, _, err := previews.Begin(context.Background(), "extra"); !errors.Is(err, ErrBusy) {
+		t.Fatal("global preview cap missing", err)
+	}
+	for _, finish := range finishes {
+		finish()
+		finish()
+	}
+	_, finish, err := previews.Begin(context.Background(), "reused")
+	if err != nil {
+		t.Fatal("preview capacity did not release", err)
+	}
+	finish()
 }

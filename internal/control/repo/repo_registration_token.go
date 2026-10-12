@@ -62,7 +62,8 @@ func (r *RegistrationTokenRepo) List(ctx context.Context, page, size int) ([]mod
 
 func (r *RegistrationTokenRepo) GetAllActive(ctx context.Context) ([]model.RegistrationToken, error) {
 	var tokens []model.RegistrationToken
-	if err := r.Database().WithContext(ctx).
+	if err := r.Database().WithContext(ctx).Clauses(database.Write()).
+		Select("id", "token_hash", "description", "created_by", "expires_at", "max_uses", "use_count", "is_active", "created_at", "updated_at").
 		Where("is_active = 1").Find(&tokens).Error; err != nil {
 		return nil, err
 	}

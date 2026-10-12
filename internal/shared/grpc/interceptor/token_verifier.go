@@ -19,10 +19,8 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/repo"
@@ -30,7 +28,6 @@ import (
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/bytedance/sonic"
-	"github.com/redis/go-redis/v9"
 )
 
 // agentSecretConfig represents the structure of agent secret key configuration
@@ -44,57 +41,39 @@ type agentTokenVerifier struct {
 	agentService   *service.AgentService
 	agentRepo      repo.IAgentRepository
 	settingService *service.SettingService
-	cache          cache.ICache
 }
 
-const (
-	// redisCacheKey is the Redis key for agent secret config cache
-	redisCacheKey = "agent:agent_secret_key"
-	// redisCacheTTL is the TTL for agent secret config cache (24 hours)
-	redisCacheTTL = 24 * time.Hour
-)
-
-// NewAgentTokenVerifier creates a new agent token verifier
+// NewAgentTokenVerifier 创建使用当前主库认证状态的令牌校验器
+// 缓存参数仅用于保持构造函数兼容，认证密钥不再读取或写入缓存
 func NewAgentTokenVerifier(
 	agentService *service.AgentService,
 	agentRepo repo.IAgentRepository,
 	settingService *service.SettingService,
-	c cache.ICache,
+	_ cache.ICache,
 ) TokenVerifier {
 	return &agentTokenVerifier{
 		agentService:   agentService,
 		agentRepo:      agentRepo,
 		settingService: settingService,
-		cache:          c,
 	}
 }
 
-// getSecretConfig gets agent secret key configuration with caching.
+// getSecretConfig reads the authoritative secret and never falls back to a cache.
 func (v *agentTokenVerifier) getSecretConfig(ctx context.Context) (*agentSecretConfig, error) {
-	if v.cache != nil {
-		cached, err := v.cache.Get(ctx, redisCacheKey).Result()
-		if err == nil && cached != "" {
-			var cfg agentSecretConfig
-			if sonic.Unmarshal([]byte(cached), &cfg) == nil && cfg.SecretKey != "" {
-				return &cfg, nil
-			}
-		}
-
-		if err != nil && !isCacheMiss(err) {
-			log.Warnw("cache get failed, fallback to DB", "error", err)
-		}
-	}
-
 	setting, err := v.settingService.GetSetting(ctx, consts.SettingNameAgentSecretKey)
 	if err != nil {
-		log.Errorw("failed to get agent secret key configuration", "error", err)
-		return nil, err
+		log.Errorw("failed to get agent secret key configuration")
+		return nil, fmt.Errorf("agent secret configuration unavailable")
+	}
+
+	if setting == nil {
+		return nil, fmt.Errorf("secret config is unavailable")
 	}
 
 	var config agentSecretConfig
 	if err := sonic.Unmarshal(setting.Value, &config); err != nil {
-		log.Errorw("failed to unmarshal agent secret key config", "error", err)
-		return nil, err
+		log.Errorw("failed to unmarshal agent secret key config")
+		return nil, fmt.Errorf("invalid agent secret configuration")
 	}
 
 	// Validate
@@ -102,21 +81,10 @@ func (v *agentTokenVerifier) getSecretConfig(ctx context.Context) (*agentSecretC
 		return nil, fmt.Errorf("invalid secret config from DB")
 	}
 
-	if v.cache != nil {
-		bytes, _ := sonic.Marshal(&config)
-		if setErr := v.cache.Set(ctx, redisCacheKey, bytes, redisCacheTTL).Err(); setErr != nil {
-			log.Warnw("failed to cache agent secret config", "error", setErr)
-		}
-	}
-
 	return &config, nil
 }
 
-func isCacheMiss(err error) bool {
-	return errors.Is(err, redis.Nil) || strings.Contains(err.Error(), "not found")
-}
-
-// generateToken generates a token for the given agentId using cached secret config.
+// generateToken generates a token for the given agentId using the current secret config.
 func (v *agentTokenVerifier) generateToken(ctx context.Context, agentID string) (string, error) {
 	config, err := v.getSecretConfig(ctx)
 	if err != nil {
@@ -165,11 +133,8 @@ func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string,
 			return "", fmt.Errorf("agentID is empty in token")
 		}
 
-		// Verify agent exists
-		agent, lookupErr := v.agentRepo.Get(ctx, agentID)
-		if lookupErr != nil || agent == nil || agent.IsEnabled != 1 {
-			log.Debugw("agent not found", "agentId", agentID, "error", err)
-			return "", fmt.Errorf("agent not found: %s", agentID)
+		if agentIDHint != "" && agentIDHint != agentID {
+			return "", fmt.Errorf("agent identity mismatch")
 		}
 
 		// Regenerate expected token for this agentID and compare
@@ -183,6 +148,9 @@ func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string,
 			return "", fmt.Errorf("invalid token signature")
 		}
 
+		if err := v.requireEnabledAgent(ctx, agentID); err != nil {
+			return "", err
+		}
 		return agentID, nil
 	}
 
@@ -190,24 +158,24 @@ func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string,
 	// Optimization: if agentIDHint is provided, verify that agent first
 	if agentIDHint != "" {
 		expectedToken, err := v.generateToken(ctx, agentIDHint)
-		if err == nil {
-			// Extract signature from expected token (new format) for comparison
-			_, expectedSignature, _ := v.parseToken(expectedToken)
-			if hmac.Equal([]byte(token), []byte(expectedSignature)) {
-				// Verify agent exists
-				agent, err := v.agentRepo.Get(ctx, agentIDHint)
-				if err == nil && agent != nil && agent.IsEnabled == 1 {
-					return agentIDHint, nil
-				}
+		if err != nil {
+			return "", fmt.Errorf("failed to generate expected token: %w", err)
+		}
+		// Extract signature from expected token (new format) for comparison
+		_, expectedSignature, _ := v.parseToken(expectedToken)
+		if hmac.Equal([]byte(token), []byte(expectedSignature)) {
+			if err := v.requireEnabledAgent(ctx, agentIDHint); err != nil {
+				return "", err
 			}
+			return agentIDHint, nil
 		}
 	}
 
 	// Fallback: list all agents and verify token (legacy format)
 	agents, _, err := v.agentRepo.List(ctx, 1, 1000)
 	if err != nil {
-		log.Errorw("failed to list agents for token verification", "error", err)
-		return "", fmt.Errorf("failed to list agents: %w", err)
+		log.Errorw("failed to list agents for token verification")
+		return "", fmt.Errorf("agent lookup unavailable")
 	}
 
 	// Try to find matching agent by verifying token signature
@@ -222,16 +190,27 @@ func (v *agentTokenVerifier) VerifyAgentToken(ctx context.Context, token string,
 
 		expectedToken, err := v.generateToken(ctx, agent.AgentID)
 		if err != nil {
-			log.Debugw("failed to generate token for agent", "agentId", agent.AgentID, "error", err)
-			continue
+			return "", fmt.Errorf("failed to generate expected token: %w", err)
 		}
 
 		// Extract signature from expected token (new format) for comparison
 		_, expectedSignature, _ := v.parseToken(expectedToken)
 		if hmac.Equal([]byte(token), []byte(expectedSignature)) {
+			if err := v.requireEnabledAgent(ctx, agent.AgentID); err != nil {
+				return "", err
+			}
 			return agent.AgentID, nil
 		}
 	}
 
 	return "", fmt.Errorf("no matching agent found for token")
+}
+
+// requireEnabledAgent rechecks current authorization, including legacy list candidates.
+func (v *agentTokenVerifier) requireEnabledAgent(ctx context.Context, agentID string) error {
+	agent, err := v.agentRepo.Get(ctx, agentID)
+	if err != nil || agent == nil || agent.AgentID != agentID || agent.IsEnabled != 1 {
+		return fmt.Errorf("agent is unavailable or disabled")
+	}
+	return nil
 }

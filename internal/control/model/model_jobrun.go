@@ -32,6 +32,13 @@ type JobRun struct {
 	ClaimID                    string     `gorm:"column:claim_id;type:varchar(64);default:''" json:"-"`
 	CancellationClaimID        string     `gorm:"column:cancellation_claim_id;type:varchar(64);not null;default:''" json:"-"` // 原作业认领，仅由控制面取消事务写入
 	TerminalReportDigest       string     `gorm:"column:terminal_report_digest;type:varchar(64);not null;default:''" json:"-"`
+	SourceExpectationCaptured  bool       `gorm:"column:source_expectation_captured;not null;default:false" json:"-"`
+	SourceType                 string     `gorm:"column:source_type;type:varchar(32);not null;default:''" json:"-"`
+	SourceRepository           string     `gorm:"column:source_repository;type:varchar(2048);not null;default:''" json:"-"`
+	SourceRef                  string     `gorm:"column:source_ref;type:varchar(512);not null;default:''" json:"-"`
+	SourceBindingDigest        string     `gorm:"column:source_binding_digest;type:varchar(67);not null;default:''" json:"-"`
+	SourceResolvedCommit       string     `gorm:"column:source_resolved_commit;type:varchar(64);not null;default:''" json:"-"`
+	SourceProvenanceState      string     `gorm:"column:source_provenance_state;type:varchar(16);not null;default:'unknown'" json:"-"`
 	Status                     int        `gorm:"column:status" json:"status"`
 	Priority                   int        `gorm:"column:priority" json:"priority"`
 	Env                        string     `gorm:"column:env;type:json" json:"env"`

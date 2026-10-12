@@ -12,6 +12,7 @@ import (
 	steprunv1 "github.com/arcentrix/arcentra/api/steprun/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/pkg/sourceprovenance"
 	"github.com/bytedance/sonic"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -272,5 +273,128 @@ func TestRunPendingAttemptSlotsDoNotHideExecutedResults(t *testing.T) {
 	jobs, err := svc.ListPipelineRunJobs(ctx, "pipeline-a", "run-a")
 	if err != nil || len(jobs) != 1 || jobs[0].CompletedSteps != 1 || jobs[0].FailedSteps != 0 {
 		t.Fatalf("reserved attempts hid success: %+v %v", jobs, err)
+	}
+}
+
+func TestPipelineJobSourceViewKeepsPerJobInitialCheckoutEvidence(t *testing.T) {
+	svc := runServiceFixture(t)
+	ctx := context.Background()
+	if err := svc.pipelineRepo.UpdateRun(ctx, "run-a", map[string]any{"commit_sha": strings.Repeat("d", 40), "definition_commit_sha": strings.Repeat("e", 40)}); err != nil {
+		t.Fatal(err)
+	}
+	for index, repository := range []string{"https://git.example/Team/Build.git", "git@git.example:Other/Source.git"} {
+		id := fmt.Sprintf("source-%d", index)
+		ref := fmt.Sprintf("refs/heads/branch-%d", index)
+		binding, err := sourceprovenance.NewBinding("pipeline-a", "run-a", id, "git", repository, ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		commit := strings.Repeat(fmt.Sprint(index+1), 40+24*index)
+		// 仅为读取投影测试直接构造已接受的回执；生产创建入口禁止预填检出证据
+		if err := svc.jobRunRepo.(*repo.JobRunRepo).Database().WithContext(ctx).Create(&model.JobRun{PipelineID: "pipeline-a", PipelineRunID: "run-a", JobRunID: id, JobName: id,
+			Status: model.JobRunStatusSuccess, AgentID: "agent-1", ClaimID: "original-claim", TerminalReportDigest: strings.Repeat("f", 64),
+			SourceExpectationCaptured: true, SourceType: binding.Type, SourceRepository: binding.Repository, SourceRef: binding.Ref, SourceBindingDigest: binding.Digest,
+			SourceResolvedCommit: commit, SourceProvenanceState: "reported", Env: `{"TOKEN":"hidden-credential"}`}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	views, err := svc.ListPipelineRunJobs(ctx, "pipeline-a", "run-a")
+	if err != nil || len(views) != 3 {
+		t.Fatalf("missing per-job views: %+v %v", views, err)
+	}
+	byID := map[string]PipelineJobView{}
+	for _, view := range views {
+		byID[view.JobRunID] = view
+	}
+	if legacy := byID["job-a"]; legacy.SourceProvenanceState != "unknown" || legacy.SourceExpectationCaptured || legacy.SourceResolvedCommit != "" || legacy.SourceRepository != "" {
+		t.Fatalf("legacy run inherited invented checkout evidence: %+v", legacy)
+	}
+	for index, repository := range []string{"https://git.example/Team/Build.git", "git@git.example:Other/Source.git"} {
+		view := byID[fmt.Sprintf("source-%d", index)]
+		if !view.SourceExpectationCaptured || view.SourceProvenanceState != "reported" || view.SourceRepository != repository ||
+			view.SourceRef != fmt.Sprintf("refs/heads/branch-%d", index) || view.SourceResolvedCommit != strings.Repeat(fmt.Sprint(index+1), 40+24*index) {
+			t.Fatalf("job evidence conflated with another source: %+v", view)
+		}
+	}
+	raw, err := sonic.MarshalString(views)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"hidden-credential", "sourceBindingDigest", "v1:", strings.Repeat("d", 40), strings.Repeat("e", 40)} {
+		if strings.Contains(raw, secret) {
+			t.Fatalf("source DTO exposed internal, credential or run-level evidence %q", secret)
+		}
+	}
+}
+
+func TestPipelineJobSourceViewFailsClosedForAbsentAndInvalidEvidence(t *testing.T) {
+	binding, err := sourceprovenance.NewBinding("pipeline-a", "run-a", "job-a", "git", "https://git.example/Team/Source.git", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := model.JobRun{PipelineID: "pipeline-a", PipelineRunID: "run-a", JobRunID: "job-a", SourceExpectationCaptured: true,
+		Status: model.JobRunStatusSuccess, AgentID: "agent-1", ClaimID: "original-claim", TerminalReportDigest: strings.Repeat("f", 64),
+		SourceType: binding.Type, SourceRepository: binding.Repository, SourceRef: binding.Ref, SourceBindingDigest: binding.Digest,
+		SourceResolvedCommit: strings.Repeat("a", 40), SourceProvenanceState: "reported"}
+	for _, tc := range []struct {
+		name     string
+		mutate   func(*model.JobRun)
+		captured bool
+	}{
+		{"legacy expectation absent", func(job *model.JobRun) { job.SourceExpectationCaptured = false }, false},
+		{"old Agent", func(job *model.JobRun) { job.SourceProvenanceState, job.SourceResolvedCommit = "", "" }, true},
+		{"failed checkout", func(job *model.JobRun) {
+			job.Status, job.SourceProvenanceState, job.SourceResolvedCommit = model.JobRunStatusFailed, "unknown", ""
+		}, true},
+		{"missing hash", func(job *model.JobRun) { job.SourceResolvedCommit = "" }, true},
+		{"short hash", func(job *model.JobRun) { job.SourceResolvedCommit = "abcdef1" }, true},
+		{"uppercase hash", func(job *model.JobRun) { job.SourceResolvedCommit = strings.Repeat("A", 40) }, true},
+		{"unrecognized state", func(job *model.JobRun) { job.SourceProvenanceState = "verified" }, true},
+		{"active job", func(job *model.JobRun) { job.Status = model.JobRunStatusRunning }, true},
+		{"missing Agent", func(job *model.JobRun) { job.AgentID = "" }, true},
+		{"missing original claim", func(job *model.JobRun) { job.ClaimID = "" }, true},
+		{"missing receipt", func(job *model.JobRun) { job.TerminalReportDigest = "" }, true},
+		{"malformed receipt", func(job *model.JobRun) { job.TerminalReportDigest = "not-a-receipt" }, true},
+		{"unbound cancellation receipt", func(job *model.JobRun) {
+			job.Status, job.CancellationClaimID = model.JobRunStatusCancelled, "different-claim"
+		}, true},
+		{"foreign job binding", func(job *model.JobRun) { job.JobRunID = "another-job" }, false},
+		{"missing binding", func(job *model.JobRun) { job.SourceBindingDigest = "" }, false},
+		{"changed ref", func(job *model.JobRun) { job.SourceRef = "other-branch" }, false},
+		{"embedded credentials", func(job *model.JobRun) {
+			job.SourceRepository = "https://user:hidden-password@git.example/Team/Source.git"
+		}, false},
+		{"query credentials", func(job *model.JobRun) { job.SourceRepository += "?token=hidden-token" }, false},
+		{"no source", func(job *model.JobRun) { *job = model.JobRun{SourceExpectationCaptured: true} }, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			job := valid
+			tc.mutate(&job)
+			view := PipelineJobView{}
+			populateJobSourceView(&view, &job)
+			if view.SourceProvenanceState != "unknown" || view.SourceResolvedCommit != "" || view.SourceExpectationCaptured != tc.captured {
+				t.Fatalf("invalid checkout promoted or wrong expectation state: %+v", view)
+			}
+			if !tc.captured && (view.SourceType != "" || view.SourceRepository != "" || view.SourceRef != "") {
+				t.Fatalf("invalid expectation exposed raw source fields: %+v", view)
+			}
+		})
+	}
+	for _, state := range []int{model.JobRunStatusSuccess, model.JobRunStatusFailed, model.JobRunStatusTimeout, model.JobRunStatusCancelled} {
+		job := valid
+		job.Status = state
+		view := PipelineJobView{}
+		populateJobSourceView(&view, &job)
+		if view.SourceProvenanceState != "reported" || view.SourceResolvedCommit != valid.SourceResolvedCommit {
+			t.Fatalf("terminal result %d erased an initial checkout already reported by its original Agent: %+v", state, view)
+		}
+		if state == model.JobRunStatusCancelled {
+			job.CancellationClaimID = job.ClaimID
+			controllerCancelled := PipelineJobView{}
+			populateJobSourceView(&controllerCancelled, &job)
+			if controllerCancelled.SourceProvenanceState != "reported" || controllerCancelled.SourceResolvedCommit != valid.SourceResolvedCommit {
+				t.Fatalf("controller cancellation erased an original-claim checkout report: %+v", controllerCancelled)
+			}
+		}
 	}
 }

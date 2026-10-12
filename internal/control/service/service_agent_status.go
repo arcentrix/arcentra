@@ -102,7 +102,10 @@ func reportClaim(ctx context.Context, current, next int, existing string) (strin
 	if len(values) != 1 {
 		return "", false, status.Error(codes.InvalidArgument, "exactly one execution claim ID is required")
 	}
-	claim := strings.TrimSpace(values[0])
+	claim := values[0]
+	if strings.TrimSpace(claim) != claim {
+		return "", false, status.Error(codes.InvalidArgument, "execution claim ID must match exactly")
+	}
 	if len(claim) > 64 {
 		return "", false, status.Error(codes.InvalidArgument, "claim ID too long")
 	}

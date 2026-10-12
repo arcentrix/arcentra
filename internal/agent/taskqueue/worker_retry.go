@@ -71,7 +71,7 @@ func executeJobAttempts(ctx, jobCtx context.Context, conf *config.AgentConfig, c
 		})
 	}
 	normalize := func(stepID string, err error) error {
-		if terminalPersistenceFailed(err) {
+		if terminalPersistenceFailed(err) || terminalQuarantined(err) {
 			return retry.Block(err)
 		}
 		if pending, ok := pendingStepReports.Load(receiptKey(ctx, "step", stepID)); ok {

@@ -25,9 +25,16 @@ var ProviderSet = wire.NewSet(NewRegistry)
 // Config 只允许管理员在服务端配置模型和明确允许发送数据的项目
 // API 密钥仅引用环境变量，禁止由浏览器请求传入
 type Config struct {
-	Enabled           bool             `mapstructure:"enabled" json:"enabled"`
-	AllowedProjectIDs []string         `mapstructure:"allowedProjectIds" json:"allowedProjectIds"`
-	Providers         []ProviderConfig `mapstructure:"providers" json:"-"`
+	Enabled           bool                `mapstructure:"enabled" json:"enabled"`
+	AllowedProjectIDs []string            `mapstructure:"allowedProjectIds" json:"allowedProjectIds"`
+	Providers         []ProviderConfig    `mapstructure:"providers" json:"-"`
+	SourceContext     SourceContextConfig `mapstructure:"sourceContext" json:"-"`
+}
+
+// SourceContextConfig 独立控制允许读取固定 GitHub 来源的项目，默认关闭
+type SourceContextConfig struct {
+	Enabled           bool     `mapstructure:"enabled"`
+	AllowedProjectIDs []string `mapstructure:"allowedProjectIds"`
 }
 
 // ProviderConfig 描述经过管理员批准的固定端点和模型白名单

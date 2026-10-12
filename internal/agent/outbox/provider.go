@@ -35,12 +35,9 @@ func ProvideExecutorManager(o *outbox.Outbox) *executor.Manager {
 	return m
 }
 
-// ProvideOutbox 为已有固定身份的 Agent 创建发件箱，动态注册时延后初始化
-func ProvideOutbox(ac *config.AgentConfig, grpcClient *grpc.ClientWrapper) (*outbox.Outbox, error) {
-	if ac == nil || ac.Agent.ID == "" || ac.Grpc.RegistrationToken != "" {
-		return nil, nil
-	}
-	return NewRegisteredOutbox(ac, grpcClient)
+// ProvideOutbox 将所有发件箱创建延迟到身份认证成功之后，避免提前发布事件
+func ProvideOutbox(_ *config.AgentConfig, _ *grpc.ClientWrapper) (*outbox.Outbox, error) {
+	return nil, nil
 }
 
 // NewRegisteredOutbox 使用注册响应中的最终身份创建发件箱

@@ -20,11 +20,14 @@ import (
 	"maps"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/internal/agent"
 	"github.com/arcentrix/arcentra/internal/agent/config"
+	"github.com/arcentrix/arcentra/internal/agent/identitystore"
 	"github.com/arcentrix/arcentra/internal/agent/taskqueue"
 	"github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/pkg/cron"
@@ -32,15 +35,24 @@ import (
 	"github.com/arcentrix/arcentra/pkg/metrics"
 	"github.com/arcentrix/arcentra/pkg/net"
 	"github.com/arcentrix/arcentra/pkg/version"
+	"google.golang.org/grpc/status"
 )
 
 // AgentServiceImpl implements agent.v1.AgentServiceServer
 type AgentServiceImpl struct {
 	agentv1.UnimplementedAgentServiceServer
-	agentConf     *config.AgentConfig
-	grpcClient    *grpc.ClientWrapper
-	metricsServer *metrics.Server // optional, for heartbeat running count
-	storageHolder *agent.StorageHolder
+	agentConf             *config.AgentConfig
+	grpcClient            *grpc.ClientWrapper
+	metricsServer         *metrics.Server // optional, for heartbeat running count
+	storageHolder         *agent.StorageHolder
+	lifecycleMu           sync.Mutex
+	identityStore         *identitystore.Store
+	identityPrepared      bool
+	registrationAttempted bool
+	registered            bool
+	heartbeatStarted      bool
+	closed                bool
+	authenticated         atomic.Bool
 }
 
 // NewAgentServiceImpl creates a new AgentService instance. metricsServer may be nil (used for heartbeat running count).
@@ -59,148 +71,269 @@ func (s *AgentServiceImpl) StorageHolder() *agent.StorageHolder {
 	return s.storageHolder
 }
 
-// Heartbeat handles heartbeat: when req is nil, starts periodic heartbeat to central server and does initial send;
-// otherwise handles incoming heartbeat request from server (returns ack).
-func (s *AgentServiceImpl) Heartbeat(_ context.Context, req *agentv1.HeartbeatRequest) (*agentv1.HeartbeatResponse, error) {
-	if req == nil {
-		// Start periodic heartbeat (called from bootstrap after registration)
-		if s == nil || s.agentConf == nil || s.grpcClient == nil || s.grpcClient.AgentClient == nil {
-			log.Warn("AgentService or grpc client is nil, skipping heartbeat setup")
-			return nil, fmt.Errorf("AgentService or grpc client is nil, skipping heartbeat setup")
-		}
-		interval := s.agentConf.Agent.Interval
-		if interval <= 0 {
-			interval = 60
-		}
-		spec := fmt.Sprintf("@every %ds", interval)
-		err := cron.AddFunc(spec, func() {
-			runningStepRunsCount := getRunningStepRunsCount(s.metricsServer)
-			hbReq := &agentv1.HeartbeatRequest{
-				AgentId:              s.agentConf.Agent.ID,
-				AgentName:            s.agentConf.Agent.Name,
-				Status:               agentv1.AgentStatus_AGENT_STATUS_ONLINE,
-				RunningStepRunsCount: runningStepRunsCount,
-				Timestamp:            time.Now().Unix(),
-			}
-			ctx, cancel := s.grpcClient.WithTimeoutAndAuth(context.Background())
-			defer cancel()
-			resp, err := s.grpcClient.AgentClient.Heartbeat(ctx, hbReq)
-			if err != nil || resp == nil || !resp.Success {
-				log.Warnw("Periodic heartbeat failed", "error", err)
-				return
-			}
-			log.Debugw("Heartbeat Message", "message", resp.Message, "timestamp", resp.Timestamp)
-		}, "agent-heartbeat")
-		if err != nil {
-			log.Errorw("Failed to add heartbeat cron job", "error", err)
-			return nil, fmt.Errorf("failed to add heartbeat cron job: %w", err)
-		}
-		log.Infow("Added periodic heartbeat to crond", "interval", spec)
-
-		runningStepRunsCount := getRunningStepRunsCount(s.metricsServer)
-		initReq := &agentv1.HeartbeatRequest{
-			AgentId:              s.agentConf.Agent.ID,
-			AgentName:            s.agentConf.Agent.Name,
-			Status:               agentv1.AgentStatus_AGENT_STATUS_ONLINE,
-			RunningStepRunsCount: runningStepRunsCount,
-			Timestamp:            time.Now().Unix(),
-		}
-		ctx, cancel := s.grpcClient.WithTimeoutAndAuth(context.Background())
-		defer cancel()
-		resp, err := s.grpcClient.AgentClient.Heartbeat(ctx, initReq)
-		if err != nil || resp == nil || !resp.Success {
-			log.Warnw("Initial heartbeat failed", "error", err)
-			return nil, fmt.Errorf("initial heartbeat failed: %w", err)
-		}
-		log.Infow("Initial heartbeat Message", "message", resp.Message)
-		return &agentv1.HeartbeatResponse{Success: true, Timestamp: time.Now().Unix()}, nil
+// PrepareIdentity 在任何注册和终态日志检查之前恢复持久身份，并持有存储锁至关闭
+func (s *AgentServiceImpl) PrepareIdentity(ctx context.Context) error {
+	if s == nil || s.agentConf == nil {
+		return fmt.Errorf("agent configuration is not ready")
 	}
-	log.Debugw("Heartbeat received", "agent_id", req.AgentId, "status", req.Status.String())
-	return &agentv1.HeartbeatResponse{
-		Success:   true,
-		Message:   "heartbeat acknowledged",
-		Timestamp: time.Now().Unix(),
-	}, nil
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return s.prepareIdentityLocked(ctx)
 }
 
-// Register registers this agent with the central server via gRPC.
-// Builds request from agentConf, calls server, updates agentConf in-place from response.
+func (s *AgentServiceImpl) prepareIdentityLocked(ctx context.Context) error {
+	if s.closed {
+		return fmt.Errorf("agent identity lifecycle is closed")
+	}
+	if s.identityPrepared {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	conf := s.agentConf
+	hasID := strings.TrimSpace(conf.Agent.ID) != ""
+	hasToken := strings.TrimSpace(conf.Grpc.Token) != ""
+	if hasID != hasToken || (conf.Agent.ID != "" && !hasID) || (conf.Grpc.Token != "" && !hasToken) {
+		return fmt.Errorf("configure the original agent.id and grpc.token together; partial explicit identity is not allowed")
+	}
+	if hasID {
+		if err := identitystore.ValidateIdentity(conf.Agent.ID, conf.Grpc.Token); err != nil {
+			return err
+		}
+	}
+	if conf.Agent.IdentityPersistence.Enabled {
+		if s.grpcClient == nil {
+			return fmt.Errorf("verified controller transport is required for identity persistence")
+		}
+		binding, err := s.grpcClient.ControllerIdentityBinding()
+		if err != nil {
+			return err
+		}
+		workspace := conf.Agent.WorkspaceDir
+		if workspace == "" {
+			workspace = "."
+		}
+		store := s.identityStore
+		if store == nil {
+			store, err = identitystore.Open(ctx, identitystore.Config{
+				Directory: conf.Agent.IdentityPersistence.Directory, Workspace: workspace, ControllerBinding: binding,
+			})
+			if err != nil {
+				return err
+			}
+			s.identityStore = store
+		}
+		if saved, ok := store.Identity(); ok {
+			if hasID && conf.Agent.ID != saved.AgentID {
+				_ = store.Close()
+				s.identityStore = nil
+				return fmt.Errorf("explicit agent identity does not match the persisted identity")
+			}
+			if !hasID {
+				conf.Agent.ID, conf.Grpc.Token = saved.AgentID, saved.PerAgentToken
+				s.grpcClient.UpdateToken(saved.PerAgentToken)
+				hasID, hasToken = true, true
+			}
+		}
+	}
+	if !hasID && !hasToken {
+		if strings.TrimSpace(conf.Grpc.RegistrationToken) == "" {
+			return fmt.Errorf("configure grpc.registrationToken or the original agent.id and grpc.token")
+		}
+		if err := taskqueue.CheckTerminalOutboxForEnrollment(ctx, conf.Agent.WorkspaceDir); err != nil {
+			return err
+		}
+	}
+	s.identityPrepared = true
+	return nil
+}
+
+// CloseIdentity 串行结束身份生命周期，阻止迟到的注册响应在存储解锁后写入
+func (s *AgentServiceImpl) CloseIdentity() error {
+	if s == nil {
+		return nil
+	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	s.authenticated.Store(false)
+	if s.heartbeatStarted {
+		_ = cron.Remove("agent-heartbeat")
+	}
+	if s.identityStore != nil {
+		return s.identityStore.Close()
+	}
+	return nil
+}
+
+// Authenticated 返回当前心跳认证状态，供就绪检查使用
+func (s *AgentServiceImpl) Authenticated() bool {
+	return s != nil && s.authenticated.Load()
+}
+
+// Heartbeat 先完成初始认证心跳，再启动周期心跳；认证失败不得触发重新注册
+func (s *AgentServiceImpl) Heartbeat(ctx context.Context, req *agentv1.HeartbeatRequest) (*agentv1.HeartbeatResponse, error) {
+	if req != nil {
+		return &agentv1.HeartbeatResponse{Success: true, Message: "heartbeat acknowledged", Timestamp: time.Now().Unix()}, nil
+	}
+	if s == nil || s.agentConf == nil || s.grpcClient == nil || s.grpcClient.AgentClient == nil {
+		return nil, fmt.Errorf("agent grpc client is not ready")
+	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.closed || !s.registered {
+		return nil, fmt.Errorf("agent must register before heartbeat startup")
+	}
+	if s.heartbeatStarted {
+		return nil, fmt.Errorf("agent heartbeat is already started")
+	}
+	if err := s.sendHeartbeatLocked(ctx); err != nil {
+		return nil, err
+	}
+	interval := s.agentConf.Agent.Interval
+	if interval <= 0 {
+		interval = 60
+	}
+	spec := fmt.Sprintf("@every %ds", interval)
+	if err := cron.AddFunc(spec, func() {
+		s.lifecycleMu.Lock()
+		defer s.lifecycleMu.Unlock()
+		if s.closed || !s.registered {
+			return
+		}
+		if err := s.sendHeartbeatLocked(context.Background()); err != nil {
+			log.Warnw("Periodic heartbeat failed", "error", err)
+		}
+	}, "agent-heartbeat"); err != nil {
+		s.authenticated.Store(false)
+		return nil, fmt.Errorf("failed to add heartbeat cron job")
+	}
+	s.heartbeatStarted = true
+	return &agentv1.HeartbeatResponse{Success: true, Timestamp: time.Now().Unix()}, nil
+}
+
+func (s *AgentServiceImpl) sendHeartbeatLocked(ctx context.Context) error {
+	hbCtx, cancel := s.grpcClient.WithTimeoutAndAuth(ctx)
+	defer cancel()
+	resp, err := s.grpcClient.AgentClient.Heartbeat(hbCtx, &agentv1.HeartbeatRequest{
+		AgentId: s.agentConf.Agent.ID, AgentName: s.agentConf.Agent.Name,
+		Status:               agentv1.AgentStatus_AGENT_STATUS_ONLINE,
+		RunningStepRunsCount: getRunningStepRunsCount(s.metricsServer), Timestamp: time.Now().Unix(),
+	})
+	if err != nil {
+		s.authenticated.Store(false)
+		return status.Error(status.Code(err), "agent heartbeat RPC failed")
+	}
+	if resp == nil || !resp.Success {
+		s.authenticated.Store(false)
+		return fmt.Errorf("agent heartbeat was rejected")
+	}
+	s.authenticated.Store(true)
+	return nil
+}
+
+// Register 注册当前进程，动态身份必须先持久化再写入运行时配置
 func (s *AgentServiceImpl) Register(ctx context.Context, _ *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
 	if s == nil || s.agentConf == nil || s.grpcClient == nil || s.grpcClient.AgentClient == nil {
 		return nil, fmt.Errorf("agent grpc client is not ready")
 	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	capacity, err := s.agentConf.Agent.ExecutionCapacity()
 	if err != nil {
 		return nil, err
 	}
+	if err := s.prepareIdentityLocked(ctx); err != nil {
+		return nil, err
+	}
+	if s.registrationAttempted {
+		return nil, fmt.Errorf("agent registration already attempted; operator reconciliation or restart is required")
+	}
 	registrationToken := s.agentConf.Grpc.RegistrationToken
-	if strings.TrimSpace(s.agentConf.Agent.ID) != "" && strings.TrimSpace(s.agentConf.Grpc.Token) != "" {
-		// 显式身份优先，认证失败直接返回；禁止用遗留注册令牌创建替代身份
+	dynamic := s.agentConf.Agent.ID == ""
+	if !dynamic {
 		registrationToken = ""
-	} else if strings.TrimSpace(registrationToken) != "" {
-		if err := taskqueue.CheckTerminalOutboxForEnrollment(ctx, s.agentConf.Agent.WorkspaceDir); err != nil {
+	} else if err := taskqueue.CheckTerminalOutboxForEnrollment(ctx, s.agentConf.Agent.WorkspaceDir); err != nil {
+		// Preparing identity may precede a long connection wait; check again at the RPC boundary.
+		return nil, err
+	}
+	regReq := &agentv1.RegisterRequest{
+		AgentId: s.agentConf.Agent.ID, Token: s.agentConf.Grpc.Token, RegistrationToken: registrationToken,
+		AgentName: s.agentConf.Agent.Name, Ip: net.GetLocalIP(), Os: runtime.GOOS, Arch: runtime.GOARCH,
+		Version: version.GetVersion().Version, MaxConcurrentStepRuns: capacity, Labels: maps.Clone(s.agentConf.Agent.Labels),
+	}
+	if dynamic && s.identityStore != nil {
+		if err := s.identityStore.BeginEnrollment(ctx); err != nil {
 			return nil, err
 		}
 	}
-	regReq := &agentv1.RegisterRequest{
-		AgentId:               s.agentConf.Agent.ID,
-		Token:                 s.agentConf.Grpc.Token,
-		RegistrationToken:     registrationToken,
-		AgentName:             s.agentConf.Agent.Name,
-		Ip:                    net.GetLocalIP(),
-		Os:                    runtime.GOOS,
-		Arch:                  runtime.GOARCH,
-		Version:               version.GetVersion().Version,
-		MaxConcurrentStepRuns: capacity,
-		Labels:                s.agentConf.Agent.Labels,
-	}
-	// Use a context without auth metadata for registration (Register is excluded from auth)
+	s.registrationAttempted = true
 	regCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	resp, err := s.grpcClient.AgentClient.Register(regCtx, regReq)
 	if err != nil {
-		return nil, err
+		return nil, status.Error(status.Code(err), "agent registration RPC failed")
 	}
-	if !resp.Success {
-		return nil, fmt.Errorf("register rejected: %s", resp.Message)
+	if resp == nil || !resp.Success {
+		return nil, fmt.Errorf("agent registration was rejected or returned no response")
 	}
-	if resp.AgentId != "" {
+	if dynamic {
+		if err := identitystore.ValidateIdentity(resp.AgentId, resp.AuthToken); err != nil {
+			return nil, fmt.Errorf("agent registration returned an invalid identity")
+		}
+		if s.identityStore != nil {
+			if err := s.identityStore.CommitIdentity(ctx, resp.AgentId, resp.AuthToken); err != nil {
+				return nil, err
+			}
+		}
+	} else if resp.AgentId != s.agentConf.Agent.ID || (resp.AuthToken != "" && resp.AuthToken != s.agentConf.Grpc.Token) {
+		return nil, fmt.Errorf("agent registration response does not match the selected identity")
+	}
+	if dynamic {
 		s.agentConf.Agent.ID = resp.AgentId
+		s.agentConf.Grpc.Token = resp.AuthToken
 	}
+	s.grpcClient.UpdateToken(s.agentConf.Grpc.Token)
 	if resp.HeartbeatInterval > 0 {
 		s.agentConf.Agent.Interval = int(resp.HeartbeatInterval)
 	}
 	if len(resp.Labels) > 0 {
-		s.agentConf.Agent.Labels = resp.Labels
+		s.agentConf.Agent.Labels = maps.Clone(resp.Labels)
 	}
-	// Save per-agent auth token for subsequent gRPC calls
-	if resp.AuthToken != "" {
-		s.agentConf.Grpc.Token = resp.AuthToken
-		s.grpcClient.UpdateToken(resp.AuthToken)
-	}
-	if resp.Storage != nil && s.storageHolder != nil {
+	if !resp.PendingApproval && resp.Storage != nil && s.storageHolder != nil {
 		s.storageHolder.SetFromProto(resp.Storage)
 	}
+	s.registered = !resp.PendingApproval
 	return resp, nil
 }
 
 // Unregister unregisters this agent from the central server via gRPC.
-func (s *AgentServiceImpl) Unregister(_ context.Context, _ *agentv1.UnregisterRequest) (*agentv1.UnregisterResponse, error) {
+func (s *AgentServiceImpl) Unregister(parentCtx context.Context, _ *agentv1.UnregisterRequest) (*agentv1.UnregisterResponse, error) {
 	if s == nil || s.agentConf == nil || s.grpcClient == nil || s.grpcClient.AgentClient == nil {
 		return &agentv1.UnregisterResponse{Success: true}, nil
 	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.authenticated.Store(false)
+	if s.closed || !s.registered {
+		return &agentv1.UnregisterResponse{Success: true}, nil
+	}
+	s.registered = false
 	if s.agentConf.Agent.ID == "" {
 		return &agentv1.UnregisterResponse{Success: true}, nil
 	}
-	ctx, cancel := s.grpcClient.WithTimeoutAndAuth(context.Background())
+	ctx, cancel := s.grpcClient.WithTimeoutAndAuth(parentCtx)
 	defer cancel()
 	resp, err := s.grpcClient.AgentClient.Unregister(ctx, &agentv1.UnregisterRequest{
 		AgentId: s.agentConf.Agent.ID,
 		Reason:  "agent shutdown",
 	})
 	if err != nil {
-		log.Warnw("agent unregister failed", "agentId", s.agentConf.Agent.ID, "error", err)
-		return nil, err
+		return nil, status.Error(status.Code(err), "agent unregistration RPC failed")
 	}
 	return resp, nil
 }

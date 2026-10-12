@@ -33,22 +33,24 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 )
 
 type ClientConf struct {
-	ServerAddr           string // server address (host:port format, e.g., "localhost:9090")
-	Token                string // Bearer token for authentication
-	ReadWriteTimeout     int    // read write timeout (seconds)
-	MaxMsgSize           int    // max message size (bytes), 0 means use default value
-	MaxReconnectAttempts int    // max reconnection attempts, 0 means unlimited
+	TLS                  ClientTLSConfig // 服务器证书认证，仅由操作者显式启用
+	ServerAddr           string          // server address (host:port format, e.g., "localhost:9090")
+	Token                string          // Bearer token for authentication
+	ReadWriteTimeout     int             // read write timeout (seconds)
+	MaxMsgSize           int             // max message size (bytes), 0 means use default value
+	MaxReconnectAttempts int             // max reconnection attempts, 0 means unlimited
 }
 
 // ClientWrapper gRPC client wrapper
 type ClientWrapper struct {
-	conn   *grpc.ClientConn
-	config ClientConf
+	conn                    *grpc.ClientConn
+	config                  ClientConf
+	controllerAuthenticated bool
+	controllerTrustDigest   string
 
 	// service clients
 	AgentClient    agentv1.AgentServiceClient
@@ -72,8 +74,12 @@ func NewGrpcClient(cfg ClientConf) (*ClientWrapper, error) {
 		return nil, fmt.Errorf("serverAddr is required")
 	}
 
+	transport, trustDigest, err := clientTransportCredentials(context.Background(), cfg.TLS)
+	if err != nil {
+		return nil, err
+	}
 	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(transport),
 		grpc.WithChainUnaryInterceptor(
 			inject.UnaryClientInterceptor(), // OpenTelemetry trace interceptor
 			//	interceptor.AuthUnaryClientInterceptor(cfg.Token),
@@ -112,9 +118,11 @@ func NewGrpcClient(cfg ClientConf) (*ClientWrapper, error) {
 	}
 
 	client := &ClientWrapper{
-		conn:          conn,
-		config:        cfg,
-		stopReconnect: make(chan struct{}),
+		conn:                    conn,
+		config:                  cfg,
+		controllerAuthenticated: cfg.TLS.Enabled,
+		controllerTrustDigest:   trustDigest,
+		stopReconnect:           make(chan struct{}),
 	}
 	client.initClients()
 
@@ -142,6 +150,10 @@ func (c *ClientWrapper) GetConn() *grpc.ClientConn {
 // Start gRPC client and monitor connection state
 func (c *ClientWrapper) Start(cfg ClientConf) error {
 	c.mu.Lock()
+	if normalizeClientAddress(cfg.ServerAddr) != normalizeClientAddress(c.config.ServerAddr) || cfg.TLS != c.config.TLS {
+		c.mu.Unlock()
+		return fmt.Errorf("gRPC transport configuration cannot change without a new client")
+	}
 	if c.config.Token != "" {
 		cfg.Token = c.config.Token
 	}
@@ -235,54 +247,12 @@ func (c *ClientWrapper) reconnect() error {
 	c.reconnectAttempts++
 	log.Infow("Attempting to reconnect", "attempt", c.reconnectAttempts, "max_attempts", maxAttempts)
 
-	// Close old connection if exists
-	if c.conn != nil {
-		err := c.conn.Close()
-		if err != nil {
-			return err
-		}
+	// ClientConn 自行管理连接恢复；不能并发替换已发布的服务客户端指针
+	// 已主动关闭的连接不得通过后台监控自动复活
+	if c.conn == nil || c.conn.GetState() == connectivity.Shutdown {
+		return fmt.Errorf("closed gRPC connection cannot reconnect")
 	}
-
-	// Recreate connection
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithChainUnaryInterceptor(
-			inject.UnaryClientInterceptor(), // OpenTelemetry trace interceptor
-			interceptor.LoggingUnaryClientInterceptor(),
-		),
-		grpc.WithChainStreamInterceptor(
-			inject.StreamClientInterceptor(), // OpenTelemetry trace interceptor
-			interceptor.LoggingStreamClientInterceptor(),
-		),
-	}
-
-	// set max message size (receive and send)
-	if c.config.MaxMsgSize > 0 {
-		opts = append(opts,
-			grpc.WithDefaultCallOptions(
-				grpc.MaxCallRecvMsgSize(c.config.MaxMsgSize),
-				grpc.MaxCallSendMsgSize(c.config.MaxMsgSize),
-			),
-		)
-	}
-
-	// Ensure address has host
-	serverAddr := c.config.ServerAddr
-	if strings.HasPrefix(serverAddr, ":") {
-		serverAddr = "localhost" + serverAddr
-	}
-
-	conn, err := grpc.NewClient(serverAddr, opts...)
-	if err != nil {
-		return fmt.Errorf("failed to recreate gRPC client: %w", err)
-	}
-
-	c.conn = conn
-	c.initClients()
-
-	// Reset reconnect attempts on successful reconnection
-	c.reconnectAttempts = 0
-	c.maxReconnectReached = false
+	c.conn.Connect()
 
 	return nil
 }

@@ -21,6 +21,7 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/pkg/sourceprovenance"
 )
 
 // IJobRunStore abstracts DB operations needed by the execution process
@@ -121,4 +122,15 @@ func (s *JobRunStore) FinishOpenStepRuns(ctx context.Context, stepIDs []string, 
 		}
 	}
 	return nil
+}
+
+// CaptureSourceExpectation 在排队前原子绑定源请求和目标 Agent
+func (s *JobRunStore) CaptureSourceExpectation(ctx context.Context, pipelineID, runID, jobID, agentID string, binding *sourceprovenance.Binding) error {
+	writer, ok := s.jobRunRepo.(interface {
+		CaptureSourceExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding) error
+	})
+	if !ok {
+		return fmt.Errorf("atomic job source capture unavailable")
+	}
+	return writer.CaptureSourceExpectation(ctx, pipelineID, runID, jobID, agentID, binding)
 }

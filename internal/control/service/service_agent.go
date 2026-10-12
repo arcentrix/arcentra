@@ -76,8 +76,8 @@ func (al *AgentService) DynamicRegisterAgent(ctx context.Context, agentID, agent
 
 	autoApprove, err := al.getAutoApproveSetting(ctx)
 	if err != nil {
-		log.Warnw("failed to read auto-approve setting, defaulting to true", "error", err)
-		autoApprove = true
+		log.Warnw("failed to read auto-approve setting, requiring approval")
+		autoApprove = false
 	}
 	if autoApprove {
 		req.IsEnabled = 1
@@ -97,18 +97,22 @@ func (al *AgentService) ApproveAgent(ctx context.Context, agentID string) error 
 	return al.agentRepo.Approve(ctx, agentID)
 }
 
-// getAutoApproveSetting reads AGENT_AUTO_APPROVE from t_setting and returns the boolean value.
+// getAutoApproveSetting reads the live approval policy. Missing, malformed, or unavailable
+// policy requires manual approval; the migration explicitly seeds auto_approve=true.
 func (al *AgentService) getAutoApproveSetting(ctx context.Context) (bool, error) {
 	setting, err := al.settingService.GetSetting(ctx, consts.SettingNameAgentAutoApprove)
 	if err != nil {
-		return true, err // default to true if setting not found
+		return false, err // Never grant approval when the policy cannot be read
 	}
 
+	if setting == nil {
+		return false, fmt.Errorf("agent approval policy unavailable")
+	}
 	var config struct {
 		AutoApprove bool `json:"auto_approve"`
 	}
-	if err := json.Unmarshal(setting.Value, &config); err != nil {
-		return true, err
+	if err := sonic.Unmarshal(setting.Value, &config); err != nil {
+		return false, fmt.Errorf("invalid agent approval policy")
 	}
 	return config.AutoApprove, nil
 }
@@ -131,14 +135,18 @@ type agentSecretConfig struct {
 func (al *AgentService) GenerateAgentToken(ctx context.Context, agentID string) (string, error) {
 	setting, err := al.settingService.GetSetting(ctx, consts.SettingNameAgentSecretKey)
 	if err != nil {
-		log.Errorw("failed to get agent secret key configuration", "error", err)
-		return "", err
+		log.Errorw("failed to get agent secret key configuration")
+		return "", fmt.Errorf("agent secret configuration unavailable")
+	}
+
+	if setting == nil {
+		return "", fmt.Errorf("agent secret configuration unavailable")
 	}
 
 	var config agentSecretConfig
 	if err := sonic.Unmarshal(setting.Value, &config); err != nil {
-		log.Errorw("failed to parse agent secret key configuration", "error", err)
-		return "", err
+		log.Errorw("failed to parse agent secret key configuration")
+		return "", fmt.Errorf("invalid agent secret configuration")
 	}
 
 	// Validate configuration

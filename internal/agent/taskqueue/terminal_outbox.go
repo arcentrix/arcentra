@@ -40,14 +40,15 @@ var (
 // Dependencies 只引用步骤；缺失记录表示步骤已确认，作业记录写入前必须持久化全部待交付步骤
 // 本地持久磁盘与控制面终态幂等性共同提供至少一次报告，不提供执行恢复或自动重跑
 type terminalRecord struct {
-	Version      int      `json:"version"`
-	Binding      string   `json:"binding"`
-	Kind         string   `json:"kind"`
-	RunID        string   `json:"runId"`
-	ClaimID      string   `json:"claimId"`
-	Dependencies []string `json:"dependencies,omitempty"`
-	Payload      []byte   `json:"payload"`
-	Checksum     string   `json:"checksum"`
+	Version      int                 `json:"version"`
+	Binding      string              `json:"binding"`
+	Kind         string              `json:"kind"`
+	RunID        string              `json:"runId"`
+	ClaimID      string              `json:"claimId"`
+	Dependencies []string            `json:"dependencies,omitempty"`
+	Payload      []byte              `json:"payload"`
+	Checksum     string              `json:"checksum"`
+	Quarantine   *terminalQuarantine `json:"quarantine,omitempty"`
 }
 
 type terminalEntry struct {
@@ -64,8 +65,11 @@ type terminalOutbox struct {
 	entries          map[string]terminalEntry
 	closed           bool
 	fatalErr         error
+	operatorOnly     bool
 	// 仅供文件同步故障测试注入
 	syncFile func(*os.File) error
+	// 仅允许包内故障测试替换可信传输检查，生产实例始终读取真实客户端配置
+	controllerAuthenticated func(*agentgrpc.ClientWrapper) bool
 }
 
 // terminalIOError 防止文件路径、序列化内容或 RPC 错误中的凭据进入日志
@@ -91,17 +95,21 @@ func terminalRecordName(kind, runID string) string {
 }
 
 func newTerminalOutbox(ctx context.Context, directory, agentID, controller string) (*terminalOutbox, error) {
+	return openTerminalOutbox(ctx, directory, agentID, controller, false)
+}
+
+func openTerminalOutbox(ctx context.Context, directory, agentID, controller string, operatorOnly bool) (*terminalOutbox, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(controller) == "" || directory == "" {
 		return nil, errors.New("terminal report outbox requires agent, controller and directory")
 	}
-	root, err := openPrivateTerminalDirectory(ctx, directory)
+	root, err := openPrivateTerminalDirectoryMode(ctx, directory, !operatorOnly)
 	if err != nil {
 		return nil, err
 	}
-	o := &terminalOutbox{root: root, agentID: agentID, binding: terminalBinding(agentID, controller), maxBytes: terminalOutboxMaxBytes, entries: make(map[string]terminalEntry), syncFile: (*os.File).Sync}
+	o := &terminalOutbox{root: root, operatorOnly: operatorOnly, agentID: agentID, binding: terminalBinding(agentID, controller), maxBytes: terminalOutboxMaxBytes, entries: make(map[string]terminalEntry), syncFile: (*os.File).Sync, controllerAuthenticated: authenticatedTerminalController}
 	fail := func(err error) (*terminalOutbox, error) { _ = o.close(); return nil, err }
 	o.dir, err = root.Open(".")
 	if err != nil {
@@ -114,17 +122,46 @@ func newTerminalOutbox(ctx context.Context, directory, agentID, controller strin
 	if err := validateTerminalOwner(info); err != nil {
 		return fail(err)
 	}
-	if err := o.dir.Chmod(0o700); err != nil {
+	if operatorOnly {
+		if info.Mode().Perm() != 0o700 {
+			return fail(errors.New("terminal quarantine directory must have mode 0700"))
+		}
+		binding, err := o.readFile(ctx, "identity", 65)
+		if err != nil {
+			return fail(err)
+		}
+		if string(binding) != o.binding+"\n" {
+			return fail(errors.New("terminal report outbox identity does not match this agent and controller"))
+		}
+	} else if err := o.dir.Chmod(0o700); err != nil {
 		return fail(terminalIO("protect directory", err))
 	}
-	if err := checkTerminalRegular(root, ".lock", true); err != nil {
+	if err := checkTerminalRegular(root, ".lock", !operatorOnly); err != nil {
 		return fail(err)
 	}
-	o.lock, err = root.OpenFile(".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	lockFlags := os.O_RDWR
+	if !operatorOnly {
+		lockFlags |= os.O_CREATE
+	}
+	o.lock, err = root.OpenFile(".lock", lockFlags, 0o600)
 	if err != nil {
 		return fail(terminalIO("open lock", err))
 	}
-	if err := o.lock.Chmod(0o600); err != nil {
+	if err := validateOpenedTerminalFile(root, ".lock", o.lock); err != nil {
+		return fail(err)
+	}
+	if operatorOnly {
+		info, err := o.lock.Stat()
+		if err != nil {
+			return fail(terminalIO("inspect lock", err))
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+			return fail(errors.New("terminal quarantine lock must be regular with mode 0600"))
+		}
+		if err := validateTerminalOwner(info); err != nil {
+			return fail(err)
+		}
+	} else if err := o.lock.Chmod(0o600); err != nil {
 		return fail(terminalIO("protect lock", err))
 	}
 	if err := lockTerminalOutbox(o.lock); err != nil {
@@ -145,6 +182,9 @@ func (o *terminalOutbox) recover(ctx context.Context) error {
 		return err
 	}
 	missingIdentity := errors.Is(err, os.ErrNotExist)
+	if missingIdentity && o.operatorOnly {
+		return errors.New("terminal quarantine identity is missing")
+	}
 	if !missingIdentity && string(binding) != o.binding+"\n" {
 		return errors.New("terminal report outbox identity does not match this agent and controller")
 	}
@@ -173,6 +213,9 @@ func (o *terminalOutbox) recover(ctx context.Context) error {
 				temporary++
 				if temporary > 1 {
 					return errors.New("terminal report outbox contains multiple incomplete writes")
+				}
+				if o.operatorOnly {
+					return errors.New("terminal quarantine has an incomplete write; restart the Agent for recovery before review")
 				}
 				// 原子替换前的临时文件从未允许上报或队列确认
 				if err := o.root.Remove(name); err != nil {
@@ -204,6 +247,10 @@ func (o *terminalOutbox) recover(ctx context.Context) error {
 			if err := sonic.Unmarshal(data, &record); err != nil {
 				return errors.New("malformed terminal report record")
 			}
+			canonical, canonicalErr := sonic.Marshal(record)
+			if canonicalErr != nil || !bytes.Equal(data, canonical) {
+				return errors.New("noncanonical terminal report record")
+			}
 			if err := o.validateRecord(record); err != nil {
 				return err
 			}
@@ -220,13 +267,18 @@ func (o *terminalOutbox) recover(ctx context.Context) error {
 			break
 		}
 	}
+	if err := o.validateQuarantineDependencies(); err != nil {
+		return err
+	}
 	if missingIdentity {
 		if err := o.writeAtomic(ctx, "identity", []byte(o.binding+"\n")); err != nil {
 			return err
 		}
 	}
-	if err := o.syncFile(o.dir); err != nil {
-		return terminalIO("sync directory", err)
+	if !o.operatorOnly {
+		if err := o.syncFile(o.dir); err != nil {
+			return terminalIO("sync directory", err)
+		}
 	}
 	return nil
 }
@@ -272,6 +324,8 @@ func (o *terminalOutbox) validateRecord(r terminalRecord) error {
 		return errors.New("terminal report payload identity or status mismatch")
 	}
 	expected := r.Checksum
+	quarantine := r.Quarantine
+	r.Quarantine = nil
 	r.Checksum = ""
 	data, err := sonic.Marshal(r)
 	if err != nil {
@@ -281,7 +335,9 @@ func (o *terminalOutbox) validateRecord(r terminalRecord) error {
 	if expected != hex.EncodeToString(sum[:]) {
 		return errors.New("terminal report checksum mismatch")
 	}
-	return nil
+	r.Checksum = expected
+	r.Quarantine = quarantine
+	return validateTerminalQuarantine(r)
 }
 
 func (o *terminalOutbox) put(ctx context.Context, r terminalRecord) error {
@@ -295,6 +351,9 @@ func (o *terminalOutbox) put(ctx context.Context, r terminalRecord) error {
 	}
 	if o.fatalErr != nil {
 		return o.fatalErr
+	}
+	if r.Quarantine != nil {
+		return errors.New("cannot replace terminal quarantine through report persistence")
 	}
 	r.Version = 1
 	r.Binding = o.binding
@@ -385,7 +444,24 @@ func (o *terminalOutbox) readFile(ctx context.Context, name string, size int64) 
 		return nil, terminalIO("open record", err)
 	}
 	defer file.Close()
-	if err := file.Chmod(0o600); err != nil {
+	if err := validateOpenedTerminalFile(o.root, name, file); err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return nil, terminalIO("inspect opened record", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, errors.New("terminal report outbox contains a non-regular file")
+	}
+	if err := validateTerminalOwner(info); err != nil {
+		return nil, err
+	}
+	if o.operatorOnly {
+		if info.Mode().Perm() != 0o600 {
+			return nil, errors.New("terminal quarantine files must have mode 0600")
+		}
+	} else if err := file.Chmod(0o600); err != nil {
 		return nil, terminalIO("protect record", err)
 	}
 	data, err := io.ReadAll(io.LimitReader(file, size+1))
@@ -429,12 +505,22 @@ func (o *terminalOutbox) deliverLocked(ctx context.Context, client *agentgrpc.Cl
 	if !ok {
 		return nil
 	}
+	if entry.record.Quarantine != nil {
+		return &terminalQuarantinedError{}
+	}
 	for _, dependency := range entry.record.Dependencies {
-		if err := o.deliverLocked(ctx, client, terminalRecordName("step", dependency)); err != nil {
+		dependencyName := terminalRecordName("step", dependency)
+		if err := o.deliverLocked(ctx, client, dependencyName); err != nil {
+			if terminalQuarantined(err) {
+				return o.quarantineDependencyLocked(ctx, name, dependencyName)
+			}
 			return err
 		}
 	}
 	if err := sendTerminalRecord(ctx, client, entry.record); err != nil {
+		if o.controllerAuthenticated != nil && o.controllerAuthenticated(client) {
+			return o.quarantineConflictLocked(ctx, name, err)
+		}
 		return err
 	}
 	if err := o.root.Remove(name); err != nil {
@@ -465,7 +551,7 @@ func (o *terminalOutbox) replay(ctx context.Context, client *agentgrpc.ClientWra
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if err := o.deliverLocked(ctx, client, name); err != nil {
+		if err := o.deliverLocked(ctx, client, name); err != nil && !terminalQuarantined(err) {
 			return err
 		}
 	}
@@ -547,7 +633,26 @@ func checkTerminalRegular(root *os.Root, name string, allowMissing bool) error {
 	return validateTerminalOwner(info)
 }
 
-func openPrivateTerminalDirectory(ctx context.Context, path string) (*os.Root, error) {
+// validateOpenedTerminalFile 拒绝检查和打开之间被替换为符号链接或其他 inode 的文件
+func validateOpenedTerminalFile(root *os.Root, name string, file *os.File) error {
+	actual, err := file.Stat()
+	if err != nil {
+		return terminalIO("inspect opened file", err)
+	}
+	current, err := root.Lstat(name)
+	if err != nil {
+		return terminalIO("inspect current file", err)
+	}
+	if !actual.Mode().IsRegular() || !current.Mode().IsRegular() || !os.SameFile(actual, current) {
+		return errors.New("terminal report file changed while opening")
+	}
+	if err := validateTerminalOwner(actual); err != nil {
+		return err
+	}
+	return validateTerminalOwner(current)
+}
+
+func openPrivateTerminalDirectoryMode(ctx context.Context, path string, create bool) (*os.Root, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return nil, terminalIO("resolve directory", err)
@@ -566,7 +671,7 @@ func openPrivateTerminalDirectory(ctx context.Context, path string) (*os.Root, e
 			return nil, err
 		}
 		info, err := root.Lstat(component)
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) && create {
 			if err := root.Mkdir(component, 0o700); err != nil {
 				_ = root.Close()
 				return nil, terminalIO("create directory", err)

@@ -23,6 +23,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"gorm.io/gorm"
 )
 
 // IAgentRepository defines agent persistence with context support for timeout, tracing and cancellation.
@@ -68,13 +69,19 @@ func (ar *AgentRepo) Create(ctx context.Context, agent *model.Agent) error {
 	return ar.Database().WithContext(ctx).Table(agent.TableName()).Create(agent).Error
 }
 
-// Get returns agent by agentId.
+// Get 从主库读取 Agent 当前身份与启用状态，不使用展示缓存
 func (ar *AgentRepo) Get(ctx context.Context, agentID string) (*model.Agent, error) {
-	detail, err := ar.getAgentDetailCached(ctx, agentID)
-	if err != nil {
+	var agent model.Agent
+	if err := ar.Database().WithContext(ctx).Clauses(database.Write()).
+		Table(agent.TableName()).Select(agentSelectFields).
+		Where("agent_id = ?", agentID).First(&agent).Error; err != nil {
 		return nil, err
 	}
-	return &detail.Agent, nil
+	// 数据库排序规则可能忽略大小写，认证身份必须逐字节一致
+	if agent.AgentID != agentID {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &agent, nil
 }
 
 var agentSelectFields = []string{

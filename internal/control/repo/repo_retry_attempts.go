@@ -15,7 +15,13 @@ import (
 
 func lockReportedJob(ctx context.Context, tx *gorm.DB, expected *model.JobRun) error {
 	var current model.JobRun
-	return reportedJobQuery(tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id"), expected).First(&current).Error
+	if err := reportedJobQuery(tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns), expected).First(&current).Error; err != nil {
+		return err
+	}
+	if !jobSnapshotEqual(&current, expected) {
+		return fmt.Errorf("execution identity or source changed")
+	}
+	return nil
 }
 
 func ensureJobAttemptsTerminal(ctx context.Context, tx *gorm.DB, jobRunID string) error {

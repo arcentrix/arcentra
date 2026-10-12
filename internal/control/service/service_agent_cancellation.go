@@ -9,20 +9,26 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func confirmCancelledJobReceipt(ctx context.Context, repository any, expected *model.JobRun, claim, digest string) error {
+func confirmCancelledJobReceipt(ctx context.Context, repository any, expected *model.JobRun, claim, digest string, sourceUpdates map[string]any) error {
 	if expected.ClaimID != claim || expected.CancellationClaimID != claim {
 		return status.Error(codes.PermissionDenied, "original cancellation claim required")
 	}
 	if expected.TerminalReportDigest != "" {
-		return validateTerminalReplay(expected.TerminalReportDigest, digest)
+		if err := validateTerminalReplay(expected.TerminalReportDigest, digest); err != nil {
+			return err
+		}
+		if err := validateSourceReceiptReplay(expected, sourceUpdates); err != nil {
+			return err
+		}
+		return verifySourceReplay(ctx, repository, expected, claim)
 	}
 	writer, ok := repository.(interface {
-		CommitCancellationReceipt(context.Context, *model.JobRun, string, string) error
+		CommitCancellationReceiptWithSource(context.Context, *model.JobRun, string, string, map[string]any) error
 	})
 	if !ok {
 		return status.Error(codes.Unimplemented, "atomic cancellation receipt unavailable")
 	}
-	if err := writer.CommitCancellationReceipt(ctx, expected, claim, digest); err != nil {
+	if err := writer.CommitCancellationReceiptWithSource(ctx, expected, claim, digest, sourceUpdates); err != nil {
 		return status.Error(codes.Internal, "commit cancellation receipt failed")
 	}
 	return nil

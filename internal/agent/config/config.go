@@ -16,10 +16,12 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
+	"strconv"
 	"strings"
-	"sync"
 
+	grpcclient "github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/log"
@@ -28,7 +30,6 @@ import (
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/pprof"
-	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 )
 
@@ -64,36 +65,45 @@ type MqConfig struct {
 
 // GrpcConfig gRPC client configuration
 type GrpcConfig struct {
-	ServerAddr           string `mapstructure:"serverAddr"`           // server address (host:port format, e.g., "localhost:9090")
-	Token                string `mapstructure:"token"`                // Bearer token for authentication (uses APIkey if not set)
-	RegistrationToken    string `mapstructure:"registrationToken"`    // Dynamic registration token (art_ prefix)
-	ReadWriteTimeout     int    `mapstructure:"readWriteTimeout"`     // read write timeout (seconds, default: 30)
-	MaxMsgSize           int    `mapstructure:"maxMsgSize"`           // max message size (bytes), 0 means use default value
-	MaxReconnectAttempts int    `mapstructure:"maxReconnectAttempts"` // max reconnection attempts, 0 means unlimited (default: 0)
+	TLS                  grpcclient.ClientTLSConfig `mapstructure:"tls"`
+	ServerAddr           string                     `mapstructure:"serverAddr"`           // server address (host:port format, e.g., "localhost:9090")
+	Token                string                     `mapstructure:"token"`                // Bearer token for authentication (uses APIkey if not set)
+	RegistrationToken    string                     `mapstructure:"registrationToken"`    // Dynamic registration token (art_ prefix)
+	ReadWriteTimeout     int                        `mapstructure:"readWriteTimeout"`     // read write timeout (seconds, default: 30)
+	MaxMsgSize           int                        `mapstructure:"maxMsgSize"`           // max message size (bytes), 0 means use default value
+	MaxReconnectAttempts int                        `mapstructure:"maxReconnectAttempts"` // max reconnection attempts, 0 means unlimited (default: 0)
 }
 
 // AgentInfo agent information
 type AgentInfo struct {
-	ID                string            `mapstructure:"id"`
-	Name              string            `mapstructure:"name"`
-	Mode              string            `mapstructure:"mode"` // Agent mode: sandbox, baremetal
-	Interval          int               `mapstructure:"interval"`
-	Labels            map[string]string `mapstructure:"labels"`
-	MaxConcurrentJobs int               `mapstructure:"maxConcurrentJobs"` // 串行工作器仅支持 1，0 表示默认 1
-	JobTimeout        int               `mapstructure:"jobTimeout"`        // Job timeout in seconds
-	WorkspaceDir      string            `mapstructure:"workspaceDir"`      // Workspace directory
-	TempDir           string            `mapstructure:"tempDir"`           // Temporary directory
-	LogLevel          string            `mapstructure:"logLevel"`          // Log level
-	EnableDocker      bool              `mapstructure:"enableDocker"`      // Whether Docker is enabled
-	DockerNetwork     string            `mapstructure:"dockerNetwork"`     // Docker network mode
-	ResourceLimits    map[string]string `mapstructure:"resourceLimits"`    // Resource limits (JSON string)
-	DeniedCommands    []string          `mapstructure:"deniedCommands"`    // Denied commands (JSON string)
-	EnvVars           map[string]string `mapstructure:"envVars"`           // Environment variables (JSON string)
-	ProxyURL          string            `mapstructure:"proxyUrl"`          // Proxy URL
-	CacheDir          string            `mapstructure:"cacheDir"`          // Cache directory
-	CleanupPolicy     map[string]any    `mapstructure:"cleanupPolicy"`     // Cleanup policy (JSON string)
-	Description       string            `mapstructure:"description"`       // Description
-	Sandbox           SandboxConfig     `mapstructure:"sandbox"`           // Sandbox configuration
+	IdentityPersistence IdentityPersistenceConfig `mapstructure:"identityPersistence"`
+	ID                  string                    `mapstructure:"id"`
+	Name                string                    `mapstructure:"name"`
+	Mode                string                    `mapstructure:"mode"` // Agent mode: sandbox, baremetal
+	Interval            int                       `mapstructure:"interval"`
+	Labels              map[string]string         `mapstructure:"labels"`
+	MaxConcurrentJobs   int                       `mapstructure:"maxConcurrentJobs"` // 串行工作器仅支持 1，0 表示默认 1
+	JobTimeout          int                       `mapstructure:"jobTimeout"`        // Job timeout in seconds
+	WorkspaceDir        string                    `mapstructure:"workspaceDir"`      // Workspace directory
+	TempDir             string                    `mapstructure:"tempDir"`           // Temporary directory
+	LogLevel            string                    `mapstructure:"logLevel"`          // Log level
+	EnableDocker        bool                      `mapstructure:"enableDocker"`      // Whether Docker is enabled
+	DockerNetwork       string                    `mapstructure:"dockerNetwork"`     // Docker network mode
+	ResourceLimits      map[string]string         `mapstructure:"resourceLimits"`    // Resource limits (JSON string)
+	DeniedCommands      []string                  `mapstructure:"deniedCommands"`    // Denied commands (JSON string)
+	EnvVars             map[string]string         `mapstructure:"envVars"`           // Environment variables (JSON string)
+	ProxyURL            string                    `mapstructure:"proxyUrl"`          // Proxy URL
+	CacheDir            string                    `mapstructure:"cacheDir"`          // Cache directory
+	CleanupPolicy       map[string]any            `mapstructure:"cleanupPolicy"`     // Cleanup policy (JSON string)
+	Description         string                    `mapstructure:"description"`       // Description
+	Sandbox             SandboxConfig             `mapstructure:"sandbox"`           // Sandbox configuration
+}
+
+// IdentityPersistenceConfig 配置可选的进程独占身份持久化，默认禁用
+// 目录必须由操作者显式指定，且位于构建工作区之外
+type IdentityPersistenceConfig struct {
+	Enabled   bool   `mapstructure:"enabled"`
+	Directory string `mapstructure:"directory"`
 }
 
 // SandboxConfig sandbox configuration
@@ -126,28 +136,18 @@ type KubernetesConfig struct {
 	Resources ResourceConfig `mapstructure:"resources"` // Kubernetes pod resources
 }
 
-var (
-	ac   AgentConfig
-	mu   sync.RWMutex // 保护配置的读写
-	once sync.Once
-)
-
-func NewConf(confDir string) *AgentConfig {
-	once.Do(func() {
-		var err error
-		ac, err = loadConfigFile(confDir)
-		if err != nil {
-			panic(fmt.Sprintf("load config file error: %s", err))
-		}
-	})
-	// 返回指向全局配置的指针（通过读锁保护）
-	mu.RLock()
-	defer mu.RUnlock()
-	return &ac
+// NewConf 读取独立的启动配置快照，配置变更必须重启 Agent
+func NewConf(confDir string) (*AgentConfig, error) {
+	conf, err := loadConfigFile(confDir)
+	if err != nil {
+		return nil, err
+	}
+	return &conf, nil
 }
 
 // LoadConfigFile load config file
 func loadConfigFile(confDir string) (AgentConfig, error) {
+	var ac AgentConfig
 	config := viper.New()
 	config.SetConfigFile(confDir)
 	config.SetConfigType("toml")
@@ -157,35 +157,6 @@ func loadConfigFile(confDir string) (AgentConfig, error) {
 		return ac, fmt.Errorf("failed to read configuration file: %v", err)
 	}
 
-	config.WatchConfig()
-	config.OnConfigChange(func(e fsnotify.Event) {
-		log.Infow("The configuration changes, re-analyze the configuration file", "file", e.Name)
-		if err := config.ReadInConfig(); err != nil {
-			log.Errorw("failed to re-read configuration file", "error", err, "file", e.Name)
-			return
-		}
-		// 使用写锁保护配置更新
-		mu.Lock()
-		if err := config.Unmarshal(&ac); err != nil {
-			mu.Unlock()
-			log.Errorw("failed to unmarshal configuration file", "error", err, "file", e.Name)
-			return
-		}
-		// Apply defaults/normalization after reload (e.g. auth token expiry units).
-		ac.HTTP.SetDefaults()
-		if err := http.ApplyHTTPAuthExpiry(config, &ac.HTTP); err != nil {
-			log.Errorw("failed to parse http auth expiry from config", "error", err, "file", e.Name)
-		}
-		ac.Metrics.SetDefaults()
-		ac.Pprof.SetDefaults()
-		if err := ac.parseServerAddr(); err != nil {
-			mu.Unlock()
-			log.Errorw("failed to parse server address after config reload", "error", err, "file", e.Name)
-			return
-		}
-		mu.Unlock()
-		log.Infow("configuration reloaded successfully", "file", e.Name)
-	})
 	if err := config.Unmarshal(&ac); err != nil {
 		return ac, fmt.Errorf("failed to unmarshal configuration file: %v", err)
 	}
@@ -218,30 +189,40 @@ func (c *AgentConfig) parseServerAddr() error {
 		c.Grpc.ReadWriteTimeout = 30
 	}
 
-	// if ServerAddr is already set, validate and normalize it
-	if c.Grpc.ServerAddr != "" {
-		// try to parse as URL first
-		if parsedURL, err := url.Parse(c.Grpc.ServerAddr); err == nil && parsedURL.Scheme != "" {
-			// URL format: https://host:port or https://host
-			host := parsedURL.Hostname()
-			port := parsedURL.Port()
-			if port != "" {
-				c.Grpc.ServerAddr = fmt.Sprintf("%s:%s", host, port)
-			} else {
-				// default to port 9090 if no port specified
-				c.Grpc.ServerAddr = fmt.Sprintf("%s:9090", host)
-			}
-			return nil
-		}
-		// if already in host:port format, keep it as is
-		if strings.Contains(c.Grpc.ServerAddr, ":") {
-			return nil
-		}
-		// if only host, add default port
-		c.Grpc.ServerAddr = fmt.Sprintf("%s:9090", c.Grpc.ServerAddr)
-		return nil
+	address := strings.TrimSpace(c.Grpc.ServerAddr)
+	if address == "" {
+		return fmt.Errorf("serverAddr is required in [grpc] section")
 	}
-
-	// ServerAddr is required
-	return fmt.Errorf("serverAddr is required in [grpc] section")
+	if address != c.Grpc.ServerAddr || strings.ContainsAny(address, "\r\n\t") {
+		return fmt.Errorf("invalid gRPC server address")
+	}
+	if strings.Contains(address, "://") {
+		parsed, err := url.Parse(address)
+		if err != nil || parsed.User != nil || parsed.Hostname() == "" || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+			return fmt.Errorf("invalid gRPC server URL")
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return fmt.Errorf("unsupported gRPC server URL scheme")
+		}
+		if (parsed.Scheme == "https") != c.Grpc.TLS.Enabled {
+			return fmt.Errorf("gRPC server URL scheme must match explicit TLS enabled setting")
+		}
+		port := parsed.Port()
+		if port == "" {
+			port = "9090"
+		}
+		address = net.JoinHostPort(parsed.Hostname(), port)
+	} else if !strings.Contains(address, ":") {
+		address = net.JoinHostPort(address, "9090")
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || host == "" || strings.ContainsAny(host, "/\\ @") {
+		return fmt.Errorf("gRPC server address must be host:port")
+	}
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 1 || number > 65535 {
+		return fmt.Errorf("invalid gRPC server port")
+	}
+	c.Grpc.ServerAddr = net.JoinHostPort(host, port)
+	return nil
 }

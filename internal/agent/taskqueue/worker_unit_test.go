@@ -83,7 +83,7 @@ func TestSourceCloneRelativeWorkspaceAndPinnedCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := handleSourceClone(context.Background(), &taskpayload.SourcePayload{Type: "git", Repo: source, Branch: "main", Commit: commit}, relativeWorkspace); err != nil {
+	if _, err := handleSourceClone(context.Background(), &taskpayload.SourcePayload{Type: "git", Repo: source, Branch: "main", Commit: commit}, relativeWorkspace); err != nil {
 		t.Fatal(err)
 	}
 	bytes, err := os.ReadFile(filepath.Join(workspace, "hello.txt"))
@@ -109,7 +109,7 @@ func TestQueuedCancellationPreventsExecution(t *testing.T) {
 }
 
 func TestGitSourceRejectsEmbeddedURLCredentials(t *testing.T) {
-	err := handleSourceClone(context.Background(), &taskpayload.SourcePayload{Type: "git", Repo: "https://user:secret-password@example.invalid/repo.git"}, t.TempDir())
+	_, err := handleSourceClone(context.Background(), &taskpayload.SourcePayload{Type: "git", Repo: "https://user:secret-password@example.invalid/repo.git"}, t.TempDir())
 	if err == nil || strings.Contains(err.Error(), "secret-password") || !strings.Contains(err.Error(), "source.auth") {
 		t.Fatalf("credential-bearing URL was not rejected safely: %v", err)
 	}

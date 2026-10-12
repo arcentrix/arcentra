@@ -61,11 +61,13 @@ type StepPayload struct {
 
 // SourcePayload describes source code configuration for a job.
 type SourcePayload struct {
-	Type   string            `json:"type"`
-	Repo   string            `json:"repo,omitempty"`
-	Branch string            `json:"branch,omitempty"`
-	Auth   map[string]string `json:"auth,omitempty"`
-	Commit string            `json:"commit,omitempty"`
+	// BindingDigest 绑定不可变的作业源请求，不包含认证信息
+	BindingDigest string            `json:"bindingDigest,omitempty"`
+	Type          string            `json:"type"`
+	Repo          string            `json:"repo,omitempty"`
+	Branch        string            `json:"branch,omitempty"`
+	Auth          map[string]string `json:"auth,omitempty"`
+	Commit        string            `json:"commit,omitempty"`
 }
 
 // JobRunKey returns a composite key for the job run task.

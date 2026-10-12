@@ -20,6 +20,7 @@ import (
 
 	"github.com/arcentrix/arcentra/pkg/log"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 )
 
 // excluded methods that don't need logging
@@ -34,7 +35,7 @@ var excludedMethods = map[string]bool{
 // logCall logs a gRPC server call with common format
 func logCall(callType string, method string, duration time.Duration, err error) {
 	if err != nil {
-		log.Errorw("gRPC call failed", "type", callType, "error", err)
+		log.Errorw("gRPC call failed", "type", callType, "method", method, "code", status.Code(err).String(), "duration", duration.String())
 	} else {
 		log.Debugw("gRPC call", "type", callType, "method", method, "duration", duration.String())
 	}
@@ -43,7 +44,7 @@ func logCall(callType string, method string, duration time.Duration, err error) 
 // logClientCall logs a gRPC client call with common format
 func logClientCall(callType string, method string, duration time.Duration, err error) {
 	if err != nil {
-		log.Errorw("gRPC client call failed", "type", callType, "error", err)
+		log.Errorw("gRPC client call failed", "type", callType, "method", method, "code", status.Code(err).String(), "duration", duration.String())
 	} else {
 		log.Debugw("gRPC client call", "type", callType, "method", method, "duration", duration.String())
 	}

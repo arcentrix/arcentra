@@ -30,6 +30,8 @@ import (
 type Router struct {
 	HTTP        *http.HTTP
 	ShutdownMgr *shutdown.Manager
+	// Readiness 在注册、认证和工作器启动成功后返回 true
+	Readiness func() bool
 }
 
 func NewRouter(
@@ -76,6 +78,9 @@ func (rt *Router) Router() *fiber.App {
 	app.Get("/health", func(c *fiber.Ctx) error {
 		if rt.ShutdownMgr != nil && rt.ShutdownMgr.IsShuttingDown() {
 			return c.Status(fiber.StatusServiceUnavailable).SendString("shutting down")
+		}
+		if rt.Readiness == nil || !rt.Readiness() {
+			return c.Status(fiber.StatusServiceUnavailable).SendString("not ready")
 		}
 		return c.SendString("ok")
 	})

@@ -45,9 +45,21 @@ func receiptKey(ctx context.Context, kind, runID string) string {
 	return runID
 }
 
-// terminalDeliveryError 即使控制面拒绝终态，也必须保留记录并阻止消费确认
+// terminalDeliveryError 保留未确认记录并阻止消费确认，仅已持久隔离的明确拒绝可结束队列处理
 // 日志不输出远端提供的消息；Unwrap 保留状态码供重试和诊断判断
 type terminalDeliveryError struct{ cause error }
+
+// terminalQuarantinedError 表示拒绝已持久隔离，队列可结束处理但不能视为控制面确认
+// 不包含远端消息、负载或凭据，只有可靠写入后的本地状态能产生此错误
+type terminalQuarantinedError struct{}
+
+func (e *terminalQuarantinedError) Error() string {
+	return "terminal report quarantined for local review"
+}
+func terminalQuarantined(err error) bool {
+	var quarantined *terminalQuarantinedError
+	return errors.As(err, &quarantined)
+}
 
 func (e *terminalDeliveryError) Error() string { return "terminal report delivery failed" }
 func (e *terminalDeliveryError) Unwrap() error { return e.cause }
