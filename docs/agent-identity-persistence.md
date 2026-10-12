@@ -65,3 +65,7 @@ Registration, heartbeat, and shutdown diagnostics retain safe status codes and f
 Per-Agent authentication reads the current enabled record and HMAC secret from the primary database without the former identity/secret caches. Missing, malformed, or unavailable auto-approval policy leaves a newly enrolled Agent pending approval; the existing migration's explicit auto-approve setting retains its normal meaning. Pending registration never returns object-storage credentials. Disabled/deleted identities or changed HMAC credentials are denied without enrollment fallback.
 
 This software no longer reads or writes the old Redis HMAC-secret cache. It does not purge existing cache data or rotate real credentials during startup. Any cleanup of previously stored cache entries belongs to an explicitly authorized operational change.
+
+## Deployment probes
+
+`/health` remains a readiness alias; use `/ready` for readiness and `/live` for liveness. Pending enrollment or authentication loss must not cause a liveness restart loop. Public HTTP shutdown/debug endpoints are unavailable; use OS signals. See `deployment-readiness.md` for direct controller TLS, immutable identity/CA boundaries and explicit migration prerequisites.

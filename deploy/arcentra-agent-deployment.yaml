@@ -40,10 +40,6 @@ spec:
           name: http
         - containerPort: 8084
           name: metrics
-        - containerPort: 8085
-          name: pprof
-        - containerPort: 8086
-          name: grpc
         volumeMounts:
         - name: config
           mountPath: /conf.d
@@ -55,15 +51,22 @@ spec:
           limits:
             memory: "2Gi"
             cpu: "2000m"
+        # Allow initialization before liveness begins; tune for the reviewed host.
+        startupProbe:
+          httpGet:
+            path: /live
+            port: 8081
+          periodSeconds: 5
+          failureThreshold: 30
         livenessProbe:
           httpGet:
-            path: /health
+            path: /live
             port: 8081
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /health
+            path: /ready
             port: 8081
           initialDelaySeconds: 10
           periodSeconds: 5
@@ -91,10 +94,6 @@ spec:
     targetPort: 8084
     protocol: TCP
     name: metrics
-  - port: 8086
-    targetPort: 8086
-    protocol: TCP
-    name: grpc
   selector:
     app: arcentra-agent
 

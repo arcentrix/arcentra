@@ -16,7 +16,6 @@ package config
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/arcentrix/arcentra/internal/control/copilot"
 	"github.com/arcentrix/arcentra/internal/shared/deployment"
@@ -24,7 +23,6 @@ import (
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/nova"
-	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
 	"github.com/arcentrix/arcentra/pkg/cache"
@@ -88,78 +86,32 @@ type PipelineConfig struct {
 	KeepWorkspace bool `mapstructure:"keepWorkspace" json:"keepWorkspace"`
 }
 
-var (
-	cfg  AppConfig
-	mu   sync.RWMutex // 保护配置的读写
-	once sync.Once
-)
-
-func NewConf(confDir string) *AppConfig {
-	once.Do(func() {
-		var err error
-		cfg, err = LoadConfigFile(confDir)
-		if err != nil {
-			panic(fmt.Sprintf("load config file error: %s", err))
-		}
-	})
-	mu.RLock()
-	defer mu.RUnlock()
-	return &cfg
+// NewConf 读取独立的启动配置快照，配置和证书变更必须重启控制器
+func NewConf(confDir string) (*AppConfig, error) {
+	conf, err := LoadConfigFile(confDir)
+	if err != nil {
+		return nil, err
+	}
+	return &conf, nil
 }
 
-// GetConfig 获取当前配置（用于热重载场景）
-func GetConfig() AppConfig {
-	mu.RLock()
-	defer mu.RUnlock()
-	return cfg
-}
-
-// LoadConfigFile load config file
+// LoadConfigFile 读取配置到独立结构，不监听或热更新运行中的安全配置
 func LoadConfigFile(confDir string) (AppConfig, error) {
+	var cfg AppConfig
 	config := viper.New()
-	config.SetConfigFile(confDir) // 文件名
+	config.SetConfigFile(confDir)
 	if err := config.ReadInConfig(); err != nil {
-		return cfg, fmt.Errorf("failed to read configuration file: %v", err)
+		return cfg, fmt.Errorf("failed to read configuration file: %w", err)
 	}
-
-	config.WatchConfig()
-	config.OnConfigChange(func(e fsnotify.Event) {
-		log.Infow("The configuration changes, re-analyze the configuration file", "file", e.Name)
-		if err := config.ReadInConfig(); err != nil {
-			log.Errorw("failed to re-read configuration file", "error", err, "file", e.Name)
-			return
-		}
-		// 使用写锁保护配置更新
-		mu.Lock()
-		if err := config.Unmarshal(&cfg); err != nil {
-			mu.Unlock()
-			log.Errorw("failed to unmarshal configuration file", "error", err, "file", e.Name)
-			return
-		}
-		// Apply defaults/normalization after reload (e.g. auth token expiry units).
-		cfg.HTTP.SetDefaults()
-		if err := http.ApplyHTTPAuthExpiry(config, &cfg.HTTP); err != nil {
-			// Keep running with defaults/previous values if parsing fails.
-			log.Errorw("failed to parse http auth expiry from config", "error", err, "file", e.Name)
-		}
-		cfg.Metrics.SetDefaults()
-		cfg.Pprof.SetDefaults()
-		mu.Unlock()
-		log.Infow("configuration reloaded successfully", "file", e.Name)
-	})
 	if err := config.Unmarshal(&cfg); err != nil {
-		return cfg, fmt.Errorf("failed to unmarshal configuration file: %v", err)
+		return cfg, fmt.Errorf("failed to unmarshal configuration file: %w", err)
 	}
-	// Apply defaults/normalization after initial load (e.g. auth token expiry units).
 	cfg.HTTP.SetDefaults()
 	if err := http.ApplyHTTPAuthExpiry(config, &cfg.HTTP); err != nil {
 		return cfg, err
 	}
 	cfg.Metrics.SetDefaults()
 	cfg.Pprof.SetDefaults()
-	log.Infow("config file loaded",
-		"path", confDir,
-	)
-
+	log.Infow("config file loaded", "path", confDir)
 	return cfg, nil
 }

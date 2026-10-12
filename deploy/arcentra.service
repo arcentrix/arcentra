@@ -8,9 +8,11 @@ Wants=network.target
 Type=simple
 User=arcentra
 Group=arcentra
-WorkingDirectory=/opt/arcentra
-ExecStart=/opt/arcentra/arcentra -conf /opt/arcentra/conf.d/config.toml -plugin /opt/arcentra/plugins
-ExecReload=/bin/kill -HUP $MAINPID
+WorkingDirectory=/var/lib/arcentra
+StateDirectory=arcentra
+StateDirectoryMode=0700
+ExecStart=/opt/arcentra/arcentra -conf /opt/arcentra/conf.d/config.toml -plugin-conf /opt/arcentra/conf.d/plugins.toml
+# Configuration and TLS changes require an explicit restart; SIGHUP is not reload.
 Restart=always
 RestartSec=5s
 StandardOutput=journal
@@ -22,7 +24,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/arcentra
+ReadWritePaths=/var/lib/arcentra
 
 # 资源限制
 LimitNOFILE=65536

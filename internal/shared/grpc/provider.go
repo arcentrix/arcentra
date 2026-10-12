@@ -38,8 +38,11 @@ func ProvideGrpcServer(
 	c cache.ICache,
 	mysqlDB *gorm.DB,
 	kafkaSettings service.KafkaSettings,
-) *ServerWrapper {
-	server := NewGrpcServer(*cfg)
+) (*ServerWrapper, error) {
+	server, err := NewGrpcServer(*cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	// Set up token verifier for agent authentication
 	tokenVerifier := interceptor.NewAgentTokenVerifier(services.Agent, repos.Agent, services.Setting, c)
@@ -54,7 +57,7 @@ func ProvideGrpcServer(
 	}
 
 	server.Register(services, redisClient, mysqlDB, kafkaSettings)
-	return server
+	return server, nil
 }
 
 // ProvideGrpcClient 提供 gRPC 客户端实例

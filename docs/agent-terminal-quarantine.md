@@ -16,7 +16,7 @@ Ordinary network failures, authentication errors, generic or malformed gRPC erro
 
 - Upgrade controller and Agent together. This quarantine stage adds no database migration. Installations missing the earlier terminal-receipt schema must apply that existing migration as described in [Durable Agent terminal reports](agent-terminal-reports.md). An older controller with a newer Agent, or older Agent with a newer controller, keeps conflicts pending and blocking until the compatible upgrade is in place.
 - Retain the original configured `agent.id`, per-Agent `grpc.token`, normalized `grpc.serverAddr`, and durable workspace. Dynamic enrollment is not credential recovery.
-- To enable automatic quarantine, configure the Agent to use an already available trusted TLS endpoint. The current controller listener is plaintext; this change adds verified client TLS, not server certificate provisioning or a TLS server listener. Operators must provide trusted TLS termination/proxying that reaches the intended controller. Protect the proxy-to-controller connection and preserve the existing Agent authentication checks.
+- To enable automatic quarantine, configure the Agent to use an already available trusted TLS endpoint. Use the optional controller gRPC TLS listener with operator-supplied files, or an existing trusted TLS proxy that reaches the intended controller. See `deployment-readiness.md`. Protect any proxy-to-controller plaintext connection and preserve the existing Agent authentication checks. No server certificates are provisioned automatically.
 
 ```toml
 [grpc]

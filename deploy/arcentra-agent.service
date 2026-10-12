@@ -8,9 +8,13 @@ Wants=network.target
 Type=simple
 User=arcentra-agent
 Group=arcentra-agent
-WorkingDirectory=/opt/arcentra-agent
+# Set agent.workspaceDir and agent.tempDir below /var/lib/arcentra-agent
+# in the operator-reviewed configuration; the generic container example uses another path.
+WorkingDirectory=/var/lib/arcentra-agent
+StateDirectory=arcentra-agent
+StateDirectoryMode=0700
 ExecStart=/opt/arcentra-agent/arcentra-agent -conf /opt/arcentra-agent/conf.d/agent.toml
-ExecReload=/bin/kill -HUP $MAINPID
+# Configuration and TLS changes require an explicit restart; SIGHUP is not reload.
 Restart=always
 RestartSec=5s
 StandardOutput=journal
@@ -22,7 +26,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/arcentra-agent
+ReadWritePaths=/var/lib/arcentra-agent
 
 # 资源限制
 LimitNOFILE=65536

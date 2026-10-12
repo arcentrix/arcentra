@@ -41,8 +41,6 @@ spec:
         - containerPort: 9090
           name: grpc
         - containerPort: 8082
-          name: pprof
-        - containerPort: 8083
           name: metrics
         volumeMounts:
         - name: config
@@ -55,15 +53,22 @@ spec:
           limits:
             memory: "2Gi"
             cpu: "2000m"
+        # Allow initialization before liveness begins; tune for the reviewed host.
+        startupProbe:
+          httpGet:
+            path: /live
+            port: 8080
+          periodSeconds: 5
+          failureThreshold: 30
         livenessProbe:
           httpGet:
-            path: /health
+            path: /live
             port: 8080
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /health
+            path: /ready
             port: 8080
           initialDelaySeconds: 10
           periodSeconds: 5
@@ -79,7 +84,7 @@ kind: Service
 metadata:
   name: arcentra
   labels:
-    app: Arcentra
+    app: arcentra
 spec:
   type: ClusterIP
   ports:
@@ -91,9 +96,9 @@ spec:
     targetPort: 9090
     protocol: TCP
     name: grpc
-  - port: 8083
-    targetPort: 8083
+  - port: 8082
+    targetPort: 8082
     protocol: TCP
     name: metrics
   selector:
-    app: Arcentra
+    app: arcentra

@@ -16,9 +16,13 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
+	"net"
 	"os/signal"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -54,6 +58,8 @@ type App struct {
 	Services      *service.Services
 	ShutdownMgr   *shutdown.Manager
 	Engine        *process.Process
+	ready         atomic.Bool
+	grpcRequired  atomic.Bool
 }
 
 // InitAppFunc init app function type
@@ -94,7 +100,6 @@ func NewApp(
 			pipelineEngine.ConfigurePipelineDeployments(deploymentService)
 		}
 	}
-	httpApp := rt.Router()
 
 	// Wire the process into Services so PipelineServiceImpl can use it.
 	if pipelineEngine != nil {
@@ -102,7 +107,6 @@ func NewApp(
 	}
 
 	app := &App{
-		HTTPApp:       httpApp,
 		PluginMgr:     pluginMgr,
 		GrpcServer:    grpcServer,
 		MetricsServer: metricsServer,
@@ -114,6 +118,10 @@ func NewApp(
 		ShutdownMgr:   shutdownMgr,
 		Engine:        pipelineEngine,
 	}
+
+	app.grpcRequired.Store(appConf != nil && appConf.Grpc.Port > 0)
+	rt.Readiness = app.Ready
+	app.HTTPApp = rt.Router()
 
 	cleanup := func() {
 		// stop pipeline process (waits for in-progress runs)
@@ -142,7 +150,11 @@ func NewApp(
 		// stop gRPC server
 		if grpcServer != nil {
 			log.Info("Shutting down gRPC server...")
-			grpcServer.Stop()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			if err := grpcServer.Stop(ctx); err != nil {
+				log.Errorw("Failed to stop gRPC server", "error", err)
+			}
+			cancel()
 		}
 
 		if rt.Services != nil && rt.Services.LogAggregator != nil {
@@ -196,10 +208,80 @@ func Bootstrap(configFile string, pluginConfigFile string, initApp InitAppFunc) 
 	return app, cleanup, appConf, nil
 }
 
-// Run start app and wait for exit signal, then gracefully shutdown
-func Run(app *App, cleanup func()) {
-	appConf := app.AppConf
+// Ready 表示控制器启动完成且所需 gRPC 监听器仍可服务
+func (app *App) Ready() bool {
+	return app != nil && app.ready.Load() && (!app.grpcRequired.Load() || app.GrpcServer.Ready()) &&
+		(app.ShutdownMgr == nil || !app.ShutdownMgr.IsShuttingDown())
+}
 
+// Run 使用进程信号管理唯一的服务生命周期，并返回启动或运行失败
+func Run(app *App, cleanup func()) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	defer cancel()
+	return RunContext(ctx, app, cleanup)
+}
+
+// RunContext 在给定上下文中运行控制器，停机最多等待三十秒
+func RunContext(ctx context.Context, app *App, cleanup func()) error {
+	return runContext(ctx, app, cleanup, 30*time.Second)
+}
+
+func runContext(ctx context.Context, app *App, cleanup func(), shutdownTimeout time.Duration) (runErr error) {
+	if app == nil || app.AppConf == nil || app.HTTPApp == nil {
+		return errors.New("controller application is incomplete")
+	}
+	ctx, cancelRun := context.WithCancel(ctx)
+	appConf := *app.AppConf
+	app.grpcRequired.Store(appConf.Grpc.Port > 0)
+	app.ready.Store(false)
+	var httpListener *startupListener
+	defer func() {
+		app.ready.Store(false)
+		cancelRun()
+		if app.ShutdownMgr != nil {
+			app.ShutdownMgr.Shutdown()
+		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		// 停止调度新任务并取消运行派生上下文，随后网络排空和清理共享总期限
+		runErr = errors.Join(runErr, drainComponents(shutdownCtx, []func() error{func() error { cron.Stop(); return nil }}))
+		// 先停止接收 HTTP 请求，gRPC 排空和其余组件清理共享总期限
+		if httpListener != nil {
+			_ = httpListener.Close()
+		}
+		tasks := []func() error{}
+		if httpListener != nil {
+			tasks = append(tasks, func() error { return app.HTTPApp.ShutdownWithContext(shutdownCtx) })
+		}
+		if app.GrpcServer != nil {
+			tasks = append(tasks, func() error { return app.GrpcServer.Stop(shutdownCtx) })
+		}
+		runErr = errors.Join(runErr, drainComponents(shutdownCtx, tasks))
+		// 依赖资源在网络请求排空之后释放，所有清理仍受同一总期限约束
+		runErr = errors.Join(runErr, drainComponents(shutdownCtx, []func() error{func() error {
+			if cleanup != nil {
+				cleanup()
+			}
+			return nil
+		}}))
+	}()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if app.grpcRequired.Load() {
+		if app.GrpcServer == nil {
+			return errors.New("configured gRPC listener is unavailable")
+		}
+		if err := app.GrpcServer.Start(ctx); err != nil {
+			return err
+		}
+	}
+	var lc net.ListenConfig
+	bound, err := lc.Listen(ctx, "tcp", net.JoinHostPort(appConf.HTTP.Host, strconv.Itoa(appConf.HTTP.Port)))
+	if err != nil {
+		return fmt.Errorf("HTTP listen failed: %w", err)
+	}
+	httpListener = &startupListener{Listener: bound, started: make(chan struct{}), onStart: func() { app.ready.Store(true) }}
 	// Initialize and start global cron scheduler
 	cron.Init(app.Logger)
 	cron.Start()
@@ -208,7 +290,7 @@ func Run(app *App, cleanup func()) {
 	// SCM polling job (webhook is primary, polling is fallback)
 	if app.Services != nil && app.Services.Scm != nil {
 		_ = cron.AddFunc("*/1 * * * *", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 			defer cancel()
 			_ = app.Services.Scm.PollOnce(ctx)
 		}, "scm-poll")
@@ -218,7 +300,7 @@ func Run(app *App, cleanup func()) {
 	// exceeds AGENT_HEARTBEAT_EXPIRE_SECONDS (default 180s, matching 3× 60s heartbeat interval).
 	if app.Services != nil && app.Services.Agent != nil {
 		_ = cron.AddFunc("@every 30s", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			app.Services.Agent.MarkTimeoutAgentsOffline(ctx)
 		}, "agent-heartbeat-timeout")
@@ -234,12 +316,12 @@ func Run(app *App, cleanup func()) {
 			app.Repos.Project,
 			service.LoadPipelineDefinition,
 		)
-		syncCtx, syncCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		syncCtx, syncCancel := context.WithTimeout(ctx, 60*time.Second)
 		cronMgr.SyncAll(syncCtx)
 		syncCancel()
 
 		_ = cron.AddFunc("*/5 * * * *", func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			defer cancel()
 			cronMgr.SyncAll(ctx)
 		}, "pipeline-cron-sync")
@@ -257,57 +339,93 @@ func Run(app *App, cleanup func()) {
 		}
 	}
 
-	// start gRPC server
-	if app.GrpcServer != nil && appConf.Grpc.Port > 0 {
-		safe.Go(func() {
-			if err := app.GrpcServer.Start(appConf.Grpc); err != nil {
-				log.Errorw("gRPC server failed: %v", err)
-			}
-		})
+	var grpcDone <-chan struct{}
+	if app.grpcRequired.Load() {
+		grpcDone = app.GrpcServer.Done()
 	}
-
-	// set signal listener (graceful shutdown)
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-
-	// start HTTP server (async)
+	var shutdownRequested <-chan struct{}
+	if app.ShutdownMgr != nil {
+		shutdownRequested = app.ShutdownMgr.Wait()
+	}
+	httpDone := make(chan error, 1)
 	safe.Go(func() {
-		addr := appConf.HTTP.Host + ":" + fmt.Sprintf("%d", appConf.HTTP.Port)
-		log.Infow("HTTP listener started",
-			"address", addr,
-		)
-		if err := app.HTTPApp.Listen(addr); err != nil {
-			log.Errorw("HTTP listener failed",
-				"address", addr,
-				zap.Error(err),
-			)
+		err := app.HTTPApp.Listener(httpListener)
+		app.ready.Store(false)
+		httpDone <- err
+	})
+	// 第一次 Accept 证明 HTTP 服务循环已启动，绑定失败不会暴露就绪状态
+	select {
+	case <-httpListener.started:
+	case err := <-httpDone:
+		return listenerError("HTTP", err)
+	case <-grpcDone:
+		return listenerError("gRPC", app.GrpcServer.Err())
+	case <-ctx.Done():
+		return nil
+	case <-shutdownRequested:
+		return nil
+	}
+	select {
+	case err := <-httpDone:
+		return listenerError("HTTP", err)
+	case <-grpcDone:
+		return listenerError("gRPC", app.GrpcServer.Err())
+	case <-ctx.Done():
+		return nil
+	case <-shutdownRequested:
+		return nil
+	}
+}
+
+func listenerError(name string, err error) error {
+	if err == nil {
+		err = errors.New("listener exited unexpectedly")
+	}
+	return fmt.Errorf("%s server failed: %w", name, err)
+}
+
+func drainComponents(ctx context.Context, tasks []func() error) error {
+	finished := make(chan error, len(tasks))
+	for _, task := range tasks {
+		safe.Go(func() { finished <- task() })
+	}
+	var result error
+	for range tasks {
+		select {
+		case err := <-finished:
+			result = errors.Join(result, err)
+		case <-ctx.Done():
+			return errors.Join(result, fmt.Errorf("controller shutdown deadline exceeded: %w", ctx.Err()))
+		}
+	}
+	return result
+}
+
+type startupListener struct {
+	net.Listener
+	started   chan struct{}
+	onStart   func()
+	once      sync.Once
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func (l *startupListener) Accept() (net.Conn, error) {
+	l.once.Do(func() {
+		if l.onStart != nil {
+			l.onStart()
+		}
+		close(l.started)
+	})
+	return l.Listener.Accept()
+}
+
+func (l *startupListener) Close() error {
+	l.closeOnce.Do(func() {
+		l.closeErr = l.Listener.Close()
+		if errors.Is(l.closeErr, net.ErrClosed) {
+			l.closeErr = nil
 		}
 	})
-
-	// wait for exit signal (either from OS signal or HTTP shutdown endpoint)
-	select {
-	case sig := <-quit:
-		log.Infow("Received OS signal, shutting down gracefully...", "signal", sig)
-		// mark as shutting down for health check
-		if app.ShutdownMgr != nil {
-			app.ShutdownMgr.Shutdown()
-		}
-	case <-app.ShutdownMgr.Wait():
-		log.Info("Received shutdown request via HTTP endpoint, shutting down gracefully...")
-	}
-
-	// close components in order
-	// close HTTP server
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-	if err := app.HTTPApp.ShutdownWithContext(shutdownCtx); err != nil {
-		log.Errorw("HTTP server shutdown error: %v", err)
-	} else {
-		log.Info("HTTP server shut down gracefully")
-	}
-
-	// close plugin manager and other resources
-	cleanup()
-
-	log.Info("Server shutdown complete")
+	return l.closeErr
 }

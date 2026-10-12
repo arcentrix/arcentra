@@ -40,7 +40,7 @@ var ProviderSet = wire.NewSet(
 )
 
 // ProvideConf 提供应用配置
-func ProvideConf(configPath string) *AppConfig {
+func ProvideConf(configPath string) (*AppConfig, error) {
 	return NewConf(configPath)
 }
 
