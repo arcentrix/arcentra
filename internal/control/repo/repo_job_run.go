@@ -49,6 +49,9 @@ func (r *JobRunRepo) Create(ctx context.Context, jobRun *model.JobRun) error {
 	if jobRun == nil {
 		return gorm.ErrInvalidData
 	}
+	if jobRun.SourceExpectationCaptured || jobRun.SourceType != "" || jobRun.SourceRepository != "" || jobRun.SourceRef != "" || jobRun.SourceBindingDigest != "" || jobRun.SourceResolvedCommit != "" || (jobRun.SourceProvenanceState != "" && jobRun.SourceProvenanceState != "unknown") {
+		return gorm.ErrInvalidData
+	}
 	return r.Database().WithContext(ctx).Create(jobRun).Error
 }
 
@@ -72,11 +75,15 @@ func (r *JobRunRepo) UpdateByJobRunID(ctx context.Context, jobRunID string, upda
 	if len(updates) == 0 {
 		return nil
 	}
+	if err := rejectSourceUpdates(updates); err != nil {
+		return err
+	}
 	updates["updated_at"] = time.Now()
-	return r.Database().WithContext(ctx).
-		Model(&model.JobRun{}).
-		Where("job_run_id = ?", jobRunID).
-		Updates(updates).Error
+	query := r.Database().WithContext(ctx).Model(&model.JobRun{}).Where("job_run_id = ?", jobRunID)
+	if changesJobIdentity(updates) {
+		return reportedStatusResult(query.Where("source_expectation_captured = ?", false).Updates(updates))
+	}
+	return query.Updates(updates).Error
 }
 
 // ListByPipelineRunID returns all job runs belonging to a pipeline run.

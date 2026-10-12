@@ -10,28 +10,60 @@ import (
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/pkg/sourceprovenance"
 	"gorm.io/gorm"
 )
 
 // ErrPipelineRunNotFound 表示指定流水线下不存在该运行记录
 var ErrPipelineRunNotFound = errors.New("pipeline run not found")
 
-// PipelineJobView 仅暴露作业执行状态，避免返回包含凭据的环境和参数
+// PipelineJobView 暴露作业执行状态和无凭据的初始检出身份，避免返回环境和认证参数
 type PipelineJobView struct {
-	JobRunID       string             `json:"jobRunId"`
-	PipelineID     string             `json:"pipelineId"`
-	PipelineRunID  string             `json:"pipelineRunId"`
-	JobName        string             `json:"jobName"`
-	AgentID        string             `json:"agentId"`
-	Status         int                `json:"status"`
-	TotalSteps     int                `json:"totalSteps"`
-	CompletedSteps int                `json:"completedSteps"`
-	FailedSteps    int                `json:"failedSteps"`
-	ErrorMessage   string             `json:"errorMessage"`
-	StartTime      *time.Time         `json:"startTime"`
-	EndTime        *time.Time         `json:"endTime"`
-	Duration       int64              `json:"duration"`
-	Steps          []PipelineStepView `json:"steps"`
+	JobRunID                  string             `json:"jobRunId"`
+	PipelineID                string             `json:"pipelineId"`
+	PipelineRunID             string             `json:"pipelineRunId"`
+	JobName                   string             `json:"jobName"`
+	AgentID                   string             `json:"agentId"`
+	Status                    int                `json:"status"`
+	TotalSteps                int                `json:"totalSteps"`
+	CompletedSteps            int                `json:"completedSteps"`
+	FailedSteps               int                `json:"failedSteps"`
+	ErrorMessage              string             `json:"errorMessage"`
+	StartTime                 *time.Time         `json:"startTime"`
+	EndTime                   *time.Time         `json:"endTime"`
+	Duration                  int64              `json:"duration"`
+	Steps                     []PipelineStepView `json:"steps"`
+	SourceExpectationCaptured bool               `json:"sourceExpectationCaptured"`
+	SourceType                string             `json:"sourceType"`
+	SourceRepository          string             `json:"sourceRepository"`
+	SourceRef                 string             `json:"sourceRef"`
+	SourceResolvedCommit      string             `json:"sourceResolvedCommit"`
+	SourceProvenanceState     string             `json:"sourceProvenanceState"`
+}
+
+func populateJobSourceView(view *PipelineJobView, job *model.JobRun) {
+	view.SourceProvenanceState = "unknown"
+	if !job.SourceExpectationCaptured {
+		return
+	}
+	// 无源作业没有绑定，也没有可推断的提交；历史或损坏记录不能借用运行级提交
+	if job.SourceType == "" && job.SourceRepository == "" && job.SourceRef == "" && job.SourceBindingDigest == "" && job.SourceResolvedCommit == "" {
+		view.SourceExpectationCaptured = true
+		return
+	}
+	binding, err := sourceprovenance.NewBinding(job.PipelineID, job.PipelineRunID, job.JobRunID, job.SourceType, job.SourceRepository, job.SourceRef)
+	if err != nil || !sourceprovenance.ValidBindingDigest(job.SourceBindingDigest) ||
+		binding.Digest != job.SourceBindingDigest || binding.Type != job.SourceType || binding.Repository != job.SourceRepository {
+		return
+	}
+	view.SourceExpectationCaptured = true
+	view.SourceType, view.SourceRepository, view.SourceRef = binding.Type, binding.Repository, binding.Ref
+	if binding.Type == "git" && job.SourceProvenanceState == "reported" && sourceprovenance.ValidCommit(job.SourceResolvedCommit) &&
+		model.IsJobRunTerminal(job.Status) && job.AgentID != "" && job.ClaimID != "" && len(job.TerminalReportDigest) == 64 && sourceprovenance.ValidCommit(job.TerminalReportDigest) &&
+		(job.CancellationClaimID == "" || job.CancellationClaimID == job.ClaimID) {
+		view.SourceResolvedCommit = job.SourceResolvedCommit
+		view.SourceProvenanceState = "reported"
+	}
 }
 
 // PipelineStepView 描述单个步骤的执行进度
@@ -183,9 +215,11 @@ func (s *PipelineServiceImpl) ListPipelineRunJobs(ctx context.Context, pipelineI
 				failed++
 			}
 		}
-		out = append(out, PipelineJobView{JobRunID: job.JobRunID, PipelineID: job.PipelineID, PipelineRunID: job.PipelineRunID,
+		view := PipelineJobView{JobRunID: job.JobRunID, PipelineID: job.PipelineID, PipelineRunID: job.PipelineRunID,
 			JobName: job.JobName, AgentID: job.AgentID, Status: job.Status, TotalSteps: job.TotalSteps, CompletedSteps: completed,
-			FailedSteps: failed, ErrorMessage: job.ErrorMessage, StartTime: job.StartTime, EndTime: job.EndTime, Duration: job.Duration, Steps: childSteps})
+			FailedSteps: failed, ErrorMessage: job.ErrorMessage, StartTime: job.StartTime, EndTime: job.EndTime, Duration: job.Duration, Steps: childSteps}
+		populateJobSourceView(&view, job)
+		out = append(out, view)
 	}
 	return out, nil
 }

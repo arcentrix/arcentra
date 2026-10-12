@@ -112,7 +112,7 @@ func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 
 		if err != nil {
 			s, _ := status.FromError(err)
-			span.SetStatus(codes.Error, s.Message())
+			span.SetStatus(codes.Error, s.Code().String())
 			span.SetAttributes(attribute.Int("rpc.grpc.status_code", int(s.Code())))
 		} else {
 			span.SetStatus(codes.Ok, "")
@@ -168,7 +168,7 @@ func StreamServerInterceptor() grpc.StreamServerInterceptor {
 
 		if err != nil {
 			s, _ := status.FromError(err)
-			span.SetStatus(codes.Error, s.Message())
+			span.SetStatus(codes.Error, s.Code().String())
 			span.SetAttributes(attribute.Int("rpc.grpc.status_code", int(s.Code())))
 		} else {
 			span.SetStatus(codes.Ok, "")
@@ -216,7 +216,7 @@ func UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 
 		if err != nil {
 			s, _ := status.FromError(err)
-			span.SetStatus(codes.Error, s.Message())
+			span.SetStatus(codes.Error, s.Code().String())
 			span.SetAttributes(attribute.Int("rpc.grpc.status_code", int(s.Code())))
 		} else {
 			span.SetStatus(codes.Ok, "")
@@ -265,7 +265,7 @@ func StreamClientInterceptor() grpc.StreamClientInterceptor {
 
 		if err != nil {
 			s, _ := status.FromError(err)
-			span.SetStatus(codes.Error, s.Message())
+			span.SetStatus(codes.Error, s.Code().String())
 			span.SetAttributes(attribute.Int("rpc.grpc.status_code", int(s.Code())))
 			span.End()
 			return nil, err
@@ -293,7 +293,7 @@ func (w *wrappedClientStream) CloseSend() error {
 	err := w.ClientStream.CloseSend()
 	if err != nil {
 		s, _ := status.FromError(err)
-		w.span.SetStatus(codes.Error, s.Message())
+		w.span.SetStatus(codes.Error, s.Code().String())
 		w.span.SetAttributes(attribute.Int("rpc.grpc.status_code", int(s.Code())))
 	} else {
 		w.span.SetStatus(codes.Ok, "")

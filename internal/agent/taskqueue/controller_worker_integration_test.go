@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -41,6 +43,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -96,9 +99,20 @@ type controllerWorkerReceipt struct {
 	payload []byte
 }
 
+type controllerWorkerFixtureOptions struct {
+	serverTLS *tls.Config
+	clientTLS agentgrpc.ClientTLSConfig
+}
+
 type controllerWorkerFixture struct {
 	t                   *testing.T
 	ctx                 context.Context
+	db                  *gorm.DB
+	client              *agentgrpc.ClientWrapper
+	producer            nova.TaskQueue
+	tasks               map[string]nova.Task
+	beforeTerminal      func(context.Context, proto.Message) error
+	observeTerminal     func(context.Context, proto.Message, any, error)
 	repos               *repo.Repositories
 	engine              *process.Process
 	worker              *workerQueues
@@ -119,7 +133,7 @@ type controllerWorkerFixture struct {
 
 // newControllerWorkerFixture 使用预先批准的固定身份；不模拟或覆盖动态注册流程
 // 仅创建 Project、Pipeline、Agent 和 Storage，所有 JobRun/StepRun 必须由 Submit 创建
-func newControllerWorkerFixture(t *testing.T, loseProducerACK bool) *controllerWorkerFixture {
+func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...controllerWorkerFixtureOptions) *controllerWorkerFixture {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("controller/Agent Kafka wire-protocol integration test")
@@ -145,7 +159,7 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool) *controllerW
 		Pipeline: repo.NewPipelineRepo(adapter), JobRun: repo.NewJobRunRepo(adapter), StepRun: repo.NewStepRunRepo(adapter),
 		Log: repo.NewLogRepository(db), Artifact: repo.NewArtifactRepo(adapter), Agent: repo.NewAgentRepo(adapter, nil), Storage: repo.NewStorageRepo(adapter, nil),
 	}
-	f := &controllerWorkerFixture{t: t, ctx: ctx, repos: repos, projectID: id.GetUild(), pipelineID: id.GetUild(), receipts: make(map[string][]controllerWorkerReceipt), loseProducerACK: loseProducerACK, store: &controllerWorkerStorage{objects: make(map[string][]byte)}}
+	f := &controllerWorkerFixture{t: t, ctx: ctx, db: db, tasks: make(map[string]nova.Task), repos: repos, projectID: id.GetUild(), pipelineID: id.GetUild(), receipts: make(map[string][]controllerWorkerReceipt), loseProducerACK: loseProducerACK, store: &controllerWorkerStorage{objects: make(map[string][]byte)}}
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(os.TempDir(), "pipelines", f.pipelineID)) })
 	if err := db.WithContext(ctx).Create(&model.Project{ProjectID: f.projectID}).Error; err != nil {
 		t.Fatal(err)
@@ -168,7 +182,7 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool) *controllerW
 	t.Cleanup(cluster.Close)
 	for _, prefix := range []string{taskpayload.AgentTopicPrefix(agentID), taskpayload.AgentControlTopicPrefix(agentID)} {
 		for _, suffix := range []string{"_PRIORITY_NORMAL", "_PRIORITY_HIGH", "_PRIORITY_LOW", "_TASKS_DELAY_0"} {
-			if err := cluster.CreateTopic(prefix+suffix, 1, 1); err != nil {
+			if err := cluster.CreateTopic(strings.ToUpper(prefix+suffix), 1, 1); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -177,10 +191,40 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool) *controllerW
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := grpc.NewServer(grpc.UnaryInterceptor(func(ctx context.Context, request any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	var fixtureOptions controllerWorkerFixtureOptions
+	if len(options) > 0 {
+		fixtureOptions = options[0]
+	}
+	serverOptions := []grpc.ServerOption{}
+	if fixtureOptions.serverTLS != nil {
+		serverOptions = append(serverOptions, grpc.Creds(credentials.NewTLS(fixtureOptions.serverTLS)))
+	}
+	serverOptions = append(serverOptions, grpc.UnaryInterceptor(func(ctx context.Context, request any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		md, _ := metadata.FromIncomingContext(ctx)
 		if values := md.Get("authorization"); len(values) != 1 || values[0] != "bearer roundtrip-test-token" {
 			return nil, status.Error(codes.Unauthenticated, "fixed test token required")
+		}
+		var terminalMessage proto.Message
+		switch req := request.(type) {
+		case *agentv1.ReportJobRunStatusRequest:
+			if req.Status >= 4 {
+				terminalMessage = req
+			}
+		case *agentv1.ReportStepRunStatusRequest:
+			if req.Status >= 4 {
+				terminalMessage = req
+			}
+		}
+		f.mu.Lock()
+		beforeTerminal, observeTerminal := f.beforeTerminal, f.observeTerminal
+		f.mu.Unlock()
+		if terminalMessage != nil && beforeTerminal != nil {
+			if err := beforeTerminal(ctx, terminalMessage); err != nil {
+				if observeTerminal != nil {
+					observeTerminal(ctx, terminalMessage, nil, err)
+				}
+				return nil, err
+			}
 		}
 		if req, ok := request.(*agentv1.ReportStepRunStatusRequest); ok && int32(req.Status) == 3 {
 			f.mu.Lock()
@@ -191,6 +235,9 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool) *controllerW
 			}
 		}
 		response, err := handler(agentidentity.WithIdentity(ctx, agentidentity.Identity{ID: agentID}), request)
+		if terminalMessage != nil && observeTerminal != nil {
+			observeTerminal(ctx, terminalMessage, response, err)
+		}
 		if err != nil {
 			t.Logf("control service rejected %T: %v", request, err)
 			return response, err
@@ -244,16 +291,18 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool) *controllerW
 		}
 		return response, nil
 	}))
+	server := grpc.NewServer(serverOptions...)
 	agentv1.RegisterAgentServiceServer(server, controlservice.NewAgentServiceImpl(controlservice.NewAgentService(repos.Agent, repos.StepRun, nil, repos.JobRun), repos.Storage))
 	safe.Go(func() { _ = server.Serve(listener) })
 	t.Cleanup(server.Stop)
-	client, err := agentgrpc.NewGrpcClient(agentgrpc.ClientConf{ServerAddr: listener.Addr().String(), Token: "roundtrip-test-token", ReadWriteTimeout: 2})
+	client, err := agentgrpc.NewGrpcClient(agentgrpc.ClientConf{ServerAddr: listener.Addr().String(), Token: "roundtrip-test-token", ReadWriteTimeout: 2, TLS: fixtureOptions.clientTLS})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
+	f.client = client
 	f.conf = &config.AgentConfig{
-		Grpc:         config.GrpcConfig{ServerAddr: listener.Addr().String(), Token: "roundtrip-test-token"},
+		Grpc:         config.GrpcConfig{ServerAddr: listener.Addr().String(), Token: "roundtrip-test-token", TLS: fixtureOptions.clientTLS},
 		Agent:        config.AgentInfo{ID: agentID, Mode: "baremetal", WorkspaceDir: filepath.Join(root, "agent"), JobTimeout: 30},
 		MessageQueue: config.MqConfig{Kafka: kafkaconfig.Config{BootstrapServers: cluster.BootstrapServers(), SecurityProtocol: "PLAINTEXT"}},
 		TaskQueue:    nova.TaskQueueConfig{DelaySlotCount: 1, DelaySlotDuration: 3600, SessionTimeout: 6000, MaxPollInterval: 120000},
@@ -278,7 +327,8 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool) *controllerW
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = producer.Stop() })
-	f.engine = process.NewProcess(repos, nil, producer, nil, &log.Logger{SugaredLogger: zap.NewNop().Sugar()}, nil, nil)
+	f.producer = producer
+	f.engine = process.NewProcess(repos, nil, &controllerWorkerRecordingQueue{TaskQueue: producer, fixture: f}, nil, &log.Logger{SugaredLogger: zap.NewNop().Sugar()}, nil, nil)
 	t.Cleanup(f.engine.Stop)
 	return f
 }

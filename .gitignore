@@ -25,6 +25,8 @@ docs/*.md
 
 # Durable terminal receipt operator guide
 !docs/agent-terminal-reports.md
+!docs/agent-identity-persistence.md
+!docs/agent-terminal-quarantine.md
 
 # Kubernetes release operator guide
 !docs/kubernetes-releases.md

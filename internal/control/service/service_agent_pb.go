@@ -93,7 +93,7 @@ func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRe
 func (a *AgentServiceImpl) dynamicRegister(ctx context.Context, req *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
 	// Validate registration token
 	if err := a.agentService.ValidateRegistrationToken(ctx, req.RegistrationToken); err != nil {
-		log.Warnw("registration token validation failed", "error", err)
+		log.Warnw("registration token validation failed")
 		return nil, status.Errorf(codes.Unauthenticated, "invalid registration token")
 	}
 
@@ -157,10 +157,24 @@ func (a *AgentServiceImpl) dynamicRegister(ctx context.Context, req *agentv1.Reg
 		PendingApproval:   pendingApproval,
 	}
 
-	if a.storageRepo != nil {
+	if !pendingApproval && a.storageRepo != nil {
 		if sc := a.buildStorageConfig(ctx); sc != nil {
 			resp.Storage = sc
 		}
+	}
+
+	// 共享注册令牌可能在创建记录、读取配置期间被撤销，拒绝交付凭证
+	if err := a.agentService.ValidateRegistrationToken(ctx, req.RegistrationToken); err != nil {
+		// 保留待审批记录供管理员核对，不自动删除或重建身份
+		if err := a.agentService.agentRepo.Patch(ctx, agentID, map[string]any{"is_enabled": 0}); err != nil {
+			log.Errorw("failed to hold incomplete registration for approval", "agentID", agentID)
+		}
+		return nil, status.Error(codes.Unauthenticated, "registration authorization is no longer valid")
+	}
+
+	// 配置读取期间可能发生停用、删除或密钥轮换；响应凭证前再次检查
+	if err := a.checkRegistrationAuthorization(ctx, agentID, authToken, pendingApproval); err != nil {
+		return nil, err
 	}
 
 	return resp, nil
@@ -195,12 +209,16 @@ func (a *AgentServiceImpl) legacyRegister(ctx context.Context, req *agentv1.Regi
 	}
 
 	// Check agent exists
-	_, err = agentRepo.Get(ctx, agentID)
+	registered, err := agentRepo.Get(ctx, agentID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, status.Errorf(codes.NotFound, "agent not found: %s", agentID)
+			return nil, status.Error(codes.NotFound, "agent not found")
 		}
 		return nil, status.Errorf(codes.Internal, "failed to get agent")
+	}
+
+	if registered == nil || registered.AgentID != agentID || registered.IsEnabled != 1 {
+		return nil, status.Error(codes.PermissionDenied, "agent is disabled or pending approval")
 	}
 
 	// Update agent info
@@ -231,7 +249,7 @@ func (a *AgentServiceImpl) legacyRegister(ctx context.Context, req *agentv1.Regi
 		}
 	}
 
-	detail, err := agentRepo.GetDetail(ctx, agentID)
+	detail, err := agentRepo.Get(ctx, agentID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get agent detail")
 	}
@@ -255,7 +273,31 @@ func (a *AgentServiceImpl) legacyRegister(ctx context.Context, req *agentv1.Regi
 		}
 	}
 
+	if err := a.checkRegistrationAuthorization(ctx, agentID, req.Token, false); err != nil {
+		return nil, err
+	}
+
 	return resp, nil
+}
+
+// checkRegistrationAuthorization checks current credentials and authorization immediately
+// before a registration response is returned. Only newly pending enrollment may remain disabled.
+func (a *AgentServiceImpl) checkRegistrationAuthorization(ctx context.Context, agentID, token string, allowPending bool) error {
+	expectedToken, err := a.agentService.GenerateAgentToken(ctx, agentID)
+	if err != nil {
+		return status.Error(codes.Internal, "failed to verify current credentials")
+	}
+	if !hmac.Equal([]byte(token), []byte(expectedToken)) {
+		return status.Error(codes.Unauthenticated, "agent credentials changed during registration")
+	}
+	current, err := a.agentService.agentRepo.Get(ctx, agentID)
+	if err != nil {
+		return status.Error(codes.PermissionDenied, "agent authorization is unavailable")
+	}
+	if current == nil || current.AgentID != agentID || (current.IsEnabled != 1 && !(allowPending && current.IsEnabled == 0)) {
+		return status.Error(codes.PermissionDenied, "agent is disabled or pending approval")
+	}
+	return nil
 }
 
 // buildStorageConfig reads the default storage configuration from DB and
@@ -363,8 +405,8 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 		return &agentv1.ReportStepRunStatusResponse{Success: false, Message: "step run repository unavailable"}, nil
 	}
 	stepRunID := strings.TrimSpace(req.StepRunId)
-	if stepRunID == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "stepRunID is required")
+	if stepRunID == "" || stepRunID != req.StepRunId {
+		return nil, status.Errorf(codes.InvalidArgument, "exact stepRunID is required")
 	}
 	agentID, err := authenticatedAgent(ctx, req.AgentId)
 	if err != nil {
@@ -408,8 +450,13 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 		}
 		return nil, agentidentity.CancelledStepClaimError(entity.StepRunID, claimID)
 	}
-	if err := validateReportedStatus(entity.Status, int(req.Status), true); err != nil {
+	if err := validateReportedStatus(0, int(req.Status), true); err != nil {
 		return nil, err
+	}
+	if int(req.Status) == 3 {
+		if err := validateReportedStatus(entity.Status, int(req.Status), true); err != nil {
+			return nil, err
+		}
 	}
 	digest := ""
 	if int(req.Status) >= 4 {
@@ -418,15 +465,15 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 			return nil, err
 		}
 	}
-	if entity.Status == model.JobRunStatusCancelled && entity.CancellationClaimID != "" {
+	if entity.Status == model.JobRunStatusCancelled && entity.CancellationClaimID != "" && int(req.Status) == model.JobRunStatusCancelled && (entity.TerminalReportDigest == "" || entity.TerminalReportDigest == digest) {
 		if err := confirmCancelledStepReceipt(ctx, a.agentService.stepRunRepo, entity, claimID, digest); err != nil {
 			return nil, err
 		}
 		return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "cancellation receipt confirmed"}, nil
 	}
 	if entity.Status >= 4 {
-		if err := validateTerminalReplay(entity.TerminalReportDigest, digest); err != nil {
-			return nil, err
+		if entity.Status != int(req.Status) || entity.TerminalReportDigest == "" || entity.TerminalReportDigest != digest {
+			return nil, terminalStepConflict(ctx, a.agentService.stepRunRepo, entity, req, claimID)
 		}
 		return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "terminal report confirmed"}, nil
 	}
@@ -455,8 +502,8 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 		return &agentv1.ReportJobRunStatusResponse{Success: false, Message: "job run repository unavailable"}, nil
 	}
 	jobRunID := strings.TrimSpace(req.JobRunId)
-	if jobRunID == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "jobRunID is required")
+	if jobRunID == "" || jobRunID != req.JobRunId {
+		return nil, status.Errorf(codes.InvalidArgument, "exact jobRunID is required")
 	}
 	agentID, err := authenticatedAgent(ctx, req.AgentId)
 	if err != nil {
@@ -469,10 +516,17 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 	if entity == nil {
 		return nil, status.Error(codes.NotFound, "job run not found")
 	}
+	if entity.JobRunID != jobRunID {
+		return nil, status.Error(codes.PermissionDenied, "exact job identity is required")
+	}
 	if entity.AgentID != agentID {
 		return nil, status.Error(codes.PermissionDenied, "job run belongs to another agent")
 	}
 	claimID, alreadyClaimed, err := reportClaim(ctx, entity.Status, int(req.Status), entity.ClaimID)
+	if err != nil {
+		return nil, err
+	}
+	sourceUpdates, err := prepareJobSource(entity, req, claimID)
 	if err != nil {
 		return nil, err
 	}
@@ -482,8 +536,13 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 		}
 		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "claim confirmed"}, nil
 	}
-	if err := validateReportedStatus(entity.Status, int(req.Status), false); err != nil {
+	if err := validateReportedStatus(0, int(req.Status), false); err != nil {
 		return nil, err
+	}
+	if int(req.Status) == 3 {
+		if err := validateReportedStatus(entity.Status, int(req.Status), false); err != nil {
+			return nil, err
+		}
 	}
 	digest := ""
 	if int(req.Status) >= 4 {
@@ -492,20 +551,31 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 			return nil, err
 		}
 	}
-	if entity.Status == model.JobRunStatusCancelled && entity.CancellationClaimID != "" {
-		if err := confirmCancelledJobReceipt(ctx, a.agentService.jobRunRepo, entity, claimID, digest); err != nil {
+	if entity.Status == model.JobRunStatusCancelled && entity.CancellationClaimID != "" && int(req.Status) == model.JobRunStatusCancelled && (entity.TerminalReportDigest == "" || entity.TerminalReportDigest == digest) {
+		if err := confirmCancelledJobReceipt(ctx, a.agentService.jobRunRepo, entity, claimID, digest, sourceUpdates); err != nil {
 			return nil, err
 		}
 		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "cancellation receipt confirmed"}, nil
 	}
 	if model.IsJobRunTerminal(entity.Status) {
-		if err := validateTerminalReplay(entity.TerminalReportDigest, digest); err != nil {
+		if entity.Status != int(req.Status) || entity.TerminalReportDigest == "" || entity.TerminalReportDigest != digest {
+			return nil, terminalJobConflict(ctx, a.agentService.jobRunRepo, entity, req, claimID)
+		}
+		if err := validateSourceReceiptReplay(entity, sourceUpdates); err != nil {
 			return nil, err
+		}
+		if req.SourceCheckout != nil {
+			if err := verifySourceReplay(ctx, a.agentService.jobRunRepo, entity, claimID); err != nil {
+				return nil, err
+			}
 		}
 		// 回执与制品在同一事务中提交，重放无需重新写入或复活已清理的制品
 		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "terminal report confirmed"}, nil
 	}
 	updates := executionStatusUpdates(int(req.Status), req.ErrorMessage, req.StartTime, req.EndTime, entity.StartTime)
+	for key, value := range sourceUpdates {
+		updates[key] = value
+	}
 	updates["claim_id"] = claimID
 	if digest != "" {
 		updates["terminal_report_digest"] = digest

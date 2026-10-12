@@ -137,3 +137,41 @@ func TestTerminalReceiptMigrationAddsEmptyReceiptWithoutAcknowledgingHistory(t *
 		t.Fatalf("migration synthesized step receipt: %+v %v", step, err)
 	}
 }
+
+func TestSourceProvenanceMigrationDoesNotInventHistoricalCheckout(t *testing.T) {
+	ctx := context.Background()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, _ := db.DB()
+	defer sqlDB.Close()
+	if err := db.WithContext(ctx).AutoMigrate(&model.JobRun{}); err != nil {
+		t.Fatal(err)
+	}
+	fields := []string{"SourceExpectationCaptured", "SourceType", "SourceRepository", "SourceRef", "SourceBindingDigest", "SourceResolvedCommit", "SourceProvenanceState"}
+	for _, field := range fields {
+		if err := db.Migrator().DropColumn(&model.JobRun{}, field); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := &model.JobRun{JobRunID: "historical", PipelineID: "pipeline", PipelineRunID: "run", AgentID: "agent", ClaimID: "original", Status: 4, TerminalReportDigest: strings.Repeat("c", 64)}
+	if err := db.WithContext(ctx).Omit(fields...).Create(old).Error; err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := MigrateSchema(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got model.JobRun
+	if err := db.WithContext(ctx).Select(append(jobSnapshotColumns, "id")).Where("job_run_id = ?", "historical").First(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.SourceExpectationCaptured || got.SourceType != "" || got.SourceRepository != "" || got.SourceRef != "" || got.SourceBindingDigest != "" || got.SourceResolvedCommit != "" || got.SourceProvenanceState != "unknown" {
+		t.Fatalf("migration inferred checkout %+v", got)
+	}
+	if got.Status != 4 || got.ClaimID != "original" || got.TerminalReportDigest != old.TerminalReportDigest {
+		t.Fatal("migration changed historical receipt")
+	}
+}

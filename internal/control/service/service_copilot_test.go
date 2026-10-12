@@ -68,9 +68,12 @@ type copilotSecretRepo struct {
 	fail   bool
 }
 
-func (r *copilotSecretRepo) List(context.Context, int, int, string, string, string, string) ([]*model.Secret, int64, error) {
+func (r *copilotSecretRepo) List(_ context.Context, _, _ int, _, scope, _, _ string) ([]*model.Secret, int64, error) {
 	if r.fail {
 		return nil, 0, errors.New("unavailable")
+	}
+	if scope != "project" {
+		return []*model.Secret{}, 0, nil
 	}
 	return []*model.Secret{{SecretID: "secret"}}, 1, nil
 }
@@ -266,6 +269,9 @@ func TestCopilotCodeArtifactIntegrityAndConfinement(t *testing.T) {
 			out, err := s.Analyze(context.Background(), subject, "p", in)
 			if err != nil || len(out.Evidence) != 1 || out.Evidence[0].Kind != "code-artifact" || p.calls != 1 {
 				t.Fatalf("%+v %v", out, err)
+			}
+			if strings.Contains(out.Evidence[0].Name, "opaque-env-v9WjKx") || strings.Contains(preview.Evidence[0].Name, "opaque-env-v9WjKx") {
+				t.Fatal("artifact metadata secret leaked")
 			}
 			if strings.Contains(p.input.User, "registered-secret") || strings.Contains(p.input.User, "step-only-opaque") || strings.Contains(p.input.User, "opaque-env-v9WjKx") || strings.Contains(preview.Text, "opaque-env-v9WjKx") {
 				t.Fatal("artifact secret leaked")

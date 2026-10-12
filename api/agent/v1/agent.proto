@@ -316,6 +316,13 @@ message ReportJobRunStatusRequest {
   string artifact_storage_id = 8;         // Storage identity captured before the job starts
   string artifact_storage_fingerprint = 9; // Credential-free storage location fingerprint
   repeated ArtifactResult artifacts = 10; // Complete uploaded file metadata
+  SourceCheckout source_checkout = 11;     // Agent-reported initial checkout, captured before user steps
+}
+
+// SourceCheckout binds the initial Agent checkout to the controller source expectation.
+message SourceCheckout {
+  string binding_digest = 1;
+  string resolved_commit = 2;
 }
 
 // ArtifactResult identifies one uploaded immutable artifact; it never contains credentials or URLs.

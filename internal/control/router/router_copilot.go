@@ -23,6 +23,9 @@ func (rt *Router) copilotRouter(r fiber.Router, authMW, subjectMW fiber.Handler)
 	var svc *service.CopilotService
 	if rt.Services != nil {
 		svc = service.NewCopilotService(rt.Services.Repos(), rt.Services.Authorizer, rt.Services.Artifact, copilot.NewRegistry(cfg), rt.Services.Secret)
+		if err := svc.ConfigureSourceContext(cfg.SourceContext); err != nil {
+			svc = nil
+		}
 	}
 	registerCopilotRoutes(r, authMW, subjectMW, svc)
 }

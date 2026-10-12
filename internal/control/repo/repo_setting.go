@@ -16,12 +16,14 @@ package repo
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -55,21 +57,34 @@ func NewSettingRepo(db database.IDatabase, ch cache.ICache) ISettingRepository {
 	}
 }
 
-// Get returns a single setting by name, with cache support.
+// Get 读取设置，认证密钥和审批策略始终从主库读取，其余设置保留缓存
 func (sr *SettingRepo) Get(ctx context.Context, name string) (*model.Setting, error) {
+	liveAuthorization := name == consts.SettingNameAgentSecretKey || name == consts.SettingNameAgentAutoApprove
 	keyFunc := func(params ...any) string {
 		return consts.SettingKeyPrefix + params[0].(string)
 	}
 
 	queryFunc := func(ctx context.Context) (*model.Setting, error) {
 		var setting model.Setting
-		err := sr.Database().WithContext(ctx).
+		query := sr.Database().WithContext(ctx)
+		if liveAuthorization {
+			// 避免缓存或只读副本在密钥轮换、撤销或审批策略变更后继续授予权限
+			query = query.Clauses(database.Write())
+		}
+		err := query.Select("id", "name", "value", "created_at", "updated_at").
 			Where("name = ?", name).
 			First(&setting).Error
 		if err != nil {
+			if liveAuthorization && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, errors.New("agent authorization setting unavailable")
+			}
 			return nil, err
 		}
 		return &setting, nil
+	}
+
+	if liveAuthorization {
+		return queryFunc(ctx)
 	}
 
 	cq := cache.NewCachedQuery(

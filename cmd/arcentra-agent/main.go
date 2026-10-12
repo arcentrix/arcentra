@@ -15,17 +15,33 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/arcentrix/arcentra/internal/agent/bootstrap"
+	"github.com/arcentrix/arcentra/internal/agent/terminalops"
 )
 
 func main() {
+	// 离线隔离审查必须在加载配置、注册身份或建立任何网络客户端之前分派
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	handled, exitCode := terminalops.Run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	if handled {
+		os.Exit(exitCode)
+	}
+
 	// Parse command line flags
 	configFile := flag.String("conf", "conf.d/agent.toml", "configuration file path, e.g. -conf ./conf.d/agent.toml")
 	flag.Parse()
+	if flag.NArg() != 0 {
+		_, _ = fmt.Fprintln(os.Stderr, "error: unexpected Agent arguments; use terminal-quarantine --help for offline review")
+		os.Exit(2)
+	}
 
 	// Bootstrap initialize application
 	app, cleanup, _, err := bootstrap.Bootstrap(*configFile, initAgent)

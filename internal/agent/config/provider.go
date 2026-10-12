@@ -57,6 +57,7 @@ func ProvideGrpcClientConfig(agentConf *AgentConfig) *grpcclient.ClientConf {
 	// build server address from host and port
 	return &grpcclient.ClientConf{
 		ServerAddr:           agentConf.Grpc.ServerAddr,
+		TLS:                  agentConf.Grpc.TLS,
 		Token:                agentConf.Grpc.Token,
 		ReadWriteTimeout:     agentConf.Grpc.ReadWriteTimeout,
 		MaxMsgSize:           agentConf.Grpc.MaxMsgSize,

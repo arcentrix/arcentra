@@ -1,3 +1,4 @@
+# Agent configuration is a startup snapshot. Changes require a process restart.
 # TRUSTED CODE ONLY: commands have the same host access as this Agent process.
 # This is NOT container isolation. Use a dedicated disposable VM/container,
 # least-privilege credentials, and trusted pipeline definitions/repositories.
@@ -7,6 +8,12 @@ serverAddr = "127.0.0.1:9090"
 token = ""
 registrationToken = ""
 readWriteTimeout = 10
+
+# Identity persistence requires verified TLS with an operator-supplied CA.
+[grpc.tls]
+enabled = false
+caFile = ""
+serverName = ""
 
 [agent]
 mode = "baremetal"
@@ -19,6 +26,14 @@ jobTimeout = 3600
 workspaceDir = "./data/workspaces"
 tempDir = "./data/tmp"
 deniedCommands = []
+
+# Optional secure restart identity. Default off; enabling requires an explicit
+# absolute private directory outside (and not containing) agent.workspaceDir.
+# Example only: /var/lib/arcentra/agent-identity. Do not share across Agents.
+# Verified grpc.tls with an explicit CA is required; see docs/agent-identity-persistence.md.
+[agent.identityPersistence]
+enabled = false
+directory = ""
 
 [agent.sandbox]
 enable = false

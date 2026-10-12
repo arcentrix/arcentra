@@ -20,8 +20,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -45,6 +45,7 @@ import (
 )
 
 type Agent struct {
+	ready         atomic.Bool
 	draining      bool
 	workerMu      sync.Mutex
 	stopping      bool
@@ -77,11 +78,12 @@ func NewAgent(
 	if err := taskqueue.ValidateExecutionConfig(agentConf); err != nil {
 		return nil, nil, err
 	}
-	httpApp := rt.Router()
 
 	// Create agent service
 	agentService := service.NewAgentServiceImpl(agentConf, grpcClient, metricsServer)
-	app := &Agent{HTTPApp: httpApp, GrpcClient: grpcClient, MetricsServer: metricsServer, Logger: logger, AgentConf: agentConf, AgentService: agentService, ShutdownMgr: shutdownMgr, Outbox: ob, ExecManager: execManager}
+	app := &Agent{GrpcClient: grpcClient, MetricsServer: metricsServer, Logger: logger, AgentConf: agentConf, AgentService: agentService, ShutdownMgr: shutdownMgr, Outbox: ob, ExecManager: execManager}
+	rt.Readiness = app.IsReady
+	app.HTTPApp = rt.Router()
 	cleanup := func() {
 		app.workerMu.Lock()
 		defer app.workerMu.Unlock()
@@ -89,6 +91,7 @@ func NewAgent(
 			return
 		}
 		app.stopping = true
+		app.ready.Store(false)
 		if app.TaskQueue != nil {
 			if err := app.TaskQueue.Stop(); err != nil {
 				log.Errorw("failed to stop task queue", "error", err)
@@ -110,6 +113,9 @@ func NewAgent(
 			}
 		}
 		cron.Stop()
+		if err := app.AgentService.CloseIdentity(); err != nil {
+			log.Errorw("failed to close agent identity store", "error", err)
+		}
 		if grpcClient != nil {
 			if err := grpcClient.Close(); err != nil {
 				log.Errorw("failed to close gRPC client", "error", err)
@@ -149,25 +155,15 @@ func Run(app *Agent, cleanup func()) {
 		}
 	}
 
-	// start gRPC client
+	// Freeze transport startup settings before registration changes runtime identity.
+	clientConf := *config.ProvideGrpcClientConfig(appConf)
 	if app.GrpcClient != nil {
 		safe.Go(func() {
-			if err := app.GrpcClient.Start(grpc.ClientConf{
-				ServerAddr:           appConf.Grpc.ServerAddr,
-				Token:                appConf.Grpc.Token,
-				ReadWriteTimeout:     appConf.Grpc.ReadWriteTimeout,
-				MaxMsgSize:           appConf.Grpc.MaxMsgSize,
-				MaxReconnectAttempts: appConf.Grpc.MaxReconnectAttempts,
-			}); err != nil {
+			if err := app.GrpcClient.Start(clientConf); err != nil {
 				log.Errorw("gRPC client failed", "error", err)
 			}
 		})
-
-		// 等待 gRPC 客户端连接成功后，检查是否已注册，如果已注册则启动心跳
-		// 心跳将在注册成功后启动，而不是在启动时检查配置
-		safe.Go(func() {
-			app.waitForRegistrationAndStartHeartbeat()
-		})
+		safe.Go(app.waitForRegistrationAndStartHeartbeat)
 	}
 
 	// set signal listener (graceful shutdown)
@@ -204,6 +200,7 @@ func Run(app *Agent, cleanup func()) {
 	// 先停止工作队列，让运行中的步骤使用有效连接报告终态
 	app.workerMu.Lock()
 	app.draining = true
+	app.ready.Store(false)
 	if app.TaskQueue != nil {
 		if err := app.TaskQueue.Stop(); err != nil {
 			log.Warnw("stop agent workers", "error", err)
@@ -218,11 +215,7 @@ func Run(app *Agent, cleanup func()) {
 	if resp != nil && resp.Success {
 		log.Info("Agent unregistered successfully")
 	} else {
-		message := "no response"
-		if resp != nil {
-			message = resp.Message
-		}
-		log.Errorw("Agent unregistration failed", "error", message)
+		log.Error("Agent unregistration failed or returned no response")
 	}
 
 	// close HTTP server
@@ -243,94 +236,76 @@ func Run(app *Agent, cleanup func()) {
 	log.Info("Server shutdown complete")
 }
 
-// waitForRegistrationAndStartHeartbeat waits for gRPC client connection and checks if agent is registered,
-// then starts heartbeat if registration is successful
+// IsReady 返回已完成身份恢复、认证和工作器初始化的就绪状态
+func (app *Agent) IsReady() bool {
+	return app != nil && app.ready.Load() && app.AgentService.Authenticated()
+}
+
+// waitForRegistrationAndStartHeartbeat 先恢复身份，再等待连接并执行单次注册流程
 func (app *Agent) waitForRegistrationAndStartHeartbeat() {
-	appConf := app.AgentConf
-
-	// 完整配置的原始身份优先，不能用注册令牌绕过失败的身份认证
-	hasRegistrationToken := strings.TrimSpace(appConf.Grpc.RegistrationToken) != ""
-	hasLegacyConfig := strings.TrimSpace(appConf.Grpc.Token) != "" && strings.TrimSpace(appConf.Agent.ID) != ""
-
-	if appConf.Grpc.ServerAddr == "" {
-		log.Warn("Agent not registered, skipping heartbeat startup. " +
-			"Please configure grpc.serverAddr in configuration file")
+	if app.AgentConf == nil || app.AgentConf.Grpc.ServerAddr == "" {
 		return
 	}
-
-	if !hasRegistrationToken && !hasLegacyConfig {
-		log.Warn("Agent not registered, skipping heartbeat startup. " +
-			"Please configure grpc.registrationToken or (agent.id + grpc.token) in configuration file")
+	if app.AgentService == nil {
+		app.AgentService = service.NewAgentServiceImpl(app.AgentConf, app.GrpcClient, app.MetricsServer)
+	}
+	if err := app.AgentService.PrepareIdentity(context.Background()); err != nil {
+		log.Errorw("agent identity preparation failed", "error", err)
 		return
 	}
-	if hasRegistrationToken && !hasLegacyConfig {
-		if err := taskqueue.CheckTerminalOutboxForEnrollment(context.Background(), appConf.Agent.WorkspaceDir); err != nil {
-			log.Errorw("agent registration blocked", "error", err)
+	maxWaitTime := 30 * time.Second
+	deadline := time.Now().Add(maxWaitTime)
+	for time.Now().Before(deadline) {
+		app.workerMu.Lock()
+		stopped := app.stopping || app.draining
+		app.workerMu.Unlock()
+		if stopped {
 			return
 		}
-	}
-
-	// 等待 gRPC 客户端连接成功
-	maxWaitTime := 30 * time.Second
-	checkInterval := 1 * time.Second
-	elapsed := time.Duration(0)
-
-	for elapsed < maxWaitTime {
-		if app.GrpcClient == nil {
-			time.Sleep(checkInterval)
-			elapsed += checkInterval
-			continue
-		}
-
-		conn := app.GrpcClient.GetConn()
-		if conn != nil {
-			state := conn.GetState()
-			if state == connectivity.Ready || state == connectivity.Idle {
-				// 连接成功，先注册，再启动心跳
-				log.Info("gRPC client connected, registering agent")
-				if _, err := app.AgentService.Register(context.Background(), &agentv1.RegisterRequest{}); err != nil {
-					log.Warnw("agent registration failed", "error", err)
-					return
-				}
-				if h := app.AgentService.StorageHolder(); h != nil && h.Get() != nil {
-					st, reference := h.Snapshot()
-					taskqueue.SetStorage(st, reference)
-				}
-				if err := app.startWorkers(); err != nil {
-					log.Errorw("agent worker startup failed", "error", err)
-					return
-				}
-				log.Info("agent registration successful, starting heartbeat")
-				resp, err := app.AgentService.Heartbeat(context.Background(), nil)
-				if err != nil {
-					log.Warnw("heartbeat failed", "error", err)
-					return
-				}
-				if resp != nil && resp.Success {
-					log.Info("heartbeat successful")
-				} else {
-					message := "no response"
-					if resp != nil {
-						message = resp.Message
+		if app.GrpcClient != nil {
+			if conn := app.GrpcClient.GetConn(); conn != nil {
+				state := conn.GetState()
+				if state == connectivity.Ready || state == connectivity.Idle {
+					if err := app.registerAndStart(); err != nil {
+						log.Warnw("agent startup failed", "error", err)
 					}
-					log.Warnw("heartbeat failed", "error", message)
 					return
 				}
-				return
 			}
 		}
-
-		time.Sleep(checkInterval)
-		elapsed += checkInterval
+		time.Sleep(time.Second)
 	}
+	log.Warnw("wait gRPC client connection timeout, agent remains not ready", "timeout", maxWaitTime)
+}
 
-	log.Warnw("wait gRPC client connection timeout, heartbeat not started", "timeout", maxWaitTime)
+func (app *Agent) registerAndStart() error {
+	resp, err := app.AgentService.Register(context.Background(), &agentv1.RegisterRequest{})
+	if err != nil {
+		return err
+	}
+	if resp == nil || resp.PendingApproval {
+		return fmt.Errorf("agent registration is awaiting operator approval")
+	}
+	if _, err := app.AgentService.Heartbeat(context.Background(), nil); err != nil {
+		return err
+	}
+	if h := app.AgentService.StorageHolder(); h != nil && h.Get() != nil {
+		st, reference := h.Snapshot()
+		taskqueue.SetStorage(st, reference)
+	}
+	return app.startWorkers()
 }
 
 func (app *Agent) startWorkers() error {
 	app.workerMu.Lock()
 	defer app.workerMu.Unlock()
-	if app.stopping || app.draining || app.TaskQueue != nil {
+	if app.stopping || app.draining {
+		return fmt.Errorf("agent is stopping")
+	}
+	if !app.AgentService.Authenticated() {
+		return fmt.Errorf("agent must authenticate before starting workers")
+	}
+	if app.ready.Load() {
 		return nil
 	}
 	if app.ExecManager == nil {
@@ -359,5 +334,6 @@ func (app *Agent) startWorkers() error {
 		return err
 	}
 	app.TaskQueue = queue
+	app.ready.Store(true)
 	return nil
 }

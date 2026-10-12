@@ -1,3 +1,4 @@
+# Agent configuration is a startup snapshot. Changes require a process restart.
 # SECURITY: This template requests sandbox isolation and is intentionally rejected
 # until an isolated Agent executor is supported. For trusted-code host execution,
 # explicitly use agent.baremetal.example.toml and read docs/pipeline/implementation.md.
@@ -17,6 +18,13 @@ maxMsgSize = 104857600
 maxReconnectAttempts = 5
 
 # agent configuration
+# Verified server TLS is required for automatic terminal-conflict quarantine.
+# The operator supplies a trusted CA and DNS name; no certificate checks are bypassed.
+[grpc.tls]
+enabled = false
+caFile = ""
+serverName = ""
+
 [agent]
 # agent mode: sandbox, baremetal
 mode = "sandbox"
@@ -67,6 +75,14 @@ max_size_gb = 10
 max_age_days = 30
 
 # sandbox configuration
+# Optional secure restart identity. Default off; enabling requires an explicit
+# absolute private directory outside (and not containing) agent.workspaceDir.
+# Example only: /var/lib/arcentra/agent-identity. Do not share across Agents.
+# Verified grpc.tls with an explicit CA is required; see docs/agent-identity-persistence.md.
+[agent.identityPersistence]
+enabled = false
+directory = ""
+
 [agent.sandbox]
 # enable sandbox, false or true
 enable = true

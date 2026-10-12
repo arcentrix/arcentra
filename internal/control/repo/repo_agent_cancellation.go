@@ -14,15 +14,24 @@ import (
 
 // CancelAgentJobIfCurrent 原子取消远程作业及活动步骤，保留原认领并明确记录取消来源
 func (r *JobRunRepo) CancelAgentJobIfCurrent(ctx context.Context, runID string, current int, updates map[string]any) error {
+	if err := rejectSourceUpdates(updates); err != nil {
+		return err
+	}
+	if changesJobIdentity(updates) {
+		return fmt.Errorf("cancellation cannot replace execution identity")
+	}
 	if next, _ := updates["status"].(int); next != model.JobRunStatusCancelled || current < 1 || current > 3 {
 		return fmt.Errorf("active agent cancellation required")
 	}
 	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var job model.JobRun
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("job_run_id", "pipeline_id", "pipeline_run_id", "agent_id", "claim_id", "status", "terminal_report_digest").
+			Select(jobSnapshotColumns).
 			Where("job_run_id = ? AND status = ?", runID, current).First(&job).Error; err != nil {
 			return err
+		}
+		if job.JobRunID != runID {
+			return fmt.Errorf("exact job identity is required")
 		}
 		if job.AgentID == "" && job.ClaimID != "" {
 			return fmt.Errorf("claimed job requires agent ownership")
@@ -43,8 +52,26 @@ func (r *JobRunRepo) CancelAgentJobIfCurrent(ctx context.Context, runID string, 
 
 // CommitCancellationReceipt 只确认原作业认领的取消回执，不更改取消结果或添加制品
 func (r *JobRunRepo) CommitCancellationReceipt(ctx context.Context, expected *model.JobRun, claim, digest string) error {
+	return r.CommitCancellationReceiptWithSource(ctx, expected, claim, digest, nil)
+}
+
+// CommitCancellationReceiptWithSource 原子记录原认领取消回执和初始检出，不覆盖取消结果或添加制品
+func (r *JobRunRepo) CommitCancellationReceiptWithSource(ctx context.Context, expected *model.JobRun, claim, digest string, sourceUpdates map[string]any) error {
 	if expected == nil || expected.Status != model.JobRunStatusCancelled || expected.CancellationClaimID == "" || expected.ClaimID != claim || expected.CancellationClaimID != claim || expected.TerminalReportDigest != "" || len(digest) != 64 {
 		return fmt.Errorf("matching controller cancellation required")
+	}
+	updates := maps.Clone(sourceUpdates)
+	if updates == nil {
+		updates = map[string]any{}
+	}
+	for key := range updates {
+		if key != "source_resolved_commit" && key != "source_provenance_state" {
+			return fmt.Errorf("only source result updates are permitted")
+		}
+	}
+	updates["terminal_report_digest"] = digest
+	if err := validateSourceReportUpdates(expected, updates, true); err != nil {
+		return err
 	}
 	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockReportedJob(ctx, tx, expected); err != nil {
@@ -55,7 +82,7 @@ func (r *JobRunRepo) CommitCancellationReceipt(ctx context.Context, expected *mo
 		}
 		return reportedStatusResult(reportedJobQuery(tx.Model(&model.JobRun{}), expected).
 			Where("cancellation_claim_id = ?", expected.CancellationClaimID).
-			UpdateColumn("terminal_report_digest", digest))
+			Updates(updates))
 	})
 }
 

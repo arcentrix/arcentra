@@ -25,6 +25,12 @@ func (r *StepRunRepo) PatchStatusIfCurrent(ctx context.Context, runID string, cu
 
 // PatchStatusIfCurrent 防止迟到或并发状态报告覆盖作业终态
 func (r *JobRunRepo) PatchStatusIfCurrent(ctx context.Context, runID string, current int, updates map[string]any) error {
+	if err := rejectSourceUpdates(updates); err != nil {
+		return err
+	}
+	if changesJobIdentity(updates) {
+		return fmt.Errorf("generic status update cannot change job identity")
+	}
 	updates["updated_at"] = time.Now()
 	result := r.Database().WithContext(ctx).Model(&model.JobRun{}).
 		Where("job_run_id = ? AND status = ?", runID, current).Updates(updates)
@@ -59,6 +65,14 @@ func (r *StepRunRepo) PatchReportedStatus(ctx context.Context, expected *model.S
 
 // PatchReportedStatus 原子校验作业归属与原执行认领后提交状态和终态回执
 func (r *JobRunRepo) PatchReportedStatus(ctx context.Context, expected *model.JobRun, updates map[string]any) error {
+	if expected != nil {
+		if err := validateJobReportIdentityUpdates(expected, updates); err != nil {
+			return err
+		}
+		if err := validateSourceReportUpdates(expected, updates, false); err != nil {
+			return err
+		}
+	}
 	if expected == nil || expected.Status < 1 || expected.Status > 3 {
 		return fmt.Errorf("active job snapshot is required")
 	}
@@ -79,7 +93,9 @@ func (r *JobRunRepo) PatchReportedStatus(ctx context.Context, expected *model.Jo
 func reportedJobQuery(tx *gorm.DB, expected *model.JobRun) *gorm.DB {
 	return tx.Where("job_run_id = ? AND status = ? AND agent_id = ? AND claim_id = ?", expected.JobRunID, expected.Status, expected.AgentID, expected.ClaimID).
 		Where("pipeline_id = ? AND pipeline_run_id = ?", expected.PipelineID, expected.PipelineRunID).
-		Where("terminal_report_digest = ?", expected.TerminalReportDigest)
+		Where("terminal_report_digest = ? AND cancellation_claim_id = ?", expected.TerminalReportDigest, expected.CancellationClaimID).
+		Where("source_expectation_captured = ? AND source_type = ? AND source_repository = ? AND source_ref = ?", expected.SourceExpectationCaptured, expected.SourceType, expected.SourceRepository, expected.SourceRef).
+		Where("source_binding_digest = ? AND source_resolved_commit = ? AND source_provenance_state = ?", expected.SourceBindingDigest, expected.SourceResolvedCommit, expected.SourceProvenanceState)
 }
 
 func reportedStatusResult(result *gorm.DB) error {

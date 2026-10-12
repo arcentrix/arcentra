@@ -17,12 +17,12 @@ type capacityRegistrationClient struct {
 
 func (c *capacityRegistrationClient) Register(_ context.Context, req *agentv1.RegisterRequest, _ ...grpc.CallOption) (*agentv1.RegisterResponse, error) {
 	c.request = req
-	return &agentv1.RegisterResponse{Success: true}, nil
+	return &agentv1.RegisterResponse{Success: true, AgentId: "synthetic-capacity-agent"}, nil
 }
 func TestRegistrationReportsOnlySupportedCapacity(t *testing.T) {
 	for _, configured := range []int{0, 1, 5, -1} {
 		client := &capacityRegistrationClient{}
-		conf := &config.AgentConfig{Agent: config.AgentInfo{MaxConcurrentJobs: configured}}
+		conf := &config.AgentConfig{Agent: config.AgentInfo{ID: "synthetic-capacity-agent", MaxConcurrentJobs: configured}, Grpc: config.GrpcConfig{Token: "synthetic-capacity-agent:signature"}}
 		svc := NewAgentServiceImpl(conf, &agentgrpc.ClientWrapper{AgentClient: client}, nil)
 		_, err := svc.Register(context.Background(), nil)
 		if configured == 0 || configured == 1 {

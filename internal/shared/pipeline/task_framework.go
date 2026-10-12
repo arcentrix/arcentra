@@ -32,6 +32,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/arcentrix/arcentra/pkg/scm"
+	"github.com/arcentrix/arcentra/pkg/sourceprovenance"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
 )
@@ -260,7 +261,17 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 		return fmt.Errorf("select agent: %w", err)
 	}
 	task.Set("agentID", agentID)
-	if err := tf.getJobRunStore().UpdateJobRun(ctx, tf.execCtx.JobRunID, map[string]any{"agent_id": agentID, "status": model.JobRunStatusQueued}); err != nil {
+	source, binding, err := tf.resolveSourceExpectation(task.Job)
+	if err != nil {
+		return err
+	}
+	capture, ok := tf.getJobRunStore().(interface {
+		CaptureSourceExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding) error
+	})
+	if !ok {
+		return fmt.Errorf("atomic job source capture unavailable")
+	}
+	if err := capture.CaptureSourceExpectation(ctx, tf.execCtx.PipelineIDRef, tf.execCtx.PipelineRunID, tf.execCtx.JobRunID, agentID, binding); err != nil {
 		return err
 	}
 	steps := make([]taskqueue.StepPayload, 0, len(task.Job.Steps))
@@ -269,11 +280,6 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 			continue
 		}
 		stepRunID := tf.execCtx.StepRunIDs[step.Name]
-		for _, attemptID := range tf.execCtx.StepAttemptIDs[step.Name] {
-			if err := tf.getJobRunStore().UpdateStepRun(ctx, attemptID, map[string]any{"agent_id": agentID, "status": 2}); err != nil {
-				return err
-			}
-		}
 		steps = append(steps, taskqueue.StepPayload{AttemptRunIDs: tf.execCtx.StepAttemptIDs[step.Name], Name: step.Name, StepIndex: int32(i), StepRunID: stepRunID, Uses: step.Uses, Action: step.Action,
 			Args: tf.execCtx.ResolveVariables(spec.StructAsMap(step.Args)), Env: tf.execCtx.ResolveStepEnv(task.Job, step), ContinueOnError: step.ContinueOnError, Timeout: step.Timeout, When: step.When})
 	}
@@ -281,12 +287,7 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 		JobRunID: tf.execCtx.JobRunID, JobName: task.Job.Name, AgentID: agentID, Steps: steps, Retry: task.Job.Retry,
 		Env: tf.execCtx.ResolveStepEnv(task.Job, nil), Variables: tf.execCtx.Pipeline.Variables,
 		Timeout: task.Job.Timeout, ArtifactURIs: tf.execCtx.ArtifactSnapshot(), ArtifactReferences: tf.execCtx.ArtifactReferenceSnapshot()}
-	if source := task.Job.Source; source != nil {
-		payload.Source = &taskqueue.SourcePayload{Type: source.Type, Repo: tf.execCtx.ResolveVariable(source.Repo), Branch: tf.execCtx.ResolveVariable(source.Branch)}
-		if source.Auth != nil {
-			payload.Source.Auth = map[string]string{"username": tf.execCtx.ResolveVariable(source.Auth.Username), "password": tf.execCtx.ResolveVariable(source.Auth.Password), "token": tf.execCtx.ResolveVariable(source.Auth.Token)}
-		}
-	}
+	payload.Source = source
 	data, err := sonic.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal job run: %w", err)

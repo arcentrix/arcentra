@@ -18,11 +18,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -177,6 +174,7 @@ func StartWorker(
 		timer := time.NewTicker(time.Second)
 		defer timer.Stop()
 		warned := false
+		lastQuarantined, lastUnreviewed := -1, -1
 		for {
 			if err := reports.replayBound(runCtx, grpcClient, agentConf); err != nil && runCtx.Err() == nil {
 				if !warned {
@@ -186,6 +184,11 @@ func StartWorker(
 			} else {
 				warned = false
 			}
+			quarantined, unreviewed := reports.quarantineCounts()
+			if quarantined > 0 && (quarantined != lastQuarantined || unreviewed != lastUnreviewed) {
+				log.Warnw("terminal conflicts retained for offline operator inspection; results were not accepted", "quarantined", quarantined, "unreviewed", unreviewed)
+			}
+			lastQuarantined, lastUnreviewed = quarantined, unreviewed
 			select {
 			case <-runCtx.Done():
 				return
@@ -459,15 +462,24 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 	start := time.Now()
 	// 即使控制消息先到，也先确认原作业认领；已终态且未认领的任务不能产生收据
 	if err := reportJobRunStatus(ctx, grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_BUSY, int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING), "", start, 0, artifacts); err != nil {
+		// 确定拒绝且即将消费的任务没有执行权，不保留无用认领；不确定响应仍复用原身份
+		switch grpcstatus.Code(err) {
+		case codes.FailedPrecondition, codes.PermissionDenied, codes.InvalidArgument, codes.NotFound:
+			completeExecutionClaim(ctx, "job", payload.JobRunID)
+		}
 		return fmt.Errorf("claim job run: %w", err)
 	}
 	jobErr := validateJobExecution(payload)
+	if jobErr == nil {
+		jobErr = validateJobSourceBinding(payload)
+	}
 	workspace := ""
+	var initialCheckout *agentv1.SourceCheckout
 	if jobErr == nil {
 		workspace, jobErr = prepareWorkspace(agentConf, payload)
 	}
 	if jobErr == nil {
-		jobErr = handleSourceClone(jobCtx, payload.Source, workspace)
+		initialCheckout, jobErr = handleSourceClone(jobCtx, payload.Source, workspace)
 	}
 	if jobErr == nil {
 		jobErr = validateArtifactReferences(payload.ArtifactURIs, payload.ArtifactReferences, reference, time.Now())
@@ -513,13 +525,14 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 				}
 				if err != nil {
 					var completed *completedExecutionError
-					if !errors.As(err, &completed) {
+					if !errors.As(err, &completed) && !terminalQuarantined(err) {
 						return err
 					}
 				}
 			}
 		}
 		reportCtx = context.WithValue(reportCtx, terminalDependenciesContextKey{}, dependencies)
+		reportCtx = withInitialSourceCheckout(reportCtx, initialCheckout)
 		return reportJobRunStatus(reportCtx, grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_IDLE, int32(status), errMsg, start, end, artifacts)
 	}}
 	pendingJobReports.Store(receiptKey(ctx, "job", payload.JobRunID), receipt)
@@ -624,6 +637,7 @@ func reportJobRunStatus(
 		}
 	}
 	if status >= int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS) {
+		req.SourceCheckout = initialSourceCheckout(reportCtx)
 		return reportTerminalStatus(reportCtx, grpcClient, agentConf, "job", jobRunID, req)
 	}
 	ctx, cancel := grpcClient.WithTimeoutAndAuth(context.WithoutCancel(reportCtx))
@@ -716,94 +730,6 @@ func parseTimeout(raw string, defaultSeconds int) time.Duration {
 	return executor.ParseTimeout(raw, defaultSeconds)
 }
 
-// handleSourceClone clones the source repository into the workspace directory
-// when the job payload contains a SourcePayload with type "git".
-func handleSourceClone(ctx context.Context, src *taskqueue.SourcePayload, workspace string) error {
-	if src == nil || src.Type == "" {
-		return nil
-	}
-	if !strings.EqualFold(src.Type, "git") {
-		return fmt.Errorf("unsupported source type %q", src.Type)
-	}
-	if src.Repo == "" {
-		return fmt.Errorf("git source repository is required")
-	}
-	if repoURL, err := url.Parse(src.Repo); err == nil && repoURL.User != nil {
-		return fmt.Errorf("git source URL must not contain credentials; use source.auth instead")
-	}
-	if src.Commit != "" && !regexp.MustCompile(`^[a-fA-F0-9]{7,64}$`).MatchString(src.Commit) {
-		return fmt.Errorf("source commit must be a hexadecimal commit ID")
-	}
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
-		return err
-	}
-	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	username, password := src.Auth["username"], src.Auth["password"]
-	if password == "" {
-		password = src.Auth["token"]
-		if password != "" && username == "" {
-			username = "oauth2"
-		}
-	}
-	if password != "" {
-		// 认证内容仅放入子进程环境，避免写进命令行、仓库配置或脚本文件
-		file, err := os.CreateTemp("", "arcentra-askpass-*")
-		if err != nil {
-			return err
-		}
-		name := file.Name()
-		defer os.Remove(name)
-		script := "#!/bin/sh\ncase \"$1\" in *Username*) printf '%s\\n' \"$ARCENTRA_GIT_USERNAME\" ;; *) printf '%s\\n' \"$ARCENTRA_GIT_PASSWORD\" ;; esac\n"
-		if _, err := file.WriteString(script); err != nil {
-			_ = file.Close()
-			return err
-		}
-		if err := file.Close(); err != nil {
-			return err
-		}
-		if err := os.Chmod(name, 0o700); err != nil {
-			return err
-		}
-		env = append(env, "GIT_ASKPASS="+name, "ARCENTRA_GIT_USERNAME="+username, "ARCENTRA_GIT_PASSWORD="+password)
-	}
-	run := func(args ...string) error {
-		cmd := exec.CommandContext(ctx, "git", args...)
-		cmd.Dir, cmd.Env = workspace, env
-		cmd.WaitDelay = 2 * time.Second
-		output, err := cmd.CombinedOutput()
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err != nil {
-			message := string(output)
-			for _, secret := range []string{password, src.Auth["token"]} {
-				if secret != "" {
-					message = strings.ReplaceAll(message, secret, "[REDACTED]")
-				}
-			}
-			return fmt.Errorf("git source operation failed: %s: %w", message, err)
-		}
-		return nil
-	}
-	args := []string{"clone", "--depth", "1"}
-	if src.Branch != "" {
-		args = append(args, "--branch", src.Branch)
-	}
-	args = append(args, "--", src.Repo, ".")
-	if err := run(args...); err != nil {
-		return err
-	}
-	if src.Commit != "" {
-		if err := run("fetch", "--depth", "1", "origin", src.Commit); err != nil {
-			return err
-		}
-		if err := run("checkout", "--detach", src.Commit); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // retainStepReport 缓存所有步骤终态上报，避免临时 RPC 故障丢失跳过或失败结果
 func retainStepReport(ctx context.Context, stepRunID string, executionErr error, report func(context.Context) error) error {
 	receipt := &executionReceipt{executionErr: executionErr, report: report}
@@ -823,6 +749,9 @@ func (r *executionReceipt) deliver(ctx context.Context, pending *sync.Map, key s
 		return err
 	}
 	if err := r.report(ctx); err != nil {
+		if terminalQuarantined(err) {
+			pending.Delete(key)
+		}
 		return err
 	}
 	pending.Delete(key)
@@ -836,6 +765,10 @@ type completedExecutionError struct{ error }
 
 func (e *completedExecutionError) Unwrap() error { return e.error }
 func acknowledgeCompleted(err error) error {
+	if terminalQuarantined(err) {
+		log.Warnw("execution task retained in durable terminal quarantine; report not accepted")
+		return nil
+	}
 	if err == nil {
 		return nil
 	}
@@ -849,7 +782,7 @@ func acknowledgeCompleted(err error) error {
 	}
 	switch grpcstatus.Code(err) {
 	case codes.FailedPrecondition, codes.PermissionDenied, codes.InvalidArgument, codes.NotFound:
-		log.Warnw("discarding rejected execution task", "error", err)
+		log.Warnw("discarding rejected execution task", "code", grpcstatus.Code(err).String())
 		return nil
 	}
 	return err
@@ -874,4 +807,19 @@ func ValidateExecutionConfig(conf *config.AgentConfig) error {
 	}
 	_, err := conf.Agent.ExecutionCapacity()
 	return err
+}
+
+// quarantineCounts 仅返回本地隔离规模，不暴露负载或业务身份
+func (o *terminalOutbox) quarantineCounts() (total, unreviewed int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, entry := range o.entries {
+		if q := entry.record.Quarantine; q != nil {
+			total++
+			if len(q.Reviews) == 0 {
+				unreviewed++
+			}
+		}
+	}
+	return total, unreviewed
 }

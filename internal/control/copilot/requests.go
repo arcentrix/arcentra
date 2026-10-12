@@ -85,3 +85,40 @@ func (r *Requests) Cancel(user, project, id string) error {
 	r.states[key] = requestState{expires: time.Now().Add(90 * time.Second)}
 	return nil
 }
+
+// Previews 限制源码预览的并发，不与分析请求共享去重标识
+// 预览不保存内容或请求历史，完成后立即释放容量
+type Previews struct {
+	mu     sync.Mutex
+	users  map[string]int
+	active int
+}
+
+// Begin 为当前用户保留有限预览容量，并约束整个准备流程为 15 秒
+func (p *Previews) Begin(parent context.Context, user string) (context.Context, func(), error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.users == nil {
+		p.users = map[string]int{}
+	}
+	if p.active >= 16 || p.users[user] >= 2 {
+		return nil, nil, ErrBusy
+	}
+	p.active++
+	p.users[user]++
+	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
+	var once sync.Once
+	finish := func() {
+		once.Do(func() {
+			cancel()
+			p.mu.Lock()
+			defer p.mu.Unlock()
+			p.active--
+			p.users[user]--
+			if p.users[user] == 0 {
+				delete(p.users, user)
+			}
+		})
+	}
+	return ctx, finish, nil
+}
