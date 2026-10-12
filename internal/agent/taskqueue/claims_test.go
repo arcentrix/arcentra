@@ -160,7 +160,7 @@ func TestPersistedClaimResponseLossDoesNotDropOrRepeatExecution(t *testing.T) {
 			if got := artifactTestRead(t, filepath.Join(conf.Agent.WorkspaceDir, "claim-run", jobID), "first"); got != "x" {
 				t.Fatal("completed job executed again")
 			}
-			completeExecutionClaim("job", jobID) // 清理被控制面拒绝的测试重放身份
+			completeExecutionClaim(context.Background(), "job", jobID) // 清理被控制面拒绝的测试重放身份
 		})
 	}
 }

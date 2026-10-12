@@ -72,6 +72,22 @@ func NewApp(
 	shutdownMgr *shutdown.Manager,
 	pipelineEngine *process.Process,
 ) (*App, func(), error) {
+	if appConf != nil && rt.Services != nil && rt.Services.Deployment != nil {
+		if err := service.ConfigureDeployment(context.Background(), rt.Services.Deployment, appConf.Deployment); err != nil {
+			if pipelineEngine != nil {
+				pipelineEngine.Stop()
+			}
+			return nil, nil, err
+		}
+	}
+	if rt.Services != nil && rt.Services.Deployment != nil && repos != nil {
+		deploymentService := rt.Services.Deployment
+		deploymentService.ConfigurePipelineDeployments(repos.JobRun, repos.StepRun,
+			service.NewPipelineDeploymentAuthorizer(repos, deploymentService))
+		if pipelineEngine != nil {
+			pipelineEngine.ConfigurePipelineDeployments(deploymentService)
+		}
+	}
 	httpApp := rt.Router()
 
 	// Wire the process into Services so PipelineServiceImpl can use it.

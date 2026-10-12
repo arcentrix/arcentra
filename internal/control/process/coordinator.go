@@ -130,7 +130,7 @@ func (rc *Coordinator) Execute(ctx context.Context) error {
 
 	// Audit: pipeline run started.
 	if auditWriter != nil {
-		auditWriter.Write(ctx, PipelineAudit("pipeline_run.started", "", rc.run.RunID, rc.run.PipelineID))
+		auditWriter.Write(ctx, PipelineAudit("pipeline_run.started", rc.run.TriggeredBy, rc.run.RunID, rc.run.PipelineID))
 	}
 
 	totalJobs := len(rc.spec.Jobs)
@@ -186,7 +186,7 @@ func (rc *Coordinator) Execute(ctx context.Context) error {
 
 	// Audit: pipeline run terminal state.
 	if auditWriter != nil {
-		auditWriter.Write(persistCtx, PipelineAudit(auditAction, "", rc.run.RunID, rc.run.PipelineID))
+		auditWriter.Write(persistCtx, PipelineAudit(auditAction, rc.run.TriggeredBy, rc.run.RunID, rc.run.PipelineID))
 	}
 
 	rc.updatePipelineStats(persistCtx, updates["status"].(int))
@@ -234,6 +234,8 @@ func (rc *Coordinator) executeDAG(ctx context.Context) error {
 	execCtx.CancelJob = rc.engine.cancelJobRunOnAgent
 	execCtx.PipelineRunID = rc.run.RunID
 	execCtx.PipelineIDRef = rc.run.PipelineID
+	execCtx.TriggeredBy = rc.run.TriggeredBy
+	execCtx.RunDeployment = rc.runDeployment
 	execCtx.RecordLocalArtifacts = rc.recordLocalArtifacts
 	execCtx.CheckLocalArtifacts = rc.checkLocalArtifacts
 	execCtx.ArtifactURIs = make(map[string]string)

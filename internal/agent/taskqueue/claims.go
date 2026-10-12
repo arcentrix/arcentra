@@ -21,17 +21,21 @@ const executionClaimMetadataKey = "x-arcentra-claim-id"
 // executionClaims 仅在当前进程保留认领身份，响应丢失重试不会获得新的执行权
 var executionClaims sync.Map
 
-func withExecutionClaim(ctx context.Context, kind, runID string) context.Context {
-	key := kind + "/" + runID
+func executionClaimID(ctx context.Context, kind, runID string) string {
+	key := kind + "/" + receiptKey(ctx, kind, runID)
 	claim, ok := executionClaims.Load(key)
 	if !ok {
 		claim, _ = executionClaims.LoadOrStore(key, id.GetUUID())
 	}
-	return metadata.AppendToOutgoingContext(ctx, executionClaimMetadataKey, claim.(string))
+	return claim.(string)
 }
 
-func completeExecutionClaim(kind, runID string) {
-	executionClaims.Delete(kind + "/" + runID)
+func withExecutionClaim(ctx context.Context, kind, runID string) context.Context {
+	return metadata.AppendToOutgoingContext(ctx, executionClaimMetadataKey, executionClaimID(ctx, kind, runID))
+}
+
+func completeExecutionClaim(ctx context.Context, kind, runID string) {
+	executionClaims.Delete(kind + "/" + receiptKey(ctx, kind, runID))
 }
 
 // claimStepRun 对不确定的步骤认领响应就地重试，避免重启已开始的作业和重复前序步骤
@@ -39,9 +43,9 @@ func claimStepRun(ctx context.Context, client *agentgrpc.ClientWrapper, conf *co
 	delay := 100 * time.Millisecond
 	for {
 		if err := ctx.Err(); err != nil {
-			return reportCancelledStepClaim(client, conf, stepRunID, start, err)
+			return reportCancelledStepClaim(ctx, client, conf, stepRunID, start, err)
 		}
-		err := reportStepRunStatus(client, conf, stepRunID, steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING, 0, "", start, 0, nil)
+		err := reportStepRunStatus(ctx, client, conf, stepRunID, steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING, 0, "", start, 0, nil)
 		if err == nil {
 			return nil
 		}
@@ -55,20 +59,20 @@ func claimStepRun(ctx context.Context, client *agentgrpc.ClientWrapper, conf *co
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return reportCancelledStepClaim(client, conf, stepRunID, start, ctx.Err())
+			return reportCancelledStepClaim(ctx, client, conf, stepRunID, start, ctx.Err())
 		case <-timer.C:
 			delay = min(delay*2, 5*time.Second)
 		}
 	}
 }
 
-func reportCancelledStepClaim(client *agentgrpc.ClientWrapper, conf *config.AgentConfig, stepRunID string, start time.Time, err error) error {
+func reportCancelledStepClaim(ctx context.Context, client *agentgrpc.ClientWrapper, conf *config.AgentConfig, stepRunID string, start time.Time, err error) error {
 	terminal := steprunv1.StepRunStatus_STEP_RUN_STATUS_CANCELLED
 	if errors.Is(err, context.DeadlineExceeded) {
 		terminal = steprunv1.StepRunStatus_STEP_RUN_STATUS_TIMEOUT
 	}
 	end := time.Now().Unix()
-	return retainStepReport(stepRunID, err, func() error {
-		return reportStepRunStatus(client, conf, stepRunID, terminal, 1, err.Error(), start, end, nil)
+	return retainStepReport(ctx, stepRunID, err, func(reportCtx context.Context) error {
+		return reportStepRunStatus(reportCtx, client, conf, stepRunID, terminal, 1, err.Error(), start, end, nil)
 	})
 }

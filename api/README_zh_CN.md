@@ -123,7 +123,7 @@ Agent 端与 Server 端通信的主要接口，负责 Agent 的生命周期管�
 - **更新步骤执行** (`UpdateStepRun`) - 更新步骤执行配置
 - **删除步骤执行** (`DeleteStepRun`) - 删除步骤执行
 - **取消步骤执行** (`CancelStepRun`) - 取消正在执行的步骤执行
-- **重试步骤执行** (`RetryStepRun`) - 重新执行失败的步骤执行
+- **重试步骤执行** (`RetryStepRun`) - 返回 Unimplemented；缺少可靠工作区检查点，不能假装恢复终态步骤。请配置活动作业重试策略或触发新的流水线运行。
 - **产物管理** (`ListStepRunArtifacts`) - 管理步骤执行产物
 
 **StepRun 状态：**
@@ -165,34 +165,30 @@ Agent 端与 Server 端通信的主要接口，负责 Agent 的生命周期管�
 
 ### 前置要求
 
-- [Buf CLI](https://docs.buf.build/installation) >= 1.0.0
-- [Go](https://golang.org/) >= 1.21
-- [Protocol Buffers Compiler](https://grpc.io/docs/protoc-installation/)
+使用 `go.mod` 声明的 Go 版本和 GNU Make。`make proto-tools` 会安装根目录
+Makefile 固定版本的 Buf、官方 `protoc-gen-go` 和 `protoc-gen-go-grpc`。
+`api/buf.gen.yaml` 已从远程 BSR 生成切换为本地插件，上游插件版本保持不变，
+schema 描述符不会发往远程生成服务。首次安装工具需要 Go 模块代理，
+工具安装完成后，代码生成不依赖远程服务。
 
-### 安装 Buf
-
-```bash
-# macOS
-brew install bufbuild/buf/buf
-
-# Linux
-curl -sSL "https://github.com/bufbuild/buf/releases/latest/download/buf-$(uname -s)-$(uname -m)" -o /usr/local/bin/buf
-chmod +x /usr/local/bin/buf
-
-# 验证安装
-buf --version
-```
-
-### 生成代码
+### 生成并检查代码
 
 ```bash
 # 在项目根目录下执行
-make proto
-
-# 或者在 api 目录下直接使用 buf
-cd api
-buf generate
+make deps-check # 在代码生成前检查依赖能否完整解析
+make buf        # 使用固定版本工具重新生成 protobuf Go 包
+make buf-check  # 与全新生成的结果比较，检查是否一致
+make codegen    # 同时生成所有命令的 Wire 依赖注入代码
 ```
+
+修改 `.proto` 后必须一起提交对应的 `api/**/*.pb.go`。这些包属于根 Go module，
+新检出的源码必须包含它们，避免 `go mod tidy`、Dependabot 和下游 Go 使用者
+尝试从模块代理查找不存在的 API 子模块。不要手工修改生成文件。删除或重命名
+proto 文件时也要删除过时的生成文件；`make buf-check` 会检测过时、缺失及多余的
+输出，且不会修改工作区。
+
+`cmd/*/wire_gen.go` 仍不提交，构建或测试命令包前由 `make codegen` 生成。
+CI 会先检查纯源码的依赖解析和 protobuf 一致性，再生成 Wire 代码。
 
 ### 代码检查
 

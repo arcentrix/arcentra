@@ -384,23 +384,45 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 		return nil, err
 	}
 	if alreadyClaimed {
+		if entity.RetryMode != "" || entity.Attempt > 1 {
+			guard, ok := a.agentService.stepRunRepo.(interface {
+				ValidateRetryActivation(context.Context, *model.StepRun) error
+			})
+			if !ok {
+				return nil, status.Error(codes.Unimplemented, "retry activation repository unavailable")
+			}
+			if err := guard.ValidateRetryActivation(ctx, entity); err != nil {
+				return nil, status.Error(codes.FailedPrecondition, "retry activation is no longer authorized")
+			}
+		}
 		return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "claim confirmed"}, nil
 	}
 	if err := validateReportedStatus(entity.Status, int(req.Status), true); err != nil {
 		return nil, err
 	}
+	digest := ""
+	if int(req.Status) >= 4 {
+		digest, err = terminalReportDigest(req, claimID, entity.PipelineID, entity.PipelineRunID, entity.JobRunID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if entity.Status >= 4 {
-		return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "already completed"}, nil
+		if err := validateTerminalReplay(entity.TerminalReportDigest, digest); err != nil {
+			return nil, err
+		}
+		return &agentv1.ReportStepRunStatusResponse{Success: true, Message: "terminal report confirmed"}, nil
 	}
 	updates := executionStatusUpdates(int(req.Status), req.ErrorMessage, req.StartTime, req.EndTime, entity.StartTime)
-	if int(req.Status) == 3 {
-		updates["claim_id"] = claimID
+	updates["claim_id"] = claimID
+	if digest != "" {
+		updates["terminal_report_digest"] = digest
 	}
 	updates["exit_code"] = req.ExitCode
 	if workspace := strings.TrimSpace(req.Metrics["workspace"]); workspace != "" {
 		updates["workspace"] = workspace
 	}
-	if err := patchAgentStatus(ctx, a.agentService.stepRunRepo, stepRunID, entity.Status, updates); err != nil {
+	if err := patchAgentStepStatus(ctx, a.agentService.stepRunRepo, entity, updates); err != nil {
 		return nil, status.Error(codes.Internal, "update step run failed")
 	}
 
@@ -446,27 +468,30 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 	if err := validateReportedStatus(entity.Status, int(req.Status), false); err != nil {
 		return nil, err
 	}
+	digest := ""
+	if int(req.Status) >= 4 {
+		digest, err = terminalReportDigest(req, claimID, entity.PipelineID, entity.PipelineRunID, entity.JobRunID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if model.IsJobRunTerminal(entity.Status) {
+		if err := validateTerminalReplay(entity.TerminalReportDigest, digest); err != nil {
+			return nil, err
+		}
+		// 回执与制品在同一事务中提交，重放无需重新写入或复活已清理的制品
+		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "terminal report confirmed"}, nil
+	}
 	updates := executionStatusUpdates(int(req.Status), req.ErrorMessage, req.StartTime, req.EndTime, entity.StartTime)
-	if int(req.Status) == 3 {
-		updates["claim_id"] = claimID
+	updates["claim_id"] = claimID
+	if digest != "" {
+		updates["terminal_report_digest"] = digest
 	}
 	artifacts, err := a.prepareJobArtifacts(ctx, entity, req, updates)
 	if err != nil {
 		return nil, err
 	}
-	if model.IsJobRunTerminal(entity.Status) {
-		if len(artifacts) > 0 {
-			writer, ok := a.agentService.jobRunRepo.(agentArtifactRepository)
-			if !ok {
-				return nil, status.Error(codes.Unimplemented, "artifact repository unavailable")
-			}
-			if err := writer.ValidateCompletedArtifacts(ctx, jobRunID, artifacts); err != nil {
-				return nil, status.Error(codes.FailedPrecondition, "completed artifact metadata does not match")
-			}
-		}
-		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "already completed"}, nil
-	}
-	if err := patchAgentJobStatus(ctx, a.agentService.jobRunRepo, jobRunID, entity.Status, updates, artifacts); err != nil {
+	if err := patchAgentJobStatus(ctx, a.agentService.jobRunRepo, entity, updates, artifacts); err != nil {
 		return nil, status.Error(codes.Internal, "update job run failed")
 	}
 

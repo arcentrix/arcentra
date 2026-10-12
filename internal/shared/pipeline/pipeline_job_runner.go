@@ -37,6 +37,9 @@ func NewJobRunner(ctx *ExecutionContext, job *spec.Job) *JobRunner {
 
 // Run executes the job
 func (r *JobRunner) Run(ctx context.Context) error {
+	if r.job.Retry != nil {
+		return fmt.Errorf("retry requires the audited TaskFramework execution path")
+	}
 	r.ctx.LogJob(r.job.Name, fmt.Sprintf("starting job: %s", r.job.Description))
 
 	// Evaluate when condition with job context

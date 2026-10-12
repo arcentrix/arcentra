@@ -19,20 +19,20 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type agentArtifactRepository interface {
-	PatchStatusAndArtifacts(context.Context, string, int, map[string]any, []*model.ProjectArtifact) error
-	ValidateCompletedArtifacts(context.Context, string, []*model.ProjectArtifact) error
+type agentJobStatusRepository interface {
+	PatchReportedStatus(context.Context, *model.JobRun, map[string]any) error
+	PatchReportedStatusAndArtifacts(context.Context, *model.JobRun, map[string]any, []*model.ProjectArtifact) error
 }
 
-func patchAgentJobStatus(ctx context.Context, repository any, runID string, current int, updates map[string]any, artifacts []*model.ProjectArtifact) error {
-	if len(artifacts) == 0 {
-		return patchAgentStatus(ctx, repository, runID, current, updates)
-	}
-	writer, ok := repository.(agentArtifactRepository)
+func patchAgentJobStatus(ctx context.Context, repository any, expected *model.JobRun, updates map[string]any, artifacts []*model.ProjectArtifact) error {
+	writer, ok := repository.(agentJobStatusRepository)
 	if !ok {
-		return status.Error(codes.Unimplemented, "atomic artifact repository unavailable")
+		return status.Error(codes.Unimplemented, "atomic status and artifact repository unavailable")
 	}
-	return writer.PatchStatusAndArtifacts(ctx, runID, current, updates, artifacts)
+	if len(artifacts) == 0 {
+		return writer.PatchReportedStatus(ctx, expected, updates)
+	}
+	return writer.PatchReportedStatusAndArtifacts(ctx, expected, updates, artifacts)
 }
 
 func (a *AgentServiceImpl) prepareJobArtifacts(ctx context.Context, job *model.JobRun, req *agentv1.ReportJobRunStatusRequest, updates map[string]any) ([]*model.ProjectArtifact, error) {

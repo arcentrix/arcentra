@@ -3,14 +3,15 @@ package repo
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
+	"testing"
+
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
-	"strings"
-	"sync"
-	"testing"
 )
 
 func TestMigrateSchemaIsIdempotent(t *testing.T) {
@@ -97,5 +98,42 @@ func TestAdministratorBootstrapIsExplicitAndOneTime(t *testing.T) {
 	db.Model(&model.RoleGrant{}).Count(&count)
 	if count != 1 {
 		t.Fatalf("unexpected grants: %d", count)
+	}
+}
+
+func TestTerminalReceiptMigrationAddsEmptyReceiptWithoutAcknowledgingHistory(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, _ := db.DB()
+	defer sqlDB.Close()
+	ctx := context.Background()
+	if err := db.WithContext(ctx).AutoMigrate(&model.JobRun{}, &model.StepRun{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, entity := range []any{&model.JobRun{}, &model.StepRun{}} {
+		if err := db.Migrator().DropColumn(entity, "TerminalReportDigest"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.WithContext(ctx).Model(&model.JobRun{}).Omit("TerminalReportDigest").Create(&model.JobRun{JobRunID: "old-job", Status: 5, ClaimID: "old-claim"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WithContext(ctx).Model(&model.StepRun{}).Omit("TerminalReportDigest").Create(&model.StepRun{StepRunID: "old-step", Status: 4, ClaimID: "old-claim"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := MigrateSchema(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	job, err := (&JobRunRepo{IDatabase: statusTestDB{db}}).GetByJobRunID(ctx, "old-job")
+	if err != nil || job.Status != 5 || job.ClaimID != "old-claim" || job.TerminalReportDigest != "" {
+		t.Fatalf("migration synthesized job receipt: %+v %v", job, err)
+	}
+	step, err := (&StepRunRepo{IDatabase: statusTestDB{db}}).GetByStepRunID(ctx, "old-step")
+	if err != nil || step.Status != 4 || step.ClaimID != "old-claim" || step.TerminalReportDigest != "" {
+		t.Fatalf("migration synthesized step receipt: %+v %v", step, err)
 	}
 }

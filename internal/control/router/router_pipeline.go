@@ -254,7 +254,13 @@ func (rt *Router) getPipelineSpec(c *fiber.Ctx) error {
 	if e := pipelineAPIError(resp.GetSuccess(), resp.GetMessage(), resp.GetError()); e != nil {
 		return http.Err(c, e.code, e.msg)
 	}
+	review, reviewHash, reviewErr := rt.pipelineService().GetPipelineDeploymentReview(c.UserContext(), pipelineID, resp.GetSpec())
+	reviewError := ""
+	if reviewErr != nil {
+		reviewError = reviewErr.Error()
+	}
 	return http.Detail(c, map[string]any{
+		"deploymentPlan": review, "deploymentPlanHash": reviewHash, "deploymentReviewError": reviewError,
 		"spec":             pipelineProtoValue(resp.GetSpec()),
 		"format":           resp.GetFormat().String(),
 		"headCommitSha":    resp.GetHeadCommitSha(),
@@ -350,22 +356,31 @@ func (rt *Router) triggerPipeline(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "pipeline id is required")
 	}
 	var req struct {
-		Variables   map[string]string `json:"variables"`
-		TriggeredBy string            `json:"triggeredBy"`
-		RequestID   string            `json:"requestId"`
+		Variables                   map[string]string `json:"variables"`
+		TriggeredBy                 string            `json:"triggeredBy"`
+		AllowDeployments            bool              `json:"allowDeployments"`
+		ExpectedDefinitionCommitSha string            `json:"expectedDefinitionCommitSha"`
+		ExpectedDeploymentPlanHash  string            `json:"expectedDeploymentPlanHash"`
+		RequestID                   string            `json:"requestId"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return http.Err(c, http.RequestParameterParsingFailed.Code, http.RequestParameterParsingFailed.Msg)
 	}
-	triggeredBy := strings.TrimSpace(req.TriggeredBy)
-	if triggeredBy == "" {
-		triggeredBy = auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
+	subject, ok := collectionSubject(c)
+	if !ok {
+		return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
 	}
-	resp, err := rt.pipelineService().TriggerPipeline(c.Context(), &pipelinev1.TriggerPipelineRequest{
-		PipelineId:  pipelineID,
-		Variables:   req.Variables,
-		TriggeredBy: triggeredBy,
-		RequestId:   req.RequestID,
+	// 请求体中的 triggeredBy 仅兼容旧客户端，审计身份始终来自服务端认证。
+	if req.TriggeredBy != "" && strings.TrimSpace(req.TriggeredBy) != subject.UserID {
+		return http.Err(c, http.BadRequest.Code, "triggeredBy must match the authenticated user")
+	}
+	triggeredBy := subject.UserID
+	resp, err := rt.pipelineService().TriggerPipeline(service.WithVerifiedPipelineActor(c.UserContext(), subject.UserID), &pipelinev1.TriggerPipelineRequest{
+		PipelineId:       pipelineID,
+		Variables:        req.Variables,
+		TriggeredBy:      triggeredBy,
+		AllowDeployments: req.AllowDeployments, ExpectedDefinitionCommitSha: req.ExpectedDefinitionCommitSha, ExpectedDeploymentPlanHash: req.ExpectedDeploymentPlanHash,
+		RequestId: req.RequestID,
 	})
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())

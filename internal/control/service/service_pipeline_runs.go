@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
@@ -35,18 +36,22 @@ type PipelineJobView struct {
 
 // PipelineStepView 描述单个步骤的执行进度
 type PipelineStepView struct {
-	StepRunID    string     `json:"stepRunId"`
-	JobRunID     string     `json:"jobRunId"`
-	Name         string     `json:"name"`
-	StepIndex    int        `json:"stepIndex"`
-	Status       int        `json:"status"`
-	Uses         string     `json:"uses"`
-	Action       string     `json:"action"`
-	ExitCode     *int       `json:"exitCode"`
-	ErrorMessage string     `json:"errorMessage"`
-	StartTime    *time.Time `json:"startTime"`
-	EndTime      *time.Time `json:"endTime"`
-	Duration     int64      `json:"duration"`
+	DeploymentReleaseID string     `json:"deploymentReleaseId"`
+	Attempt             int        `json:"attempt"`
+	RetryMode           string     `json:"retryMode"`
+	PreviousStepRunID   string     `json:"previousStepRunId"`
+	StepRunID           string     `json:"stepRunId"`
+	JobRunID            string     `json:"jobRunId"`
+	Name                string     `json:"name"`
+	StepIndex           int        `json:"stepIndex"`
+	Status              int        `json:"status"`
+	Uses                string     `json:"uses"`
+	Action              string     `json:"action"`
+	ExitCode            *int       `json:"exitCode"`
+	ErrorMessage        string     `json:"errorMessage"`
+	StartTime           *time.Time `json:"startTime"`
+	EndTime             *time.Time `json:"endTime"`
+	Duration            int64      `json:"duration"`
 }
 
 // PipelineLogView 描述经过运行归属校验的构建日志
@@ -141,8 +146,8 @@ func (s *PipelineServiceImpl) ListPipelineRunJobs(ctx context.Context, pipelineI
 	}
 	byJob := make(map[string][]PipelineStepView)
 	for _, step := range steps {
-		byJob[step.JobRunID] = append(byJob[step.JobRunID], PipelineStepView{StepRunID: step.StepRunID, JobRunID: step.JobRunID,
-			Name: step.Name, StepIndex: step.StepIndex, Status: step.Status, Uses: step.Uses, Action: step.Action, ExitCode: step.ExitCode,
+		byJob[step.JobRunID] = append(byJob[step.JobRunID], PipelineStepView{DeploymentReleaseID: step.DeploymentReleaseID, StepRunID: step.StepRunID, JobRunID: step.JobRunID,
+			Attempt: max(step.Attempt, 1), RetryMode: step.RetryMode, PreviousStepRunID: step.PreviousStepRunID, Name: step.Name, StepIndex: step.StepIndex, Status: step.Status, Uses: step.Uses, Action: step.Action, ExitCode: step.ExitCode,
 			ErrorMessage: step.ErrorMessage, StartTime: step.StartTime, EndTime: step.EndTime, Duration: step.Duration})
 	}
 	out := make([]PipelineJobView, 0, len(jobs))
@@ -154,9 +159,33 @@ func (s *PipelineServiceImpl) ListPipelineRunJobs(ctx context.Context, pipelineI
 		if childSteps == nil {
 			childSteps = []PipelineStepView{}
 		}
+		sort.SliceStable(childSteps, func(i, j int) bool {
+			if childSteps[i].StepIndex != childSteps[j].StepIndex {
+				return childSteps[i].StepIndex < childSteps[j].StepIndex
+			}
+			return childSteps[i].Attempt < childSteps[j].Attempt
+		})
+		latest := map[string]PipelineStepView{}
+		for _, step := range childSteps {
+			previous, found := latest[step.Name]
+			used := step.Status >= 3 && !(step.Status == 8 && step.ErrorMessage == "attempt not used")
+			previousUsed := previous.Status >= 3 && !(previous.Status == 8 && previous.ErrorMessage == "attempt not used")
+			if !found || used && (!previousUsed || step.Attempt >= previous.Attempt) {
+				latest[step.Name] = step
+			}
+		}
+		completed, failed := 0, 0
+		for _, step := range latest {
+			if step.Status >= 4 {
+				completed++
+			}
+			if step.Status == 5 || step.Status == 7 {
+				failed++
+			}
+		}
 		out = append(out, PipelineJobView{JobRunID: job.JobRunID, PipelineID: job.PipelineID, PipelineRunID: job.PipelineRunID,
-			JobName: job.JobName, AgentID: job.AgentID, Status: job.Status, TotalSteps: job.TotalSteps, CompletedSteps: job.CompletedSteps,
-			FailedSteps: job.FailedSteps, ErrorMessage: job.ErrorMessage, StartTime: job.StartTime, EndTime: job.EndTime, Duration: job.Duration, Steps: childSteps})
+			JobName: job.JobName, AgentID: job.AgentID, Status: job.Status, TotalSteps: job.TotalSteps, CompletedSteps: completed,
+			FailedSteps: failed, ErrorMessage: job.ErrorMessage, StartTime: job.StartTime, EndTime: job.EndTime, Duration: job.Duration, Steps: childSteps})
 	}
 	return out, nil
 }

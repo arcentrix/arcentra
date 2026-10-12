@@ -58,8 +58,11 @@ triggers:                  # [可选] 触发器列表
   # concurrency 暂不支持；禁止生成非空值，生产校验会明确拒绝
   timeout: string          # [可选] 最大运行时间，格式 "30m"、"1h"、"300s"
   when: string             # [可选] 条件表达式，为 true 时才执行
-  retry:                   # [可选] 失败重试
-    maxAttempts: int        #   最大重试次数
+  retry:                   # [可选] 显式重试；省略时不重试
+    mode: string           # 必填 failed_step | whole_job；复用当前工作区
+    idempotent: true        # 必须显式确认重复执行和外部副作用安全
+    allowedExitCodes: [9]   # 明确允许的 shell 退出码，1..125，非空且不重复
+    maxAttempts: int        #   总尝试次数（包含首次），必须为 2..5
     delay: string           #   重试间隔，如 "10s"
 
   source:                  # [可选] 源码定义

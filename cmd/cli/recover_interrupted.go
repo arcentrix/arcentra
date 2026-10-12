@@ -45,6 +45,9 @@ func init() {
 			mode = "RECONCILED AS FAILED"
 		}
 		cmd.Printf("%s: %d runs, %d jobs, %d steps. Terminal records preserved. No commands executed.\n", mode, summary.Runs, summary.Jobs, summary.Steps)
+		if summary.LinkedUnresolvedReleases > 0 {
+			cmd.Printf("WARNING: %d linked releases remain unresolved. Release state and target reservations are preserved. Inspect and explicitly recover the same release IDs; do not create another deployment or infer rollback.\n", summary.LinkedUnresolvedReleases)
+		}
 		return nil
 	}}
 	command.Flags().StringVar(&configPath, "conf", "conf.d/config.toml", "Private target database configuration")

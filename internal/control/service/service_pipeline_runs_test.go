@@ -3,14 +3,18 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
+	steprunv1 "github.com/arcentrix/arcentra/api/steprun/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/bytedance/sonic"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -209,5 +213,64 @@ func TestPauseCannotResurrectConcurrentCompletedRun(t *testing.T) {
 	}
 	if run.Status != model.PipelineStatusSuccess || !engine.resumed {
 		t.Fatalf("terminal run resurrected or engine not restored: %+v", run)
+	}
+}
+
+func TestRunAttemptHistoryAndLatestLogicalCounts(t *testing.T) {
+	svc := runServiceFixture(t)
+	ctx := context.Background()
+	if err := svc.stepRunRepo.PatchByStepRunID(ctx, "step-a", map[string]any{"status": 5, "attempt": 1, "retry_mode": "failed_step"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct {
+		id              string
+		attempt, status int
+		reason          string
+	}{{"step-a-2", 2, 4, ""}, {"step-a-3", 3, 8, "attempt not used"}} {
+		if err := svc.stepRunRepo.Create(ctx, &model.StepRun{PipelineID: "pipeline-a", PipelineRunID: "run-a", JobRunID: "job-a", StepRunID: item.id, Name: "shell", Attempt: item.attempt, RetryMode: "failed_step", PreviousStepRunID: "step-a", Status: item.status, ErrorMessage: item.reason}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	jobs, err := svc.ListPipelineRunJobs(ctx, "pipeline-a", "run-a")
+	if err != nil || len(jobs) != 1 || len(jobs[0].Steps) != 3 {
+		t.Fatalf("history missing: %+v %v", jobs, err)
+	}
+	job := jobs[0]
+	if job.CompletedSteps != 1 || job.FailedSteps != 0 || job.Steps[0].Status != 5 || job.Steps[1].Attempt != 2 || job.Steps[2].Status != 8 {
+		t.Fatalf("wrong logical result or audit: %+v", job)
+	}
+}
+
+func TestManualStepRetryDoesNotCreateOrphanAttempt(t *testing.T) {
+	svc := runServiceFixture(t)
+	ctx := context.Background()
+	_, before, err := svc.stepRunRepo.List(ctx, repo.StepRunFilter{PipelineRunID: "run-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := NewStepRunServiceImpl(svc.stepRunRepo).RetryStepRun(ctx, &steprunv1.RetryStepRunRequest{StepRunId: "step-a"})
+	if response != nil || status.Code(err) != codes.Unimplemented {
+		t.Fatalf("unsafe manual retry accepted: %+v %v", response, err)
+	}
+	_, after, err := svc.stepRunRepo.List(ctx, repo.StepRunFilter{PipelineRunID: "run-a"})
+	if err != nil || before != after {
+		t.Fatalf("orphan retry inserted: %d -> %d (%v)", before, after, err)
+	}
+}
+
+func TestRunPendingAttemptSlotsDoNotHideExecutedResults(t *testing.T) {
+	svc := runServiceFixture(t)
+	ctx := context.Background()
+	if err := svc.stepRunRepo.PatchByStepRunID(ctx, "step-a", map[string]any{"status": 4, "attempt": 1, "retry_mode": "failed_step"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, attempt := range []int{2, 3} {
+		if err := svc.stepRunRepo.Create(ctx, &model.StepRun{PipelineID: "pipeline-a", PipelineRunID: "run-a", JobRunID: "job-a", StepRunID: fmt.Sprintf("reserved-%d", attempt), Name: "shell", Status: 2, Attempt: attempt, RetryMode: "failed_step"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	jobs, err := svc.ListPipelineRunJobs(ctx, "pipeline-a", "run-a")
+	if err != nil || len(jobs) != 1 || jobs[0].CompletedSteps != 1 || jobs[0].FailedSteps != 0 {
+		t.Fatalf("reserved attempts hid success: %+v %v", jobs, err)
 	}
 }

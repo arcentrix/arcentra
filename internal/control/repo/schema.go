@@ -24,6 +24,8 @@ func MigrateSchema(ctx context.Context, db *gorm.DB) error {
 func schemaModels() []any {
 	return []any{
 		&model.Agent{},
+		&model.DeploymentEnvironment{},
+		&model.DeploymentRelease{},
 		&model.ApprovalDecision{},
 		&model.ApprovalPolicy{},
 		&model.ApprovalRequest{},

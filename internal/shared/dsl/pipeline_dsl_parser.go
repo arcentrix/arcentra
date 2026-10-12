@@ -21,6 +21,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/bytedance/sonic"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // Parser parses Pipeline DSL from JSON format
@@ -43,8 +44,8 @@ func (p *Parser) Parse(dslJSON string) (*spec.Pipeline, error) {
 
 	var pipeline spec.Pipeline
 
-	// Use sonic for better performance (as per project requirements)
-	if err := sonic.UnmarshalString(dslJSON, &pipeline); err != nil {
+	// Protobuf JSON accepts canonical camelCase and proto snake_case names without dropping policy fields.
+	if err := protojson.Unmarshal([]byte(dslJSON), &pipeline); err != nil {
 		return nil, fmt.Errorf("unmarshal DSL JSON: %w", err)
 	}
 
@@ -70,7 +71,7 @@ func (p *Parser) ParseFromBytes(data []byte) (*spec.Pipeline, error) {
 
 	var pipeline spec.Pipeline
 
-	if err := sonic.Unmarshal(data, &pipeline); err != nil {
+	if err := protojson.Unmarshal(data, &pipeline); err != nil {
 		return nil, fmt.Errorf("unmarshal DSL JSON: %w", err)
 	}
 
@@ -121,6 +122,9 @@ func (p *Parser) validate(pipeline *spec.Pipeline) error {
 
 // validateJob validates a single job
 func (p *Parser) validateJob(job *spec.Job, _ int) error {
+	if job == nil {
+		return fmt.Errorf("job cannot be null")
+	}
 	// Job name is required
 	if job.Name == "" {
 		return fmt.Errorf("job name is required")
@@ -171,6 +175,9 @@ func (p *Parser) validateJob(job *spec.Job, _ int) error {
 
 // validateStep validates a single step
 func (p *Parser) validateStep(step *spec.Step, _ int) error {
+	if step == nil {
+		return fmt.Errorf("step cannot be null")
+	}
 	// Step name is required
 	if step.Name == "" {
 		return fmt.Errorf("step name is required")

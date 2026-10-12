@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
@@ -38,18 +39,19 @@ type SecretService struct {
 }
 
 func NewSecretService(secretRepo repo.ISecretRepository) *SecretService {
-	// TODO: load encryption key from config or environment variable
-	// For now, using a default key (should be replaced in production)
-	encryptKey := []byte("arcentra-secret-encryption-key-32b") // 32 bytes for AES-256
-
-	return &SecretService{
-		secretRepo: secretRepo,
-		encryptKey: encryptKey,
+	// 只读取运维显式配置的密钥，不生成默认密钥或自动迁移历史密文。
+	key, err := base64.StdEncoding.Strict().DecodeString(os.Getenv("ARCENTRA_SECRET_ENCRYPTION_KEY"))
+	if err != nil || len(key) != 32 {
+		key = nil
 	}
+	return &SecretService{secretRepo: secretRepo, encryptKey: key}
 }
 
 // encrypt encrypts plain text using AES-256-GCM
 func (ss *SecretService) encrypt(plainText string) (string, error) {
+	if len(ss.encryptKey) != 32 {
+		return "", errors.New("secret encryption requires an explicitly configured 32-byte key")
+	}
 	block, err := aes.NewCipher(ss.encryptKey)
 	if err != nil {
 		return "", err
@@ -71,6 +73,9 @@ func (ss *SecretService) encrypt(plainText string) (string, error) {
 
 // decrypt decrypts cipher text using AES-256-GCM
 func (ss *SecretService) decrypt(cipherText string) (string, error) {
+	if len(ss.encryptKey) != 32 {
+		return "", errors.New("secret encryption requires an explicitly configured 32-byte key")
+	}
 	data, err := base64.StdEncoding.DecodeString(cipherText)
 	if err != nil {
 		return "", err

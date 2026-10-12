@@ -87,7 +87,7 @@ func TestLocalStepLogFailurePreservesTimeoutAndContinueOnError(t *testing.T) {
 	}{
 		{"execution-timeout", "50ms", false, 7, 7},
 		{"log-persistence-failure", "", false, 5, 5},
-		{"explicit-continue-on-error", "", true, 5, 4},
+		{"log-failure-cannot-continue-on-error", "", true, 5, 5},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			logger := log.Logger{SugaredLogger: zap.NewNop().Sugar()}
@@ -107,13 +107,10 @@ func TestLocalStepLogFailurePreservesTimeoutAndContinueOnError(t *testing.T) {
 			task.Set("stepStatuses", map[string]int{})
 			framework := NewTaskFramework(execution, logger)
 			err := framework.executeStepOnce(context.Background(), task, step)
-			if test.continued {
-				if err != nil {
-					t.Fatalf("explicit continuation was lost: %v", err)
-				}
-			} else if !errors.Is(err, executor.ErrBuildLogPersistence) {
+			if !errors.Is(err, executor.ErrBuildLogPersistence) {
 				t.Fatalf("persistence failure was lost: %v", err)
 			}
+
 			if got := store.stepUpdates["status"]; got != test.wantStep {
 				t.Fatalf("step status=%v want=%d err=%v", got, test.wantStep, err)
 			}

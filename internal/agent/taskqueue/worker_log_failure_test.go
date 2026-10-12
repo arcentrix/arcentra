@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -53,7 +55,7 @@ func TestJobDurableLogRejectionReportsFailedInsteadOfCancelled(t *testing.T) {
 		wantSecond int
 	}{
 		{"stop-on-failure", false, 5, 8},
-		{"explicit-continue-on-error", true, 4, 4},
+		{"log-failure-fences-continue-on-error", true, 5, 8},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			publisher, err := executor.NewDurableLogPublisher(context.Background(), &capturedLogs{}, t.TempDir(), 1)
@@ -77,19 +79,19 @@ func TestJobDurableLogRejectionReportsFailedInsteadOfCancelled(t *testing.T) {
 				PipelineRunID: "log-failure-run", JobRunID: "log-failure-job", JobName: "build",
 				Steps: []taskpayload.StepPayload{
 					{Name: "first", StepRunID: "log-failure-first", ContinueOnError: test.continued, Args: map[string]any{"run": "printf 'private-log-payload'; sleep 30 & wait"}},
-					{Name: "second", StepRunID: "log-failure-second", Args: map[string]any{"run": "true"}},
+					{Name: "second", StepRunID: "log-failure-second", Args: map[string]any{"run": "touch should-not-exist"}},
 				},
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 			defer cancel()
 			err = executeJobRun(ctx, conf, wrapper, manager, payload)
-			if test.continued {
-				if err != nil {
-					t.Fatalf("explicit continuation was lost: %v", err)
-				}
-			} else if !errors.Is(err, executor.ErrBuildLogPersistence) || !errors.Is(err, executor.ErrBuildLogSpoolFull) {
+			if !errors.Is(err, executor.ErrBuildLogPersistence) || !errors.Is(err, executor.ErrBuildLogSpoolFull) {
 				t.Fatalf("durability error was not preserved: %v", err)
 			}
+			if _, statErr := os.Stat(filepath.Join(conf.Agent.WorkspaceDir, "log-failure-run", "log-failure-job", "should-not-exist")); !os.IsNotExist(statErr) {
+				t.Fatalf("later command ran after persistence failure: %v", statErr)
+			}
+
 			if len(client.jobReports) == 0 {
 				t.Fatal("missing job status")
 			}

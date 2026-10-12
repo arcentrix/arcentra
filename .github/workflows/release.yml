@@ -53,22 +53,13 @@ jobs:
             exit 1
           fi
 
-      - name: Install Buf CLI
+      - name: Verify source dependencies and committed protobuf code
         run: |
-          curl -sSL "https://github.com/bufbuild/buf/releases/latest/download/buf-$(uname -s)-$(uname -m)" \
-            -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf
+          make deps-check
+          make buf-check
 
-      - name: Install codegen tools
-        run: |
-          go install github.com/google/wire/cmd/wire@latest
-          go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-
-      - name: Generate code
-        run: |
-          cd api && buf generate --template buf.gen.yaml && cd ..
-          cd cmd/arcentra && wire && cd ../..
-          cd cmd/arcentra-agent && wire && cd ../..
-          sqlc generate
+      - name: Generate code with pinned tools
+        run: make codegen
 
       # - name: Lint
       #   run: make lint
@@ -111,22 +102,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install Buf CLI
+      - name: Verify source dependencies and committed protobuf code
         run: |
-          curl -sSL "https://github.com/bufbuild/buf/releases/latest/download/buf-$(uname -s)-$(uname -m)" \
-            -o /usr/local/bin/buf && chmod +x /usr/local/bin/buf
+          make deps-check
+          make buf-check
 
-      - name: Install codegen tools
-        run: |
-          go install github.com/google/wire/cmd/wire@latest
-          go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-
-      - name: Generate code
-        run: |
-          cd api && buf generate --template buf.gen.yaml && cd ..
-          cd cmd/arcentra && wire && cd ../..
-          cd cmd/arcentra-agent && wire && cd ../..
-          sqlc generate
+      - name: Generate code with pinned tools
+        run: make codegen
 
       - name: Build release binaries
         env:

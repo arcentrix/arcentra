@@ -22,6 +22,7 @@ import (
 
 // Repositories 统一管理所有 repository
 type Repositories struct {
+	Deployment           IDeploymentRepository
 	Artifact             IArtifactRepository
 	Log                  ILogRepository
 	User                 IUserRepository
@@ -55,6 +56,7 @@ type Repositories struct {
 // NewRepositories 初始化所有 repository
 func NewRepositories(db database.IDatabase, ch cache.ICache) *Repositories {
 	return &Repositories{
+		Deployment:           NewDeploymentRepo(db),
 		Artifact:             NewArtifactRepo(db),
 		Log:                  NewLogRepository(db.Database()),
 		User:                 NewUserRepo(db, ch),

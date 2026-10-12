@@ -133,7 +133,7 @@ func (r *StepRunRepo) List(ctx context.Context, filter StepRunFilter) ([]model.S
 	}
 
 	var stepRuns []model.StepRun
-	if err := query.Order(order).Offset((page - 1) * pageSize).Limit(pageSize).Find(&stepRuns).Error; err != nil {
+	if err := query.Order(order).Order("attempt ASC").Order("step_run_id ASC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&stepRuns).Error; err != nil {
 		return nil, 0, err
 	}
 	return stepRuns, total, nil

@@ -23,6 +23,7 @@ import (
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/internal/shared/deployment"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/cron"
 	"github.com/arcentrix/arcentra/pkg/id"
@@ -199,6 +200,10 @@ func (m *CronTriggerManager) makeTriggerFunc(pipelineID string) func() {
 			return
 		}
 
+		if plan, err := deployment.DecodePipelinePlan(parsedSpec); err != nil || plan != nil {
+			log.Warnw("cron trigger refused: deployment-bearing pipelines require verified manual consent", "pipelineId", pipelineID)
+			return
+		}
 		fireTS := time.Now().UTC().Truncate(time.Minute).Format("200601021504")
 		requestID := fmt.Sprintf("cron:%s:%s", pipelineID, fireTS)
 
@@ -253,6 +258,9 @@ func (m *CronTriggerManager) extractCronExpression(ctx context.Context, p *model
 		return ""
 	}
 
+	if plan, err := deployment.DecodePipelinePlan(parsed); err != nil || plan != nil {
+		return ""
+	}
 	exprs := ExtractCronExpressions(parsed)
 	if len(exprs) == 0 {
 		return ""

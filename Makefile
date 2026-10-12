@@ -62,8 +62,13 @@ BINARIES := $(notdir $(wildcard cmd/*))
 GOLANGCI_LINT := $(LOCALBIN)/golangci-lint
 BUF_VERSION := v1.66.1
 WIRE_VERSION := v0.7.0
+PROTOC_GEN_GO_VERSION := v1.36.11
+PROTOC_GEN_GO_GRPC_VERSION := v1.5.1
 BUF := $(LOCALBIN)/buf-$(BUF_VERSION)/buf
 WIRE := $(LOCALBIN)/wire-$(WIRE_VERSION)/wire
+PROTOC_GEN_GO := $(LOCALBIN)/protoc-gen-go-$(PROTOC_GEN_GO_VERSION)/protoc-gen-go
+PROTOC_GEN_GO_GRPC := $(LOCALBIN)/protoc-gen-go-grpc-$(PROTOC_GEN_GO_GRPC_VERSION)/protoc-gen-go-grpc
+PROTO_PLUGIN_PATH := $(dir $(PROTOC_GEN_GO)):$(dir $(PROTOC_GEN_GO_GRPC))
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
@@ -93,6 +98,11 @@ deps: ## sync go dependencies
 	go mod tidy
 	go mod verify
 
+.PHONY: deps-check
+deps-check: ## verify dependencies resolve from source without code generation
+	go mod tidy -diff
+	go mod verify
+
 # -----------------------------------------------------------------------------
 # Code generation
 # -----------------------------------------------------------------------------
@@ -103,9 +113,24 @@ $(BUF):
 	mkdir -p $(dir $(BUF))
 	GOBIN=$(dir $(BUF)) go install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
 
+.PHONY: proto-tools
+proto-tools: $(BUF) $(PROTOC_GEN_GO) $(PROTOC_GEN_GO_GRPC) ## install pinned local protobuf generators
+
+$(PROTOC_GEN_GO):
+	mkdir -p $(dir $(PROTOC_GEN_GO))
+	GOBIN=$(dir $(PROTOC_GEN_GO)) go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
+
+$(PROTOC_GEN_GO_GRPC):
+	mkdir -p $(dir $(PROTOC_GEN_GO_GRPC))
+	GOBIN=$(dir $(PROTOC_GEN_GO_GRPC)) go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
+
 .PHONY: buf
-buf: buf-install ## generate protobuf code
-	cd $(PROTO_DIR) && $(BUF) generate --template buf.gen.yaml
+buf: proto-tools ## generate protobuf code locally with pinned plugins
+	cd $(PROTO_DIR) && PATH="$(PROTO_PLUGIN_PATH):$$PATH" $(BUF) generate --template buf.gen.yaml
+
+.PHONY: buf-check
+buf-check: proto-tools ## check committed protobuf files against pinned generators
+	PATH="$(PROTO_PLUGIN_PATH):$$PATH" bash scripts/check-protobuf.sh "$(BUF)" "$(PROTO_DIR)"
 
 .PHONY: wire-install
 wire-install: $(WIRE) ## install the pinned Wire version

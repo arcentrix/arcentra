@@ -72,6 +72,12 @@ message Job {
 message Retry {
   int32 max_attempts = 1;
   string delay = 2;
+  // Explicit scope: failed_step or whole_job. Omitted retry executes once.
+  string mode = 3;
+  // Required opt-in: repeated commands are safe despite retained workspace/side effects.
+  bool idempotent = 4;
+  // Only real shell exits in this allowlist are retryable (1..125).
+  repeated int32 allowed_exit_codes = 5;
 }
 
 // Step is the step specification.

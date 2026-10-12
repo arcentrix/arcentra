@@ -17,7 +17,9 @@ package repo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/database"
@@ -246,4 +248,16 @@ func (r *PipelineRepo) UpdateRunIfStatus(ctx context.Context, runID string, stat
 		}
 		return nil
 	})
+}
+
+// StartRunIfPending 原子认领部署运行，防止重复调度或重启后自动重放
+func (r *PipelineRepo) StartRunIfPending(ctx context.Context, runID string) error {
+	result := r.Database().WithContext(ctx).Model(&model.PipelineRun{}).Where("run_id = ? AND status = ?", runID, model.PipelineStatusPending).Updates(map[string]any{"status": model.PipelineStatusRunning, "start_time": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("pipeline run is no longer pending")
+	}
+	return nil
 }

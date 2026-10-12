@@ -4,7 +4,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-# Generated protobuf and Wire files are intentionally absent from source control.
+# Protobuf packages are committed; regenerate them and the untracked Wire files.
 RUN make codegen && make build-target TARGET=arcentra && \
     make build-target TARGET=arcentra-agent && make build-target TARGET=cli
 
