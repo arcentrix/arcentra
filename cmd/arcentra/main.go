@@ -16,6 +16,8 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"os"
 
 	"github.com/arcentrix/arcentra/internal/control/bootstrap"
 	_ "github.com/arcentrix/arcentra/pkg/plugins/apollo"
@@ -40,9 +42,13 @@ func main() {
 	// Bootstrap 初始化应用
 	app, cleanup, _, err := bootstrap.Bootstrap(configFile, pluginConfigFile, initApp)
 	if err != nil {
-		panic(err)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
 	// 启动应用并等待退出信号
-	bootstrap.Run(app, cleanup)
+	if err := bootstrap.Run(app, cleanup); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }

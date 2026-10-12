@@ -137,6 +137,16 @@ maxConnections = 1000
 # read write timeout
 # unit: second
 readWriteTimeout = 5
+# Reflection is disabled by default; enable only for controlled diagnostics.
+reflection = false
+
+[grpc.tls]
+# Legacy plaintext is only for a trusted network or protected TLS proxy hop.
+# Enable TLS and supply an existing PEM certificate/key pair before exposure.
+# Certificate/config changes require a process restart. Never place keys in Git.
+enabled = false
+certFile = ""
+keyFile = ""
 
 [http]
 # http server host

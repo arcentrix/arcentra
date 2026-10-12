@@ -19,11 +19,9 @@ import (
 
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/http/middleware"
-	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/shutdown"
 	"github.com/arcentrix/arcentra/pkg/version"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/pprof"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 )
 
@@ -60,6 +58,13 @@ func (rt *Router) Router() *fiber.App {
 		BodyLimit:    bodyLimit, // 请求体大小限制，用于插件上传等
 	})
 
+	// 公共监听器不提供管理接口，必须先于 CORS 拒绝所有方法及预检请求
+	notFound := func(c *fiber.Ctx) error {
+		return http.Err(c.Status(fiber.StatusNotFound), fiber.StatusNotFound, "request path not found")
+	}
+	app.Use("/shutdown", notFound)
+	app.Use("/debug/pprof", notFound)
+
 	app.Use(middleware.AccessLogMiddleware())
 
 	// 中间件
@@ -70,12 +75,13 @@ func (rt *Router) Router() *fiber.App {
 		middleware.UnifiedResponseMiddleware(),
 	)
 
-	// pprof
-	// path: /debug/pprof
-	app.Use(pprof.New())
+	// 存活检查只反映 HTTP 进程仍可响应，等待注册或排空时不触发重启
+	app.Get("/live", func(c *fiber.Ctx) error {
+		return c.SendString("ok")
+	})
 
-	// 健康检查 - 在下线时返回 503，用于 Kubernetes readiness probe
-	app.Get("/health", func(c *fiber.Ctx) error {
+	// 就绪检查在启动未完成或下线时返回 503，/health 保留为兼容别名
+	ready := func(c *fiber.Ctx) error {
 		if rt.ShutdownMgr != nil && rt.ShutdownMgr.IsShuttingDown() {
 			return c.Status(fiber.StatusServiceUnavailable).SendString("shutting down")
 		}
@@ -83,21 +89,9 @@ func (rt *Router) Router() *fiber.App {
 			return c.Status(fiber.StatusServiceUnavailable).SendString("not ready")
 		}
 		return c.SendString("ok")
-	})
-
-	// 优雅下线接口 - 触发服务优雅关闭
-	app.Post("/shutdown", func(c *fiber.Ctx) error {
-		if rt.ShutdownMgr == nil {
-			return http.Err(c, fiber.StatusInternalServerError, "shutdown manager not initialized")
-		}
-
-		if rt.ShutdownMgr.Shutdown() {
-			log.Info("Graceful shutdown triggered via HTTP endpoint")
-			return http.Detail(c, map[string]any{"message": "shutdown initiated"})
-		}
-
-		return http.Err(c, fiber.StatusConflict, "shutdown already in progress")
-	})
+	}
+	app.Get("/ready", ready)
+	app.Get("/health", ready)
 
 	// 版本信息
 	app.Get("/version", func(c *fiber.Ctx) error {
@@ -105,9 +99,7 @@ func (rt *Router) Router() *fiber.App {
 	})
 
 	// 找不到路径时的处理 - 必须在所有路由注册之后
-	app.Use(func(c *fiber.Ctx) error {
-		return http.Err(c, fiber.StatusNotFound, "request path not found")
-	})
+	app.Use(notFound)
 
 	return app
 }

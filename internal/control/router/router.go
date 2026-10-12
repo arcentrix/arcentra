@@ -23,13 +23,11 @@ import (
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/http/middleware"
-	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/shutdown"
 	"github.com/arcentrix/arcentra/pkg/trace/inject"
 	"github.com/arcentrix/arcentra/pkg/version"
 	"github.com/gofiber/contrib/fiberi18n/v2"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/pprof"
 	"github.com/gofiber/fiber/v2/middleware/recover"
 	"golang.org/x/text/language"
 )
@@ -40,6 +38,8 @@ type Router struct {
 	Services    *service.Services
 	ShutdownMgr *shutdown.Manager
 	AppConf     *config.AppConfig
+	// Readiness 在启动依赖和 gRPC 服务就绪后返回 true
+	Readiness func() bool
 }
 
 const (
@@ -83,6 +83,13 @@ func (rt *Router) Router() *fiber.App {
 		ProxyHeader:  fiber.HeaderXForwardedFor, // get real ip from proxy header
 	})
 
+	// 公共监听器不提供管理接口，必须先于 CORS 拒绝所有方法及预检请求
+	notFound := func(c *fiber.Ctx) error {
+		return http.Err(c.Status(fiber.StatusNotFound), fiber.StatusNotFound, "request path not found")
+	}
+	app.Use("/shutdown", notFound)
+	app.Use("/debug/pprof", notFound)
+
 	// WARNING: middleware.RealIPMiddleware -> middleware.RequestMiddleware -> inject.FiberMiddleware sequence is important
 	app.Use(
 		middleware.RealIPMiddleware(),  // 先解析真实 IP 到 Locals("ip")
@@ -107,31 +114,23 @@ func (rt *Router) Router() *fiber.App {
 		Loader:          &fiberi18n.EmbedLoader{FS: localizeFS},
 	}))
 
-	// pprof
-	// path: /debug/pprof
-	app.Use(pprof.New())
-
-	// 健康检查 - 在下线时返回 503，用于 Kubernetes readiness probe
-	app.Get("/health", func(c *fiber.Ctx) error {
-		if rt.ShutdownMgr != nil && rt.ShutdownMgr.IsShuttingDown() {
-			return http.Err(c, fiber.StatusServiceUnavailable, "shutting down")
-		}
+	// 存活检查只反映 HTTP 进程仍可响应，等待注册或排空时不触发重启
+	app.Get("/live", func(c *fiber.Ctx) error {
 		return c.SendString("ok")
 	})
 
-	// 优雅下线接口 - 触发服务优雅关闭
-	app.Post("/shutdown", func(c *fiber.Ctx) error {
-		if rt.ShutdownMgr == nil {
-			return http.Err(c, fiber.StatusInternalServerError, "shutdown manager not initialized")
+	// 就绪检查在启动未完成或下线时返回 503，/health 保留为兼容别名
+	ready := func(c *fiber.Ctx) error {
+		if rt.ShutdownMgr != nil && rt.ShutdownMgr.IsShuttingDown() {
+			return c.Status(fiber.StatusServiceUnavailable).SendString("shutting down")
 		}
-
-		if rt.ShutdownMgr.Shutdown() {
-			log.Info("Graceful shutdown triggered via HTTP endpoint")
-			return http.Msg(c, fiber.StatusOK, "shutdown initiated")
+		if rt.Readiness == nil || !rt.Readiness() {
+			return c.Status(fiber.StatusServiceUnavailable).SendString("not ready")
 		}
-
-		return http.Err(c, fiber.StatusConflict, "shutdown already in progress")
-	})
+		return c.SendString("ok")
+	}
+	app.Get("/ready", ready)
+	app.Get("/health", ready)
 
 	// API路由
 	api := app.Group(apiContextPath)
@@ -149,9 +148,7 @@ func (rt *Router) Router() *fiber.App {
 	// }
 
 	// 找不到路径时的处理 - 必须在所有路由注册之后
-	app.Use(func(c *fiber.Ctx) error {
-		return http.Err(c, fiber.StatusNotFound, "request path not found")
-	})
+	app.Use(notFound)
 
 	return app
 }

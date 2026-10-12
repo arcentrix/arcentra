@@ -16,8 +16,8 @@
 # from source. Used by the release workflow for multi-arch image publishing.
 #
 # Expected layout (prepared by the CI "docker" job):
-#   dist/linux/amd64/{arcentra,arcentra-agent,conf.d/}
-#   dist/linux/arm64/{arcentra,arcentra-agent,conf.d/}
+#   dist/linux/amd64/{arcentra,arcentra-agent,arcentra-cli,conf.d/}
+#   dist/linux/arm64/{arcentra,arcentra-agent,arcentra-cli,conf.d/}
 
 # ── arcentra (control-plane) ─────────────────────────────────────────
 FROM debian:bookworm-slim AS arcentra
@@ -26,9 +26,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 
 ARG TARGETARCH
 COPY dist/linux/${TARGETARCH}/arcentra /arcentra
+COPY dist/linux/${TARGETARCH}/arcentra-cli /usr/local/bin/arcentra-cli
 COPY dist/linux/${TARGETARCH}/conf.d/  /conf.d/
 
-EXPOSE 8080
+WORKDIR /var/lib/arcentra
+EXPOSE 8080 9090
 ENTRYPOINT ["/arcentra", "-conf", "/conf.d/config.toml", "-plugin-conf", "/conf.d/plugins.toml"]
 
 # ── arcentra-agent ───────────────────────────────────────────────────

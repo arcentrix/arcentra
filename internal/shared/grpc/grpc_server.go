@@ -16,11 +16,11 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
-	"os"
-	"os/signal"
-	"syscall"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/repo"
@@ -46,19 +46,41 @@ import (
 
 // Conf 配置
 type Conf struct {
-	Host             string
-	Port             int
-	MaxConnections   int
-	ReadWriteTimeout int
+	Host             string          `mapstructure:"host"`
+	Port             int             `mapstructure:"port"`
+	MaxConnections   int             `mapstructure:"maxConnections"`
+	ReadWriteTimeout int             `mapstructure:"readWriteTimeout"`
+	Reflection       bool            `mapstructure:"reflection"`
+	TLS              ServerTLSConfig `mapstructure:"tls" json:"-"`
 }
 
+// ServerWrapper 管理已加载传输配置的 gRPC 服务及其生命周期
 type ServerWrapper struct {
 	svr           *grpc.Server
 	streamService *service.StreamServiceImpl
+	config        Conf
+	mu            sync.Mutex
+	listener      net.Listener
+	started       bool
+	stopping      bool
+	ready         bool
+	serveErr      error
+	done          chan struct{}
+	stopOnce      sync.Once
+	forceOnce     sync.Once
+	stopDone      chan struct{}
+	stopErr       error
 }
 
-// NewGrpcServer 创建 gRPC 服务
-func NewGrpcServer(cfg Conf) *ServerWrapper {
+// NewGrpcServer 创建 gRPC 服务，启动前加载并验证证书，不允许自动降级
+func NewGrpcServer(cfg Conf) (*ServerWrapper, error) {
+	if cfg.Port < 0 || cfg.Port > 65535 || cfg.MaxConnections < 0 || cfg.ReadWriteTimeout < 0 {
+		return nil, errors.New("invalid gRPC server configuration")
+	}
+	transport, err := serverTransportCredentials(context.Background(), cfg.TLS)
+	if err != nil {
+		return nil, err
+	}
 	opts := []grpc.ServerOption{
 		grpc.MaxConcurrentStreams(uint32(cfg.MaxConnections)),
 		grpc.StreamInterceptor(grpcmiddleware.ChainStreamServer(
@@ -81,10 +103,17 @@ func NewGrpcServer(cfg Conf) *ServerWrapper {
 		)),
 	}
 
-	s := grpc.NewServer(opts...)
-	return &ServerWrapper{
-		svr: s,
+	if transport != nil {
+		opts = append(opts, grpc.Creds(transport))
 	}
+	if cfg.ReadWriteTimeout > 0 {
+		opts = append(opts, grpc.ConnectionTimeout(time.Duration(cfg.ReadWriteTimeout)*time.Second))
+	}
+	s := grpc.NewServer(opts...)
+	if cfg.Reflection {
+		reflection.Register(s)
+	}
+	return &ServerWrapper{svr: s, config: cfg, done: make(chan struct{}), stopDone: make(chan struct{})}, nil
 }
 
 // Register 注册所有 gRPC 服务
@@ -99,48 +128,109 @@ func (s *ServerWrapper) Register(services *service.Services,
 	s.streamService = service.NewStreamService(redisClient, db, kafkaSettings, services.LogAggregator)
 	streamv1.RegisterStreamServiceServer(s.svr, s.streamService)
 	pipelinev1.RegisterPipelineServiceServer(s.svr, service.NewPipelineServiceImpl(services))
-	// reflection（调试）
-	reflection.Register(s.svr)
 }
 
-// Start 启动服务
-func (s *ServerWrapper) Start(cfg Conf) error {
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-	lis, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("failed to listen: %w", err)
+// Start 同步绑定监听端口并异步服务，运行期错误通过 Done 和 Err 提供
+// 传输和监听配置使用构造时的快照，配置热重载不会改变已有端点
+func (s *ServerWrapper) Start(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.started || s.stopping {
+		return errors.New("gRPC server cannot be started more than once")
 	}
-
-	safe.Go(func() {
-		log.Infow("gRPC listener started",
-			"address", addr,
-		)
-		if err := s.svr.Serve(lis); err != nil {
-			log.Errorw("gRPC listener failed",
-				"address", addr,
-				"error", err,
-			)
-		}
-	})
-
-	// 优雅退出
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	<-ch
-
-	log.Info("Shutting down gRPC server...")
-	s.Stop()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	addr := net.JoinHostPort(s.config.Host, strconv.Itoa(s.config.Port))
+	var lc net.ListenConfig
+	lis, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("gRPC listen failed: %w", err)
+	}
+	s.listener = lis
+	s.started = true
+	s.ready = true
+	safe.Go(func() { s.serve(lis) })
+	log.Infow("gRPC listener started", "address", lis.Addr().String(), "tls", s.config.TLS.Enabled)
 	return nil
 }
 
-// Stop 手动停止
-func (s *ServerWrapper) Stop() {
-	s.svr.GracefulStop()
-	if s.streamService != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := s.streamService.Close(ctx); err != nil {
-			log.Errorw("failed to stop log consumer", "error", err)
+func (s *ServerWrapper) serve(lis net.Listener) {
+	err := s.svr.Serve(lis)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ready = false
+	if !s.stopping {
+		if err == nil {
+			err = errors.New("gRPC listener exited unexpectedly")
 		}
+		s.serveErr = fmt.Errorf("gRPC serve failed: %w", err)
 	}
+	close(s.done)
+}
+
+// Ready 表示监听器已成功绑定且尚未退出或进入排空阶段
+func (s *ServerWrapper) Ready() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ready
+}
+
+// Done 在服务退出时关闭，可用于控制器生命周期监督
+func (s *ServerWrapper) Done() <-chan struct{} { return s.done }
+
+// Err 返回已发生的非预期服务退出错误
+func (s *ServerWrapper) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.serveErr
+}
+
+// Stop 停止接收新请求并在上下文期限内排空，超时后强制关闭连接
+func (s *ServerWrapper) Stop(ctx context.Context) error {
+	s.stopOnce.Do(func() {
+		s.mu.Lock()
+		s.stopping = true
+		s.ready = false
+		if !s.started {
+			close(s.done)
+		}
+		s.mu.Unlock()
+		safe.Go(func() {
+			gracefulDone := make(chan struct{})
+			safe.Go(func() {
+				s.svr.GracefulStop()
+				close(gracefulDone)
+			})
+			var stopErr error
+			select {
+			case <-gracefulDone:
+			case <-ctx.Done():
+				stopErr = ctx.Err()
+				s.forceStop()
+			}
+			if s.streamService != nil {
+				stopErr = errors.Join(stopErr, s.streamService.Close(ctx))
+			}
+			s.stopErr = stopErr
+			close(s.stopDone)
+		})
+	})
+	select {
+	case <-s.stopDone:
+		return s.stopErr
+	case <-ctx.Done():
+		s.forceStop()
+		return ctx.Err()
+	}
+}
+
+func (s *ServerWrapper) forceStop() {
+	s.forceOnce.Do(func() {
+		// 单独运行强制关闭，确保忽略取消的处理器不能阻塞调用方
+		safe.Go(s.svr.Stop)
+	})
 }
