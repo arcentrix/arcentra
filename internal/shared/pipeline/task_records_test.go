@@ -59,7 +59,7 @@ func TestRuntimeEnvironmentIsExplicitlyApplied(t *testing.T) {
 func TestRemoteArtifactBackflowIsScopedAndSharedWithDownstreamJobs(t *testing.T) {
 	logger := log.Logger{SugaredLogger: zap.NewNop().Sugar()}
 	root := NewExecutionContext(&spec.Pipeline{Namespace: "test"}, nil, t.TempDir(), logger)
-	root.JobRunStore = &terminalJobStore{job: &model.JobRun{JobRunID: "upstream-run", Status: model.JobRunStatusSuccess, ArtifactURIs: `{"dist/output.bin":"opaque/run-a/job-a/dist/output.bin"}`}}
+	root.JobRunStore = &terminalJobStore{job: &model.JobRun{JobRunID: "upstream-run", Status: model.JobRunStatusSuccess, ArtifactURIs: `{"dist/output.bin":"opaque/run-a/job-a/dist/output.bin"}`, ArtifactReferences: `{"dist/output.bin":{"storageId":"original-store","fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expiresAt":1900000000}}`}}
 	upstream := root.ForJob()
 	task := &Task{Name: "build", Job: &spec.Job{Name: "build"}}
 	task.Set("jobRunID", "upstream-run")
@@ -72,5 +72,14 @@ func TestRemoteArtifactBackflowIsScopedAndSharedWithDownstreamJobs(t *testing.T)
 	uris["build/dist/output.bin"] = "mutated"
 	if root.ArtifactSnapshot()["build/dist/output.bin"] != "opaque/run-a/job-a/dist/output.bin" {
 		t.Fatal("downstream snapshot mutated shared artifact state")
+	}
+	refs := downstream.ArtifactReferenceSnapshot()
+	reference := refs["build/dist/output.bin"]
+	if reference.StorageID != "original-store" || reference.ExpiresAt != 1900000000 {
+		t.Fatalf("artifact storage binding was not backfilled: %+v", refs)
+	}
+	delete(refs, "build/dist/output.bin")
+	if len(root.ArtifactReferenceSnapshot()) != 1 {
+		t.Fatal("downstream mutated shared storage binding")
 	}
 }

@@ -128,6 +128,10 @@ func (s *AgentServiceImpl) Register(ctx context.Context, _ *agentv1.RegisterRequ
 	if s == nil || s.agentConf == nil || s.grpcClient == nil || s.grpcClient.AgentClient == nil {
 		return nil, fmt.Errorf("agent grpc client is not ready")
 	}
+	capacity, err := s.agentConf.Agent.ExecutionCapacity()
+	if err != nil {
+		return nil, err
+	}
 	regReq := &agentv1.RegisterRequest{
 		AgentId:               s.agentConf.Agent.ID,
 		Token:                 s.agentConf.Grpc.Token,
@@ -137,7 +141,7 @@ func (s *AgentServiceImpl) Register(ctx context.Context, _ *agentv1.RegisterRequ
 		Os:                    runtime.GOOS,
 		Arch:                  runtime.GOARCH,
 		Version:               version.GetVersion().Version,
-		MaxConcurrentStepRuns: int32(s.agentConf.Agent.MaxConcurrentJobs),
+		MaxConcurrentStepRuns: capacity,
 		Labels:                s.agentConf.Agent.Labels,
 	}
 	// Use a context without auth metadata for registration (Register is excluded from auth)

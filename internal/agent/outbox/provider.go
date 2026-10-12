@@ -21,7 +21,6 @@ import (
 	"github.com/arcentrix/arcentra/internal/agent/service"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/grpc"
-	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/outbox"
 )
 
@@ -30,7 +29,6 @@ import (
 func ProvideExecutorManager(o *outbox.Outbox) *executor.Manager {
 	m := executor.NewExecutorManager()
 	m.Register(executor.NewShellExecutor())
-	m.Register(executor.NewPluginExecutor(nil, log.Logger{}))
 	if o != nil {
 		m.SetEventPublisher(NewPublisher(o), executor.EventEmitterConfig{})
 	}

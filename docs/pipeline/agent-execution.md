@@ -8,6 +8,14 @@ Startup rejects sandbox mode, requested Docker execution, and restrictions the w
 
 Install Go at the version required by `go.mod` for development. The runtime needs a POSIX `sh` and `git`; scripts can require additional project-specific tools. Steps run through `sh -ec` so failed commands stop the script. Unix process-group cancellation terminates descendant processes, and captured stdout/stderr are each bounded to 4 MiB while logs stream separately.
 
+## Supported capacity and step types
+
+The Kafka worker executes one job at a time to preserve message acknowledgment order. Set `agent.maxConcurrentJobs = 1`; an omitted/zero value means effective capacity 1. Negative values and values above 1 are rejected at startup and registration, and the Agent advertises only capacity 1. `job.concurrency` is rejected by production pipeline validation because named cross-job/cross-run locking is not implemented.
+
+Agent jobs accept explicit `shell` or `builtin:shell` steps (actions: omitted, `run`, `script`, `command`), `builtin:artifacts` (`upload` or `download` in a whole-job task), and `http` (action omitted or `request`). Shell steps require a nonempty `run`, `script`, `command` or `commands` argument. HTTP steps require an absolute HTTP(S) `url` without embedded credentials and run through the existing HTTP executor on the trusted Agent host. An HTTP step's `run` argument is never interpreted as a shell command.
+
+Unknown native plugin names and version-qualified plugin names are rejected before host workspace/source/artifact preparation, even when their arguments contain a shell command or URL. Pipeline validation checks every step in an Agent-dispatched job, including steps without their own `runOnAgent` flag. Local control-plane plugin validation is unchanged. Old queue tasks with an empty `uses` and a shell command remain compatible; new pipeline definitions require an explicit `uses`. Unsupported queued work is claimed and reported as failed, rather than silently discarded or retried as a native plugin.
+
 ## Startup and delivery
 
 1. Connect and register over gRPC. Dynamic registration updates the active client bearer token.

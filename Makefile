@@ -60,6 +60,10 @@ BINARIES := $(notdir $(wildcard cmd/*))
 # Tools
 # -----------------------------------------------------------------------------
 GOLANGCI_LINT := $(LOCALBIN)/golangci-lint
+BUF_VERSION := v1.66.1
+WIRE_VERSION := v0.7.0
+BUF := $(LOCALBIN)/buf-$(BUF_VERSION)/buf
+WIRE := $(LOCALBIN)/wire-$(WIRE_VERSION)/wire
 
 $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
@@ -93,21 +97,27 @@ deps: ## sync go dependencies
 # Code generation
 # -----------------------------------------------------------------------------
 .PHONY: buf-install
-buf-install: ## install buf if missing
-	@command -v buf >/dev/null 2>&1 || go install github.com/bufbuild/buf/cmd/buf@v1.66.1
+buf-install: $(BUF) ## install the pinned Buf version
+
+$(BUF):
+	mkdir -p $(dir $(BUF))
+	GOBIN=$(dir $(BUF)) go install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
 
 .PHONY: buf
 buf: buf-install ## generate protobuf code
-	cd $(PROTO_DIR) && buf generate --template buf.gen.yaml
+	cd $(PROTO_DIR) && $(BUF) generate --template buf.gen.yaml
 
 .PHONY: wire-install
-wire-install: ## install wire
-	@command -v wire >/dev/null 2>&1 || go install github.com/google/wire/cmd/wire@v0.7.0
+wire-install: $(WIRE) ## install the pinned Wire version
+
+$(WIRE):
+	mkdir -p $(dir $(WIRE))
+	GOBIN=$(dir $(WIRE)) go install github.com/google/wire/cmd/wire@$(WIRE_VERSION)
 
 .PHONY: wire
 wire: buf wire-install ## generate dependency injection code
 	test -d $(CMD_PATH)
-	if [ -f $(CMD_PATH)/wire.go ]; then cd $(CMD_PATH) && wire; fi
+	if [ -f $(CMD_PATH)/wire.go ]; then cd $(CMD_PATH) && $(WIRE); fi
 
 # -----------------------------------------------------------------------------
 # Lint
@@ -124,9 +134,10 @@ lint: golangci-lint-install ## run lint
 # Code generation (all-in-one)
 # -----------------------------------------------------------------------------
 .PHONY: codegen
-codegen: buf ## run all code generators
-	$(MAKE) wire TARGET=arcentra
-	$(MAKE) wire TARGET=arcentra-agent
+codegen: buf wire-install ## run all code generators
+	@for target in $(BINARIES); do \
+		if [ -f cmd/$$target/wire.go ]; then (cd cmd/$$target && $(WIRE)); fi; \
+	done
 
 # -----------------------------------------------------------------------------
 # Formatting / Testing

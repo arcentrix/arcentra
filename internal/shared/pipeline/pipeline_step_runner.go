@@ -282,11 +282,23 @@ func (r *StepRunner) executeBuiltin(ctx context.Context, builtinName string) err
 	}
 
 	// Execute builtin
-	_, err = r.ctx.BuiltinManager.Execute(ctx, builtinName, action, paramsJSON, opts)
+	result, err := r.ctx.BuiltinManager.Execute(ctx, builtinName, action, paramsJSON, opts)
 	if err != nil {
 		return fmt.Errorf("builtin execution failed: %w", err)
 	}
-
+	if builtinName == "artifacts" && action == "upload" && r.ctx.RecordLocalArtifacts != nil {
+		var uploaded struct {
+			Files []string `json:"uploaded_files"`
+			Root  string   `json:"artifacts_dir"`
+		}
+		if err := sonic.Unmarshal(result, &uploaded); err != nil {
+			return fmt.Errorf("decode artifact result: %w", err)
+		}
+		expireIn, _ := resolvedParams["expireIn"].(string)
+		if err := r.ctx.RecordLocalArtifacts(ctx, r.ctx.JobRunID, r.ctx.StepRunIDs[r.step.Name], uploaded.Root, uploaded.Files, expireIn); err != nil {
+			return fmt.Errorf("register artifacts: %w", err)
+		}
+	}
 	return nil
 }
 

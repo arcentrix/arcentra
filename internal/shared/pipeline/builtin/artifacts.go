@@ -18,6 +18,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/arcentrix/arcentra/pkg/artifact"
+	"time"
 
 	"github.com/bytedance/sonic"
 )
@@ -47,6 +49,15 @@ func (m *Manager) handleArtifactsUpload(ctx context.Context, params json.RawMess
 	}
 	if len(args.Paths) == 0 {
 		return nil, fmt.Errorf("paths are required")
+	}
+	if _, err := artifact.ParseExpiry(args.ExpireIn, time.Now()); err != nil {
+		return nil, err
+	}
+	if args.Public || args.Untracked || args.Name != "" {
+		return nil, fmt.Errorf("named, public and untracked artifact modes are not supported; specify explicit private paths")
+	}
+	if args.When != "" && args.When != "always" {
+		return nil, fmt.Errorf("artifact when must be empty or always; use the step when condition")
 	}
 
 	workspace, artifacts, artifactsDir, err := openTransferRoots(ctx, opts, "artifacts", "", true)
@@ -97,6 +108,17 @@ func (m *Manager) handleArtifactsDownload(ctx context.Context, params json.RawMe
 	paths, err := expandTransferPaths(ctx, artifacts, requested)
 	if err != nil {
 		return nil, err
+	}
+	if validator, ok := opts.ExecutionContext.(interface {
+		ValidateLocalArtifactRead(context.Context, string, []string) error
+	}); ok {
+		job := args.Job
+		if job == "" && opts.Job != nil {
+			job = opts.Job.Name
+		}
+		if err := validator.ValidateLocalArtifactRead(ctx, job, paths); err != nil {
+			return nil, err
+		}
 	}
 	for _, name := range paths {
 		if err := copyRootPath(ctx, artifacts, workspace, name); err != nil {

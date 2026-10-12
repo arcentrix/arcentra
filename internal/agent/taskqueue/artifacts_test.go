@@ -3,6 +3,7 @@ package taskqueue
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/internal/agent/config"
@@ -90,7 +92,7 @@ func artifactTestRead(t *testing.T, root, name string) string {
 }
 
 func artifactTestRequest(workspace, action string, args map[string]any) *executor.ExecutionRequest {
-	return &executor.ExecutionRequest{Workspace: workspace, Step: &executor.StepInfo{Uses: "builtin:artifacts", Action: action, Args: args}}
+	return &executor.ExecutionRequest{Workspace: workspace, StepRunID: "upload-step", Step: &executor.StepInfo{Uses: "builtin:artifacts", Action: action, Args: args}}
 }
 
 func TestRemoteArtifactsUploadDownloadPreservePathsAndRunIsolation(t *testing.T) {
@@ -102,7 +104,7 @@ func TestRemoteArtifactsUploadDownloadPreservePathsAndRunIsolation(t *testing.T)
 		for name, value := range map[string]string{"dist/a.txt": run, "dist/b.txt": "B", "dist/nested/tool": "tool", "dist_a.txt": "flat", ".version": "version"} {
 			artifactTestWrite(t, workspace, name, value)
 		}
-		producer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{PipelineRunID: run, JobRunID: "build-run", JobName: "build"}, storage: st}
+		producer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{PipelineRunID: run, JobRunID: "build-run", JobName: "build"}, storage: st, reference: artifactTestReference()}
 		result, err := producer.Execute(ctx, artifactTestRequest(workspace, "upload", map[string]any{"paths": []string{"dist/*", "dist/a.txt", "dist_a.txt", ".version"}}))
 		if err != nil || !result.Success {
 			t.Fatalf("upload: %+v %v", result, err)
@@ -111,7 +113,7 @@ func TestRemoteArtifactsUploadDownloadPreservePathsAndRunIsolation(t *testing.T)
 			t.Fatalf("duplicate or missing files: %v", producer.uploaded)
 		}
 		for name, key := range producer.uploaded {
-			if key != "artifacts/"+run+"/build-run/"+name {
+			if !strings.HasPrefix(key, "artifacts/"+run+"/build-run/upload-step/") || !strings.HasSuffix(key, "/"+name) {
 				t.Fatalf("object key is not scoped or was replaced with a URL: %s", key)
 			}
 			if run == "run-one" {
@@ -120,7 +122,7 @@ func TestRemoteArtifactsUploadDownloadPreservePathsAndRunIsolation(t *testing.T)
 		}
 	}
 	workspace := t.TempDir()
-	consumer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{JobName: "consume", ArtifactURIs: upstream}, storage: st}
+	consumer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{JobName: "consume", ArtifactURIs: upstream, ArtifactReferences: artifactTestReferences(upstream)}, storage: st, reference: artifactTestReference()}
 	if err := handleArtifactDownload(ctx, upstream, workspace, st); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +170,7 @@ func TestRemoteArtifactsRejectUnsafePathsAndSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := &memoryArtifactStorage{}
-	producer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{PipelineRunID: "run", JobRunID: "job"}, storage: st}
+	producer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{PipelineRunID: "run", JobRunID: "job"}, storage: st, reference: artifactTestReference()}
 	for _, pattern := range []string{"../secret", "/etc/passwd", "C:/secret", `dist\file`, "dist/../dist/file", "link", "link/*", "internal-link", "[broken", "missing*"} {
 		t.Run(pattern, func(t *testing.T) {
 			if _, err := producer.Execute(ctx, artifactTestRequest(workspace, "upload", map[string]any{"paths": []string{pattern}})); err == nil {
@@ -273,7 +275,7 @@ func TestRemoteArtifactCancellationAndAtomicDownload(t *testing.T) {
 		_, err := reader.Read(buf)
 		return err
 	}}
-	producer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{PipelineRunID: "run", JobRunID: "job"}, storage: st}
+	producer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{PipelineRunID: "run", JobRunID: "job"}, storage: st, reference: artifactTestReference()}
 	if _, err := producer.Execute(ctx, artifactTestRequest(workspace, "upload", map[string]any{"paths": []string{"file"}})); !errors.Is(err, context.Canceled) {
 		t.Fatalf("upload ignored cancellation: %v", err)
 	}
@@ -314,7 +316,7 @@ func (c *artifactStatusClient) ReportJobRunStatus(_ context.Context, req *agentv
 
 func TestJobArtifactBuiltinReportsURIsAndRetriedReportDoesNotUploadAgain(t *testing.T) {
 	st := &memoryArtifactStorage{}
-	SetStorage(st)
+	SetStorage(st, artifactTestReference())
 	t.Cleanup(func() { SetStorage(nil) })
 	ctx := context.Background()
 	client := &artifactStatusClient{failJobTerminals: 1}
@@ -334,11 +336,11 @@ func TestJobArtifactBuiltinReportsURIsAndRetriedReportDoesNotUploadAgain(t *test
 		t.Fatalf("terminal retry repeated upload: %d", st.uploads)
 	}
 	report := client.jobReports[len(client.jobReports)-1]
-	want := map[string]string{"dist/nested/file": "artifacts/artifact-run/artifact-producer/dist/nested/file"}
+	want := map[string]string{"dist/nested/file": fmt.Sprintf("artifacts/artifact-run/artifact-producer/artifact-upload/%x/dist/nested/file", sha256.Sum256([]byte("artifact")))}
 	if report.Status != 4 || !reflect.DeepEqual(report.ArtifactUris, want) {
 		t.Fatalf("terminal artifacts missing: %+v", report)
 	}
-	consumer := &taskpayload.JobRunTaskPayload{PipelineRunID: "artifact-run", JobRunID: "artifact-consumer", JobName: "consume", ArtifactURIs: map[string]string{"build/dist/nested/file": want["dist/nested/file"]}, Steps: []taskpayload.StepPayload{
+	consumer := &taskpayload.JobRunTaskPayload{PipelineRunID: "artifact-run", JobRunID: "artifact-consumer", JobName: "consume", ArtifactURIs: map[string]string{"build/dist/nested/file": want["dist/nested/file"]}, ArtifactReferences: artifactTestReferences(map[string]string{"build/dist/nested/file": ""}), Steps: []taskpayload.StepPayload{
 		{Name: "download", StepRunID: "artifact-download", Uses: "builtin:artifacts", Action: "download", Args: map[string]any{"job": "build", "path": "dist"}},
 		{Name: "consume", StepRunID: "artifact-consume", Args: map[string]any{"run": `test "$(cat dist/nested/file)" = artifact; test "$(cat .artifacts/build/dist/nested/file)" = artifact`}},
 	}}
@@ -354,17 +356,113 @@ func TestPreparationArtifactFailureRedactsJobCredentials(t *testing.T) {
 	st := &memoryArtifactStorage{download: func(context.Context, string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("storage failure: env-secret")
 	}}
-	SetStorage(st)
+	SetStorage(st, artifactTestReference())
 	t.Cleanup(func() { SetStorage(nil) })
 	client := &artifactStatusClient{}
 	wrapper := &agentgrpc.ClientWrapper{AgentClient: client}
-	payload := &taskpayload.JobRunTaskPayload{PipelineRunID: "run", JobRunID: "redact-artifact-prep", Env: map[string]string{"secrets.TEST": "env-secret"}, ArtifactURIs: map[string]string{"build/file": "object"}}
+	payload := &taskpayload.JobRunTaskPayload{PipelineRunID: "run", JobRunID: "redact-artifact-prep", Env: map[string]string{"secrets.TEST": "env-secret"}, ArtifactURIs: map[string]string{"build/file": "object"}, ArtifactReferences: artifactTestReferences(map[string]string{"build/file": ""})}
 	conf := &config.AgentConfig{Agent: config.AgentInfo{ID: "agent", WorkspaceDir: t.TempDir()}}
 	err := executeJobRun(context.Background(), conf, wrapper, nil, payload)
 	if err == nil || strings.Contains(err.Error(), "env-secret") {
 		t.Fatalf("unredacted preparation error: %v", err)
 	}
-	if report := client.jobReports[len(client.jobReports)-1]; report.Status != 5 || strings.Contains(report.ErrorMessage, "env-secret") || !strings.Contains(report.ErrorMessage, "[REDACTED]") {
+	if report := client.jobReports[len(client.jobReports)-1]; report.Status != 5 || strings.Contains(report.ErrorMessage, "env-secret") || !strings.Contains(report.ErrorMessage, "object storage operation failed") {
 		t.Fatalf("unredacted terminal report: %+v", report)
+	}
+}
+
+func artifactTestReference() taskpayload.ArtifactReference {
+	return taskpayload.ArtifactReference{StorageID: "test-store", Fingerprint: strings.Repeat("a", 64)}
+}
+func artifactTestReferences(uris map[string]string) map[string]taskpayload.ArtifactReference {
+	refs := make(map[string]taskpayload.ArtifactReference, len(uris))
+	for name := range uris {
+		refs[name] = artifactTestReference()
+	}
+	return refs
+}
+
+func TestArtifactReferencesFailClosedAndExpiry(t *testing.T) {
+	now := time.Now()
+	uris := map[string]string{"build/file": "artifacts/run/job/step/hash/file"}
+	reference := artifactTestReference()
+	for _, test := range []struct {
+		name    string
+		refs    map[string]taskpayload.ArtifactReference
+		current taskpayload.ArtifactReference
+	}{
+		{name: "legacy_missing", current: reference},
+		{name: "current_missing", refs: artifactTestReferences(uris)},
+		{name: "different_store", refs: map[string]taskpayload.ArtifactReference{"build/file": {StorageID: "other", Fingerprint: reference.Fingerprint}}, current: reference},
+		{name: "changed_location", refs: map[string]taskpayload.ArtifactReference{"build/file": {StorageID: reference.StorageID, Fingerprint: strings.Repeat("b", 64)}}, current: reference},
+		{name: "expired", refs: map[string]taskpayload.ArtifactReference{"build/file": {StorageID: reference.StorageID, Fingerprint: reference.Fingerprint, ExpiresAt: now.Unix()}}, current: reference},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateArtifactReferences(uris, test.refs, test.current, now); err == nil {
+				t.Fatal("unsafe artifact reference accepted")
+			}
+		})
+	}
+	if err := validateArtifactReferences(uris, artifactTestReferences(uris), reference, now); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRemoteArtifactSnapshotsAndPerStepIsolation(t *testing.T) {
+	workspace := t.TempDir()
+	artifactTestWrite(t, workspace, "output.txt", "first")
+	st := &memoryArtifactStorage{}
+	producer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{PipelineRunID: "run", JobRunID: "job"}, storage: st, reference: artifactTestReference()}
+	first := artifactTestRequest(workspace, "upload", map[string]any{"paths": []string{"output.txt"}, "expireIn": "1d"})
+	first.StepRunID = "step-one"
+	if _, err := producer.Execute(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	firstKey := producer.uploaded["output.txt"]
+	artifactTestWrite(t, workspace, "output.txt", "second")
+	second := artifactTestRequest(workspace, "upload", map[string]any{"path": "output.txt"})
+	second.StepRunID = "step-two"
+	if _, err := producer.Execute(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	if len(producer.results) != 2 || producer.results[0].ExpiresAt <= time.Now().Unix() || producer.results[1].ExpiresAt != 0 {
+		t.Fatalf("file metadata missing: %+v", producer.results)
+	}
+	if firstKey == producer.uploaded["output.txt"] || string(st.objects[firstKey]) != "first" {
+		t.Fatal("later step overwrote immutable earlier artifact")
+	}
+	if producer.results[0].Size != 5 || producer.results[0].Sha256 != fmt.Sprintf("%x", sha256.Sum256([]byte("first"))) {
+		t.Fatal("snapshot metadata does not match uploaded bytes")
+	}
+	// 上传源被执行器更改时，已经固定的快照仍与摘要一致
+	st.upload = func(ctx context.Context, key string, reader io.ReadSeeker, size int64) error {
+		artifactTestWrite(t, workspace, "output.txt", "mutated-after-snapshot")
+		content, err := io.ReadAll(reader)
+		if err != nil {
+			return err
+		}
+		if string(content) != "second" || size != 6 || !strings.Contains(key, fmt.Sprintf("%x", sha256.Sum256(content))) {
+			t.Fatal("upload read a mutable source")
+		}
+		return nil
+	}
+	second.StepRunID = "step-three"
+	if _, err := producer.Execute(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRemoteArtifactStorageErrorsDoNotExposeCredentials(t *testing.T) {
+	workspace := t.TempDir()
+	artifactTestWrite(t, workspace, "file", "bytes")
+	secretError := fmt.Errorf("https://key:secret@storage.invalid/object?X-Amz-Credential=private")
+	st := &memoryArtifactStorage{upload: func(context.Context, string, io.ReadSeeker, int64) error { return secretError }}
+	producer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{PipelineRunID: "run", JobRunID: "job"}, storage: st, reference: artifactTestReference()}
+	result, err := producer.Execute(context.Background(), artifactTestRequest(workspace, "upload", map[string]any{"path": "file", "when": "always"}))
+	if err == nil || result.Success || strings.Contains(err.Error(), "secret") || strings.Contains(result.Error, "private") {
+		t.Fatalf("storage credentials leaked: %+v %v", result, err)
+	}
+	if len(producer.results) != 0 {
+		t.Fatal("failed upload registered")
 	}
 }

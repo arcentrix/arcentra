@@ -25,6 +25,7 @@ import (
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	artifactutil "github.com/arcentrix/arcentra/pkg/artifact"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/bytedance/sonic"
@@ -259,24 +260,29 @@ func (a *AgentServiceImpl) legacyRegister(ctx context.Context, req *agentv1.Regi
 // buildStorageConfig reads the default storage configuration from DB and
 // converts it to the proto StorageConfig delivered to agents.
 func (a *AgentServiceImpl) buildStorageConfig(ctx context.Context) *agentv1.StorageConfig {
+	if a.storageRepo == nil {
+		return nil
+	}
 	sc, err := a.storageRepo.GetDefault(ctx)
 	if err != nil || sc == nil {
 		return nil
 	}
 	var detail model.StorageConfigDetail
 	if err := sonic.Unmarshal(sc.Config, &detail); err != nil {
-		log.Warnw("failed to parse default storage config for agent", "error", err)
+		log.Warn("failed to parse default storage config for agent")
 		return nil
 	}
 	return &agentv1.StorageConfig{
-		Provider:  sc.StorageType,
-		Endpoint:  detail.Endpoint,
-		Bucket:    detail.Bucket,
-		Region:    detail.Region,
-		AccessKey: detail.AccessKey,
-		SecretKey: detail.SecretKey,
-		BasePath:  detail.BasePath,
-		UseSsl:    detail.UseTLS,
+		StorageId:          sc.StorageID,
+		StorageFingerprint: artifactutil.StorageFingerprint(sc.StorageType, detail.Endpoint, detail.Bucket, detail.Region, detail.BasePath, detail.UseTLS),
+		Provider:           sc.StorageType,
+		Endpoint:           detail.Endpoint,
+		Bucket:             detail.Bucket,
+		Region:             detail.Region,
+		AccessKey:          detail.AccessKey,
+		SecretKey:          detail.SecretKey,
+		BasePath:           detail.BasePath,
+		UseSsl:             detail.UseTLS,
 	}
 }
 
@@ -432,26 +438,35 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 		return nil, err
 	}
 	if alreadyClaimed {
+		if req.ArtifactStorageId != entity.ArtifactStorageID || req.ArtifactStorageFingerprint != entity.ArtifactStorageFingerprint {
+			return nil, status.Error(codes.FailedPrecondition, "artifact storage identity changed after execution claim")
+		}
 		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "claim confirmed"}, nil
 	}
 	if err := validateReportedStatus(entity.Status, int(req.Status), false); err != nil {
 		return nil, err
 	}
-	if model.IsJobRunTerminal(entity.Status) {
-		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "already completed"}, nil
-	}
 	updates := executionStatusUpdates(int(req.Status), req.ErrorMessage, req.StartTime, req.EndTime, entity.StartTime)
 	if int(req.Status) == 3 {
 		updates["claim_id"] = claimID
 	}
-	if len(req.ArtifactUris) > 0 {
-		encoded, err := sonic.Marshal(req.ArtifactUris)
-		if err != nil {
-			return nil, status.Error(codes.InvalidArgument, "invalid artifact URIs")
-		}
-		updates["artifact_uris"] = string(encoded)
+	artifacts, err := a.prepareJobArtifacts(ctx, entity, req, updates)
+	if err != nil {
+		return nil, err
 	}
-	if err := patchAgentStatus(ctx, a.agentService.jobRunRepo, jobRunID, entity.Status, updates); err != nil {
+	if model.IsJobRunTerminal(entity.Status) {
+		if len(artifacts) > 0 {
+			writer, ok := a.agentService.jobRunRepo.(agentArtifactRepository)
+			if !ok {
+				return nil, status.Error(codes.Unimplemented, "artifact repository unavailable")
+			}
+			if err := writer.ValidateCompletedArtifacts(ctx, jobRunID, artifacts); err != nil {
+				return nil, status.Error(codes.FailedPrecondition, "completed artifact metadata does not match")
+			}
+		}
+		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "already completed"}, nil
+	}
+	if err := patchAgentJobStatus(ctx, a.agentService.jobRunRepo, jobRunID, entity.Status, updates, artifacts); err != nil {
 		return nil, status.Error(codes.Internal, "update job run failed")
 	}
 

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 
 // SchemaValidator validates static schema constraints of pipeline spec.
@@ -107,6 +108,9 @@ func (v *SchemaValidator) validateUniqueJobNames(jobs []*spec.Job) error {
 }
 
 func (v *SchemaValidator) validateJobAdvanced(job *spec.Job, index int) error {
+	if job.Concurrency != "" {
+		return fmt.Errorf("job %q: named concurrency is unsupported by the production DAG executor; remove concurrency instead of relying on an unenforced lock", job.Name)
+	}
 	if err := v.validateName(job.Name, "job name"); err != nil {
 		return fmt.Errorf("job[%d] '%s' name: %w", index, job.Name, err)
 	}
@@ -134,7 +138,16 @@ func (v *SchemaValidator) validateJobAdvanced(job *spec.Job, index int) error {
 			return fmt.Errorf("job %q: use an explicit deployment step for agent jobs", job.Name)
 		}
 	}
+	agentJob := false
+	for _, step := range job.Steps {
+		agentJob = agentJob || step.RunOnAgent
+	}
 	for i, step := range job.Steps {
+		if agentJob {
+			if err := taskqueue.ValidateAgentStepUses(step.Uses, step.Action); err != nil {
+				return fmt.Errorf("job %q step %q: %w", job.Name, step.Name, err)
+			}
+		}
 		if err := v.validateStepAdvanced(step, i); err != nil {
 			return fmt.Errorf("job[%d] '%s' step[%d] '%s': %w", index, job.Name, i, step.Name, err)
 		}
@@ -215,6 +228,9 @@ func (v *SchemaValidator) validateRetry(retry *spec.Retry) error {
 }
 
 func (v *SchemaValidator) validateUses(uses string) error {
+	if uses == "builtin:shell" || uses == "builtin:artifacts" {
+		return nil
+	}
 	if strings.TrimSpace(uses) == "" {
 		return fmt.Errorf("uses field is required")
 	}

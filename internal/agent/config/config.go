@@ -79,7 +79,7 @@ type AgentInfo struct {
 	Mode              string            `mapstructure:"mode"` // Agent mode: sandbox, baremetal
 	Interval          int               `mapstructure:"interval"`
 	Labels            map[string]string `mapstructure:"labels"`
-	MaxConcurrentJobs int               `mapstructure:"maxConcurrentJobs"` // Maximum concurrent jobs
+	MaxConcurrentJobs int               `mapstructure:"maxConcurrentJobs"` // 串行工作器仅支持 1，0 表示默认 1
 	JobTimeout        int               `mapstructure:"jobTimeout"`        // Job timeout in seconds
 	WorkspaceDir      string            `mapstructure:"workspaceDir"`      // Workspace directory
 	TempDir           string            `mapstructure:"tempDir"`           // Temporary directory

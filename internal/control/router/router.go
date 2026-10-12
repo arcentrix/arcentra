@@ -196,6 +196,7 @@ func (rt *Router) routerGroup(r fiber.Router) {
 
 	// project
 	rt.projectRouter(r, auth, subject)
+	rt.artifactRouter(r, auth, subject)
 
 	// pipeline
 	rt.pipelineRouter(r, auth, subject)

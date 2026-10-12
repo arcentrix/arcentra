@@ -36,6 +36,16 @@ func UnifiedResponseMiddleware() fiber.Handler {
 			c.Status(fiber.StatusOK)
 		}
 
+		// 原始下载流不能通过 Body() 读取，否则整文件会被缓冲并泄露内存
+		if c.Response().IsBodyStream() {
+			return nil
+		}
+
+		// handler 已写出的非 2xx 错误保留准确状态和安全说明
+		if c.Response().StatusCode() >= fiber.StatusBadRequest && len(c.Response().Body()) > 0 {
+			return nil
+		}
+
 		// 非 2xx 统一错误
 		if c.Response().StatusCode() < fiber.StatusOK || c.Response().StatusCode() >= fiber.StatusMultipleChoices {
 			return http.Err(

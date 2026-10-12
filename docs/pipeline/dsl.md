@@ -126,7 +126,7 @@
 
         "concurrency": {
           "type": "string",
-          "description": "并发控制 key（相同 key 的 Job 串行执行）"
+          "description": "保留字段；当前生产实现拒绝非空值，不提供命名并发锁"
         },
 
         "timeout": {
@@ -373,7 +373,7 @@
 
 + `jobs` 与 `stages` 必须至少存在一个
 + Stage 不允许直接包含 steps
-+ 并发 key 的全局冲突检测
++ 并发 key 的全局冲突检测（待实现；当前非空 concurrency 会被校验拒绝）
 + 审批顺序的确定性
 + Trigger 权限校验
 
