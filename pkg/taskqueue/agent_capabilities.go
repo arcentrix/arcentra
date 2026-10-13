@@ -31,3 +31,10 @@ func ValidateAgentStepUses(uses, action string) error {
 	}
 	return fmt.Errorf("agent step action %q is unsupported for uses %q", action, uses)
 }
+
+// AgentRuntimeCapabilities 保存独立于用户标签的 Agent 运行时就绪报告
+// 缺失报告或未知版本不能获得离线容器任务
+type AgentRuntimeCapabilities struct {
+	ExecutionMode       string `json:"executionMode,omitempty"`
+	ContainerdOfflineV1 bool   `json:"containerdOfflineV1,omitempty"`
+}

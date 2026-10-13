@@ -23,6 +23,8 @@ option go_package = "github.com/arcentrix/arcentra/api/agent/v1;agentv1";
 
 // AgentService - Main interface for communication between Agent and Server
 service AgentService {
+  // Read-only confirmation for recovery of the original runtime execution.
+  rpc InspectJobExecution(InspectJobExecutionRequest) returns (InspectJobExecutionResponse) {}
   // Heartbeat - Agent periodically sends heartbeat to Server
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {}
 
@@ -83,6 +85,7 @@ message ConnectHeartbeat {
   AgentStatus status = 2;                   // Agent status
   int32 running_step_runs_count = 3;        // Running step runs count
   int32 max_concurrent_step_runs = 4;       // Maximum concurrent step runs
+  RuntimeCapabilities runtime_capabilities = 5; // Missing means unknown/incompatible
 }
 
 // Task dispatch command
@@ -130,12 +133,19 @@ enum AgentStatus {
 }
 
 // Heartbeat request
+// RuntimeCapabilities reports authenticated Agent readiness, independently of editable labels.
+message RuntimeCapabilities {
+  bool containerd_offline_v1 = 1;
+  string execution_mode = 2; // baremetal or containerd-offline-v1, independent of readiness
+}
+
 message HeartbeatRequest {
   string agent_id = 1;                    // Agent unique identifier
   string agent_name = 2;                  // Agent name
   AgentStatus status = 3;                 // Agent current status
   int32 running_step_runs_count = 4;      // Number of running step runs
   int64 timestamp = 5;                    // Timestamp in seconds
+  RuntimeCapabilities runtime_capabilities = 6; // Missing means unknown/incompatible
 }
 
 // Heartbeat response
@@ -157,6 +167,7 @@ message RegisterRequest {
   map<string, string> labels = 8;        // Custom labels
   string registration_token = 9;         // Dynamic registration token (art_ prefix)
   string agent_name = 10;                // Agent name for dynamic registration
+  RuntimeCapabilities runtime_capabilities = 11; // Runtime readiness, never labels
 }
 
 // Agent registration response
@@ -317,6 +328,7 @@ message ReportJobRunStatusRequest {
   string artifact_storage_fingerprint = 9; // Credential-free storage location fingerprint
   repeated ArtifactResult artifacts = 10; // Complete uploaded file metadata
   SourceCheckout source_checkout = 11;     // Agent-reported initial checkout, captured before user steps
+  string runtime_binding_digest = 12;      // Required for every report of a runtime job
 }
 
 // SourceCheckout binds the initial Agent checkout to the controller source expectation.
@@ -390,3 +402,17 @@ enum PluginLocation {
   PLUGIN_LOCATION_REGISTRY = 3;          // Plugin registry
 }
 
+
+// InspectJobExecutionRequest never creates or replaces an execution claim.
+message InspectJobExecutionRequest {
+  string agent_id = 1;
+  string job_run_id = 2;
+  string original_claim_id = 3;
+  string runtime_binding_digest = 4;
+}
+
+// InspectJobExecutionResponse contains authoritative state only, without user data.
+message InspectJobExecutionResponse {
+  int32 status = 1;
+  bool terminal = 2;
+}

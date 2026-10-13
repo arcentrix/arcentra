@@ -1,6 +1,6 @@
 # Safe deployment startup and acceptance
 
-These are operator-reviewed examples, not a one-command production installation. No command in the normal server entrypoint creates credentials, changes schema, or deploys workloads. Real infrastructure validation remains required.
+These are operator-reviewed examples, not a one-command production installation. No command in the normal server entrypoint creates credentials, changes schema, or deploys workloads. V10 passed disposable hosted real-service and browser acceptance; production infrastructure and release-image validation remain required. The current offline-containerd work is hard-disabled and has no successful runtime acceptance yet.
 
 ## Public listeners and probes
 
@@ -43,7 +43,7 @@ When Kafka is configured, producer/worker initialization errors are propagated; 
 - Compose's configuration bind is repository `conf.d`, read-only. The file is still an incomplete dependency example: Kafka, object storage, dependency readiness, database creation and container-address configuration are prerequisites. Default loopback addresses refer to each container itself. Do not paste placeholder passwords into a real deployment.
 - Kubernetes examples intentionally omit PVC and credential resources. Provide reviewed per-instance storage and configuration before relying on restart durability. Single-replica examples do not provide HA leases/fencing.
 - Systemd templates use the actual `-plugin-conf` flag and explicit restart semantics; SIGHUP is shutdown, not reload. StateDirectory and working/writable directory are `/var/lib/arcentra` for Control and `/var/lib/arcentra-agent` for Agent. Set Agent workspace/temp paths accordingly in its reviewed configuration. These are template edits only, not host configuration changes.
-- Default `agent.toml` intentionally requests unsupported sandbox mode and fails closed. `agent.baremetal.example.toml` is only for explicitly trusted code and provides no same-UID isolation. Do not enable it silently to make a healthcheck green.
+- Default `agent.toml` requests sandbox mode, which remains behind the closed offline-runtime acceptance gate and fails closed. `agent.baremetal.example.toml` is only for explicitly trusted code and provides no same-UID isolation. Do not enable it silently to make a healthcheck green.
 
 ## Explicit migration and upgrade
 
@@ -53,12 +53,14 @@ When Kafka is configured, producer/worker initialization errors are propagated; 
 4. Run the supplied `arcentra-cli migrate --conf /absolute/path/to/reviewed-config.toml` explicitly on the intended database. This uses GORM schema migration plus idempotent built-in authorization seeds; it does not create an administrator or grant user privileges. It is not an automatic rollback system or a guarantee of zero-lock/destructive-free changes on every legacy schema.
 5. Verify required tables/columns/indexes and existing data before starting one controller and one Agent. Restore the backup and compatible binaries if the staging rehearsal demonstrates that rollback is needed; do not assume an older binary is compatible with every migration.
 
-Do not run historical `docs/migrations/002_authz.sql` as an upgrade script: it drops legacy tables/columns. Normal startup, probes and image entrypoints must never execute migration or seed actions implicitly. This milestone introduces no new schema.
+Do not run historical `docs/migrations/002_authz.sql` as an upgrade script: it drops legacy tables/columns. Normal startup, probes and image entrypoints must never execute migration or seed actions implicitly. The in-development offline-runtime branch adds persisted Agent capability and immutable job-runtime binding fields. Review and explicitly migrate the final schema before any future authorized rollout; a migration does not open the runtime acceptance gate.
 
-## Acceptance evidence still required
+## Hosted evidence and remaining acceptance
 
-On an authorized capable host: build both images; run their `--help` and CLI `migrate --help`; execute a disposable MySQL migration/repeat-upgrade with data preservation checks; use a real Kafka broker and approved object storage; establish Agent TLS with matching/mismatched/untrusted certificates; confirm `/live` remains healthy while `/ready` waits for enrollment; run create → actual checkout/build → artifact upload/download → results/UI, cancellation and restart replay. Verify actual browser navigation and interrupted flows, then separately approve any real cluster or model request.
+V10 passed backend main `6c24bd389d76fe749ad07a8e23fc049d6cd46c93` in [run 38393872734](https://github.com/arcentrix/arcentra/actions/runs/38393872734) and frontend main `e7906be0e9909de26dea2467744420c197d27237` in [run 38393804004](https://github.com/arcentrix/arcentra-web/actions/runs/38393804004), verified on 2026-10-13. Backend CI exercised real disposable MySQL, Kafka, Redis and S3-compatible storage, verified TLS Agent execution and lost-ACK report replay, plus a fresh-install actual-backend Chromium journey. The separately named frontend Chromium job uses simulated API transport. See [the exact scope](real-stack-acceptance.md).
 
-This cloud has Go/local-process integration support but no Docker/Podman/containerd/MySQL installation or runtime socket. Installed Chromium fails at its process-singleton socket with `Operation not permitted`; sandbox/network restrictions were not bypassed. Java being present does not mean a real Kafka service has been validated. Existing mock broker/storage tests remain explicitly labeled.
+Still required on the intended authorized deployment: build and start both release images; run their `--help` and CLI `migrate --help`; rehearse an existing-data MySQL upgrade and restore; verify production Kafka TLS/SASL, object storage, TLS trust and credential handling, durable volumes, cancellation/restart behavior, load and HA limits. No live Kubernetes deployment, external model request, private Git authentication or production infrastructure validation is inferred from disposable CI. Any such destination needs its own explicit configuration and acceptance.
+
+The assistant cloud workspace's missing runtime and Chromium socket restrictions were not bypassed. Successful real-service/browser results came from standard GitHub-hosted runners, not a local mock or skipped test. Containerd namespace/cgroup/process isolation, release-image startup and the new staged worker/recovery path were not included in that V10 acceptance. Keep the offline-runtime hard gate closed and obtain separate authorization for a capable runtime host/CI setup before following [containerd acceptance](sandbox-containerd.md).
 
 References: [gRPC authentication](https://grpc.io/docs/guides/auth/) and [Kubernetes probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/).

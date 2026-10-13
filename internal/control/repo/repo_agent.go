@@ -50,7 +50,7 @@ type AgentRepo struct {
 }
 
 const agentListSelectFields = "id, agent_id, agent_name, address, port, os, arch, version, " +
-	"status, labels, metrics, last_heartbeat, is_enabled, " +
+	"status, labels, runtime_capabilities, metrics, last_heartbeat, is_enabled, " +
 	"COALESCE(registered_by, 'admin') as registered_by"
 
 // NewAgentRepo creates an agent repository with optional cache.
@@ -96,6 +96,7 @@ var agentSelectFields = []string{
 	"status",
 	"labels",
 	"metrics",
+	"runtime_capabilities",
 	"last_heartbeat",
 	"is_enabled",
 	"COALESCE(registered_by, 'admin') as registered_by",
@@ -195,7 +196,7 @@ func (ar *AgentRepo) List(ctx context.Context, page, size int) ([]model.Agent, i
 		return nil, 0, err
 	}
 
-	if err := ar.Database().WithContext(ctx).Select(agentListSelectFields).
+	if err := ar.Database().WithContext(ctx).Clauses(database.Write()).Select(agentListSelectFields).
 		Table(agent.TableName()).
 		Offset(offset).Limit(size).Find(&agents).Error; err != nil {
 		return nil, 0, err

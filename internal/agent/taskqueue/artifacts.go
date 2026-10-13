@@ -452,7 +452,7 @@ func uploadArtifactFile(ctx context.Context, root *os.Root, name, prefix string,
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("artifact is not a regular file: %s", name)
 	}
-	file, err := root.Open(filepath.FromSlash(name))
+	file, err := openArtifactRegularFile(root, filepath.FromSlash(name), info)
 	if err != nil {
 		return nil, err
 	}

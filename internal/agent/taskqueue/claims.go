@@ -20,6 +20,8 @@ import (
 const executionClaimMetadataKey = "x-arcentra-claim-id"
 
 type jobExecutionClaimContextKey struct{}
+type receiptJobClaimContextKey struct{}
+type receiptJobClaim struct{ runID, claimID string }
 
 func withJobExecutionClaim(ctx context.Context, jobRunID string) context.Context {
 	return context.WithValue(ctx, jobExecutionClaimContextKey{}, executionClaimID(ctx, "job", jobRunID))
@@ -29,6 +31,11 @@ func withJobExecutionClaim(ctx context.Context, jobRunID string) context.Context
 var executionClaims sync.Map
 
 func executionClaimID(ctx context.Context, kind, runID string) string {
+	if kind == "job" {
+		if original, ok := ctx.Value(receiptJobClaimContextKey{}).(receiptJobClaim); ok && original.runID == runID && original.claimID != "" {
+			return original.claimID
+		}
+	}
 	key := kind + "/" + receiptKey(ctx, kind, runID)
 	claim, ok := executionClaims.Load(key)
 	if !ok {

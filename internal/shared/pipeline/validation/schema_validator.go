@@ -28,7 +28,9 @@ import (
 
 // SchemaValidator validates static schema constraints of pipeline spec.
 // It does not evaluate runtime context/expressions.
-type SchemaValidator struct{}
+type SchemaValidator struct {
+	runtimePolicy taskqueue.OfflineRuntimePolicy
+}
 
 func NewSchemaValidator() *SchemaValidator { return &SchemaValidator{} }
 
@@ -42,15 +44,8 @@ func (v *SchemaValidator) Validate(pipeline *spec.Pipeline) error {
 	if err := v.validateVersion(pipeline.Version); err != nil {
 		return fmt.Errorf("version: %w", err)
 	}
-	if runtime := pipeline.Runtime; runtime != nil {
-		switch strings.ToLower(strings.TrimSpace(runtime.Type)) {
-		case "", "local", "baremetal":
-		default:
-			return fmt.Errorf("runtime type %q is unsupported; only trusted local/baremetal execution is available", runtime.Type)
-		}
-		if strings.TrimSpace(runtime.Image) != "" || runtime.Resources != nil || len(spec.StructAsMap(runtime.Config)) > 0 {
-			return fmt.Errorf("runtime image, resources, and isolation configuration are unsupported")
-		}
+	if _, err := ResolveRuntime(pipeline, v.runtimePolicy); err != nil {
+		return err
 	}
 	if len(pipeline.Jobs) == 0 {
 		return fmt.Errorf("pipeline must have at least one job")

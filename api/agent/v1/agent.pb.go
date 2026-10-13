@@ -417,6 +417,7 @@ type ConnectHeartbeat struct {
 	Status                AgentStatus            `protobuf:"varint,2,opt,name=status,proto3,enum=agent.v1.AgentStatus" json:"status,omitempty"`                                      // Agent status
 	RunningStepRunsCount  int32                  `protobuf:"varint,3,opt,name=running_step_runs_count,json=runningStepRunsCount,proto3" json:"running_step_runs_count,omitempty"`    // Running step runs count
 	MaxConcurrentStepRuns int32                  `protobuf:"varint,4,opt,name=max_concurrent_step_runs,json=maxConcurrentStepRuns,proto3" json:"max_concurrent_step_runs,omitempty"` // Maximum concurrent step runs
+	RuntimeCapabilities   *RuntimeCapabilities   `protobuf:"bytes,5,opt,name=runtime_capabilities,json=runtimeCapabilities,proto3" json:"runtime_capabilities,omitempty"`            // Missing means unknown/incompatible
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -477,6 +478,13 @@ func (x *ConnectHeartbeat) GetMaxConcurrentStepRuns() int32 {
 		return x.MaxConcurrentStepRuns
 	}
 	return 0
+}
+
+func (x *ConnectHeartbeat) GetRuntimeCapabilities() *RuntimeCapabilities {
+	if x != nil {
+		return x.RuntimeCapabilities
+	}
+	return nil
 }
 
 // Task dispatch command
@@ -724,6 +732,59 @@ func (x *TaskStatus) GetMetrics() map[string]string {
 }
 
 // Heartbeat request
+// RuntimeCapabilities reports authenticated Agent readiness, independently of editable labels.
+type RuntimeCapabilities struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ContainerdOfflineV1 bool                   `protobuf:"varint,1,opt,name=containerd_offline_v1,json=containerdOfflineV1,proto3" json:"containerd_offline_v1,omitempty"`
+	ExecutionMode       string                 `protobuf:"bytes,2,opt,name=execution_mode,json=executionMode,proto3" json:"execution_mode,omitempty"` // baremetal or containerd-offline-v1, independent of readiness
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *RuntimeCapabilities) Reset() {
+	*x = RuntimeCapabilities{}
+	mi := &file_agent_v1_agent_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RuntimeCapabilities) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RuntimeCapabilities) ProtoMessage() {}
+
+func (x *RuntimeCapabilities) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RuntimeCapabilities.ProtoReflect.Descriptor instead.
+func (*RuntimeCapabilities) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RuntimeCapabilities) GetContainerdOfflineV1() bool {
+	if x != nil {
+		return x.ContainerdOfflineV1
+	}
+	return false
+}
+
+func (x *RuntimeCapabilities) GetExecutionMode() string {
+	if x != nil {
+		return x.ExecutionMode
+	}
+	return ""
+}
+
 type HeartbeatRequest struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
 	AgentId              string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`                                             // Agent unique identifier
@@ -731,13 +792,14 @@ type HeartbeatRequest struct {
 	Status               AgentStatus            `protobuf:"varint,3,opt,name=status,proto3,enum=agent.v1.AgentStatus" json:"status,omitempty"`                                   // Agent current status
 	RunningStepRunsCount int32                  `protobuf:"varint,4,opt,name=running_step_runs_count,json=runningStepRunsCount,proto3" json:"running_step_runs_count,omitempty"` // Number of running step runs
 	Timestamp            int64                  `protobuf:"varint,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                                       // Timestamp in seconds
+	RuntimeCapabilities  *RuntimeCapabilities   `protobuf:"bytes,6,opt,name=runtime_capabilities,json=runtimeCapabilities,proto3" json:"runtime_capabilities,omitempty"`         // Missing means unknown/incompatible
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
 
 func (x *HeartbeatRequest) Reset() {
 	*x = HeartbeatRequest{}
-	mi := &file_agent_v1_agent_proto_msgTypes[7]
+	mi := &file_agent_v1_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -749,7 +811,7 @@ func (x *HeartbeatRequest) String() string {
 func (*HeartbeatRequest) ProtoMessage() {}
 
 func (x *HeartbeatRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[7]
+	mi := &file_agent_v1_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -762,7 +824,7 @@ func (x *HeartbeatRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatRequest.ProtoReflect.Descriptor instead.
 func (*HeartbeatRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{7}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *HeartbeatRequest) GetAgentId() string {
@@ -800,6 +862,13 @@ func (x *HeartbeatRequest) GetTimestamp() int64 {
 	return 0
 }
 
+func (x *HeartbeatRequest) GetRuntimeCapabilities() *RuntimeCapabilities {
+	if x != nil {
+		return x.RuntimeCapabilities
+	}
+	return nil
+}
+
 // Heartbeat response
 type HeartbeatResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -812,7 +881,7 @@ type HeartbeatResponse struct {
 
 func (x *HeartbeatResponse) Reset() {
 	*x = HeartbeatResponse{}
-	mi := &file_agent_v1_agent_proto_msgTypes[8]
+	mi := &file_agent_v1_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -824,7 +893,7 @@ func (x *HeartbeatResponse) String() string {
 func (*HeartbeatResponse) ProtoMessage() {}
 
 func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[8]
+	mi := &file_agent_v1_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -837,7 +906,7 @@ func (x *HeartbeatResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatResponse.ProtoReflect.Descriptor instead.
 func (*HeartbeatResponse) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{8}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *HeartbeatResponse) GetSuccess() bool {
@@ -874,13 +943,14 @@ type RegisterRequest struct {
 	Labels                map[string]string      `protobuf:"bytes,8,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Custom labels
 	RegistrationToken     string                 `protobuf:"bytes,9,opt,name=registration_token,json=registrationToken,proto3" json:"registration_token,omitempty"`                            // Dynamic registration token (art_ prefix)
 	AgentName             string                 `protobuf:"bytes,10,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`                                                   // Agent name for dynamic registration
+	RuntimeCapabilities   *RuntimeCapabilities   `protobuf:"bytes,11,opt,name=runtime_capabilities,json=runtimeCapabilities,proto3" json:"runtime_capabilities,omitempty"`                     // Runtime readiness, never labels
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_agent_v1_agent_proto_msgTypes[9]
+	mi := &file_agent_v1_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -892,7 +962,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[9]
+	mi := &file_agent_v1_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -905,7 +975,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{9}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RegisterRequest) GetAgentId() string {
@@ -978,6 +1048,13 @@ func (x *RegisterRequest) GetAgentName() string {
 	return ""
 }
 
+func (x *RegisterRequest) GetRuntimeCapabilities() *RuntimeCapabilities {
+	if x != nil {
+		return x.RuntimeCapabilities
+	}
+	return nil
+}
+
 // Agent registration response
 type RegisterResponse struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
@@ -995,7 +1072,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_agent_v1_agent_proto_msgTypes[10]
+	mi := &file_agent_v1_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1007,7 +1084,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[10]
+	mi := &file_agent_v1_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1020,7 +1097,7 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{10}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *RegisterResponse) GetSuccess() bool {
@@ -1098,7 +1175,7 @@ type StorageConfig struct {
 
 func (x *StorageConfig) Reset() {
 	*x = StorageConfig{}
-	mi := &file_agent_v1_agent_proto_msgTypes[11]
+	mi := &file_agent_v1_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1110,7 +1187,7 @@ func (x *StorageConfig) String() string {
 func (*StorageConfig) ProtoMessage() {}
 
 func (x *StorageConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[11]
+	mi := &file_agent_v1_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1123,7 +1200,7 @@ func (x *StorageConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorageConfig.ProtoReflect.Descriptor instead.
 func (*StorageConfig) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{11}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *StorageConfig) GetProvider() string {
@@ -1207,7 +1284,7 @@ type UnregisterRequest struct {
 
 func (x *UnregisterRequest) Reset() {
 	*x = UnregisterRequest{}
-	mi := &file_agent_v1_agent_proto_msgTypes[12]
+	mi := &file_agent_v1_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1219,7 +1296,7 @@ func (x *UnregisterRequest) String() string {
 func (*UnregisterRequest) ProtoMessage() {}
 
 func (x *UnregisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[12]
+	mi := &file_agent_v1_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1232,7 +1309,7 @@ func (x *UnregisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnregisterRequest.ProtoReflect.Descriptor instead.
 func (*UnregisterRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{12}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *UnregisterRequest) GetAgentId() string {
@@ -1260,7 +1337,7 @@ type UnregisterResponse struct {
 
 func (x *UnregisterResponse) Reset() {
 	*x = UnregisterResponse{}
-	mi := &file_agent_v1_agent_proto_msgTypes[13]
+	mi := &file_agent_v1_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1272,7 +1349,7 @@ func (x *UnregisterResponse) String() string {
 func (*UnregisterResponse) ProtoMessage() {}
 
 func (x *UnregisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[13]
+	mi := &file_agent_v1_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1285,7 +1362,7 @@ func (x *UnregisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnregisterResponse.ProtoReflect.Descriptor instead.
 func (*UnregisterResponse) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{13}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *UnregisterResponse) GetSuccess() bool {
@@ -1313,7 +1390,7 @@ type FetchStepRunRequest struct {
 
 func (x *FetchStepRunRequest) Reset() {
 	*x = FetchStepRunRequest{}
-	mi := &file_agent_v1_agent_proto_msgTypes[14]
+	mi := &file_agent_v1_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1325,7 +1402,7 @@ func (x *FetchStepRunRequest) String() string {
 func (*FetchStepRunRequest) ProtoMessage() {}
 
 func (x *FetchStepRunRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[14]
+	mi := &file_agent_v1_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1338,7 +1415,7 @@ func (x *FetchStepRunRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FetchStepRunRequest.ProtoReflect.Descriptor instead.
 func (*FetchStepRunRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{14}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *FetchStepRunRequest) GetAgentId() string {
@@ -1367,7 +1444,7 @@ type FetchStepRunResponse struct {
 
 func (x *FetchStepRunResponse) Reset() {
 	*x = FetchStepRunResponse{}
-	mi := &file_agent_v1_agent_proto_msgTypes[15]
+	mi := &file_agent_v1_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1379,7 +1456,7 @@ func (x *FetchStepRunResponse) String() string {
 func (*FetchStepRunResponse) ProtoMessage() {}
 
 func (x *FetchStepRunResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[15]
+	mi := &file_agent_v1_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1392,7 +1469,7 @@ func (x *FetchStepRunResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FetchStepRunResponse.ProtoReflect.Descriptor instead.
 func (*FetchStepRunResponse) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{15}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *FetchStepRunResponse) GetSuccess() bool {
@@ -1454,7 +1531,7 @@ type StepRun struct {
 
 func (x *StepRun) Reset() {
 	*x = StepRun{}
-	mi := &file_agent_v1_agent_proto_msgTypes[16]
+	mi := &file_agent_v1_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1466,7 +1543,7 @@ func (x *StepRun) String() string {
 func (*StepRun) ProtoMessage() {}
 
 func (x *StepRun) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[16]
+	mi := &file_agent_v1_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1479,7 +1556,7 @@ func (x *StepRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StepRun.ProtoReflect.Descriptor instead.
 func (*StepRun) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{16}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *StepRun) GetStepRunId() string {
@@ -1643,7 +1720,7 @@ type ArtifactConfig struct {
 
 func (x *ArtifactConfig) Reset() {
 	*x = ArtifactConfig{}
-	mi := &file_agent_v1_agent_proto_msgTypes[17]
+	mi := &file_agent_v1_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1655,7 +1732,7 @@ func (x *ArtifactConfig) String() string {
 func (*ArtifactConfig) ProtoMessage() {}
 
 func (x *ArtifactConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[17]
+	mi := &file_agent_v1_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1668,7 +1745,7 @@ func (x *ArtifactConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactConfig.ProtoReflect.Descriptor instead.
 func (*ArtifactConfig) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{17}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ArtifactConfig) GetName() string {
@@ -1723,7 +1800,7 @@ type ReportStepRunStatusRequest struct {
 
 func (x *ReportStepRunStatusRequest) Reset() {
 	*x = ReportStepRunStatusRequest{}
-	mi := &file_agent_v1_agent_proto_msgTypes[18]
+	mi := &file_agent_v1_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1735,7 +1812,7 @@ func (x *ReportStepRunStatusRequest) String() string {
 func (*ReportStepRunStatusRequest) ProtoMessage() {}
 
 func (x *ReportStepRunStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[18]
+	mi := &file_agent_v1_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1748,7 +1825,7 @@ func (x *ReportStepRunStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportStepRunStatusRequest.ProtoReflect.Descriptor instead.
 func (*ReportStepRunStatusRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{18}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ReportStepRunStatusRequest) GetAgentId() string {
@@ -1818,7 +1895,7 @@ type ReportStepRunStatusResponse struct {
 
 func (x *ReportStepRunStatusResponse) Reset() {
 	*x = ReportStepRunStatusResponse{}
-	mi := &file_agent_v1_agent_proto_msgTypes[19]
+	mi := &file_agent_v1_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1830,7 +1907,7 @@ func (x *ReportStepRunStatusResponse) String() string {
 func (*ReportStepRunStatusResponse) ProtoMessage() {}
 
 func (x *ReportStepRunStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[19]
+	mi := &file_agent_v1_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1843,7 +1920,7 @@ func (x *ReportStepRunStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportStepRunStatusResponse.ProtoReflect.Descriptor instead.
 func (*ReportStepRunStatusResponse) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{19}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ReportStepRunStatusResponse) GetSuccess() bool {
@@ -1872,7 +1949,7 @@ type CancelStepRunRequest struct {
 
 func (x *CancelStepRunRequest) Reset() {
 	*x = CancelStepRunRequest{}
-	mi := &file_agent_v1_agent_proto_msgTypes[20]
+	mi := &file_agent_v1_agent_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1884,7 +1961,7 @@ func (x *CancelStepRunRequest) String() string {
 func (*CancelStepRunRequest) ProtoMessage() {}
 
 func (x *CancelStepRunRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[20]
+	mi := &file_agent_v1_agent_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1897,7 +1974,7 @@ func (x *CancelStepRunRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelStepRunRequest.ProtoReflect.Descriptor instead.
 func (*CancelStepRunRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{20}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *CancelStepRunRequest) GetAgentId() string {
@@ -1932,7 +2009,7 @@ type CancelStepRunResponse struct {
 
 func (x *CancelStepRunResponse) Reset() {
 	*x = CancelStepRunResponse{}
-	mi := &file_agent_v1_agent_proto_msgTypes[21]
+	mi := &file_agent_v1_agent_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1944,7 +2021,7 @@ func (x *CancelStepRunResponse) String() string {
 func (*CancelStepRunResponse) ProtoMessage() {}
 
 func (x *CancelStepRunResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[21]
+	mi := &file_agent_v1_agent_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1957,7 +2034,7 @@ func (x *CancelStepRunResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelStepRunResponse.ProtoReflect.Descriptor instead.
 func (*CancelStepRunResponse) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{21}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *CancelStepRunResponse) GetSuccess() bool {
@@ -1986,7 +2063,7 @@ type UpdateLabelsRequest struct {
 
 func (x *UpdateLabelsRequest) Reset() {
 	*x = UpdateLabelsRequest{}
-	mi := &file_agent_v1_agent_proto_msgTypes[22]
+	mi := &file_agent_v1_agent_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1998,7 +2075,7 @@ func (x *UpdateLabelsRequest) String() string {
 func (*UpdateLabelsRequest) ProtoMessage() {}
 
 func (x *UpdateLabelsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[22]
+	mi := &file_agent_v1_agent_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2011,7 +2088,7 @@ func (x *UpdateLabelsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateLabelsRequest.ProtoReflect.Descriptor instead.
 func (*UpdateLabelsRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{22}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *UpdateLabelsRequest) GetAgentId() string {
@@ -2047,7 +2124,7 @@ type UpdateLabelsResponse struct {
 
 func (x *UpdateLabelsResponse) Reset() {
 	*x = UpdateLabelsResponse{}
-	mi := &file_agent_v1_agent_proto_msgTypes[23]
+	mi := &file_agent_v1_agent_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2059,7 +2136,7 @@ func (x *UpdateLabelsResponse) String() string {
 func (*UpdateLabelsResponse) ProtoMessage() {}
 
 func (x *UpdateLabelsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[23]
+	mi := &file_agent_v1_agent_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2072,7 +2149,7 @@ func (x *UpdateLabelsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateLabelsResponse.ProtoReflect.Descriptor instead.
 func (*UpdateLabelsResponse) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{23}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *UpdateLabelsResponse) GetSuccess() bool {
@@ -2110,13 +2187,14 @@ type ReportJobRunStatusRequest struct {
 	ArtifactStorageFingerprint string                 `protobuf:"bytes,9,opt,name=artifact_storage_fingerprint,json=artifactStorageFingerprint,proto3" json:"artifact_storage_fingerprint,omitempty"`                               // Credential-free storage location fingerprint
 	Artifacts                  []*ArtifactResult      `protobuf:"bytes,10,rep,name=artifacts,proto3" json:"artifacts,omitempty"`                                                                                                    // Complete uploaded file metadata
 	SourceCheckout             *SourceCheckout        `protobuf:"bytes,11,opt,name=source_checkout,json=sourceCheckout,proto3" json:"source_checkout,omitempty"`                                                                    // Agent-reported initial checkout, captured before user steps
+	RuntimeBindingDigest       string                 `protobuf:"bytes,12,opt,name=runtime_binding_digest,json=runtimeBindingDigest,proto3" json:"runtime_binding_digest,omitempty"`                                                // Required for every report of a runtime job
 	unknownFields              protoimpl.UnknownFields
 	sizeCache                  protoimpl.SizeCache
 }
 
 func (x *ReportJobRunStatusRequest) Reset() {
 	*x = ReportJobRunStatusRequest{}
-	mi := &file_agent_v1_agent_proto_msgTypes[24]
+	mi := &file_agent_v1_agent_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2128,7 +2206,7 @@ func (x *ReportJobRunStatusRequest) String() string {
 func (*ReportJobRunStatusRequest) ProtoMessage() {}
 
 func (x *ReportJobRunStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[24]
+	mi := &file_agent_v1_agent_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2141,7 +2219,7 @@ func (x *ReportJobRunStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportJobRunStatusRequest.ProtoReflect.Descriptor instead.
 func (*ReportJobRunStatusRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{24}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ReportJobRunStatusRequest) GetAgentId() string {
@@ -2221,6 +2299,13 @@ func (x *ReportJobRunStatusRequest) GetSourceCheckout() *SourceCheckout {
 	return nil
 }
 
+func (x *ReportJobRunStatusRequest) GetRuntimeBindingDigest() string {
+	if x != nil {
+		return x.RuntimeBindingDigest
+	}
+	return ""
+}
+
 // SourceCheckout binds the initial Agent checkout to the controller source expectation.
 type SourceCheckout struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -2232,7 +2317,7 @@ type SourceCheckout struct {
 
 func (x *SourceCheckout) Reset() {
 	*x = SourceCheckout{}
-	mi := &file_agent_v1_agent_proto_msgTypes[25]
+	mi := &file_agent_v1_agent_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2244,7 +2329,7 @@ func (x *SourceCheckout) String() string {
 func (*SourceCheckout) ProtoMessage() {}
 
 func (x *SourceCheckout) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[25]
+	mi := &file_agent_v1_agent_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2257,7 +2342,7 @@ func (x *SourceCheckout) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SourceCheckout.ProtoReflect.Descriptor instead.
 func (*SourceCheckout) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{25}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *SourceCheckout) GetBindingDigest() string {
@@ -2290,7 +2375,7 @@ type ArtifactResult struct {
 
 func (x *ArtifactResult) Reset() {
 	*x = ArtifactResult{}
-	mi := &file_agent_v1_agent_proto_msgTypes[26]
+	mi := &file_agent_v1_agent_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2302,7 +2387,7 @@ func (x *ArtifactResult) String() string {
 func (*ArtifactResult) ProtoMessage() {}
 
 func (x *ArtifactResult) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[26]
+	mi := &file_agent_v1_agent_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2315,7 +2400,7 @@ func (x *ArtifactResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArtifactResult.ProtoReflect.Descriptor instead.
 func (*ArtifactResult) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{26}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ArtifactResult) GetStepRunId() string {
@@ -2378,7 +2463,7 @@ type ReportJobRunStatusResponse struct {
 
 func (x *ReportJobRunStatusResponse) Reset() {
 	*x = ReportJobRunStatusResponse{}
-	mi := &file_agent_v1_agent_proto_msgTypes[27]
+	mi := &file_agent_v1_agent_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2390,7 +2475,7 @@ func (x *ReportJobRunStatusResponse) String() string {
 func (*ReportJobRunStatusResponse) ProtoMessage() {}
 
 func (x *ReportJobRunStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[27]
+	mi := &file_agent_v1_agent_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2403,7 +2488,7 @@ func (x *ReportJobRunStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportJobRunStatusResponse.ProtoReflect.Descriptor instead.
 func (*ReportJobRunStatusResponse) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{27}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ReportJobRunStatusResponse) GetSuccess() bool {
@@ -2431,7 +2516,7 @@ type CancelJobRunRequest struct {
 
 func (x *CancelJobRunRequest) Reset() {
 	*x = CancelJobRunRequest{}
-	mi := &file_agent_v1_agent_proto_msgTypes[28]
+	mi := &file_agent_v1_agent_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2443,7 +2528,7 @@ func (x *CancelJobRunRequest) String() string {
 func (*CancelJobRunRequest) ProtoMessage() {}
 
 func (x *CancelJobRunRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[28]
+	mi := &file_agent_v1_agent_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2456,7 +2541,7 @@ func (x *CancelJobRunRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelJobRunRequest.ProtoReflect.Descriptor instead.
 func (*CancelJobRunRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{28}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *CancelJobRunRequest) GetJobRunId() string {
@@ -2484,7 +2569,7 @@ type CancelJobRunResponse struct {
 
 func (x *CancelJobRunResponse) Reset() {
 	*x = CancelJobRunResponse{}
-	mi := &file_agent_v1_agent_proto_msgTypes[29]
+	mi := &file_agent_v1_agent_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2496,7 +2581,7 @@ func (x *CancelJobRunResponse) String() string {
 func (*CancelJobRunResponse) ProtoMessage() {}
 
 func (x *CancelJobRunResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[29]
+	mi := &file_agent_v1_agent_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2509,7 +2594,7 @@ func (x *CancelJobRunResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelJobRunResponse.ProtoReflect.Descriptor instead.
 func (*CancelJobRunResponse) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{29}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *CancelJobRunResponse) GetSuccess() bool {
@@ -2537,7 +2622,7 @@ type AgentSelector struct {
 
 func (x *AgentSelector) Reset() {
 	*x = AgentSelector{}
-	mi := &file_agent_v1_agent_proto_msgTypes[30]
+	mi := &file_agent_v1_agent_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2549,7 +2634,7 @@ func (x *AgentSelector) String() string {
 func (*AgentSelector) ProtoMessage() {}
 
 func (x *AgentSelector) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[30]
+	mi := &file_agent_v1_agent_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2562,7 +2647,7 @@ func (x *AgentSelector) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSelector.ProtoReflect.Descriptor instead.
 func (*AgentSelector) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{30}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *AgentSelector) GetMatchLabels() map[string]string {
@@ -2591,7 +2676,7 @@ type LabelExpression struct {
 
 func (x *LabelExpression) Reset() {
 	*x = LabelExpression{}
-	mi := &file_agent_v1_agent_proto_msgTypes[31]
+	mi := &file_agent_v1_agent_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2603,7 +2688,7 @@ func (x *LabelExpression) String() string {
 func (*LabelExpression) ProtoMessage() {}
 
 func (x *LabelExpression) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[31]
+	mi := &file_agent_v1_agent_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2616,7 +2701,7 @@ func (x *LabelExpression) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LabelExpression.ProtoReflect.Descriptor instead.
 func (*LabelExpression) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{31}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *LabelExpression) GetKey() string {
@@ -2656,7 +2741,7 @@ type PluginInfo struct {
 
 func (x *PluginInfo) Reset() {
 	*x = PluginInfo{}
-	mi := &file_agent_v1_agent_proto_msgTypes[32]
+	mi := &file_agent_v1_agent_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2668,7 +2753,7 @@ func (x *PluginInfo) String() string {
 func (*PluginInfo) ProtoMessage() {}
 
 func (x *PluginInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_agent_proto_msgTypes[32]
+	mi := &file_agent_v1_agent_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2681,7 +2766,7 @@ func (x *PluginInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PluginInfo.ProtoReflect.Descriptor instead.
 func (*PluginInfo) Descriptor() ([]byte, []int) {
-	return file_agent_v1_agent_proto_rawDescGZIP(), []int{32}
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *PluginInfo) GetPluginId() string {
@@ -2733,6 +2818,128 @@ func (x *PluginInfo) GetLocation() PluginLocation {
 	return PluginLocation_PLUGIN_LOCATION_UNSPECIFIED
 }
 
+// InspectJobExecutionRequest never creates or replaces an execution claim.
+type InspectJobExecutionRequest struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	AgentId              string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	JobRunId             string                 `protobuf:"bytes,2,opt,name=job_run_id,json=jobRunId,proto3" json:"job_run_id,omitempty"`
+	OriginalClaimId      string                 `protobuf:"bytes,3,opt,name=original_claim_id,json=originalClaimId,proto3" json:"original_claim_id,omitempty"`
+	RuntimeBindingDigest string                 `protobuf:"bytes,4,opt,name=runtime_binding_digest,json=runtimeBindingDigest,proto3" json:"runtime_binding_digest,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *InspectJobExecutionRequest) Reset() {
+	*x = InspectJobExecutionRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectJobExecutionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectJobExecutionRequest) ProtoMessage() {}
+
+func (x *InspectJobExecutionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectJobExecutionRequest.ProtoReflect.Descriptor instead.
+func (*InspectJobExecutionRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *InspectJobExecutionRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *InspectJobExecutionRequest) GetJobRunId() string {
+	if x != nil {
+		return x.JobRunId
+	}
+	return ""
+}
+
+func (x *InspectJobExecutionRequest) GetOriginalClaimId() string {
+	if x != nil {
+		return x.OriginalClaimId
+	}
+	return ""
+}
+
+func (x *InspectJobExecutionRequest) GetRuntimeBindingDigest() string {
+	if x != nil {
+		return x.RuntimeBindingDigest
+	}
+	return ""
+}
+
+// InspectJobExecutionResponse contains authoritative state only, without user data.
+type InspectJobExecutionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        int32                  `protobuf:"varint,1,opt,name=status,proto3" json:"status,omitempty"`
+	Terminal      bool                   `protobuf:"varint,2,opt,name=terminal,proto3" json:"terminal,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InspectJobExecutionResponse) Reset() {
+	*x = InspectJobExecutionResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectJobExecutionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectJobExecutionResponse) ProtoMessage() {}
+
+func (x *InspectJobExecutionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectJobExecutionResponse.ProtoReflect.Descriptor instead.
+func (*InspectJobExecutionResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *InspectJobExecutionResponse) GetStatus() int32 {
+	if x != nil {
+		return x.Status
+	}
+	return 0
+}
+
+func (x *InspectJobExecutionResponse) GetTerminal() bool {
+	if x != nil {
+		return x.Terminal
+	}
+	return false
+}
+
 var File_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_agent_v1_agent_proto_rawDesc = "" +
@@ -2754,12 +2961,13 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\rtask_dispatch\x18\x03 \x01(\v2\x16.agent.v1.TaskDispatchH\x00R\ftaskDispatch\x127\n" +
 	"\vtask_cancel\x18\x04 \x01(\v2\x14.agent.v1.TaskCancelH\x00R\n" +
 	"taskCancelB\t\n" +
-	"\apayload\"\xcf\x01\n" +
+	"\apayload\"\xa1\x02\n" +
 	"\x10ConnectHeartbeat\x12\x1c\n" +
 	"\ttimestamp\x18\x01 \x01(\x03R\ttimestamp\x12-\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x15.agent.v1.AgentStatusR\x06status\x125\n" +
 	"\x17running_step_runs_count\x18\x03 \x01(\x05R\x14runningStepRunsCount\x127\n" +
-	"\x18max_concurrent_step_runs\x18\x04 \x01(\x05R\x15maxConcurrentStepRuns\">\n" +
+	"\x18max_concurrent_step_runs\x18\x04 \x01(\x05R\x15maxConcurrentStepRuns\x12P\n" +
+	"\x14runtime_capabilities\x18\x05 \x01(\v2\x1d.agent.v1.RuntimeCapabilitiesR\x13runtimeCapabilities\">\n" +
 	"\fTaskDispatch\x12.\n" +
 	"\tstep_runs\x18\x01 \x03(\v2\x11.agent.v1.StepRunR\bstepRuns\"D\n" +
 	"\n" +
@@ -2781,18 +2989,22 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\ametrics\x18\x06 \x03(\v2!.agent.v1.TaskStatus.MetricsEntryR\ametrics\x1a:\n" +
 	"\fMetricsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd0\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"p\n" +
+	"\x13RuntimeCapabilities\x122\n" +
+	"\x15containerd_offline_v1\x18\x01 \x01(\bR\x13containerdOfflineV1\x12%\n" +
+	"\x0eexecution_mode\x18\x02 \x01(\tR\rexecutionMode\"\xa2\x02\n" +
 	"\x10HeartbeatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1d\n" +
 	"\n" +
 	"agent_name\x18\x02 \x01(\tR\tagentName\x12-\n" +
 	"\x06status\x18\x03 \x01(\x0e2\x15.agent.v1.AgentStatusR\x06status\x125\n" +
 	"\x17running_step_runs_count\x18\x04 \x01(\x05R\x14runningStepRunsCount\x12\x1c\n" +
-	"\ttimestamp\x18\x05 \x01(\x03R\ttimestamp\"e\n" +
+	"\ttimestamp\x18\x05 \x01(\x03R\ttimestamp\x12P\n" +
+	"\x14runtime_capabilities\x18\x06 \x01(\v2\x1d.agent.v1.RuntimeCapabilitiesR\x13runtimeCapabilities\"e\n" +
 	"\x11HeartbeatResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1c\n" +
-	"\ttimestamp\x18\x03 \x01(\x03R\ttimestamp\"\x91\x03\n" +
+	"\ttimestamp\x18\x03 \x01(\x03R\ttimestamp\"\xe3\x03\n" +
 	"\x0fRegisterRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x14\n" +
 	"\x05token\x18\x02 \x01(\tR\x05token\x12\x0e\n" +
@@ -2805,7 +3017,8 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x12registration_token\x18\t \x01(\tR\x11registrationToken\x12\x1d\n" +
 	"\n" +
 	"agent_name\x18\n" +
-	" \x01(\tR\tagentName\x1a9\n" +
+	" \x01(\tR\tagentName\x12P\n" +
+	"\x14runtime_capabilities\x18\v \x01(\v2\x1d.agent.v1.RuntimeCapabilitiesR\x13runtimeCapabilities\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x88\x03\n" +
@@ -2925,7 +3138,7 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x06labels\x18\x03 \x03(\v2*.agent.v1.UpdateLabelsResponse.LabelsEntryR\x06labels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd5\x04\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8b\x05\n" +
 	"\x19ReportJobRunStatusRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1c\n" +
 	"\n" +
@@ -2940,7 +3153,8 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x1cartifact_storage_fingerprint\x18\t \x01(\tR\x1aartifactStorageFingerprint\x126\n" +
 	"\tartifacts\x18\n" +
 	" \x03(\v2\x18.agent.v1.ArtifactResultR\tartifacts\x12A\n" +
-	"\x0fsource_checkout\x18\v \x01(\v2\x18.agent.v1.SourceCheckoutR\x0esourceCheckout\x1a?\n" +
+	"\x0fsource_checkout\x18\v \x01(\v2\x18.agent.v1.SourceCheckoutR\x0esourceCheckout\x124\n" +
+	"\x16runtime_binding_digest\x18\f \x01(\tR\x14runtimeBindingDigest\x1a?\n" +
 	"\x11ArtifactUrisEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"`\n" +
@@ -2986,7 +3200,16 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\bchecksum\x18\x04 \x01(\tR\bchecksum\x12\x12\n" +
 	"\x04size\x18\x05 \x01(\x03R\x04size\x12!\n" +
 	"\fdownload_url\x18\x06 \x01(\tR\vdownloadUrl\x124\n" +
-	"\blocation\x18\a \x01(\x0e2\x18.agent.v1.PluginLocationR\blocation*Q\n" +
+	"\blocation\x18\a \x01(\x0e2\x18.agent.v1.PluginLocationR\blocation\"\xb7\x01\n" +
+	"\x1aInspectJobExecutionRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1c\n" +
+	"\n" +
+	"job_run_id\x18\x02 \x01(\tR\bjobRunId\x12*\n" +
+	"\x11original_claim_id\x18\x03 \x01(\tR\x0foriginalClaimId\x124\n" +
+	"\x16runtime_binding_digest\x18\x04 \x01(\tR\x14runtimeBindingDigest\"Q\n" +
+	"\x1bInspectJobExecutionResponse\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\x05R\x06status\x12\x1a\n" +
+	"\bterminal\x18\x02 \x01(\bR\bterminal*Q\n" +
 	"\tAckStatus\x12\x1a\n" +
 	"\x16ACK_STATUS_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rACK_STATUS_OK\x10\x01\x12\x15\n" +
@@ -3001,8 +3224,9 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x1bPLUGIN_LOCATION_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16PLUGIN_LOCATION_SERVER\x10\x01\x12\x1b\n" +
 	"\x17PLUGIN_LOCATION_STORAGE\x10\x02\x12\x1c\n" +
-	"\x18PLUGIN_LOCATION_REGISTRY\x10\x032\xbc\x06\n" +
-	"\fAgentService\x12F\n" +
+	"\x18PLUGIN_LOCATION_REGISTRY\x10\x032\xa2\a\n" +
+	"\fAgentService\x12d\n" +
+	"\x13InspectJobExecution\x12$.agent.v1.InspectJobExecutionRequest\x1a%.agent.v1.InspectJobExecutionResponse\"\x00\x12F\n" +
 	"\tHeartbeat\x12\x1a.agent.v1.HeartbeatRequest\x1a\x1b.agent.v1.HeartbeatResponse\"\x00\x12C\n" +
 	"\bRegister\x12\x19.agent.v1.RegisterRequest\x1a\x1a.agent.v1.RegisterResponse\"\x00\x12I\n" +
 	"\n" +
@@ -3030,7 +3254,7 @@ func file_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
+var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
 var file_agent_v1_agent_proto_goTypes = []any{
 	(AckStatus)(0),                      // 0: agent.v1.AckStatus
 	(AgentStatus)(0),                    // 1: agent.v1.AgentStatus
@@ -3042,44 +3266,47 @@ var file_agent_v1_agent_proto_goTypes = []any{
 	(*TaskCancel)(nil),                  // 7: agent.v1.TaskCancel
 	(*TaskAck)(nil),                     // 8: agent.v1.TaskAck
 	(*TaskStatus)(nil),                  // 9: agent.v1.TaskStatus
-	(*HeartbeatRequest)(nil),            // 10: agent.v1.HeartbeatRequest
-	(*HeartbeatResponse)(nil),           // 11: agent.v1.HeartbeatResponse
-	(*RegisterRequest)(nil),             // 12: agent.v1.RegisterRequest
-	(*RegisterResponse)(nil),            // 13: agent.v1.RegisterResponse
-	(*StorageConfig)(nil),               // 14: agent.v1.StorageConfig
-	(*UnregisterRequest)(nil),           // 15: agent.v1.UnregisterRequest
-	(*UnregisterResponse)(nil),          // 16: agent.v1.UnregisterResponse
-	(*FetchStepRunRequest)(nil),         // 17: agent.v1.FetchStepRunRequest
-	(*FetchStepRunResponse)(nil),        // 18: agent.v1.FetchStepRunResponse
-	(*StepRun)(nil),                     // 19: agent.v1.StepRun
-	(*ArtifactConfig)(nil),              // 20: agent.v1.ArtifactConfig
-	(*ReportStepRunStatusRequest)(nil),  // 21: agent.v1.ReportStepRunStatusRequest
-	(*ReportStepRunStatusResponse)(nil), // 22: agent.v1.ReportStepRunStatusResponse
-	(*CancelStepRunRequest)(nil),        // 23: agent.v1.CancelStepRunRequest
-	(*CancelStepRunResponse)(nil),       // 24: agent.v1.CancelStepRunResponse
-	(*UpdateLabelsRequest)(nil),         // 25: agent.v1.UpdateLabelsRequest
-	(*UpdateLabelsResponse)(nil),        // 26: agent.v1.UpdateLabelsResponse
-	(*ReportJobRunStatusRequest)(nil),   // 27: agent.v1.ReportJobRunStatusRequest
-	(*SourceCheckout)(nil),              // 28: agent.v1.SourceCheckout
-	(*ArtifactResult)(nil),              // 29: agent.v1.ArtifactResult
-	(*ReportJobRunStatusResponse)(nil),  // 30: agent.v1.ReportJobRunStatusResponse
-	(*CancelJobRunRequest)(nil),         // 31: agent.v1.CancelJobRunRequest
-	(*CancelJobRunResponse)(nil),        // 32: agent.v1.CancelJobRunResponse
-	(*AgentSelector)(nil),               // 33: agent.v1.AgentSelector
-	(*LabelExpression)(nil),             // 34: agent.v1.LabelExpression
-	(*PluginInfo)(nil),                  // 35: agent.v1.PluginInfo
-	nil,                                 // 36: agent.v1.TaskStatus.MetricsEntry
-	nil,                                 // 37: agent.v1.RegisterRequest.LabelsEntry
-	nil,                                 // 38: agent.v1.RegisterResponse.LabelsEntry
-	nil,                                 // 39: agent.v1.StepRun.EnvEntry
-	nil,                                 // 40: agent.v1.StepRun.SecretsEntry
-	nil,                                 // 41: agent.v1.ReportStepRunStatusRequest.MetricsEntry
-	nil,                                 // 42: agent.v1.UpdateLabelsRequest.LabelsEntry
-	nil,                                 // 43: agent.v1.UpdateLabelsResponse.LabelsEntry
-	nil,                                 // 44: agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
-	nil,                                 // 45: agent.v1.AgentSelector.MatchLabelsEntry
-	(v1.StepRunStatus)(0),               // 46: steprun.v1.StepRunStatus
-	(*structpb.Struct)(nil),             // 47: google.protobuf.Struct
+	(*RuntimeCapabilities)(nil),         // 10: agent.v1.RuntimeCapabilities
+	(*HeartbeatRequest)(nil),            // 11: agent.v1.HeartbeatRequest
+	(*HeartbeatResponse)(nil),           // 12: agent.v1.HeartbeatResponse
+	(*RegisterRequest)(nil),             // 13: agent.v1.RegisterRequest
+	(*RegisterResponse)(nil),            // 14: agent.v1.RegisterResponse
+	(*StorageConfig)(nil),               // 15: agent.v1.StorageConfig
+	(*UnregisterRequest)(nil),           // 16: agent.v1.UnregisterRequest
+	(*UnregisterResponse)(nil),          // 17: agent.v1.UnregisterResponse
+	(*FetchStepRunRequest)(nil),         // 18: agent.v1.FetchStepRunRequest
+	(*FetchStepRunResponse)(nil),        // 19: agent.v1.FetchStepRunResponse
+	(*StepRun)(nil),                     // 20: agent.v1.StepRun
+	(*ArtifactConfig)(nil),              // 21: agent.v1.ArtifactConfig
+	(*ReportStepRunStatusRequest)(nil),  // 22: agent.v1.ReportStepRunStatusRequest
+	(*ReportStepRunStatusResponse)(nil), // 23: agent.v1.ReportStepRunStatusResponse
+	(*CancelStepRunRequest)(nil),        // 24: agent.v1.CancelStepRunRequest
+	(*CancelStepRunResponse)(nil),       // 25: agent.v1.CancelStepRunResponse
+	(*UpdateLabelsRequest)(nil),         // 26: agent.v1.UpdateLabelsRequest
+	(*UpdateLabelsResponse)(nil),        // 27: agent.v1.UpdateLabelsResponse
+	(*ReportJobRunStatusRequest)(nil),   // 28: agent.v1.ReportJobRunStatusRequest
+	(*SourceCheckout)(nil),              // 29: agent.v1.SourceCheckout
+	(*ArtifactResult)(nil),              // 30: agent.v1.ArtifactResult
+	(*ReportJobRunStatusResponse)(nil),  // 31: agent.v1.ReportJobRunStatusResponse
+	(*CancelJobRunRequest)(nil),         // 32: agent.v1.CancelJobRunRequest
+	(*CancelJobRunResponse)(nil),        // 33: agent.v1.CancelJobRunResponse
+	(*AgentSelector)(nil),               // 34: agent.v1.AgentSelector
+	(*LabelExpression)(nil),             // 35: agent.v1.LabelExpression
+	(*PluginInfo)(nil),                  // 36: agent.v1.PluginInfo
+	(*InspectJobExecutionRequest)(nil),  // 37: agent.v1.InspectJobExecutionRequest
+	(*InspectJobExecutionResponse)(nil), // 38: agent.v1.InspectJobExecutionResponse
+	nil,                                 // 39: agent.v1.TaskStatus.MetricsEntry
+	nil,                                 // 40: agent.v1.RegisterRequest.LabelsEntry
+	nil,                                 // 41: agent.v1.RegisterResponse.LabelsEntry
+	nil,                                 // 42: agent.v1.StepRun.EnvEntry
+	nil,                                 // 43: agent.v1.StepRun.SecretsEntry
+	nil,                                 // 44: agent.v1.ReportStepRunStatusRequest.MetricsEntry
+	nil,                                 // 45: agent.v1.UpdateLabelsRequest.LabelsEntry
+	nil,                                 // 46: agent.v1.UpdateLabelsResponse.LabelsEntry
+	nil,                                 // 47: agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
+	nil,                                 // 48: agent.v1.AgentSelector.MatchLabelsEntry
+	(v1.StepRunStatus)(0),               // 49: steprun.v1.StepRunStatus
+	(*structpb.Struct)(nil),             // 50: google.protobuf.Struct
 }
 var file_agent_v1_agent_proto_depIdxs = []int32{
 	5,  // 0: agent.v1.ConnectRequest.heartbeat:type_name -> agent.v1.ConnectHeartbeat
@@ -3088,56 +3315,61 @@ var file_agent_v1_agent_proto_depIdxs = []int32{
 	6,  // 3: agent.v1.ConnectResponse.task_dispatch:type_name -> agent.v1.TaskDispatch
 	7,  // 4: agent.v1.ConnectResponse.task_cancel:type_name -> agent.v1.TaskCancel
 	1,  // 5: agent.v1.ConnectHeartbeat.status:type_name -> agent.v1.AgentStatus
-	19, // 6: agent.v1.TaskDispatch.step_runs:type_name -> agent.v1.StepRun
-	0,  // 7: agent.v1.TaskAck.status:type_name -> agent.v1.AckStatus
-	46, // 8: agent.v1.TaskStatus.status:type_name -> steprun.v1.StepRunStatus
-	36, // 9: agent.v1.TaskStatus.metrics:type_name -> agent.v1.TaskStatus.MetricsEntry
-	1,  // 10: agent.v1.HeartbeatRequest.status:type_name -> agent.v1.AgentStatus
-	37, // 11: agent.v1.RegisterRequest.labels:type_name -> agent.v1.RegisterRequest.LabelsEntry
-	38, // 12: agent.v1.RegisterResponse.labels:type_name -> agent.v1.RegisterResponse.LabelsEntry
-	14, // 13: agent.v1.RegisterResponse.storage:type_name -> agent.v1.StorageConfig
-	19, // 14: agent.v1.FetchStepRunResponse.step_runs:type_name -> agent.v1.StepRun
-	47, // 15: agent.v1.StepRun.args:type_name -> google.protobuf.Struct
-	39, // 16: agent.v1.StepRun.env:type_name -> agent.v1.StepRun.EnvEntry
-	40, // 17: agent.v1.StepRun.secrets:type_name -> agent.v1.StepRun.SecretsEntry
-	20, // 18: agent.v1.StepRun.artifacts:type_name -> agent.v1.ArtifactConfig
-	33, // 19: agent.v1.StepRun.agent_selector:type_name -> agent.v1.AgentSelector
-	35, // 20: agent.v1.StepRun.plugins:type_name -> agent.v1.PluginInfo
-	46, // 21: agent.v1.ReportStepRunStatusRequest.status:type_name -> steprun.v1.StepRunStatus
-	41, // 22: agent.v1.ReportStepRunStatusRequest.metrics:type_name -> agent.v1.ReportStepRunStatusRequest.MetricsEntry
-	42, // 23: agent.v1.UpdateLabelsRequest.labels:type_name -> agent.v1.UpdateLabelsRequest.LabelsEntry
-	43, // 24: agent.v1.UpdateLabelsResponse.labels:type_name -> agent.v1.UpdateLabelsResponse.LabelsEntry
-	44, // 25: agent.v1.ReportJobRunStatusRequest.artifact_uris:type_name -> agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
-	29, // 26: agent.v1.ReportJobRunStatusRequest.artifacts:type_name -> agent.v1.ArtifactResult
-	28, // 27: agent.v1.ReportJobRunStatusRequest.source_checkout:type_name -> agent.v1.SourceCheckout
-	45, // 28: agent.v1.AgentSelector.match_labels:type_name -> agent.v1.AgentSelector.MatchLabelsEntry
-	34, // 29: agent.v1.AgentSelector.match_expressions:type_name -> agent.v1.LabelExpression
-	2,  // 30: agent.v1.PluginInfo.location:type_name -> agent.v1.PluginLocation
-	10, // 31: agent.v1.AgentService.Heartbeat:input_type -> agent.v1.HeartbeatRequest
-	12, // 32: agent.v1.AgentService.Register:input_type -> agent.v1.RegisterRequest
-	15, // 33: agent.v1.AgentService.Unregister:input_type -> agent.v1.UnregisterRequest
-	17, // 34: agent.v1.AgentService.FetchStepRun:input_type -> agent.v1.FetchStepRunRequest
-	21, // 35: agent.v1.AgentService.ReportStepRunStatus:input_type -> agent.v1.ReportStepRunStatusRequest
-	27, // 36: agent.v1.AgentService.ReportJobRunStatus:input_type -> agent.v1.ReportJobRunStatusRequest
-	23, // 37: agent.v1.AgentService.CancelStepRun:input_type -> agent.v1.CancelStepRunRequest
-	31, // 38: agent.v1.AgentService.CancelJobRun:input_type -> agent.v1.CancelJobRunRequest
-	25, // 39: agent.v1.AgentService.UpdateLabels:input_type -> agent.v1.UpdateLabelsRequest
-	3,  // 40: agent.v1.AgentService.Connect:input_type -> agent.v1.ConnectRequest
-	11, // 41: agent.v1.AgentService.Heartbeat:output_type -> agent.v1.HeartbeatResponse
-	13, // 42: agent.v1.AgentService.Register:output_type -> agent.v1.RegisterResponse
-	16, // 43: agent.v1.AgentService.Unregister:output_type -> agent.v1.UnregisterResponse
-	18, // 44: agent.v1.AgentService.FetchStepRun:output_type -> agent.v1.FetchStepRunResponse
-	22, // 45: agent.v1.AgentService.ReportStepRunStatus:output_type -> agent.v1.ReportStepRunStatusResponse
-	30, // 46: agent.v1.AgentService.ReportJobRunStatus:output_type -> agent.v1.ReportJobRunStatusResponse
-	24, // 47: agent.v1.AgentService.CancelStepRun:output_type -> agent.v1.CancelStepRunResponse
-	32, // 48: agent.v1.AgentService.CancelJobRun:output_type -> agent.v1.CancelJobRunResponse
-	26, // 49: agent.v1.AgentService.UpdateLabels:output_type -> agent.v1.UpdateLabelsResponse
-	4,  // 50: agent.v1.AgentService.Connect:output_type -> agent.v1.ConnectResponse
-	41, // [41:51] is the sub-list for method output_type
-	31, // [31:41] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	10, // 6: agent.v1.ConnectHeartbeat.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
+	20, // 7: agent.v1.TaskDispatch.step_runs:type_name -> agent.v1.StepRun
+	0,  // 8: agent.v1.TaskAck.status:type_name -> agent.v1.AckStatus
+	49, // 9: agent.v1.TaskStatus.status:type_name -> steprun.v1.StepRunStatus
+	39, // 10: agent.v1.TaskStatus.metrics:type_name -> agent.v1.TaskStatus.MetricsEntry
+	1,  // 11: agent.v1.HeartbeatRequest.status:type_name -> agent.v1.AgentStatus
+	10, // 12: agent.v1.HeartbeatRequest.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
+	40, // 13: agent.v1.RegisterRequest.labels:type_name -> agent.v1.RegisterRequest.LabelsEntry
+	10, // 14: agent.v1.RegisterRequest.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
+	41, // 15: agent.v1.RegisterResponse.labels:type_name -> agent.v1.RegisterResponse.LabelsEntry
+	15, // 16: agent.v1.RegisterResponse.storage:type_name -> agent.v1.StorageConfig
+	20, // 17: agent.v1.FetchStepRunResponse.step_runs:type_name -> agent.v1.StepRun
+	50, // 18: agent.v1.StepRun.args:type_name -> google.protobuf.Struct
+	42, // 19: agent.v1.StepRun.env:type_name -> agent.v1.StepRun.EnvEntry
+	43, // 20: agent.v1.StepRun.secrets:type_name -> agent.v1.StepRun.SecretsEntry
+	21, // 21: agent.v1.StepRun.artifacts:type_name -> agent.v1.ArtifactConfig
+	34, // 22: agent.v1.StepRun.agent_selector:type_name -> agent.v1.AgentSelector
+	36, // 23: agent.v1.StepRun.plugins:type_name -> agent.v1.PluginInfo
+	49, // 24: agent.v1.ReportStepRunStatusRequest.status:type_name -> steprun.v1.StepRunStatus
+	44, // 25: agent.v1.ReportStepRunStatusRequest.metrics:type_name -> agent.v1.ReportStepRunStatusRequest.MetricsEntry
+	45, // 26: agent.v1.UpdateLabelsRequest.labels:type_name -> agent.v1.UpdateLabelsRequest.LabelsEntry
+	46, // 27: agent.v1.UpdateLabelsResponse.labels:type_name -> agent.v1.UpdateLabelsResponse.LabelsEntry
+	47, // 28: agent.v1.ReportJobRunStatusRequest.artifact_uris:type_name -> agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
+	30, // 29: agent.v1.ReportJobRunStatusRequest.artifacts:type_name -> agent.v1.ArtifactResult
+	29, // 30: agent.v1.ReportJobRunStatusRequest.source_checkout:type_name -> agent.v1.SourceCheckout
+	48, // 31: agent.v1.AgentSelector.match_labels:type_name -> agent.v1.AgentSelector.MatchLabelsEntry
+	35, // 32: agent.v1.AgentSelector.match_expressions:type_name -> agent.v1.LabelExpression
+	2,  // 33: agent.v1.PluginInfo.location:type_name -> agent.v1.PluginLocation
+	37, // 34: agent.v1.AgentService.InspectJobExecution:input_type -> agent.v1.InspectJobExecutionRequest
+	11, // 35: agent.v1.AgentService.Heartbeat:input_type -> agent.v1.HeartbeatRequest
+	13, // 36: agent.v1.AgentService.Register:input_type -> agent.v1.RegisterRequest
+	16, // 37: agent.v1.AgentService.Unregister:input_type -> agent.v1.UnregisterRequest
+	18, // 38: agent.v1.AgentService.FetchStepRun:input_type -> agent.v1.FetchStepRunRequest
+	22, // 39: agent.v1.AgentService.ReportStepRunStatus:input_type -> agent.v1.ReportStepRunStatusRequest
+	28, // 40: agent.v1.AgentService.ReportJobRunStatus:input_type -> agent.v1.ReportJobRunStatusRequest
+	24, // 41: agent.v1.AgentService.CancelStepRun:input_type -> agent.v1.CancelStepRunRequest
+	32, // 42: agent.v1.AgentService.CancelJobRun:input_type -> agent.v1.CancelJobRunRequest
+	26, // 43: agent.v1.AgentService.UpdateLabels:input_type -> agent.v1.UpdateLabelsRequest
+	3,  // 44: agent.v1.AgentService.Connect:input_type -> agent.v1.ConnectRequest
+	38, // 45: agent.v1.AgentService.InspectJobExecution:output_type -> agent.v1.InspectJobExecutionResponse
+	12, // 46: agent.v1.AgentService.Heartbeat:output_type -> agent.v1.HeartbeatResponse
+	14, // 47: agent.v1.AgentService.Register:output_type -> agent.v1.RegisterResponse
+	17, // 48: agent.v1.AgentService.Unregister:output_type -> agent.v1.UnregisterResponse
+	19, // 49: agent.v1.AgentService.FetchStepRun:output_type -> agent.v1.FetchStepRunResponse
+	23, // 50: agent.v1.AgentService.ReportStepRunStatus:output_type -> agent.v1.ReportStepRunStatusResponse
+	31, // 51: agent.v1.AgentService.ReportJobRunStatus:output_type -> agent.v1.ReportJobRunStatusResponse
+	25, // 52: agent.v1.AgentService.CancelStepRun:output_type -> agent.v1.CancelStepRunResponse
+	33, // 53: agent.v1.AgentService.CancelJobRun:output_type -> agent.v1.CancelJobRunResponse
+	27, // 54: agent.v1.AgentService.UpdateLabels:output_type -> agent.v1.UpdateLabelsResponse
+	4,  // 55: agent.v1.AgentService.Connect:output_type -> agent.v1.ConnectResponse
+	45, // [45:56] is the sub-list for method output_type
+	34, // [34:45] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_agent_v1_agent_proto_init() }
@@ -3160,7 +3392,7 @@ func file_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_v1_agent_proto_rawDesc), len(file_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   43,
+			NumMessages:   46,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

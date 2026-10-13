@@ -54,7 +54,7 @@ func validateJobAttempts(payload *taskqueue.JobRunTaskPayload) error {
 	return nil
 }
 
-func executeJobAttempts(ctx, jobCtx context.Context, conf *config.AgentConfig, client *agentgrpc.ClientWrapper, manager *executor.Manager, payload *taskqueue.JobRunTaskPayload, artifacts *artifactExecutor, workspace string, preparationErr error, start time.Time) error {
+func executeJobAttempts(ctx, jobCtx context.Context, conf *config.AgentConfig, client *agentgrpc.ClientWrapper, manager *executor.Manager, payload *taskqueue.JobRunTaskPayload, artifacts *artifactExecutor, workspace string, preparationErr error, start time.Time, sessions ...*offlineJobSession) error {
 	visited := make(map[string]bool)
 	steps := make([]retry.Step, len(payload.Steps))
 	for i, step := range payload.Steps {
@@ -119,9 +119,26 @@ func executeJobAttempts(ctx, jobCtx context.Context, conf *config.AgentConfig, c
 				return normalize(stepID, err)
 			}
 			request := &taskqueue.StepRunTaskPayload{PipelineID: payload.PipelineID, PipelineRunID: payload.PipelineRunID, JobID: payload.JobRunID, JobName: payload.JobName, StepName: step.Name, StepIndex: step.StepIndex, StepRunID: stepID, Uses: step.Uses, Action: step.Action, Args: step.Args, Env: env, Workspace: workspace, Timeout: step.Timeout, AgentID: payload.AgentID}
+			var session *offlineJobSession
+			if len(sessions) > 0 {
+				session = sessions[0]
+			}
 			var err error
+			if session != nil {
+				if err = session.beforeStep(jobCtx, step); err != nil {
+					failedAt := time.Now().Unix()
+					return normalize(stepID, retainStepReport(ctx, stepID, err, func(reportCtx context.Context) error {
+						return reportStepRunStatus(reportCtx, client, conf, stepID, steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, 1, "sandbox staging failed", start, failedAt, nil)
+					}))
+				}
+			}
 			if strings.EqualFold(strings.TrimSpace(step.Uses), "builtin:artifacts") {
 				err = executeStepRunViaExecutor(jobCtx, conf, client, manager, request, artifacts)
+			} else if session != nil {
+				if manager == nil {
+					return retry.Block(fmt.Errorf("sandbox requires the managed executor path"))
+				}
+				err = executeStepRunViaExecutor(jobCtx, conf, client, manager, request, session.offlineSession)
 			} else if manager != nil {
 				err = executeStepRunViaExecutor(jobCtx, conf, client, manager, request)
 			} else {

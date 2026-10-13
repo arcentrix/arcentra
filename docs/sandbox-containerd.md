@@ -2,9 +2,9 @@
 
 ## Status and scope
 
-The standalone `pkg/sandbox` backend now has a repaired containerd lifecycle, strict offline/spec validation and injectable tests. **The Agent still rejects sandbox mode.** Neither the pipeline runtime validator nor Agent execution wiring is enabled by this repair. A separate [standalone job-session adapter](sandbox-agent-integration.md) now exercises Agent-facing shell, workspace and cleanup contracts without changing either production gate.
+The `pkg/sandbox` backend contains containerd lifecycle, strict offline/spec validation and injectable test support. The current branch also adds exact-owner resource recovery and [whole-job Agent integration plumbing](sandbox-agent-integration.md), including immutable runtime requests, selection/readiness, staged sessions and a durable runtime journal. **Production activation remains hard-disabled:** the default policy is off and `OfflineRuntimeAccepted = false` rejects production opt-in. Implemented wiring is not successful runtime acceptance.
 
-Unit/spec success is not proof of actual isolation. The restricted implementation environment has no usable containerd/runc runtime or containerd socket and no mounted cgroup hierarchy. No runtime installation, privileged host change, or Docker workaround was attempted. Real runtime acceptance remains pending on an authorized host.
+The successful V10 [backend main CI](https://github.com/arcentrix/arcentra/actions/runs/38393872734) covers trusted baremetal execution with real disposable services and a browser, not this new runtime work. No final-code test success for the in-development runtime stage is claimed here. Unit/spec success is not proof of actual isolation. The restricted implementation environment has no usable containerd/runc runtime or containerd socket and no mounted cgroup hierarchy. Real runtime acceptance remains pending on an explicitly authorized capable host. Installing a runtime, changing privileged host settings or adding a runtime CI job requires separate approval; this work does not do those things.
 
 ## Runtime-independent checks
 
@@ -57,6 +57,6 @@ The test creates a uniquely named namespace/container and a temporary bind-mount
 
 The test reports cleanup errors. It does not remove the downloaded image cache. In-process cleanup is not crash recovery; after an interrupted test, an operator must inspect the test's `arcentra-acceptance-*` namespace and generated IDs before removing leftovers.
 
-## Required next step before Agent integration
+## Required evidence before runtime activation
 
-Record the successful command, commit, host/runtime versions, approved image digest and complete test output. Investigate any leak or missing controller rather than weakening assertions. Even a successful run validates these bounded behaviors; it does not establish suitability for hostile multi-tenant code. Agent integration, runtime-aware scheduling, DSL propagation, security policy and broader end-to-end tests are separate work.
+Record the successful command, exact code revision, host/runtime versions, approved image digest and complete test output. Investigate any leak or missing controller rather than weakening assertions. Even a successful run validates only these bounded backend behaviors; it does not establish suitability for hostile multi-tenant code or certify the new Agent wiring. The separate adapter and integrated whole-job path still need real runtime evidence, including trusted staging, all-process sealing before artifact reads, cancellation, exact-owner restart cleanup and authenticated terminal-state reconciliation. Keep the hard production gate closed until the required acceptance evidence and activation review are complete; no passing compile-only, mock or standalone check opens it automatically.

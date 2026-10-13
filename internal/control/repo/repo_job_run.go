@@ -49,7 +49,7 @@ func (r *JobRunRepo) Create(ctx context.Context, jobRun *model.JobRun) error {
 	if jobRun == nil {
 		return gorm.ErrInvalidData
 	}
-	if jobRun.SourceExpectationCaptured || jobRun.SourceType != "" || jobRun.SourceRepository != "" || jobRun.SourceRef != "" || jobRun.SourceBindingDigest != "" || jobRun.SourceResolvedCommit != "" || (jobRun.SourceProvenanceState != "" && jobRun.SourceProvenanceState != "unknown") {
+	if !emptyRuntime(jobRun) || jobRun.SourceExpectationCaptured || jobRun.SourceType != "" || jobRun.SourceRepository != "" || jobRun.SourceRef != "" || jobRun.SourceBindingDigest != "" || jobRun.SourceResolvedCommit != "" || (jobRun.SourceProvenanceState != "" && jobRun.SourceProvenanceState != "unknown") {
 		return gorm.ErrInvalidData
 	}
 	if err := normalizeJSONFields(map[string]*string{"env": &jobRun.Env, "artifact_references": &jobRun.ArtifactReferences, "artifact_uris": &jobRun.ArtifactURIs}, jobRunJSONDefaults); err != nil {

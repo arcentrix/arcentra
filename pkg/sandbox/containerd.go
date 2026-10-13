@@ -39,20 +39,23 @@ const cleanupTimeout = 20 * time.Second
 const maxCapturedBytes = 4 * 1024 * 1024
 
 // Containerd 提供显式生命周期的离线 containerd 执行后端
-// 此后端尚未接入 Agent，不能作为不可信多租户代码的安全保证
+// Agent 接线仍受关闭的真实验收门禁保护，不能作为不可信多租户代码的安全保证
 type Containerd struct {
-	backend    runtimeBackend
-	namespace  string
-	config     ContainerdConfig
-	mu         sync.RWMutex
-	containers map[string]*containerState
-	creating   sync.WaitGroup
-	closing    bool
-	closed     bool
-	closeMu    sync.Mutex
+	backend      runtimeBackend
+	namespace    string
+	config       ContainerdConfig
+	mu           sync.RWMutex
+	containers   map[string]*containerState
+	removedIDs   map[string]struct{}
+	removedOrder []string
+	creating     sync.WaitGroup
+	closing      bool
+	closed       bool
+	closeMu      sync.Mutex
 }
 
 type containerState struct {
+	ref          ResourceRef
 	container    runtimeContainer
 	gate         chan struct{}
 	mu           sync.Mutex
@@ -147,7 +150,7 @@ func NewContainerdSandbox(config *ContainerdConfig, _ log.Logger) (*Containerd, 
 }
 
 func newSandbox(config ContainerdConfig, backend runtimeBackend) *Containerd {
-	return &Containerd{backend: backend, namespace: config.Namespace, config: config, containers: make(map[string]*containerState)}
+	return &Containerd{backend: backend, namespace: config.Namespace, config: config, containers: make(map[string]*containerState), removedIDs: make(map[string]struct{})}
 }
 
 // Create 创建容器元数据和 snapshot，必须显式提供 init 命令
@@ -185,24 +188,57 @@ func (s *Containerd) Create(ctx context.Context, opts *CreateOptions) (string, e
 	if err != nil {
 		return "", err
 	}
+	ref := ResourceRef{}
+	if opts.Resource != nil {
+		ref = *opts.Resource
+		if err = s.validateRef(ref); err != nil {
+			return "", err
+		}
+	} else {
+		ref, err = s.PrepareResource(ctx, "arcentra-"+uuid.NewString(), uuid.NewString())
+		if err != nil {
+			return "", err
+		}
+	}
 	labels := maps.Clone(opts.Labels)
 	if labels == nil {
 		labels = make(map[string]string)
 	}
-	labels["io.arcentra.sandbox"] = "true"
-	id := "arcentra-" + uuid.NewString()
+	maps.Copy(labels, ownershipLabels(ref))
+	id := ref.ID
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
-	container, createErr := s.backend.create(ctx, id, image, options, labels)
+	state := newContainerState(nil, ref)
+	if err = state.acquire(ctx); err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	if _, exists := s.containers[id]; exists {
+		s.mu.Unlock()
+		state.release()
+		return "", fmt.Errorf("resource ID already tracked: %w", errdefs.ErrAlreadyExists)
+	}
+	s.containers[id] = state
+	delete(s.removedIDs, id)
+	s.removedOrder = slices.DeleteFunc(s.removedOrder, func(previous string) bool { return previous == id })
+	s.mu.Unlock()
+	container, createErr := s.backend.create(ctx, id, image, options, labels, opts.User != "")
+	state.container = container
+	if createErr != nil || container == nil {
+		state.stopped = true
+	}
 	if container == nil {
+		// backend 返回空句柄表示尚未创建本资源，不得清理预先存在的容器
+		s.mu.Lock()
+		delete(s.containers, id)
+		s.mu.Unlock()
+		state.removed = true
+		state.release()
 		if createErr == nil {
 			createErr = fmt.Errorf("runtime returned no container")
 		}
 		return "", createErr
 	}
-	state := &containerState{container: container, gate: make(chan struct{}, 1), processes: make(map[string]runtimeProcess), logs: &boundedBuffer{}}
-	s.mu.Lock()
-	s.containers[id] = state
-	s.mu.Unlock()
+	state.release()
 	if createErr != nil {
 		if cleanupErr := s.Remove(ctx, id); cleanupErr != nil {
 			return id, errors.Join(createErr, cleanupErr)
@@ -378,9 +414,6 @@ func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts 
 // Stop 停止全部容器进程，优雅退出超时后强制终止
 func (s *Containerd) Stop(ctx context.Context, id string, timeout time.Duration) error {
 	state, err := s.getContainer(id)
-	if errdefs.IsNotFound(err) {
-		return nil
-	}
 	if err != nil {
 		return err
 	}
@@ -398,6 +431,11 @@ func (s *Containerd) Stop(ctx context.Context, id string, timeout time.Duration)
 	if state.removed {
 		return nil
 	}
+	container, _, inspectErr := s.backend.inspectOwned(cleanup, state.ref)
+	if inspectErr != nil {
+		return inspectErr
+	}
+	state.container = container
 	if err = state.reconcileTask(cleanup); err != nil {
 		return err
 	}
@@ -420,7 +458,7 @@ func stopTask(ctx context.Context, task runtimeTask, grace time.Duration) error 
 		return fmt.Errorf("inspect task before stop: %w", err)
 	}
 	if status.Status == containerd.Stopped || (status.Status == containerd.Created && task.Pid() == 0) {
-		return nil
+		return ensureTaskEmpty(ctx, task)
 	}
 	if status.Status == containerd.Created {
 		grace = 0
@@ -441,7 +479,7 @@ func stopTask(ctx context.Context, task runtimeTask, grace time.Duration) error 
 		defer timer.Stop()
 		select {
 		case status, ok := <-wait:
-			return exitWaitError(status, ok)
+			return errors.Join(exitWaitError(status, ok), ensureTaskEmpty(ctx, task))
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
@@ -452,9 +490,45 @@ func stopTask(ctx context.Context, task runtimeTask, grace time.Duration) error 
 	}
 	select {
 	case status, ok := <-wait:
-		return exitWaitError(status, ok)
+		return errors.Join(exitWaitError(status, ok), ensureTaskEmpty(ctx, task))
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// init 退出不代表整个容器已静默；必须验证 cgroup 内没有背景进程
+func ensureTaskEmpty(ctx context.Context, task runtimeTask) error {
+	pids, err := task.Pids(ctx)
+	if errdefs.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect remaining task processes: %w", err)
+	}
+	if len(pids) == 0 {
+		return nil
+	}
+	if err = task.Kill(ctx, unix.SIGKILL, containerd.WithKillAll); err != nil && !errdefs.IsNotFound(err) {
+		return fmt.Errorf("kill remaining task processes: %w", err)
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		pids, err = task.Pids(ctx)
+		if errdefs.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("verify quiescent task: %w", err)
+		}
+		if len(pids) == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("task processes remain after kill: %w", ctx.Err())
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -471,28 +545,45 @@ func exitWaitError(status containerd.ExitStatus, ok bool) error {
 // Remove 终止进程并删除容器和 snapshot，失败时保留记录以便重试
 func (s *Containerd) Remove(ctx context.Context, id string) error {
 	state, err := s.getContainer(id)
-	if errdefs.IsNotFound(err) {
-		return nil
-	}
 	if err != nil {
+		s.mu.RLock()
+		_, removed := s.removedIDs[id]
+		s.mu.RUnlock()
+		if removed {
+			return nil
+		}
 		return err
 	}
+	return s.removeState(ctx, id, state)
+}
+
+func (s *Containerd) removeState(ctx context.Context, id string, state *containerState) error {
 	state.cancelActive()
-	ctx = namespaces.WithNamespace(ctx, s.namespace)
-	cleanup, cancel := cleanupContext(ctx)
+	cleanup, cancel := cleanupContext(namespaces.WithNamespace(ctx, s.namespace))
 	defer cancel()
-	if err = state.acquire(cleanup); err != nil {
+	if err := state.acquire(cleanup); err != nil {
 		return err
 	}
 	defer state.release()
+	// 查找与获得 gate 之间可能已完成删除，旧句柄不得触碰复用该 ID 的新资源
 	if state.removed {
 		return nil
 	}
-	if err = state.reconcileTask(cleanup); err != nil {
+
+	container, resources, err := s.backend.inspectOwned(cleanup, state.ref)
+	if err != nil {
+		return err
+	}
+	state.container = container
+	if !resources.ContainerExists && !resources.SnapshotExists && !resources.TaskExists {
+		s.forgetRemoved(id, state)
+		return nil
+	}
+	if err := state.reconcileTask(cleanup); err != nil {
 		return err
 	}
 	if state.task != nil {
-		if err = stopTask(cleanup, state.task, 0); err != nil {
+		if err := stopTask(cleanup, state.task, 0); err != nil {
 			return err
 		}
 		state.stopped = true
@@ -507,19 +598,44 @@ func (s *Containerd) Remove(ctx context.Context, id string) error {
 		if cleanupErr != nil {
 			return fmt.Errorf("remove exec processes: %w", cleanupErr)
 		}
-		if _, err = state.task.Delete(cleanup); err != nil && !errdefs.IsNotFound(err) {
+		if _, err := state.task.Delete(cleanup); err != nil && !errdefs.IsNotFound(err) {
 			return fmt.Errorf("delete task: %w", err)
 		}
 		state.task = nil
 	}
-	if err = state.container.remove(cleanup); err != nil && !errdefs.IsNotFound(err) {
+	if err := state.container.remove(cleanup); err != nil {
 		return fmt.Errorf("remove container: %w", err)
 	}
+	// 删除后的实时查询负责确认没有残留，失败时保留精确身份用于重试
+	_, resources, err = s.backend.inspectOwned(cleanup, state.ref)
+	if err != nil {
+		return err
+	}
+	if resources.ContainerExists || resources.SnapshotExists || resources.TaskExists {
+		return fmt.Errorf("resource removal was not confirmed")
+	}
+	s.forgetRemoved(id, state)
+	return nil
+}
+
+func (s *Containerd) forgetRemoved(id string, state *containerState) {
 	state.removed = true
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	// 只有当前 map 中的同一代句柄才可删除记录或写入幂等缓存
+	if s.containers[id] != state {
+		return
+	}
 	delete(s.containers, id)
-	s.mu.Unlock()
-	return nil
+	if _, exists := s.removedIDs[id]; !exists {
+		s.removedIDs[id] = struct{}{}
+		s.removedOrder = append(s.removedOrder, id)
+		// 仅用于进程内短期幂等；长期恢复必须使用显式 ResourceRef
+		if len(s.removedOrder) > 1024 {
+			delete(s.removedIDs, s.removedOrder[0])
+			s.removedOrder = s.removedOrder[1:]
+		}
+	}
 }
 
 // GetLogs 返回内存中至多 4 MiB 的合并日志快照，不支持跟随或时间过滤

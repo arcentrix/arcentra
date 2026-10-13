@@ -84,7 +84,8 @@ type AppConfig struct {
 
 // PipelineConfig holds pipeline process settings.
 type PipelineConfig struct {
-	KeepWorkspace bool `mapstructure:"keepWorkspace" json:"keepWorkspace"`
+	OfflineRuntime taskqueue.OfflineRuntimePolicy `mapstructure:"offlineRuntime" json:"offlineRuntime"`
+	KeepWorkspace  bool                           `mapstructure:"keepWorkspace" json:"keepWorkspace"`
 }
 
 // NewConf 读取独立的启动配置快照，配置和证书变更必须重启控制器
@@ -111,6 +112,9 @@ func LoadConfigFile(confDir string) (AppConfig, error) {
 	}
 	if err := config.Unmarshal(&cfg); err != nil {
 		return cfg, fmt.Errorf("failed to unmarshal configuration file: %w", err)
+	}
+	if err := cfg.Pipeline.OfflineRuntime.ValidateProduction(); err != nil {
+		return cfg, err
 	}
 	cfg.HTTP.SetDefaults()
 	if err := http.ApplyHTTPAuthExpiry(config, &cfg.HTTP); err != nil {

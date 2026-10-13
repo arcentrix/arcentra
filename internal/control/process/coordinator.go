@@ -27,6 +27,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/validation"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/serde"
@@ -230,7 +231,15 @@ func (rc *Coordinator) executeDAG(ctx context.Context) error {
 	)
 	execCtx.JobRunStore = jobRunStore
 	execCtx.RunCoordinator = rc
-	execCtx.SelectAgent = rc.engine.selectAgent
+	runtime, err := validation.ResolveRuntime(rc.spec, rc.engine.offlineRuntimePolicy)
+	if err != nil {
+		return err
+	}
+	execCtx.Runtime = runtime
+	execCtx.RuntimePolicy = rc.engine.offlineRuntimePolicy.Clone()
+	execCtx.SelectAgent = func(ctx context.Context, job *spec.Job) (string, error) {
+		return rc.engine.selectAgentForRuntime(ctx, job, runtime)
+	}
 	execCtx.CancelJob = rc.engine.cancelJobRunOnAgent
 	execCtx.PipelineRunID = rc.run.RunID
 	execCtx.PipelineIDRef = rc.run.PipelineID

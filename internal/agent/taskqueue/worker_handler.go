@@ -5,6 +5,7 @@ package taskqueue
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
@@ -18,6 +19,9 @@ import (
 func newWorkerHandler(workerCtx context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper, execManager *executor.Manager, reports *terminalOutbox) nova.HandlerFunc {
 	return nova.HandlerFunc(func(ctx context.Context, task *nova.Task) error {
 		ctx = withTerminalOutbox(ctx, reports)
+		if runtime := offlineRuntimeFromContext(workerCtx); runtime != nil {
+			ctx = withOfflineJobRuntime(ctx, runtime)
+		}
 		if task == nil {
 			return nil
 		}
@@ -26,6 +30,9 @@ func newWorkerHandler(workerCtx context.Context, agentConf *config.AgentConfig, 
 		}
 		if err := reports.replayBound(ctx, grpcClient, agentConf); err != nil {
 			return &terminalDeliveryError{err}
+		}
+		if runtime := offlineRuntimeFromContext(ctx); runtime != nil && !runtime.Ready() {
+			return &terminalDeliveryError{fmt.Errorf("offline runtime requires recovery before accepting tasks")}
 		}
 		switch task.Type {
 		case taskqueue.TaskTypeJobRun:
@@ -52,6 +59,12 @@ func newWorkerHandler(workerCtx context.Context, agentConf *config.AgentConfig, 
 			}
 			if payload.AgentID != agentConf.Agent.ID {
 				log.Warnw("discarding step addressed to a different agent", "stepRunID", payload.StepRunID)
+				return nil
+			}
+			if err := taskqueue.ValidateStandaloneRuntime(&payload); err != nil {
+				return nil
+			}
+			if agentConf.Agent.Sandbox.Enable {
 				return nil
 			}
 			log.Infow("received step run task",

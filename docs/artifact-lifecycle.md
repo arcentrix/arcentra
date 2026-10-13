@@ -109,3 +109,7 @@ go test ./cmd/cli
 ```
 
 Production credentials, deletion permissions, mount health and provider recovery/versioning remain operator acceptance checks. A passing dry run or local test suite does not prove those external conditions.
+
+## Local upload platform boundary
+
+Artifact uploads now open every path component through directory descriptors with no-follow semantics and use nonblocking file opening before verifying the original regular-file inode. This prevents a replaced FIFO from blocking before file-type validation. The implementation supports Linux, macOS, FreeBSD, OpenBSD, NetBSD, DragonFly and Solaris. Other platforms (including Windows) fail artifact upload explicitly rather than falling back to a weaker open path; this also applies to baremetal Agents. Actual platform coverage remains Linux, not a certification of every compiled Unix target. Offline containerd jobs additionally seal all container processes before artifact publication.

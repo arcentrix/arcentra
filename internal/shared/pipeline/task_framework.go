@@ -153,6 +153,9 @@ func (tf *TaskFramework) Execute(ctx context.Context, task *Task) (resultErr err
 
 // prepare validates and prepares task execution
 func (tf *TaskFramework) prepare(_ context.Context, task *Task) error {
+	if err := tf.execCtx.validateRuntimeContext(); err != nil {
+		return err
+	}
 	task.State = TaskStatePrepared
 
 	// Inject upstream job artifact URIs into this job's environment so that
@@ -265,14 +268,16 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 	if err != nil {
 		return err
 	}
-	capture, ok := tf.getJobRunStore().(interface {
-		CaptureSourceExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding) error
-	})
-	if !ok {
-		return fmt.Errorf("atomic job source capture unavailable")
-	}
-	if err := capture.CaptureSourceExpectation(ctx, tf.execCtx.PipelineIDRef, tf.execCtx.PipelineRunID, tf.execCtx.JobRunID, agentID, binding); err != nil {
-		return err
+	if tf.execCtx.Runtime == nil {
+		capture, ok := tf.getJobRunStore().(interface {
+			CaptureSourceExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding) error
+		})
+		if !ok {
+			return fmt.Errorf("atomic job source capture unavailable")
+		}
+		if err := capture.CaptureSourceExpectation(ctx, tf.execCtx.PipelineIDRef, tf.execCtx.PipelineRunID, tf.execCtx.JobRunID, agentID, binding); err != nil {
+			return err
+		}
 	}
 	steps := make([]taskqueue.StepPayload, 0, len(task.Job.Steps))
 	for i, step := range task.Job.Steps {
@@ -288,6 +293,26 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 		Env: tf.execCtx.ResolveStepEnv(task.Job, nil), Variables: tf.execCtx.Pipeline.Variables,
 		Timeout: task.Job.Timeout, ArtifactURIs: tf.execCtx.ArtifactSnapshot(), ArtifactReferences: tf.execCtx.ArtifactReferenceSnapshot()}
 	payload.Source = source
+	if tf.execCtx.Runtime != nil {
+		runtime := *tf.execCtx.Runtime
+		runtime.BindingDigest, err = taskqueue.RuntimeBindingDigest(payload.PipelineID, payload.PipelineRunID, payload.JobRunID, payload.AgentID, &runtime)
+		if err != nil {
+			return err
+		}
+		payload.Runtime = &runtime
+		if err := taskqueue.ValidateJobRuntime(payload, tf.execCtx.RuntimePolicy); err != nil {
+			return err
+		}
+		capture, ok := tf.getJobRunStore().(interface {
+			CaptureRuntimeExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest) error
+		})
+		if !ok {
+			return fmt.Errorf("atomic job runtime capture unavailable")
+		}
+		if err := capture.CaptureRuntimeExpectation(ctx, payload.PipelineID, payload.PipelineRunID, payload.JobRunID, agentID, binding, payload.Runtime); err != nil {
+			return err
+		}
+	}
 	data, err := sonic.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal job run: %w", err)

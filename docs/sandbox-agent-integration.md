@@ -1,54 +1,80 @@
 # Agent sandbox integration boundary
 
-## Current status
+## Current status: wired, hard-disabled, not runtime-accepted
 
-Production remains fail-closed: `ValidateExecutionConfig` still rejects sandbox mode and the pipeline validator still rejects container runtimes, images and resource policies. No bootstrap registration or queue worker dispatch uses this adapter. `internal/agent/sandboxexec` is a standalone integration building block, not a shipped Agent execution mode or an isolation certification.
+The current branch contains `containerd-offline-v1` plumbing across pipeline validation, immutable dispatch payloads and persisted job bindings, Agent capability/readiness reporting, runtime-aware selection, the queue worker, whole-job sessions and durable runtime recovery. This is under-development implementation, not a released or validated isolation capability.
 
-The implementation host has no usable containerd/runc/socket/cgroup-v2 environment. Fake-backend tests exercise the contract without running a container. The optional host test below is only runtime evidence when it actually runs successfully on an authorized host. The separate [backend acceptance](sandbox-containerd.md) is still required; the session test is not a substitute for namespace, cgroup and isolation assertions.
+Production remains fail-closed. The default policy is disabled and `pkg/taskqueue.OfflineRuntimeAccepted` is `false`; production configuration validation rejects opt-in while that hard gate is closed. Setting a policy flag, editing an Agent label, or requesting sandbox mode cannot enable execution. A runtime job must never fall back to host shell, HTTP or native plugin execution. The existing trusted baremetal path remains available with its existing retry semantics.
 
-## Standalone session contract
+V10's successful [backend main CI](https://github.com/arcentrix/arcentra/actions/runs/38393872734) at `6c24bd389d76fe749ad07a8e23fc049d6cd46c93` establishes the earlier trusted-baremetal real-service/browser baseline. It does not validate the new sandbox branch. The local final-code uncached full-repository race suite passed for this implementation stage. No successful real containerd run is claimed here. Fake-backend tests and compile-only acceptance checks cannot prove namespace, cgroup, process termination or filesystem isolation behavior.
 
-- An operator supplies an existing absolute, canonical workspace root with no symlink components or group/other write permission. Keep this root and its ancestor path under trusted host control for the whole job. These checks are defense in depth, not protection against another privileged host actor.
-- Each session creates a fresh, private `0700` subdirectory under that root using a root-scoped filesystem handle. Neither queue payloads nor step requests can choose a different host mount source. The container receives exactly that directory at `/workspace` and no Agent configuration, socket, credential file, cache root or sibling job directory.
-- Image, CPU and memory limits are explicit. The selected image must contain `sh` and `sleep`. The init command runs at `/`; shell steps run at `/workspace` with a numeric UID/GID. By default it uses the Agent filesystem owner's numeric UID/GID. A configured override must already have workspace permissions; the adapter never changes host ownership or grants extra access.
-- Only `uses: shell` or `builtin:shell`, with an empty action or `run`, can execute. Commands use `sh -ec`. Environment comes from the explicit request and the approved image configuration, without inheriting the Agent's process environment.
-- All steps in a session are serialized. Runtime errors, timeout, cancellation or a replaced workspace stop further execution. A normal nonzero exit can be followed by another step if the job's policy permits it.
-- Use `Manager.ExecuteWithExecutor(ctx, request, session)` so the existing declared-secret redaction (`secrets.*` environment values), durable logs and events remain active. Arbitrary environment values are not automatically treated as secrets. A failed log append cancels the session command. Do not register the adapter alongside host executors and use fallback selection for a sandbox job.
-- `Close(ctx)` cancels an active command, waits for it, removes the container and only then deletes the workspace through its root-scoped handle. It uses an independent bounded cleanup context even after the job was canceled. Complete authorized artifact publication before Close.
-- A failed container removal preserves the directory and returns an error. Repeated Close retries cleanup; successful Close is idempotent. A constructor failure can return a non-nil session when cleanup still needs retrying. Never discard that handle or report clean completion in that case.
-- A backend with uncertain creation must return the resource ID. The session does not close a shared backend connection. Process crashes still require a durable ownership registry and reconciliation before production integration.
+The implementation environment has no usable containerd/runc/socket/cgroup-v2 setup. Runtime-host or privileged-CI setup requires separate authorization; this work does not install a daemon, change host permissions, add a runtime CI job, or bypass the acceptance gate. Keep the [backend acceptance](sandbox-containerd.md), adapter acceptance and eventual end-to-end worker acceptance distinct.
 
-Filesystem deletion is synchronous. A huge file tree, blocked filesystem or a backend violating its cancellation contract can exceed normal expectations; no successful cleanup should be reported before the filesystem and runtime actually confirm it. An execution failure does not authorize deleting the shared root or unrelated runtime resources.
+## Bounded offline job profile
 
-## Network and data boundaries requiring product decisions
+The request and validation plumbing restricts the initial profile to:
 
-The current backend accepts only `network: none`; it creates a private network namespace without outbound access. There is no bridge, host-network mode, CNI provisioning or DNS policy. Package managers, remote build tools and deployments requiring network access will fail inside the session. The bounded initial use case therefore requires prebuilt toolchain images plus vendored/pre-fetched dependencies and local build inputs. Image resolution itself happens through the trusted containerd daemon and can pull an approved image before the offline command starts; runtime image allowlists, pinning and registry authentication remain host policy work.
+- Trusted pipeline code and exactly one job, with every step routed to the selected Agent. The serial worker supports one job at a time; this is not a multi-tenant or hostile-code security guarantee.
+- Explicit runtime type `containerd-offline-v1`, an exact operator-allowlisted `image@sha256:...` reference, and mandatory CPU/memory limits within operator maxima. Image and resource values are frozen at dispatch and bound to the pipeline/run/job/Agent identity by a runtime digest. Queue payloads and reports must match that binding.
+- An explicit numeric non-root `UID:GID` matching the Agent's effective UID and GID. There is no automatic ownership change to make an image or workspace work. The image must contain the required shell/init tools and all toolchains/dependencies needed offline.
+- A private network namespace with `network: none`. No container egress, host networking, bridge/CNI configuration or DNS exception is supported. The container sees its allocated job workspace at `/workspace`, not the Agent's configuration, runtime socket, journal root, cache root or sibling jobs.
+- Only a prefix of explicit `builtin:artifacts` downloads, one or more `shell`/`builtin:shell` steps, and a suffix of explicit artifact uploads. Shell action must be empty or `run`. Source checkout is an explicit trusted host preparation operation using a remote Git URL.
+- No automatic retry policy, alternate attempt IDs, HTTP steps, arbitrary native plugins, Kubernetes/deployment steps or targets, standalone StepRun runtime tasks, caller-chosen host workspace, local source transport, custom mounts or extra isolation flags. An interrupted or failed job needs an explicitly requested fresh run; baremetal retry policies are unchanged.
 
-Source clone and object-storage artifact transfers currently run in the host Agent using its credentials and network access. Future wiring must explicitly keep these as trusted preparatory/transfer operations, with the session-owned workspace as their sole file boundary. Do not expose storage credentials or Git authentication helpers to commands by mounting the Agent's wider filesystem. Artifact file operations must retain their existing traversal/symlink defenses. Decide whether trusted host preparation is acceptable for the intended tenant model; moving it into a separate controlled networked stage is a different design, not a reason to silently enable container networking.
+Operator policy belongs to Control and Agent configuration, not the pipeline or queue payload. Runtime capabilities are separate from labels and are checked with Agent availability/readiness. A reported capability is not acceptance evidence or HA admission/fencing. Production gate checks still apply before this profile can be enabled.
 
-The existing worker accepts arbitrary nonempty `payload.Workspace` values and uses host execution; that path cannot be reused as a sandbox bind-mount policy. The session avoids that path entirely. Tightening existing baremetal workspace compatibility requires its own focused worker change and tests, including legacy standalone step dispatch.
+## Staging, execution, sealing and output
 
-## Remaining production integration
+The whole-job worker plumbing has this ordered lifecycle:
 
-1. Obtain and retain actual backend and adapter acceptance output with the exact commit, host/runtime versions and approved image digest. Do not weaken assertions to fit an incapable host.
-2. Define the supported offline product profile: image policy, numeric user, mandatory resources, source/artifact staging and unsupported step types. Add explicit immutable runtime/image/resources fields to job payloads. Do not infer a container request from a label or silently discard unsupported fields.
-3. Advertise validated runtime capabilities from registered Agents, and dispatch only to compatible Agents with sufficient admission capacity. Current selection filters online status and labels, not container runtime or cgroup readiness.
-4. Create one session for the whole job, feed the allocated workspace into source/artifact operations, and force shell execution through its request-level adapter. Builtin artifact transfer remains a separately approved host operation. Reject generic native/HTTP plugin execution for this profile.
-5. Join cleanup failures into the job outcome, report leaked resource IDs without secret-bearing options, and reconcile owned resources across restart. Keep terminal-report retry separate from executing a job again.
-6. Prove end-to-end claim, cancellation, durable log failure, artifact transfer and shutdown behavior before deliberately changing either fail-closed gate. A StepRun-only task must not be allowed to bypass a required job session.
+1. Validate the complete job and immutable runtime binding before host staging or command execution. Claim the original job, allocate one session-owned workspace, and durably record the exact runtime ownership identity.
+2. Stage source checkout and artifact downloads using trusted host Agent code, credentials and network access into that workspace. No container process runs during this prefix. The payload cannot select a host bind-mount source.
+3. Start one container session after inputs are ready. Every shell step uses the same session through `Manager.ExecuteWithExecutor`, retaining the existing declared-secret redaction, durable logs and events. Commands use `sh -ec` at `/workspace`; environment comes from the explicit request and approved image, not the Agent process environment. There is no host-executor fallback.
+4. Call `Seal` before reading output for any host artifact upload. Sealing cancels active exec work and must establish that all container processes, including background descendants, have stopped. A seal error blocks publication; it cannot be treated as a normal shell exit or bypassed by `continueOnError`. The sealed session cannot run another command or accept more downloads.
+5. Upload the allowed artifact suffix through the trusted host transfer path. Artifact paths remain workspace-scoped and retain traversal, symlink and opened-file identity checks; special files are not valid artifacts. Commands never receive storage credentials by mounting the Agent's wider filesystem.
+6. Close the session, remove only the recorded container/task/snapshot and job workspace, and include cleanup errors in the job outcome. Cleanup uses independent bounded contexts after cancellation. Runtime records remain until cleanup and terminal delivery/reconciliation satisfy their acknowledgment requirements.
 
-## Runtime-independent checks
+Image resolution or a permitted image pull occurs through the trusted host containerd daemon. “Offline” describes container command networking, not host Git/object-storage/image operations. This design assumes that trusted host preparation is acceptable for the deployment's tenant model. Networked builds, package installation during commands and releases to external systems require a different explicitly designed profile.
+
+Shell steps are serialized within the session. A normal nonzero shell exit can follow the job's explicit `continueOnError` behavior; runtime errors, canceled/timed-out execution, log persistence failure or a replaced workspace must not cause host fallback. Host artifact reads happen only after successful sealing. A slow/blocked filesystem or runtime can still delay cleanup; no successful removal should be reported until actual runtime/filesystem checks confirm it.
+
+## Private persistent roots and restart recovery
+
+The durable runtime controller uses separate, pre-existing journal and workspace roots. Both must be clean absolute paths, owned by the Agent user with mode `0700`, under trusted ancestor paths without symlink components. The roots cannot overlap and must survive process restart. An operator creates and provisions them before startup. The runtime controller does not create missing roots, `chmod` them, `chown` them or silently adopt another user's state. Private job subdirectories and journal records are created within those roots.
+
+The journal is process-exclusive and bound to the stable Agent identity, authenticated controller trust binding, containerd namespace and workspace root. Records retain the exact job/run/original claim/runtime digest, lifecycle phase, resource ownership and workspace filesystem identity. Writes use file/directory synchronization; bounded records, canonical checksums, private modes, link rejection and an exclusive lock fail closed on corruption, identity conflicts or uncertain persistence. A checksum is not a signature against a host administrator or malicious process with the same UID. Trusted code and trusted host operators remain part of the boundary.
+
+Recovery is deliberately narrower than execution resumption:
+
+- Before becoming ready, the controller inspects recorded ownership and removes only the exact recorded resources. It does not sweep a namespace, infer ownership from a job name, delete unrelated directories or recreate a missing container to finish work. Unknown/corrupt state, a conflicting owner or incomplete cleanup preserves evidence and blocks readiness.
+- The existing durable terminal outbox handles saved report delivery independently; replay uses the original result and claim and never repeats a command. Normal successful terminal delivery is already authenticated and checked against the immutable job/runtime binding. Runtime journal acknowledgment also requires exact local cleanup evidence.
+- On restart, after cleanup, `InspectJobExecution` makes a read-only authenticated query for that Agent's exact original job/claim/runtime digest. Only authoritative terminal state permits acknowledgment of the recovered runtime record. The query neither changes job state nor authorizes a rerun. Unavailable, mismatched or still-active state blocks readiness and requires operator review and, where appropriate, the existing explicit offline interrupted-run reconciliation.
+- A surviving runtime journal does not reconstruct a lost terminal result, claim successful execution, roll back external effects or grant another Agent execution authority. Durable identity and the same surviving disk are prerequisites; automatic re-enrollment cannot replace the original owner.
+
+Failed removal retains the affected workspace and journal evidence. Retrying cleanup must preserve the same exact resource identity. Never delete the shared root, rewrite the journal, change an Agent identity, or broaden daemon permissions to make readiness pass.
+
+## Standalone adapter compatibility
+
+`NewSession` remains the smaller adapter entry point used by its standalone acceptance test. It starts the runtime during construction and can use the Agent filesystem owner's numeric UID/GID by default; that does not relax the integrated offline profile's explicit matching non-root user requirement. The durable worker uses `Controller.Allocate` followed by host staging, `Start`, `Seal` and `Close` instead.
+
+A constructor failure can return a non-nil session when cleanup still needs retrying; keep that handle. Repeated `Close` retries failed cleanup and successful `Close` is idempotent. An uncertain-create backend must retain the exact resource identity. A session does not close a shared backend connection. Standalone session success alone does not prove durable controller recovery or the production queue path.
+
+## Runtime-independent verification commands
+
+Run against the final code revision and retain the actual results separately:
 
 ```sh
-go test -race -count=1 ./internal/agent/sandboxexec ./pkg/sandbox
+go test -race -count=1 ./pkg/taskqueue ./pkg/sandbox ./internal/agent/sandboxexec ./internal/agent/taskqueue ./internal/shared/pipeline/validation ./internal/control/process ./internal/control/repo ./internal/control/service
 go test -tags=sandbox_acceptance -run '^$' ./internal/agent/sandboxexec ./pkg/sandbox
 ```
 
-The second command compiles both acceptance tests only; it proves no actual runtime behavior.
+The second command only compiles acceptance tests. Neither command establishes real container behavior. Retain the current revision’s full repository quality results after code generation; previously passed V10 tests are not evidence for changed source.
+
+Required regression evidence includes runtime schema/claim/digest rejection, readiness-aware selection, no fallback or standalone-task bypass, staging order, seal-before-read, cancellation/shutdown, log/terminal persistence failure, exact-owner restart cleanup and unavailable/mismatched/nonterminal authority. Keep passing checks, failures, blocked checks and never-run checks separate.
 
 ## Optional capable-host adapter test
 
-Follow all prerequisites and restrictions in [backend acceptance](sandbox-containerd.md), including a disposable authorized Linux host, working rootful containerd/runc, usable cgroup-v2 CPU/memory controllers and an approved Alpine-compatible image. Run the backend test first and keep its full results.
+After explicit authorization, follow the prerequisites in [backend acceptance](sandbox-containerd.md): a dedicated disposable Linux host, a working rootful containerd/runc setup, usable cgroup-v2 CPU/memory controllers and an approved Alpine-compatible digest image. Run the backend test first and retain its complete output. These commands do not grant permission to install components or change host security settings.
 
 ```sh
 export ARCENTRA_SANDBOX_SESSION_ACCEPTANCE=1
@@ -57,16 +83,18 @@ export ARCENTRA_SANDBOX_TEST_IMAGE='your-approved-alpine-image@sha256:YOUR_VERIF
 go test -tags=sandbox_acceptance -count=1 -timeout=5m -run '^TestSessionContainerdAcceptance$' -v ./internal/agent/sandboxexec
 ```
 
-The explicit test fails rather than skips when opt-in or prerequisites are absent. It exercises real session creation, shell environment/output streaming, file visibility through the artifact workspace, sequential steps, nonzero exits, timeout poisoning, canceled-context cleanup, repeated Close, and container/snapshot/workspace removal. It does not run Kafka, gRPC, a production Agent, host source cloning or object-storage transfer. Images remain cached. Cleanup failures report the namespace and workspace for operator inspection and preserve the acceptance root.
+The explicit test fails rather than skips when opt-in or prerequisites are absent. It exercises real standalone session creation, shell environment/output streaming, workspace visibility, sequential steps, nonzero exits, timeout poisoning, canceled-context cleanup, repeated `Close`, and container/snapshot/workspace removal. It does not run Kafka, gRPC, a production Agent, host source cloning, object-storage transfer or durable-controller restart recovery. Images remain cached; cleanup failures retain evidence for operator inspection.
 
-## Adjacent audit: native plugins and concurrency
+Record the exact code revision, host/runtime versions, approved image digest, command and complete output. Before considering activation, additionally prove the integrated staging/session/sealing/publication/recovery path on the same bounded profile. Passing a standalone backend or adapter test must not silently open the production gate. Release-image startup, production infrastructure and hostile multi-tenant isolation remain separate validation work.
 
-Native plugins are registered Go objects executed in-process. `Plugin.Execute` has no context argument, and `PluginExecutor.executePlugin` drops the incoming context; timeout options alone cannot force a plugin to stop. The Agent has no native plugin manager. Pipeline and queue validation now reject unknown native plugin names before workspace preparation, including names that carry `run` or `url` arguments. Baremetal HTTP execution is accepted only through explicit `uses: http` and dispatched directly to the existing HTTP executor; it retains trusted host network access. It must never serve as a sandbox fallback. A small next step is to define an opt-in context-aware plugin interface with cancellation tests for trusted builtins; loading arbitrary native plugins and isolating them requires a separate execution/process boundary and compatibility policy.
+## Adjacent limits: native plugins and concurrency
 
-There are three different concurrency concepts:
+Native plugins are registered Go objects executed in-process. The existing `Plugin.Execute` interface has no context argument and cannot enforce process isolation; the Agent has no native plugin manager. Pipeline and queue validation reject unknown native plugin names. Baremetal HTTP steps retain trusted host network access only through explicit `uses: http`; offline-containerd jobs reject them.
 
-- The production control process limits simultaneous pipeline runs with a local semaphore.
-- The Kafka Agent queue currently executes and acknowledges one message before reading the next, intentionally protecting delivery/commit order. `agent.maxConcurrentJobs` now accepts only 1 or 0 (the default of 1); negative values and values above 1 fail startup/registration, and registration advertises the actual capacity of 1. Adding unbounded goroutines around the handler would make later offsets acknowledge unfinished earlier messages.
-- Nonempty `job.concurrency` is now rejected by production pipeline validation. The old legacy `Runner` implementation is not a production cross-run or cross-control-instance lock.
+The controller's local pipeline-run semaphore, the Agent's single-message-at-a-time Kafka worker and named cross-run concurrency are different mechanisms. `agent.maxConcurrentJobs` accepts only 1 or 0 (default 1); nonempty `job.concurrency` is rejected. Runtime readiness/selection does not add cross-instance leases. Real parallel admission requires partition-aware contiguous-offset acknowledgment and shutdown/cancellation tests; named concurrency needs defined scope and durable ownership/expiry/recovery.
 
-The supported-capacity contract and native-plugin/named-concurrency rejections have regression coverage. Real parallel admission needs partition-aware contiguous-offset acknowledgment and cancellation/shutdown tests. Named concurrency requires an agreed key scope (for example project/environment), fairness and cancellation policy, durable lease ownership, expiry/renewal and restart reconciliation; a process-local mutex would not deliver the documented cross-run guarantee.
+## Durable-controller acceptance harness
+
+`TestDurableControllerContainerdAcceptance` is a separate `sandbox_acceptance` test with its own `ARCENTRA_DURABLE_SESSION_ACCEPTANCE=1` opt-in. Its prerequisites and retained-evidence behavior are described in [the session package README](../internal/agent/sandboxexec/README.md). It targets the new persistent Controller, source/artifact staging boundary, background-process sealing, exact cleanup and reopening tombstones. Merely compiling it with `-run '^$'` does not execute a daemon or validate isolation. No workflow currently enables this test, and no privileged runner operation is implied by the ordinary CI job.
+
+The Agent advertises an explicit execution mode separately from readiness. A containerd-mode Agent is excluded from baremetal dispatch even while it is not ready; a legacy Agent with no mode report remains eligible only for the old baremetal path. Unknown modes fail selection. If an already-bound structurally valid task reaches the same Agent after its image/resource policy is tightened or its configured execution mode changes, the Agent claims that exact task and reports a failed, unexecuted result. It does not allocate a session, clone source or transfer artifacts. Unresolved runtime recovery instead blocks consumption without claiming or acknowledging new work.

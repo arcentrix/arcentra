@@ -143,3 +143,31 @@ func TestExecutionSpecRejectsUnsupportedSettings(t *testing.T) {
 		t.Fatal("base user mutated")
 	}
 }
+
+func TestInitUserClearsImagePrivileges(t *testing.T) {
+	options, err := createSpecOptions(&CreateOptions{Command: []string{"sleep", "60"}, User: "1000:1001"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inherited := func(_ context.Context, _ oci.Client, _ *containers.Container, spec *specs.Spec) error {
+		spec.Process.User = specs.User{UID: 0, GID: 0, AdditionalGids: []uint32{0, 10}}
+		spec.Process.Capabilities = &specs.LinuxCapabilities{Bounding: []string{"CAP_SYS_ADMIN"}, Effective: []string{"CAP_SYS_ADMIN"}, Permitted: []string{"CAP_SYS_ADMIN"}, Inheritable: []string{"CAP_SYS_ADMIN"}, Ambient: []string{"CAP_SYS_ADMIN"}}
+		return nil
+	}
+	spec, err := oci.GenerateSpec(namespaces.WithNamespace(context.Background(), "arcentra-test"), nil, &containers.Container{ID: "test-init-user"}, append([]oci.SpecOpts{inherited}, options...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.Process.User.UID != 1000 || spec.Process.User.GID != 1001 || len(spec.Process.User.AdditionalGids) != 0 || !spec.Process.NoNewPrivileges {
+		t.Fatalf("init privileges retained: %+v", spec.Process)
+	}
+	caps := spec.Process.Capabilities
+	if caps == nil || len(caps.Bounding)+len(caps.Effective)+len(caps.Permitted)+len(caps.Inheritable)+len(caps.Ambient) != 0 {
+		t.Fatalf("init capabilities retained: %+v", caps)
+	}
+	for _, user := range []string{"0", "0:1000", "1000:0", "root", "1:", "1:2:3", "-1", "4294967296"} {
+		if _, err := createSpecOptions(&CreateOptions{Command: []string{"true"}, User: user}, nil); err == nil {
+			t.Errorf("unsafe init user accepted: %q", user)
+		}
+	}
+}

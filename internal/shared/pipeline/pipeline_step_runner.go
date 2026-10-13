@@ -44,6 +44,9 @@ func NewStepRunner(ctx *ExecutionContext, job *spec.Job, step *spec.Step) *StepR
 
 // Run executes the step
 func (r *StepRunner) Run(ctx context.Context) error {
+	if err := r.ctx.rejectStandaloneRuntime(); err != nil {
+		return err
+	}
 	r.ctx.LogStep(r.job.Name, r.step.Name, "starting step")
 
 	// Evaluate when condition with step context

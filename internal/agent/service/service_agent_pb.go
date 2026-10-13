@@ -53,6 +53,7 @@ type AgentServiceImpl struct {
 	heartbeatStarted      bool
 	closed                bool
 	authenticated         atomic.Bool
+	offlineRuntimeReady   func() bool
 }
 
 // NewAgentServiceImpl creates a new AgentService instance. metricsServer may be nil (used for heartbeat running count).
@@ -69,6 +70,28 @@ func NewAgentServiceImpl(agentConf *config.AgentConfig, grpcClient *grpc.ClientW
 // initialized from the control-plane's RegisterResponse.
 func (s *AgentServiceImpl) StorageHolder() *agent.StorageHolder {
 	return s.storageHolder
+}
+
+// SetOfflineRuntimeReadiness 仅在本地运行时初始化成功后安装能力探针
+func (s *AgentServiceImpl) SetOfflineRuntimeReadiness(probe func() bool) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.offlineRuntimeReady = probe
+}
+
+func (s *AgentServiceImpl) runtimeCapabilitiesLocked() *agentv1.RuntimeCapabilities {
+	capabilities := &agentv1.RuntimeCapabilities{}
+	if s.agentConf == nil {
+		return capabilities
+	}
+	switch strings.ToLower(strings.TrimSpace(s.agentConf.Agent.Mode)) {
+	case "baremetal":
+		capabilities.ExecutionMode = "baremetal"
+	case "sandbox":
+		capabilities.ExecutionMode = "containerd-offline-v1"
+		capabilities.ContainerdOfflineV1 = s.offlineRuntimeReady != nil && s.offlineRuntimeReady()
+	}
+	return capabilities
 }
 
 // PrepareIdentity 在任何注册和终态日志检查之前恢复持久身份，并持有存储锁至关闭
@@ -222,6 +245,7 @@ func (s *AgentServiceImpl) sendHeartbeatLocked(ctx context.Context) error {
 	resp, err := s.grpcClient.AgentClient.Heartbeat(hbCtx, &agentv1.HeartbeatRequest{
 		AgentId: s.agentConf.Agent.ID, AgentName: s.agentConf.Agent.Name,
 		Status:               agentv1.AgentStatus_AGENT_STATUS_ONLINE,
+		RuntimeCapabilities:  s.runtimeCapabilitiesLocked(),
 		RunningStepRunsCount: getRunningStepRunsCount(s.metricsServer), Timestamp: time.Now().Unix(),
 	})
 	if err != nil {
@@ -262,7 +286,8 @@ func (s *AgentServiceImpl) Register(ctx context.Context, _ *agentv1.RegisterRequ
 		return nil, err
 	}
 	regReq := &agentv1.RegisterRequest{
-		AgentId: s.agentConf.Agent.ID, Token: s.agentConf.Grpc.Token, RegistrationToken: registrationToken,
+		RuntimeCapabilities: s.runtimeCapabilitiesLocked(),
+		AgentId:             s.agentConf.Agent.ID, Token: s.agentConf.Grpc.Token, RegistrationToken: registrationToken,
 		AgentName: s.agentConf.Agent.Name, Ip: net.GetLocalIP(), Os: runtime.GOOS, Arch: runtime.GOARCH,
 		Version: version.GetVersion().Version, MaxConcurrentStepRuns: capacity, Labels: maps.Clone(s.agentConf.Agent.Labels),
 	}
