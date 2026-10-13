@@ -33,6 +33,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	AgentService_InspectJobExecution_FullMethodName = "/agent.v1.AgentService/InspectJobExecution"
 	AgentService_Heartbeat_FullMethodName           = "/agent.v1.AgentService/Heartbeat"
 	AgentService_Register_FullMethodName            = "/agent.v1.AgentService/Register"
 	AgentService_Unregister_FullMethodName          = "/agent.v1.AgentService/Unregister"
@@ -51,6 +52,8 @@ const (
 //
 // AgentService - Main interface for communication between Agent and Server
 type AgentServiceClient interface {
+	// Read-only confirmation for recovery of the original runtime execution.
+	InspectJobExecution(ctx context.Context, in *InspectJobExecutionRequest, opts ...grpc.CallOption) (*InspectJobExecutionResponse, error)
 	// Heartbeat - Agent periodically sends heartbeat to Server
 	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
 	// Register - Agent registers with Server on startup
@@ -79,6 +82,16 @@ type agentServiceClient struct {
 
 func NewAgentServiceClient(cc grpc.ClientConnInterface) AgentServiceClient {
 	return &agentServiceClient{cc}
+}
+
+func (c *agentServiceClient) InspectJobExecution(ctx context.Context, in *InspectJobExecutionRequest, opts ...grpc.CallOption) (*InspectJobExecutionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InspectJobExecutionResponse)
+	err := c.cc.Invoke(ctx, AgentService_InspectJobExecution_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *agentServiceClient) Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error) {
@@ -190,6 +203,8 @@ type AgentService_ConnectClient = grpc.BidiStreamingClient[ConnectRequest, Conne
 //
 // AgentService - Main interface for communication between Agent and Server
 type AgentServiceServer interface {
+	// Read-only confirmation for recovery of the original runtime execution.
+	InspectJobExecution(context.Context, *InspectJobExecutionRequest) (*InspectJobExecutionResponse, error)
 	// Heartbeat - Agent periodically sends heartbeat to Server
 	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
 	// Register - Agent registers with Server on startup
@@ -220,6 +235,9 @@ type AgentServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAgentServiceServer struct{}
 
+func (UnimplementedAgentServiceServer) InspectJobExecution(context.Context, *InspectJobExecutionRequest) (*InspectJobExecutionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InspectJobExecution not implemented")
+}
 func (UnimplementedAgentServiceServer) Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Heartbeat not implemented")
 }
@@ -269,6 +287,24 @@ func RegisterAgentServiceServer(s grpc.ServiceRegistrar, srv AgentServiceServer)
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&AgentService_ServiceDesc, srv)
+}
+
+func _AgentService_InspectJobExecution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InspectJobExecutionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).InspectJobExecution(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_InspectJobExecution_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).InspectJobExecution(ctx, req.(*InspectJobExecutionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _AgentService_Heartbeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -447,6 +483,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "agent.v1.AgentService",
 	HandlerType: (*AgentServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "InspectJobExecution",
+			Handler:    _AgentService_InspectJobExecution_Handler,
+		},
 		{
 			MethodName: "Heartbeat",
 			Handler:    _AgentService_Heartbeat_Handler,

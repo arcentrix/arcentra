@@ -18,13 +18,17 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/sonic"
 	"github.com/containerd/containerd"
 	introspectionapi "github.com/containerd/containerd/api/services/introspection/v1"
+	tasks "github.com/containerd/containerd/api/services/tasks/v1"
+	tasktypes "github.com/containerd/containerd/api/types/task"
 	"github.com/containerd/containerd/containers"
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/content/local"
@@ -40,6 +44,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	imagebase "github.com/opencontainers/image-spec/specs-go"
 	imagev1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"google.golang.org/grpc"
 )
 
 // 此 fixture 使用真实 containerd Client / Image / WithNewSpec / WithImageConfig
@@ -77,10 +82,11 @@ func TestContainerdAdapterCreatesSnapshotBeforeImageSpec(t *testing.T) {
 	manifest := writeBlob(imagev1.MediaTypeImageManifest, imagev1.Manifest{Versioned: imagebase.Versioned{SchemaVersion: 2}, Config: config})
 	snapshotter := &fixtureSnapshotter{prepared: make(map[string]bool)}
 	containerStore := &fixtureContainerStore{records: make(map[string]containers.Container)}
+	imageStore := &fixtureImages{image: images.Image{Name: "fixture:local", Target: manifest}}
 	client, err := containerd.New("", containerd.WithServices(
-		containerd.WithContentStore(store), containerd.WithImageStore(&fixtureImages{image: images.Image{Name: "fixture:local", Target: manifest}}),
+		containerd.WithContentStore(store), containerd.WithImageStore(imageStore),
 		containerd.WithNamespaceService(fixtureNamespaces{}), containerd.WithSnapshotters(map[string]snapshots.Snapshotter{"fixture": snapshotter}),
-		containerd.WithIntrospectionService(fixtureIntrospection{}), containerd.WithContainerStore(containerStore)))
+		containerd.WithIntrospectionService(fixtureIntrospection{}), containerd.WithTaskClient(fixtureTasks{}), containerd.WithContainerStore(containerStore)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +104,8 @@ func TestContainerdAdapterCreatesSnapshotBeforeImageSpec(t *testing.T) {
 		t.Fatal("fixture failed to exercise image rootfs dependency")
 	}
 	backend := &containerdBackend{client: client}
-	container, err := backend.create(ctx, "fixture-container", "fixture:local", options, map[string]string{"owner": "test"})
+	ref := ResourceRef{ID: "fixture-container", Owner: "test", Namespace: "arcentra-test", Snapshotter: "fixture"}
+	container, err := backend.create(ctx, ref.ID, "fixture:local", options, ownershipLabels(ref), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,9 +122,33 @@ func TestContainerdAdapterCreatesSnapshotBeforeImageSpec(t *testing.T) {
 	if container.(*containerdContainer).snapshotter != "fixture" {
 		t.Fatal("namespaced snapshotter was not preserved")
 	}
+	// 显式数字用户不允许 SDK 为镜像用户或附加组执行宿主 mount
+	snapshotter.mountErr = fmt.Errorf("client-side rootfs access forbidden")
+	namedConfig := writeBlob(imagev1.MediaTypeImageConfig, imagev1.Image{Platform: imagev1.Platform{OS: "linux", Architecture: "amd64"}, Config: imagev1.ImageConfig{Env: []string{"IMAGE=fixture"}, User: "missing-user:missing-group", Entrypoint: []string{"image-entrypoint"}, Cmd: []string{"image-command"}, WorkingDir: "/image-workdir"}, RootFS: imagev1.RootFS{Type: "layers", DiffIDs: []digest.Digest{digest.FromString("empty-rootfs-fixture")}}})
+	imageStore.image.Target = writeBlob(imagev1.MediaTypeImageManifest, imagev1.Manifest{Versioned: imagebase.Versioned{SchemaVersion: 2}, Config: namedConfig})
+	explicitOptions, err := createSpecOptions(&CreateOptions{Command: []string{"explicit-init"}, User: "1000:1001", WorkingDir: "/chosen", Env: map[string]string{"STEP": "explicit"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicitRef := ref
+	explicitRef.ID = "explicit-user-container"
+	explicit, err := backend.create(ctx, explicitRef.ID, "fixture:local", explicitOptions, ownershipLabels(explicitRef), true)
+	if err != nil {
+		t.Fatalf("explicit init required rootfs mount: %v", err)
+	}
+	explicitSpec, err := explicit.spec(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicitSpec.Process.User.UID != 1000 || explicitSpec.Process.User.GID != 1001 || explicitSpec.Process.Cwd != "/chosen" || !slices.Equal(explicitSpec.Process.Args, []string{"explicit-init"}) || !slices.Contains(explicitSpec.Process.Env, "IMAGE=fixture") || !slices.Contains(explicitSpec.Process.Env, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin") {
+		t.Fatalf("incorrect nonmounting image configuration: %+v", explicitSpec.Process)
+	}
+	snapshotter.mountErr = nil
 	// 仅 snapshot 存在但 metadata 不存在的恢复路径必须使用相同 snapshotter
-	orphan := &containerdContainer{client: client, id: "orphan", snapshotter: "fixture"}
+	orphanRef := ResourceRef{ID: "orphan", Owner: "test", Namespace: "arcentra-test", Snapshotter: "fixture"}
+	orphan := &containerdContainer{client: client, id: "orphan", snapshotter: "fixture", ref: orphanRef}
 	snapshotter.prepared["orphan-snapshot"] = true
+	snapshotter.labels["orphan-snapshot"] = ownershipLabels(orphanRef)
 	if err := orphan.remove(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -152,16 +183,42 @@ type fixtureSnapshotter struct {
 	snapshots.Snapshotter
 	prepared   map[string]bool
 	mountReads int
+	mountErr   error
+	labels     map[string]map[string]string
+	statErr    error
+	removeErr  error
 }
 
 func (s *fixtureSnapshotter) Stat(_ context.Context, key string) (snapshots.Info, error) {
+	if s.statErr != nil {
+		return snapshots.Info{}, s.statErr
+	}
+	if strings.HasSuffix(key, "-snapshot") {
+		if !s.prepared[key] {
+			return snapshots.Info{}, errdefs.ErrNotFound
+		}
+		return snapshots.Info{Name: key, Kind: snapshots.KindActive, Labels: maps.Clone(s.labels[key])}, nil
+	}
 	return snapshots.Info{Name: key, Kind: snapshots.KindCommitted}, nil
 }
-func (s *fixtureSnapshotter) Prepare(_ context.Context, key, _ string, _ ...snapshots.Opt) ([]mount.Mount, error) {
+func (s *fixtureSnapshotter) Prepare(_ context.Context, key, _ string, opts ...snapshots.Opt) ([]mount.Mount, error) {
+	info := snapshots.Info{}
+	for _, opt := range opts {
+		if err := opt(&info); err != nil {
+			return nil, err
+		}
+	}
+	if s.labels == nil {
+		s.labels = make(map[string]map[string]string)
+	}
+	s.labels[key] = maps.Clone(info.Labels)
 	s.prepared[key] = true
 	return nil, nil
 }
 func (s *fixtureSnapshotter) Mounts(_ context.Context, key string) ([]mount.Mount, error) {
+	if s.mountErr != nil {
+		return nil, s.mountErr
+	}
 	if !s.prepared[key] {
 		return nil, fmt.Errorf("image config requested rootfs before snapshot creation")
 	}
@@ -169,6 +226,9 @@ func (s *fixtureSnapshotter) Mounts(_ context.Context, key string) ([]mount.Moun
 	return nil, nil
 }
 func (s *fixtureSnapshotter) Remove(_ context.Context, key string) error {
+	if s.removeErr != nil {
+		return s.removeErr
+	}
 	if !s.prepared[key] {
 		return errdefs.ErrNotFound
 	}
@@ -191,4 +251,65 @@ func (s *fixtureContainerStore) Get(_ context.Context, id string) (containers.Co
 		return containers.Container{}, errdefs.ErrNotFound
 	}
 	return record, nil
+}
+
+func (s *fixtureContainerStore) Delete(_ context.Context, id string) error {
+	if _, ok := s.records[id]; !ok {
+		return errdefs.ErrNotFound
+	}
+	delete(s.records, id)
+	return nil
+}
+
+type fixtureTasks struct {
+	tasks.TasksClient
+	exists bool
+	err    error
+}
+
+func (f fixtureTasks) Get(_ context.Context, request *tasks.GetRequest, _ ...grpc.CallOption) (*tasks.GetResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.exists {
+		return &tasks.GetResponse{Process: &tasktypes.Process{ID: request.ContainerID}}, nil
+	}
+	return nil, errdefs.ErrNotFound
+}
+
+type fixtureConfigImage struct {
+	containerd.Image
+	descriptor imagev1.Descriptor
+	store      content.Store
+}
+
+func (f fixtureConfigImage) Config(context.Context) (imagev1.Descriptor, error) {
+	return f.descriptor, nil
+}
+func (f fixtureConfigImage) ContentStore() content.Store { return f.store }
+
+func TestExplicitUserImageConfigurationFailsClosed(t *testing.T) {
+	for _, test := range []struct{ name, os, media string }{
+		{"unsupported OS", "windows", imagev1.MediaTypeImageConfig},
+		{"missing OS", "", imagev1.MediaTypeImageConfig},
+		{"unsupported media", "linux", "application/not-an-image-config"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data, err := sonic.Marshal(imagev1.Image{Platform: imagev1.Platform{OS: test.os}, Config: imagev1.ImageConfig{Env: []string{"PATH=/image/path"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			store, err := local.NewStore(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			descriptor := imagev1.Descriptor{MediaType: test.media, Digest: digest.FromBytes(data), Size: int64(len(data))}
+			if err = content.WriteBlob(context.Background(), store, descriptor.Digest.String(), bytes.NewReader(data), descriptor); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = imageEnvironmentOptions(context.Background(), fixtureConfigImage{descriptor: descriptor, store: store}); err == nil {
+				t.Fatal("unsupported image config accepted")
+			}
+		})
+	}
 }

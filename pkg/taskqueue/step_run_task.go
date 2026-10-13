@@ -23,6 +23,7 @@ const (
 
 // StepRunTaskPayload is the payload for step run execution.
 type StepRunTaskPayload struct {
+	Runtime       *RuntimeRequest   `json:"runtime,omitempty"`
 	ProjectID     string            `json:"projectId,omitempty"`
 	PipelineID    string            `json:"pipelineId,omitempty"`
 	PipelineRunID string            `json:"pipelineRunId,omitempty"`

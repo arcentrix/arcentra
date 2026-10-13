@@ -426,9 +426,10 @@ func (s *StreamServiceImpl) AgentChannel(
 					Table((&model.Agent{}).TableName()).
 					Where("agent_id = ?", req.AgentId).
 					Updates(map[string]any{
-						"status":         int(req.GetHeartbeat().Status),
-						"last_heartbeat": time.Now(),
-						"updated_at":     time.Now(),
+						"status":               int(req.GetHeartbeat().Status),
+						"runtime_capabilities": "{}", // 旧流协议不报告运行时就绪，不能保留旧能力
+						"last_heartbeat":       time.Now(),
+						"updated_at":           time.Now(),
 					}).Error
 			}
 			if err := stream.Send(&streamv1.AgentChannelResponse{
@@ -871,6 +872,7 @@ func (s *StreamServiceImpl) fetchAgentStepRuns(ctx context.Context, agentID stri
 		Where("status IN ?", []int{1, 2}).
 		Order("created_at ASC").
 		Limit(maxVal)
+	query = repo.ExcludeRuntimeSteps(query)
 	if err := query.Find(&records).Error; err != nil {
 		return nil, err
 	}

@@ -64,6 +64,11 @@ func (r *StepRunRepo) PatchReportedStatus(ctx context.Context, expected *model.S
 		return fmt.Errorf("active step snapshot is required")
 	}
 	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		claim, _ := updates["claim_id"].(string)
+		next, _ := updates["status"].(int)
+		if err := validateRuntimeStepClaim(ctx, tx, expected, claim, next); err != nil {
+			return err
+		}
 		if next, _ := updates["status"].(int); next == 3 {
 			if err := validateRetryActivation(ctx, tx, expected); err != nil {
 				return err
@@ -115,7 +120,8 @@ func reportedJobQuery(tx *gorm.DB, expected *model.JobRun) *gorm.DB {
 		Where("pipeline_id = ? AND pipeline_run_id = ?", expected.PipelineID, expected.PipelineRunID).
 		Where("terminal_report_digest = ? AND cancellation_claim_id = ?", expected.TerminalReportDigest, expected.CancellationClaimID).
 		Where("source_expectation_captured = ? AND source_type = ? AND source_repository = ? AND source_ref = ?", expected.SourceExpectationCaptured, expected.SourceType, expected.SourceRepository, expected.SourceRef).
-		Where("source_binding_digest = ? AND source_resolved_commit = ? AND source_provenance_state = ?", expected.SourceBindingDigest, expected.SourceResolvedCommit, expected.SourceProvenanceState)
+		Where("source_binding_digest = ? AND source_resolved_commit = ? AND source_provenance_state = ?", expected.SourceBindingDigest, expected.SourceResolvedCommit, expected.SourceProvenanceState).
+		Where("runtime_type = ? AND runtime_image = ? AND runtime_cpu = ? AND runtime_memory = ? AND runtime_binding_digest = ?", expected.RuntimeType, expected.RuntimeImage, expected.RuntimeCPU, expected.RuntimeMemory, expected.RuntimeBindingDigest)
 }
 
 func reportedStatusResult(result *gorm.DB) error {

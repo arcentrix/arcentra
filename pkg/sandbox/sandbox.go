@@ -36,12 +36,16 @@ type Sandbox interface {
 // CreateOptions 定义容器初始化配置
 // Mounts 只能来自可信宿主配置，不能直接接受不可信流水线输入
 type CreateOptions struct {
-	Image string
+	// Resource 指定已写入持久日志的资源身份，空值使用进程内自动身份
+	Resource *ResourceRef
+	Image    string
 	// Command 必須显式指定长期运行的容器 init 命令
 	Command    []string
 	Args       []string
 	Env        map[string]string
 	WorkingDir string
+	// User 可选显式非零数字 UID 或 UID:GID，设置时清空附加组与全部 capabilities
+	User string
 	// NetworkMode 仅支持 none，空值使用默认离线模式
 	NetworkMode string
 	Resources   *Resources

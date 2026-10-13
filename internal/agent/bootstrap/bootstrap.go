@@ -239,7 +239,14 @@ func Run(app *Agent, cleanup func()) {
 
 // IsReady 返回已完成身份恢复、认证和工作器初始化的就绪状态
 func (app *Agent) IsReady() bool {
-	return app != nil && app.ready.Load() && app.AgentService.Authenticated()
+	if app == nil || !app.ready.Load() || !app.AgentService.Authenticated() {
+		return false
+	}
+	if app.AgentConf.Agent.Sandbox.Enable {
+		probe, ok := app.TaskQueue.(interface{ OfflineRuntimeReady() bool })
+		return ok && probe.OfflineRuntimeReady()
+	}
+	return true
 }
 
 // waitForRegistrationAndStartHeartbeat 先恢复身份，再等待连接并执行单次注册流程
@@ -335,6 +342,9 @@ func (app *Agent) startWorkers() error {
 		return err
 	}
 	app.TaskQueue = queue
+	if probe, ok := queue.(interface{ OfflineRuntimeReady() bool }); ok {
+		app.AgentService.SetOfflineRuntimeReadiness(probe.OfflineRuntimeReady)
+	}
 	app.ready.Store(true)
 	return nil
 }

@@ -198,6 +198,20 @@ func createSpecOptions(opts *CreateOptions, resources *Resources) ([]oci.SpecOpt
 			return nil
 		},
 	}
+	if opts.User != "" {
+		user, err := numericUser(opts.User)
+		if err != nil {
+			return nil, err
+		}
+		if user.UID == 0 || user.GID == 0 {
+			return nil, fmt.Errorf("explicit init user must have nonzero UID and GID")
+		}
+		options = append(options, func(_ context.Context, _ oci.Client, _ *containers.Container, spec *specs.Spec) error {
+			spec.Process.User = user
+			spec.Process.Capabilities = &specs.LinuxCapabilities{}
+			return nil
+		})
+	}
 	if opts.WorkingDir != "" {
 		options = append(options, oci.WithProcessCwd(opts.WorkingDir))
 	}
@@ -273,23 +287,31 @@ func executionSpec(base *specs.Spec, cmd []string, opts *ExecuteOptions) (*specs
 	}
 	process.Env = envList(env)
 	if opts.User != "" {
-		parts := strings.Split(opts.User, ":")
-		if len(parts) > 2 {
-			return nil, fmt.Errorf("user must be numeric UID or UID:GID")
-		}
-		uid, err := strconv.ParseUint(parts[0], 10, 32)
+		user, err := numericUser(opts.User)
 		if err != nil {
-			return nil, fmt.Errorf("user must be numeric UID or UID:GID")
+			return nil, err
 		}
-		gid := uid
-		if len(parts) == 2 {
-			gid, err = strconv.ParseUint(parts[1], 10, 32)
-			if err != nil {
-				return nil, fmt.Errorf("user must be numeric UID or UID:GID")
-			}
-		}
-		process.User = specs.User{UID: uint32(uid), GID: uint32(gid)}
+		process.User = user
 		process.Capabilities = &specs.LinuxCapabilities{}
 	}
 	return &process, nil
+}
+
+func numericUser(value string) (specs.User, error) {
+	parts := strings.Split(value, ":")
+	if len(parts) > 2 {
+		return specs.User{}, fmt.Errorf("user must be numeric UID or UID:GID")
+	}
+	uid, err := strconv.ParseUint(parts[0], 10, 32)
+	if err != nil {
+		return specs.User{}, fmt.Errorf("user must be numeric UID or UID:GID")
+	}
+	gid := uid
+	if len(parts) == 2 {
+		gid, err = strconv.ParseUint(parts[1], 10, 32)
+		if err != nil {
+			return specs.User{}, fmt.Errorf("user must be numeric UID or UID:GID")
+		}
+	}
+	return specs.User{UID: uint32(uid), GID: uint32(gid)}, nil
 }

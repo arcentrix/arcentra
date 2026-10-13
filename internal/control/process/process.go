@@ -34,6 +34,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/plugin"
 	"github.com/arcentrix/arcentra/pkg/safe"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -42,18 +43,19 @@ const defaultMaxConcurrentRuns = 10
 // Process manages pipeline run orchestration. It bridges the trigger layer
 // (HTTP/gRPC/Cron/Webhook) with the execution process (Executor DAG).
 type Process struct {
-	repos             *repo.Repositories
-	pluginMgr         *plugin.Manager
-	taskQueue         nova.TaskQueue
-	storage           storage.IStorage
-	logger            *log.Logger
-	appConf           *config.AppConfig
-	secretSvc         *service.SecretService
-	deploymentService *service.DeploymentService
-	auditWriter       *AuditWriter
-	logPublisher      executor.LogPublisher
-	closeLogs         func()
-	logInitErr        error
+	repos                *repo.Repositories
+	pluginMgr            *plugin.Manager
+	taskQueue            nova.TaskQueue
+	storage              storage.IStorage
+	logger               *log.Logger
+	appConf              *config.AppConfig
+	secretSvc            *service.SecretService
+	deploymentService    *service.DeploymentService
+	auditWriter          *AuditWriter
+	logPublisher         executor.LogPublisher
+	closeLogs            func()
+	logInitErr           error
+	offlineRuntimePolicy taskqueue.OfflineRuntimePolicy
 
 	mu        sync.Mutex
 	stopped   bool
@@ -89,6 +91,13 @@ func NewProcess(
 		ctx:       ctx,
 		cancel:    cancel,
 	}
+	if appConf != nil {
+		if err := appConf.Pipeline.OfflineRuntime.ValidateProduction(); err != nil {
+			engine.logInitErr = err
+			return engine
+		}
+		engine.offlineRuntimePolicy = appConf.Pipeline.OfflineRuntime.Clone()
+	}
 	engine.initLogPublisher()
 	return engine
 }
@@ -106,7 +115,7 @@ func (e *Process) Submit(run *model.PipelineRun, parsedSpec *spec.Pipeline) erro
 		return fmt.Errorf("run and spec must not be nil")
 	}
 
-	if err := validation.NewSchemaValidator().Validate(parsedSpec); err != nil {
+	if err := validation.NewSchemaValidatorWithRuntimePolicy(e.offlineRuntimePolicy).Validate(parsedSpec); err != nil {
 		return err
 	}
 	isDeployment, err := e.validateDeploymentRun(run, parsedSpec)

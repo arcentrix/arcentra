@@ -41,17 +41,19 @@ type StepRunRepo struct {
 }
 
 type StepRunFilter struct {
-	StepRunIDs    []string
-	PipelineID    string
-	PipelineRunID string
-	JobID         string
-	StepName      string
-	AgentID       string
-	Status        int
-	Page          int
-	PageSize      int
-	SortBy        string
-	SortDesc      bool
+	// ExcludeRuntime 旧单步派发不得读取容器作业内容
+	ExcludeRuntime bool
+	StepRunIDs     []string
+	PipelineID     string
+	PipelineRunID  string
+	JobID          string
+	StepName       string
+	AgentID        string
+	Status         int
+	Page           int
+	PageSize       int
+	SortBy         string
+	SortDesc       bool
 }
 
 func NewStepRunRepo(db database.IDatabase) IStepRunRepository {
@@ -118,6 +120,9 @@ func (r *StepRunRepo) List(ctx context.Context, filter StepRunFilter) ([]model.S
 	var stepRun model.StepRun
 	query := r.Database().WithContext(ctx).Table(stepRun.TableName())
 	query = applyStepRunFilters(query, filter)
+	if filter.ExcludeRuntime {
+		query = ExcludeRuntimeSteps(query.Clauses(database.Write()))
+	}
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {

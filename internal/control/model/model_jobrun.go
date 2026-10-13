@@ -39,6 +39,11 @@ type JobRun struct {
 	SourceBindingDigest        string     `gorm:"column:source_binding_digest;type:varchar(67);not null;default:''" json:"-"`
 	SourceResolvedCommit       string     `gorm:"column:source_resolved_commit;type:varchar(64);not null;default:''" json:"-"`
 	SourceProvenanceState      string     `gorm:"column:source_provenance_state;type:varchar(16);not null;default:'unknown'" json:"-"`
+	RuntimeType                string     `gorm:"column:runtime_type;type:varchar(64);not null;default:''" json:"runtimeType,omitempty"`
+	RuntimeImage               string     `gorm:"column:runtime_image;type:varchar(512);not null;default:''" json:"runtimeImage,omitempty"`
+	RuntimeCPU                 string     `gorm:"column:runtime_cpu;type:varchar(64);not null;default:''" json:"runtimeCpu,omitempty"`
+	RuntimeMemory              string     `gorm:"column:runtime_memory;type:varchar(64);not null;default:''" json:"runtimeMemory,omitempty"`
+	RuntimeBindingDigest       string     `gorm:"column:runtime_binding_digest;type:varchar(67);not null;default:''" json:"-"`
 	Status                     int        `gorm:"column:status" json:"status"`
 	Priority                   int        `gorm:"column:priority" json:"priority"`
 	Env                        string     `gorm:"column:env;type:json" json:"env"`

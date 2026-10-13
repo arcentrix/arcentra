@@ -114,6 +114,18 @@ func StartWorker(
 	if err := workerCtx.Err(); err != nil {
 		return nil, err
 	}
+	offline, err := newOfflineRuntime(workerCtx, agentConf, grpcClient)
+	if err != nil {
+		return nil, err
+	}
+	if offline != nil {
+		workerCtx = withOfflineJobRuntime(workerCtx, offline)
+		defer func() {
+			if !started {
+				_ = offline.Close(context.Background())
+			}
+		}()
+	}
 	options := []nova.QueueOption{
 		nova.WithMessageCodec(codec),
 		nova.WithTopicPrefix(taskqueue.AgentTopicPrefix(agentConf.Agent.ID)),
@@ -166,7 +178,7 @@ func StartWorker(
 		return nil, taskqueue.WrapStartupError("start task queue", err)
 	}
 	runCtx, cancelReports := context.WithCancel(workerCtx)
-	result := &workerQueues{TaskQueue: queue, control: control, reports: reports, cancelReports: cancelReports, reportsDone: make(chan struct{})}
+	result := &workerQueues{offline: offline, TaskQueue: queue, control: control, reports: reports, cancelReports: cancelReports, reportsDone: make(chan struct{})}
 	started = true
 	safe.Go(func() {
 		defer close(result.reportsDone)
@@ -199,6 +211,7 @@ func StartWorker(
 }
 
 type workerQueues struct {
+	offline *durableOfflineRuntime
 	nova.TaskQueue
 	control       nova.TaskQueue
 	reports       *terminalOutbox
@@ -218,6 +231,9 @@ func (q *workerQueues) Stop() error {
 		if q.reportsDone != nil {
 			<-q.reportsDone
 		}
+		if q.offline != nil {
+			q.stopErr = errors.Join(q.stopErr, q.offline.Close(context.Background()))
+		}
 		if q.reports != nil {
 			q.stopErr = errors.Join(q.stopErr, q.reports.close())
 		}
@@ -231,6 +247,12 @@ func executeStepRunViaExecutor(
 	override ...executor.Executor,
 ) error {
 	ctx = withTerminalSecrets(ctx, agentConf, nil, payload)
+	if err := taskqueue.ValidateStandaloneRuntime(payload); err != nil {
+		return grpcstatus.Error(codes.FailedPrecondition, err.Error())
+	}
+	if agentConf != nil && agentConf.Agent.Sandbox.Enable && len(override) == 0 {
+		return grpcstatus.Error(codes.FailedPrecondition, "sandbox steps require their allocated job executor")
+	}
 	if payload != nil {
 		if pending, ok := pendingStepReports.Load(receiptKey(ctx, "step", payload.StepRunID)); ok {
 			return pending.(*executionReceipt).deliver(ctx, &pendingStepReports, receiptKey(ctx, "step", payload.StepRunID))
@@ -406,7 +428,7 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 	ctx = withTerminalSecrets(ctx, agentConf, payload, nil)
 	if payload != nil {
 		if pending, ok := pendingJobReports.Load(receiptKey(ctx, "job", payload.JobRunID)); ok {
-			return pending.(*executionReceipt).deliver(ctx, &pendingJobReports, receiptKey(ctx, "job", payload.JobRunID))
+			return deliverJobReceipt(ctx, payload, pending.(*executionReceipt))
 		}
 	}
 	if payload == nil || payload.JobRunID == "" {
@@ -414,6 +436,17 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 	}
 	if found, err := replayTerminalForTask(ctx, grpcClient, agentConf, "job", payload.JobRunID); found || err != nil {
 		return err
+	}
+	localRuntimeErr, runtimeValidationErr := offlineJobValidation(ctx, agentConf, payload)
+	if runtimeValidationErr != nil {
+		var unavailable *terminalDeliveryError
+		if errors.As(runtimeValidationErr, &unavailable) {
+			return runtimeValidationErr
+		}
+		return grpcstatus.Error(codes.FailedPrecondition, runtimeValidationErr.Error())
+	}
+	if payload.Runtime != nil {
+		ctx = context.WithValue(ctx, runtimeBindingContextKey{}, payload.Runtime.BindingDigest)
 	}
 	ctx = withJobExecutionClaim(ctx, payload.JobRunID)
 	jobCtx, cancel := context.WithCancel(ctx)
@@ -448,14 +481,30 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 		}
 		return fmt.Errorf("claim job run: %w", err)
 	}
-	jobErr := validateJobExecution(payload)
+	jobErr := localRuntimeErr
+	if jobErr == nil {
+		jobErr = validateJobExecution(payload)
+	}
 	if jobErr == nil {
 		jobErr = validateJobSourceBinding(payload)
 	}
 	workspace := ""
 	var initialCheckout *agentv1.SourceCheckout
+	var session *offlineJobSession
 	if jobErr == nil {
-		workspace, jobErr = prepareWorkspace(agentConf, payload)
+		if payload.Runtime != nil {
+			var allocated offlineSession
+			allocated, jobErr = offlineRuntimeFromContext(ctx).Allocate(jobCtx, payload, executionClaimID(ctx, "job", payload.JobRunID))
+			if allocated != nil {
+				session = &offlineJobSession{offlineSession: allocated}
+				workspace = allocated.Workspace()
+			}
+			if jobErr == nil && (allocated == nil || workspace == "" || !filepath.IsAbs(workspace)) {
+				jobErr = fmt.Errorf("offline runtime returned no valid allocated workspace")
+			}
+		} else {
+			workspace, jobErr = prepareWorkspace(agentConf, payload)
+		}
 	}
 	if jobErr == nil {
 		initialCheckout, jobErr = handleSourceClone(jobCtx, payload.Source, workspace)
@@ -466,11 +515,15 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 			jobErr = handleArtifactDownload(jobCtx, payload.ArtifactURIs, workspace, st)
 		}
 	}
-	jobErr = executeJobAttempts(ctx, jobCtx, agentConf, grpcClient, execManager, payload, artifacts, workspace, jobErr, start)
+	jobErr = executeJobAttempts(ctx, jobCtx, agentConf, grpcClient, execManager, payload, artifacts, workspace, jobErr, start, session)
 
-	if jobCtx.Err() != nil {
-		jobErr = jobCtx.Err()
+	if session != nil {
+		jobErr = errors.Join(jobErr, session.finish(ctx))
 	}
+	if jobCtx.Err() != nil {
+		jobErr = errors.Join(jobErr, jobCtx.Err())
+	}
+
 	status := steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS
 	switch {
 	case errors.Is(executor.ExecutionContextCause(jobErr), context.DeadlineExceeded):
@@ -493,7 +546,7 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 	}
 	end := time.Now().Unix()
 	dependencies := allJobAttemptIDs(payload)
-	receipt := &executionReceipt{executionErr: jobErr, report: func(reportCtx context.Context) error {
+	receipt := &executionReceipt{runtimeCompletionRequired: session != nil, runtimeBinding: runtimeBindingFromContext(ctx), jobClaim: executionClaimID(ctx, "job", payload.JobRunID), executionErr: jobErr, report: func(reportCtx context.Context) error {
 		for _, stepID := range dependencies {
 			if pending, ok := pendingStepReports.Load(receiptKey(ctx, "step", stepID)); ok {
 				var err error
@@ -515,7 +568,7 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 		return reportJobRunStatus(reportCtx, grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_IDLE, int32(status), errMsg, start, end, artifacts)
 	}}
 	pendingJobReports.Store(receiptKey(ctx, "job", payload.JobRunID), receipt)
-	return receipt.deliver(ctx, &pendingJobReports, receiptKey(ctx, "job", payload.JobRunID))
+	return deliverJobReceipt(ctx, payload, receipt)
 }
 
 func prepareWorkspace(conf *config.AgentConfig, payload *taskqueue.JobRunTaskPayload) (string, error) {
@@ -599,12 +652,13 @@ func reportJobRunStatus(
 		agentID = agentConf.Agent.ID
 	}
 	req := &agentv1.ReportJobRunStatusRequest{
-		AgentId:      agentID,
-		JobRunId:     jobRunID,
-		Status:       status,
-		ErrorMessage: errMsg,
-		StartTime:    start.Unix(),
-		EndTime:      endUnix,
+		AgentId:              agentID,
+		JobRunId:             jobRunID,
+		Status:               status,
+		ErrorMessage:         errMsg,
+		StartTime:            start.Unix(),
+		EndTime:              endUnix,
+		RuntimeBindingDigest: runtimeBindingFromContext(reportCtx),
 	}
 	if len(artifacts) > 0 && artifacts[0] != nil {
 		files := artifacts[0]
@@ -719,8 +773,11 @@ func retainStepReport(ctx context.Context, stepRunID string, executionErr error,
 // executionReceipt 保留终态上报以避免队列重试重复执行 Shell
 // 使用相同执行认领身份先持久化终态，再尝试投递
 type executionReceipt struct {
-	executionErr error
-	report       func(context.Context) error
+	runtimeCompletionRequired bool
+	runtimeBinding            string
+	jobClaim                  string
+	executionErr              error
+	report                    func(context.Context) error
 }
 
 func (r *executionReceipt) deliver(ctx context.Context, pending *sync.Map, key string) error {
@@ -772,8 +829,21 @@ func ValidateExecutionConfig(conf *config.AgentConfig) error {
 	if conf == nil {
 		return fmt.Errorf("agent configuration is required")
 	}
-	if strings.ToLower(strings.TrimSpace(conf.Agent.Mode)) != "baremetal" || conf.Agent.Sandbox.Enable {
-		return fmt.Errorf("this agent supports only explicit agent.mode=baremetal with agent.sandbox.enable=false; sandbox execution is not implemented")
+	mode := strings.ToLower(strings.TrimSpace(conf.Agent.Mode))
+	if mode == "sandbox" && conf.Agent.Sandbox.Enable {
+		if conf.Agent.Sandbox.Runtime != "containerd" {
+			return fmt.Errorf("sandbox runtime must be containerd")
+		}
+		if err := conf.Agent.Sandbox.Containerd.Policy.ValidateProduction(); err != nil {
+			return err
+		}
+		if !conf.Agent.Sandbox.Containerd.Policy.Enabled {
+			return fmt.Errorf("offline containerd runtime policy is disabled")
+		}
+	} else if mode != "baremetal" || conf.Agent.Sandbox.Enable {
+		return fmt.Errorf("agent mode must explicitly select trusted baremetal or an accepted offline containerd profile")
+	} else if conf.Agent.Sandbox.Containerd.Policy.Enabled {
+		return fmt.Errorf("baremetal cannot enable a containerd runtime policy")
 	}
 	if len(conf.Agent.DeniedCommands) > 0 || len(conf.Agent.ResourceLimits) > 0 {
 		return fmt.Errorf("baremetal executor cannot enforce deniedCommands or resourceLimits; use a dedicated trusted host and remove unsupported restrictions explicitly")

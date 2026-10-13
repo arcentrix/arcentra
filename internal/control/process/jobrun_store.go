@@ -22,6 +22,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/pkg/sourceprovenance"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 
 // IJobRunStore abstracts DB operations needed by the execution process
@@ -133,4 +134,15 @@ func (s *JobRunStore) CaptureSourceExpectation(ctx context.Context, pipelineID, 
 		return fmt.Errorf("atomic job source capture unavailable")
 	}
 	return writer.CaptureSourceExpectation(ctx, pipelineID, runID, jobID, agentID, binding)
+}
+
+// CaptureRuntimeExpectation 原子保存作业运行时与源请求，缺少专用持久化能力时关闭派发
+func (s *JobRunStore) CaptureRuntimeExpectation(ctx context.Context, pipelineID, runID, jobID, agentID string, binding *sourceprovenance.Binding, runtime *taskqueue.RuntimeRequest) error {
+	writer, ok := s.jobRunRepo.(interface {
+		CaptureRuntimeExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest) error
+	})
+	if !ok {
+		return fmt.Errorf("atomic runtime capture unavailable")
+	}
+	return writer.CaptureRuntimeExpectation(ctx, pipelineID, runID, jobID, agentID, binding, runtime)
 }

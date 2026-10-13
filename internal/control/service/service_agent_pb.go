@@ -52,25 +52,29 @@ func NewAgentServiceImpl(agentService *AgentService, storageRepo repo.IStorageRe
 }
 
 func (a *AgentServiceImpl) Heartbeat(ctx context.Context, req *agentv1.HeartbeatRequest) (*agentv1.HeartbeatResponse, error) {
-	if strings.TrimSpace(req.AgentId) != "" && a.agentService != nil && a.agentService.agentRepo != nil {
-		updates := map[string]any{
-			"status":         int(req.Status),
-			"metrics":        fmt.Sprintf(`{"runningStepRunsCount":%d}`, req.RunningStepRunsCount),
-			"updated_at":     time.Now(),
-			"last_heartbeat": time.Now(),
-		}
-		if err := a.agentService.agentRepo.Patch(ctx, strings.TrimSpace(req.AgentId), updates); err != nil {
-			log.Warnw("failed to update agent from heartbeat", "agentID", req.AgentId, "error", err)
-		}
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "heartbeat request is required")
 	}
-
-	resp := &agentv1.HeartbeatResponse{
-		Success:   true,
-		Message:   "pong",
-		Timestamp: time.Now().Unix(),
+	agentID, err := authenticatedAgent(ctx, req.AgentId)
+	if err != nil {
+		return nil, err
 	}
-
-	return resp, nil
+	if a.agentService == nil || a.agentService.agentRepo == nil {
+		return nil, status.Error(codes.Unavailable, "agent repository unavailable")
+	}
+	agent, err := a.agentService.agentRepo.Get(ctx, agentID)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "load agent failed")
+	}
+	if agent == nil || agent.AgentID != agentID || agent.IsEnabled != 1 {
+		return nil, status.Error(codes.PermissionDenied, "enabled agent required")
+	}
+	now := time.Now()
+	updates := map[string]any{"status": int(req.Status), "metrics": fmt.Sprintf(`{"runningStepRunsCount":%d}`, req.RunningStepRunsCount), "updated_at": now, "last_heartbeat": now, "runtime_capabilities": string(agentRuntimeCapabilities(req.RuntimeCapabilities, agent.OS))}
+	if err := a.agentService.agentRepo.Patch(ctx, agentID, updates); err != nil {
+		return nil, status.Error(codes.Internal, "persist agent heartbeat failed")
+	}
+	return &agentv1.HeartbeatResponse{Success: true, Message: "pong", Timestamp: now.Unix()}, nil
 }
 
 func (a *AgentServiceImpl) Register(ctx context.Context, req *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
@@ -115,15 +119,16 @@ func (a *AgentServiceImpl) dynamicRegister(ctx context.Context, req *agentv1.Reg
 	}
 
 	agent := &model.Agent{
-		AgentID:   agentID,
-		AgentName: agentName,
-		Address:   req.Ip,
-		OS:        req.Os,
-		Arch:      req.Arch,
-		Version:   req.Version,
-		Status:    1, // online
-		Labels:    []byte(labelsJSON),
-		Metrics:   "/metrics",
+		AgentID:             agentID,
+		AgentName:           agentName,
+		Address:             req.Ip,
+		OS:                  req.Os,
+		Arch:                req.Arch,
+		Version:             req.Version,
+		Status:              1, // online
+		Labels:              []byte(labelsJSON),
+		Metrics:             "/metrics",
+		RuntimeCapabilities: agentRuntimeCapabilities(req.RuntimeCapabilities, req.Os),
 	}
 
 	if err := a.agentService.DynamicRegisterAgent(ctx, agentID, agentName, agent); err != nil {
@@ -240,6 +245,11 @@ func (a *AgentServiceImpl) legacyRegister(ctx context.Context, req *agentv1.Regi
 			updates["labels"] = string(encoded)
 		}
 	}
+	reportedOS := registered.OS
+	if req.Os != "" {
+		reportedOS = req.Os
+	}
+	updates["runtime_capabilities"] = string(agentRuntimeCapabilities(req.RuntimeCapabilities, reportedOS))
 	updates["status"] = 1
 	updates["last_heartbeat"] = time.Now()
 
@@ -365,11 +375,12 @@ func (a *AgentServiceImpl) FetchStepRun(ctx context.Context, req *agentv1.FetchS
 		maxRuns = 1
 	}
 	filter := repo.StepRunFilter{
-		AgentID:  agentID,
-		Page:     1,
-		PageSize: maxRuns,
-		SortBy:   "created_at",
-		SortDesc: false,
+		ExcludeRuntime: true,
+		AgentID:        agentID,
+		Page:           1,
+		PageSize:       maxRuns,
+		SortBy:         "created_at",
+		SortDesc:       false,
 	}
 	stepRuns, _, err := a.agentService.stepRunRepo.List(ctx, filter)
 	if err != nil {
@@ -424,6 +435,9 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 	}
 	claimID, alreadyClaimed, err := reportClaim(ctx, entity.Status, int(req.Status), entity.ClaimID)
 	if err != nil {
+		return nil, err
+	}
+	if err := a.validateRuntimeStepReport(ctx, entity, claimID, int(req.Status)); err != nil {
 		return nil, err
 	}
 	if alreadyClaimed {
@@ -521,6 +535,9 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 	}
 	if entity.AgentID != agentID {
 		return nil, status.Error(codes.PermissionDenied, "job run belongs to another agent")
+	}
+	if err := validateJobRuntimeReport(entity, req.RuntimeBindingDigest); err != nil {
+		return nil, err
 	}
 	claimID, alreadyClaimed, err := reportClaim(ctx, entity.Status, int(req.Status), entity.ClaimID)
 	if err != nil {

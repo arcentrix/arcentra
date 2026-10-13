@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"strings"
 	"sync"
 	"syscall"
@@ -43,7 +44,7 @@ type fakeBackend struct {
 	cleanupErr error
 }
 
-func (b *fakeBackend) create(ctx context.Context, id, _ string, options []oci.SpecOpts, labels map[string]string) (runtimeContainer, error) {
+func (b *fakeBackend) create(ctx context.Context, id, _ string, options []oci.SpecOpts, labels map[string]string, _ bool) (runtimeContainer, error) {
 	if b.createHook != nil {
 		b.createHook()
 	}
@@ -57,11 +58,24 @@ func (b *fakeBackend) create(ctx context.Context, id, _ string, options []oci.Sp
 	if labels["io.arcentra.sandbox"] != "true" {
 		return nil, fmt.Errorf("missing ownership label")
 	}
-	container := &fakeContainer{base: spec, removeErr: b.cleanupErr, task: &fakeTask{fakeProcess: newFakeProcess(false), pid: 1234}}
+	container := &fakeContainer{labels: maps.Clone(labels), base: spec, removeErr: b.cleanupErr, task: &fakeTask{fakeProcess: newFakeProcess(false), pid: 1234}}
 	b.mu.Lock()
 	b.containers[id] = container
 	b.mu.Unlock()
 	return container, b.createErr
+}
+func (b *fakeBackend) snapshotter(context.Context) (string, error) { return "fake", nil }
+func (b *fakeBackend) inspectOwned(ctx context.Context, ref ResourceRef) (runtimeContainer, ResourceState, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	c, ok := b.containers[ref.ID]
+	if !ok || c.removed > 0 {
+		return &fakeContainer{}, ResourceState{}, nil
+	}
+	if err := verifyOwnership(c.labels, ref); err != nil {
+		return nil, ResourceState{}, err
+	}
+	return c, ResourceState{ContainerExists: true, SnapshotExists: true, TaskExists: c.newTasks > 0 && c.task.deleted == 0}, nil
 }
 func (b *fakeBackend) close() error { b.mu.Lock(); defer b.mu.Unlock(); b.closed++; return nil }
 func (b *fakeBackend) lookup(id string) *fakeContainer {
@@ -71,6 +85,7 @@ func (b *fakeBackend) lookup(id string) *fakeContainer {
 }
 
 type fakeContainer struct {
+	labels     map[string]string
 	base       *specs.Spec
 	task       *fakeTask
 	removeErr  error
@@ -222,15 +237,37 @@ func (p *fakeProcess) Status(ctx context.Context) (containerd.Status, error) {
 
 type fakeTask struct {
 	*fakeProcess
-	pid        uint32
-	process    *fakeProcess
-	execSpec   *specs.Process
-	execErr    error
-	signals    []syscall.Signal
-	ignoreTerm bool
-	killAll    bool
+	pid                uint32
+	process            *fakeProcess
+	execSpec           *specs.Process
+	execErr            error
+	signals            []syscall.Signal
+	ignoreTerm         bool
+	killAll            bool
+	background         int
+	keepChildrenOnTerm bool
+	stubbornChildren   bool
+	pidsErr            error
 }
 
+func (t *fakeTask) Pids(ctx context.Context) ([]containerd.ProcessInfo, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if t.pidsErr != nil {
+		return nil, t.pidsErr
+	}
+	var pids []containerd.ProcessInfo
+	if t.status != containerd.Stopped && t.deleted == 0 {
+		pids = append(pids, containerd.ProcessInfo{Pid: t.pid})
+	}
+	for i := 0; i < t.background; i++ {
+		pids = append(pids, containerd.ProcessInfo{Pid: uint32(9000 + i)})
+	}
+	return pids, nil
+}
 func (t *fakeTask) Pid() uint32 { return t.pid }
 func (t *fakeTask) Delete(ctx context.Context, opts ...containerd.ProcessDeleteOpts) (*containerd.ExitStatus, error) {
 	t.mu.Lock()
@@ -265,6 +302,9 @@ func (t *fakeTask) Kill(ctx context.Context, signal syscall.Signal, opts ...cont
 	t.mu.Lock()
 	t.signals = append(t.signals, signal)
 	t.killAll = info.All
+	if info.All && !t.stubbornChildren && (signal == syscall.SIGKILL || !t.keepChildrenOnTerm) {
+		t.background = 0
+	}
 	ignored := t.ignoreTerm && signal == syscall.SIGTERM
 	t.mu.Unlock()
 	if ignored {

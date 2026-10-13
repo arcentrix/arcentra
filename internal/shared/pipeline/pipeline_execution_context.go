@@ -82,6 +82,10 @@ type ExecutionContext struct {
 
 	// SelectAgent 根据作业选择可用 Agent
 	SelectAgent func(context.Context, *spec.Job) (string, error)
+	// Runtime 保存已验证的不可变运行时快照，不从步骤参数派生
+	Runtime *taskqueue.RuntimeRequest
+	// RuntimePolicy 保存操作者策略快照，默认禁用
+	RuntimePolicy taskqueue.OfflineRuntimePolicy
 	// CancelJob 通知远程 Agent 停止作业
 	CancelJob func(context.Context, string, string, string) error
 	// StepRunIDs 保存当前作业的步骤执行标识
@@ -365,6 +369,11 @@ func (c *ExecutionContext) SendNotification(_ context.Context, item *spec.Notify
 func (c *ExecutionContext) ForJob() *ExecutionContext {
 	child := *c
 	child.Env = maps.Clone(c.Env)
+	child.RuntimePolicy = c.RuntimePolicy.Clone()
+	if c.Runtime != nil {
+		runtime := *c.Runtime
+		child.Runtime = &runtime
+	}
 	child.StepRunIDs = make(map[string]string)
 	child.StepAttemptIDs = make(map[string][]string)
 	return &child

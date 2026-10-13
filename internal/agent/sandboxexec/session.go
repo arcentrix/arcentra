@@ -1,7 +1,7 @@
 // Copyright 2026 Arcentra Authors.
 // Licensed under the Apache License, Version 2.0.
 
-// Package sandboxexec 提供未接入生产 Agent 的离线作业会话与 Shell 适配器
+// Package sandboxexec 提供显式启用的离线作业持久会话与 Shell 适配器
 package sandboxexec
 
 import (
@@ -36,18 +36,22 @@ type Backend interface {
 
 // Options 定义可信宿主配置，不得从流水线参数直接填充根目录或镜像策略
 // WorkspaceRoot 必须已存在且禁止非所有者写入，作业仅获得新建子目录的挂载
-// User 为空时使用 Agent 的数字 UID:GID，不改变宿主文件所有权
+// 持久会话要求显式非零 UID:GID，旧版 NewSession 才允许空值继承 Agent UID:GID
+// 不改变宿主文件所有权，运行模式及实际 UID 绑定由可信生产配置验证
 type Options struct {
-	WorkspaceRoot string
-	JobRunID      string
-	Image         string
-	Resources     *sandbox.Resources
-	User          string
+	WorkspaceRoot        string
+	JobRunID             string
+	PipelineRunID        string
+	ExecutionClaimID     string
+	RuntimeBindingDigest string
+	Image                string
+	Resources            *sandbox.Resources
+	User                 string
 }
 
 // Session 持有一个容器和专属工作目录，步骤串行执行且不会回退到宿主执行器
 // Close 成功会删除工作目录，调用方必须先完成可信制品上传
-// 本类型不提供崩溃恢复，也不构成不可信多租户代码的安全保证
+// 通过 Controller 分配的会话提供持久化恢复，但不构成不可信多租户代码的安全保证
 type Session struct {
 	backend                                           Backend
 	root                                              *os.Root
@@ -57,9 +61,15 @@ type Session struct {
 	mu                                                sync.Mutex
 	activeCancel                                      context.CancelFunc
 	closing, ready, removed, cleaned                  bool
+	sealed                                            bool
+	controller                                        *Controller
+	recordID                                          string
+	createOptions                                     *sandbox.CreateOptions
+	resourceRef                                       sandbox.ResourceRef
 }
 
-// NewSession 分配新工作目录并创建启动离线容器，不修改 Agent 的生产执行配置
+// NewSession 兼容旧版离线测试并立即启动容器，不提供崩溃恢复
+// 生产候选路径必须使用 OpenController、Allocate、Start 的持久化生命周期
 // 若失败时返回非空会话，清理尚未成功，调用方必须保留会话并重试 Close
 func NewSession(ctx context.Context, backend Backend, opts Options) (*Session, error) {
 	if err := ctx.Err(); err != nil {
@@ -196,6 +206,9 @@ func (s *Session) release() { <-s.gate }
 // Close 取消当前步骤，先移除容器再删除工作目录，失败后可重复调用
 // 清理使用保留上下文值但独立于调用方取消的 30 秒期限
 func (s *Session) Close(ctx context.Context) error {
+	if s.controller != nil {
+		return s.closeDurable(ctx)
+	}
 	s.mu.Lock()
 	s.closing = true
 	if s.activeCancel != nil {

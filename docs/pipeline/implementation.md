@@ -2,6 +2,15 @@
 
 This document describes the implemented execution path, its verification, and its remaining limits. Older inventory/decision documents describe earlier repository layouts; the active control-plane path is `Process → Coordinator → DAG Executor → TaskFramework`.
 
+## Verified baseline and current work
+
+V10 passed the designated hosted CI jobs on both merged main commits, verified on 2026-10-13:
+
+- Backend `6c24bd389d76fe749ad07a8e23fc049d6cd46c93`: [run 38393872734](https://github.com/arcentrix/arcentra/actions/runs/38393872734), including Go quality, two fresh-schema real MySQL/Kafka/S3/Agent runs, Redis registration/login, and the actual-backend Chromium journey.
+- Frontend `e7906be0e9909de26dea2467744420c197d27237`: [run 38393804004](https://github.com/arcentrix/arcentra-web/actions/runs/38393804004), including frontend quality and Chromium with simulated API transport. The backend job uses its separately pinned frontend acceptance client; these two browser checks are not interchangeable.
+
+That evidence covers the trusted baremetal baseline, not the new offline-containerd wiring under development. The new runtime remains disabled behind a hard acceptance gate. No real containerd acceptance, release-image validation, production deployment, live Kubernetes release or external model call is established by V10. See [real-stack acceptance](../real-stack-acceptance.md) and [the sandbox integration boundary](../sandbox-agent-integration.md).
+
 ## Implemented workflow
 
 - Create a project and pipeline, validate/save a definition, trigger a run, inspect jobs/steps/logs, cancel, and trigger a fresh rerun from the web application.
@@ -14,12 +23,12 @@ This document describes the implemented execution path, its verification, and it
 - Logs are persisted through a repository, de-duplicated on Kafka replay, and retained when writes fail. HTTP and WebSocket readers share the same aggregator.
 - Local artifacts/reports are isolated by run and job, preserve nested paths, support globs, and reject traversal/symlinks. File replacement is atomic and cancellation-aware.
 - Project SCM credentials are restricted to the project’s configured repository; credential-bearing overrides to other origins or repositories are rejected.
-- Requested pipeline runtime images, resource constraints, or isolation configuration are rejected rather than ignored; runtime environment variables are applied explicitly.
+- The default production path rejects unsupported runtime images, resources and isolation configuration rather than ignoring them; runtime environment variables are applied explicitly. The in-development `containerd-offline-v1` request, policy, scheduling and worker plumbing remains behind a disabled acceptance gate.
 - Project responses omit SCM credentials and webhook secrets. Missing authorization infrastructure fails closed.
 
 ## Build from a clean checkout
 
-Requirements: Go 1.25.6 or compatible, a C compiler (SQLite/librdkafka use CGO), Git, and a POSIX shell. Code generation requires access to the Buf registry. Put `$(go env GOPATH)/bin` on PATH.
+Requirements: Go 1.25.6 or compatible, a C compiler (SQLite/librdkafka use CGO), Git, and a POSIX shell. Buf, Wire and the official Go protobuf plugins are version-pinned in the Makefile. Generation uses local plugins from `api/buf.gen.yaml`; it does not send schemas to a remote Buf generation service. Installing the pinned tools and Go modules requires the corresponding dependency downloads unless already cached. Put `$(go env GOPATH)/bin` on PATH.
 
 ```sh
 make codegen
@@ -28,7 +37,7 @@ make build TARGET=arcentra-agent
 make build-target TARGET=cli
 ```
 
-`make build` generates protobuf before Wire. The source Dockerfile now performs generation and builds both processes plus the CLI. Both runtime images include Git and a shell. Build toolchains required by your jobs (Node, Go, Java, etc.) must be added to your own agent image or installed on its dedicated host.
+Generated `api/**/*.pb.go` files are committed so a clean checkout can resolve dependencies before generation; `make buf-check` checks them against the pinned generators. `make build` generates protobuf before Wire. The source Dockerfile now performs generation and builds both processes plus the CLI. Both runtime images include Git and a shell. Build toolchains required by your jobs (Node, Go, Java, etc.) must be added to your own agent image or installed on its dedicated host.
 
 Container commands, for a machine with Docker:
 
@@ -37,7 +46,7 @@ docker build --target arcentra -t arcentra:local .
 docker build --target arcentra-agent -t arcentra-agent:local .
 ```
 
-These image builds were not run in the implementation environment because Docker/containerd were unavailable.
+The V10 hosted acceptance built and launched the application binaries with disposable containerized dependencies. It did not validate these Arcentra release images or their production deployment; a successful binary build is not release-image acceptance.
 
 ## Explicit schema initialization
 
@@ -47,7 +56,7 @@ Prepare a private configuration with the correct database DSN. Back up an existi
 ./cli migrate --conf /private/path/config.toml
 ```
 
-This is opt-in. Normal server startup does not migrate the database. The command creates/updates model tables and idempotently seeds built-in permissions, roles, bindings, and menus. It does not create users, grant a user administrator access, or overwrite existing role/menu customizations. For a new installation, register an account, then an operator with database access can explicitly select it with `./cli bootstrap-admin --conf /private/path/config.toml --username <registered-user>`. This command refuses to run once an enabled platform-super-admin grant exists. No administrator is granted automatically. After this explicit bootstrap, restart every control-plane instance to reload its authorization policy, then sign in again. Existing installations use their existing authorized role-management workflow. Schema tests use a disposable SQLite database; production MySQL migration compatibility still requires staging validation.
+This is opt-in. Normal server startup does not migrate the database. The command creates/updates model tables and idempotently seeds built-in permissions, roles, bindings, and menus. It does not create users, grant a user administrator access, or overwrite existing role/menu customizations. For a new installation, register an account, then an operator with database access can explicitly select it with `./cli bootstrap-admin --conf /private/path/config.toml --username <registered-user>`. This command refuses to run once an enabled platform-super-admin grant exists. No administrator is granted automatically. After this explicit bootstrap, restart every control-plane instance to reload its authorization policy, then sign in again. Existing installations use their existing authorized role-management workflow. Fast schema tests use disposable SQLite, and V10 hosted acceptance successfully migrated and used fresh disposable MySQL schemas. Representative existing-data upgrades, production locking, backup/restore and deployment-specific compatibility still require staging validation.
 
 ## Agent trust boundary
 
@@ -55,9 +64,13 @@ The implemented worker supports **explicit trusted-code baremetal execution**. A
 
 `conf.d/agent.baremetal.example.toml` is an explicit example. Copy it to a private file and configure the control plane, Kafka, and registration token. Never commit live tokens or passwords.
 
-The older `conf.d/agent.toml` requests sandbox mode. That mode now fails closed instead of silently executing commands on the host. Requested sandbox, container/Docker, command-denial, or resource-limit enforcement is rejected when unsupported. Containerd/Kubernetes sandbox integration is a remaining feature, not a verified capability.
+The older `conf.d/agent.toml` requests sandbox mode and still fails closed instead of silently executing commands on the host. Requested Docker, Kubernetes runtime, command-denial or other unsupported enforcement is rejected.
 
-The tested worker processes one job at a time per agent. Do not interpret `maxConcurrentJobs` as verified multi-job scheduling capacity. Use multiple agents for parallel jobs.
+The current branch adds offline-containerd plumbing, but `OfflineRuntimeAccepted = false` is a hard production gate; setting the operator policy's `enabled` flag cannot bypass it. Its bounded profile is trusted code, exactly one Agent job, an allowlisted digest-pinned image, explicit CPU/memory limits and an explicit non-root UID:GID matching the Agent. The container has no egress and receives neither a host runtime socket nor wider host paths. Trusted host source checkout/artifact-download staging precedes shell execution in one session; all container processes must be sealed before trusted host artifact uploads and cleanup. Automatic retries, HTTP/native/deploy steps, standalone step tasks and host-path overrides are rejected for this profile. Existing baremetal retries are unchanged.
+
+Durable exact-owner runtime journaling and restart cleanup are part of that in-development wiring. They do not resume or rerun interrupted commands. Startup requires authenticated, read-only confirmation of the original job/claim/runtime binding's terminal state before acknowledging a recovered journal record. Operators must precreate separate private persistent runtime journal/workspace roots; the runtime controller does not repair permissions or ownership. These are implementation contracts awaiting tests and actual host acceptance, not a claim of verified container isolation. See [sandbox integration](../sandbox-agent-integration.md).
+
+The worker processes one job at a time per Agent. `maxConcurrentJobs` accepts 1 or 0 (the default of 1); negative values and values above 1 are rejected. Use multiple Agents for parallel jobs. Runtime-capability/readiness plumbing does not establish multi-job admission or HA fencing.
 
 ## Verification commands
 
@@ -66,30 +79,34 @@ go test -race -count=1 ./...
 go vet ./...
 ```
 
-Important integration tests run real shell commands and real SQLite persistence. Agent integration uses authenticated loopback gRPC. Queue tests use librdkafka's mock Kafka cluster; this exercises Kafka wire/client routing and cancellation but is not validation of an external production broker, TLS/SASL, rebalance, or cluster failure behavior.
+Fast integration tests run real shell commands and SQLite persistence with authenticated loopback gRPC; mock-Kafka tests exercise wire/client routing and cancellation. Separately, V10 hosted acceptance ran the production Control → real Kafka → Agent shell → verified TLS gRPC → MySQL path twice in independent schemas with S3-compatible storage and Kafka logs. Each run lost committed step and job acknowledgments, required unchanged durable replay bytes/claims/digests, and verified commands were not repeated. This is disposable service acceptance, not validation of production broker TLS/SASL, rebalance, HA or infrastructure failure behavior.
 
 Frontend (sibling `arcentra-web`):
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm typecheck
 pnpm test:run
 pnpm build
 pnpm lint
+pnpm format:check
 pnpm test:ui
 ```
 
-The Playwright smoke script uses explicit local API fixtures. Chromium could not start in the implementation sandbox because Unix socket creation was denied, so no successful browser/screenshot QA is claimed.
+`pnpm test:ui` uses real Chromium with explicit simulated API fixtures. V10 also passed a separate actual-backend Chromium journey on a standard hosted runner: fresh install/migration, HTTP registration, explicit administrator bootstrap, login, TLS Agent enrollment/approval and same-identity restart, project/pipeline creation, Git definition review, shell execution, persisted logs and checkout evidence, byte-verified artifact download, refresh and re-login. Mobile controls and real downloads were exercised at 390/320/1440px, with screenshots reviewed. The local implementation sandbox's socket restriction was not bypassed; successful browser evidence comes from the linked hosted runs.
+
+The commands above are instructions, not a passing result for the current offline-containerd changes. That branch requires its own final-code regression results and separate authorized runtime acceptance.
 
 ## Remaining limits
 
-- No production or staging deployment was performed. MySQL, external Kafka, real object storage, and container images need environment-specific integration validation.
-- Sandbox execution/resource isolation is unsupported and rejected. Trusted baremetal is the supported path in this change.
-- Control and Agent jobs support the same explicit live-attempt retry policy: `failed_step` or `whole_job`, 2–5 attempts, idempotent opt-in, and an allowlist of real shell exit codes. Each attempt has an immutable StepRun identity. Manual reruns create a fresh pipeline run; post-terminal step resume is unavailable. See [retry semantics](retries.md).
-- Agent jobs with an implicit deployment target are rejected; use an explicit deployment step on the agent. Local target plugins use the existing `deploy` contract and fail when unavailable.
+- Disposable hosted MySQL/Kafka/Redis/S3-compatible service and browser acceptance passed for V10. Production/staging infrastructure, existing-data upgrades, private Git authentication, release images, load and HA still need environment-specific validation.
+- Trusted baremetal remains the available execution path. Offline-containerd plumbing is under development and hard-disabled pending actual runtime acceptance; Kubernetes is not an Agent execution runtime.
+- Ordinary controller-local and baremetal Agent jobs support the same explicit live-attempt retry policy: `failed_step` or `whole_job`, 2–5 attempts, idempotent opt-in, and an allowlist of real shell exit codes. Each attempt has an immutable StepRun identity. Manual reruns create a fresh pipeline run; post-terminal step resume is unavailable. See [retry semantics](retries.md). The offline-containerd profile rejects automatic retries.
+- Agent jobs with implicit deployment targets are rejected. The separate, default-disabled [controller-only Kubernetes release job](kubernetes-jobs.md) and [durable deployment approval](durable-deployment-approvals.md) flows have bounded implementation/test coverage, but no live cluster rollout was validated by V10. Offline-containerd jobs reject deployment steps and targets; there is no container-to-host deployment fallback.
 - Automatic takeover/resumption after agent/control-plane process loss still needs execution-attempt leases and fencing. Explicit offline reconciliation is available below; completed-replay protection is present, but exactly-once execution across crashes is not promised.
 - Gateway CloudEvents now persist transactionally before acknowledgment, and WAL restart preserves committed sequence numbers. Legacy Gateway PushLogs returns an explicit unsupported error; live build logs use Kafka.
-- Agent terminal-report retry receipts are in memory. Process loss before durable acknowledgment can leave a running record that needs operator reconciliation.
-- Local artifacts are filesystem artifacts, not remote download URLs. Remote agent artifact steps support streaming transfers and downstream opaque-key references. Provider SDK behavior is tested with local fake transports; actual object-storage credentials/providers still require configured integration tests.
+- Agent terminal reports use a durable, fsynced, claim-bound outbox, with exact-byte replay and verified-conflict quarantine. Recovery requires the same surviving disk and original Agent/controller identity. A crash before a receipt is durably saved can still leave an unknown execution result requiring reconciliation; report replay never reruns the command. See [terminal reports](../agent-terminal-reports.md) and [identity persistence](../agent-identity-persistence.md).
+- Remote Agent artifact steps support streaming transfers and downstream opaque-key references; authorized artifact APIs provide downloads. V10 verified upload/download bytes against a real disposable S3-compatible service, including the browser download path. Other provider SDKs, real credentials, retention and production storage need their own configured validation; controller-local filesystem artifacts are not automatically remote object URLs.
 - Delay-queue scheduling outside the immediate pipeline path has not been comprehensively validated under broker/process failure.
 - The frontend work covers the requested project/pipeline/build/agent integration. Other product areas that were already prototypes are not certified complete by this change.
 
@@ -111,7 +128,7 @@ Before applying recovery:
 
 Use `--all-active` instead of `--run-id` only when deliberately recovering every active run. The default is dry-run. Applying requires the operator's explicit `--executors-stopped` assertion, preserves already-terminal records, and marks pending/running/paused runs plus active jobs/steps failed. It does not execute jobs, roll back deployments, or publish cancellation claims that external work actually stopped.
 
-Restart services after reconciliation, inspect results, and trigger a fresh manual run if appropriate. Automatic orphan discovery across controllers requires controller/Agent leases and fencing that the current in-memory execution design does not provide; automatic startup mutation is intentionally absent.
+Restart services after reconciliation, inspect results, and trigger a fresh manual run if appropriate. Automatic execution takeover across controllers requires controller/Agent leases and fencing that the current design does not provide. The in-development sandbox journal is narrower: it can clean only its exact recorded runtime resources on restart, then query authoritative terminal state. It does not automatically change interrupted run status, discover arbitrary orphan resources or execute work again.
 
 ## Durable build logs
 
@@ -125,6 +142,6 @@ Normal shutdown stops work before closing the spool. Confirmed records are delet
 
 Kafka remains a trusted infrastructure boundary: restrict broker access and topic ACLs to authorized control/Agent services, use TLS/SASL in deployment, and do not expose the sample PLAINTEXT development broker publicly. A stable log ID provides retry deduplication, not cryptographic sender authentication.
 
-Compose examples now bind separate control/Agent data directories. Kubernetes examples deliberately do not choose a storage class/PVC; they require an operator-provided per-instance persistent volume at `/var/lib/arcentra` before relying on recovery across Pod replacement. Container images/manifests were not deployed or runtime-tested here.
+Compose examples now bind separate control/Agent data directories. Kubernetes examples deliberately do not choose a storage class/PVC; they require an operator-provided per-instance persistent volume at `/var/lib/arcentra` before relying on recovery across Pod replacement. V10 tested disposable dependency containers, not these release images/manifests or production volume durability.
 
 Tests exercise subprocess exit/reopen and injected fsync failures on temporary local storage. They do not verify power-loss persistence or the permanence of this assistant cloud filesystem. These guarantees require working fsync semantics and the same surviving disk. They do not protect against disk destruction, manually deleting the spool, misconfigured Kafka retention/replication, or sharing a spool between hosts. There is no transparent execution resumption: only log delivery is replayed. Spool corruption or a changed limit smaller than the retained backlog prevents startup and requires an operator to preserve and investigate the files, not silently delete them.

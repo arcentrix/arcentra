@@ -70,10 +70,28 @@ func (s *Session) Execute(ctx context.Context, req *executor.ExecutionRequest) (
 	s.mu.Unlock()
 	defer func() { cancel(); s.mu.Lock(); s.activeCancel = nil; s.mu.Unlock() }()
 	if err := s.verifyWorkspace(); err != nil {
+		if s.controller != nil {
+			err = s.stopOwnedOnFailure(ctx, err)
+		}
 		s.mu.Lock()
 		s.closing = true
 		s.mu.Unlock()
 		return fail(err)
+	}
+	if s.controller != nil {
+		record, err := s.durableRecord(runCtx)
+		if err != nil {
+			return fail(s.stopOwnedOnFailure(ctx, err))
+		}
+		if record.Phase != phaseRunning && record.Phase != phaseExecuting {
+			return fail(fmt.Errorf("sandbox journal is not executable"))
+		}
+		if _, err := s.controller.verifyRecordWorkspace(record, false); err != nil {
+			return fail(s.stopOwnedOnFailure(ctx, err))
+		}
+		if err := s.advance(runCtx, phaseExecuting); err != nil {
+			return fail(s.stopOwnedOnFailure(ctx, err))
+		}
 	}
 	opts := &sandbox.ExecuteOptions{WorkingDir: containerWorkspace, Env: maps.Clone(req.Env), User: s.user}
 	if req.Options != nil {
@@ -101,6 +119,9 @@ func (s *Session) Execute(ctx context.Context, req *executor.ExecutionRequest) (
 		err = fmt.Errorf("sandbox backend returned no execution result")
 	}
 	if err != nil {
+		if s.controller != nil {
+			err = s.stopOwnedOnFailure(ctx, err)
+		}
 		s.mu.Lock()
 		s.closing = true
 		s.mu.Unlock()

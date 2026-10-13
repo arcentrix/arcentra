@@ -41,6 +41,7 @@ var agentUnaryMethods = map[string]bool{
 	"/agent.v1.AgentService/FetchStepRun":        true,
 	"/agent.v1.AgentService/ReportStepRunStatus": true,
 	"/agent.v1.AgentService/ReportJobRunStatus":  true,
+	"/agent.v1.AgentService/InspectJobExecution": true,
 }
 var agentStreamMethods = map[string]bool{
 	"/gateway.v1.GatewayService/PushLogs":   true,
