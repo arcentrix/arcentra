@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -173,5 +174,51 @@ func TestSourceProvenanceMigrationDoesNotInventHistoricalCheckout(t *testing.T) 
 	}
 	if got.Status != 4 || got.ClaimID != "original" || got.TerminalReportDigest != old.TerminalReportDigest {
 		t.Fatal("migration changed historical receipt")
+	}
+}
+
+func TestMenuSeedsUseValidJSONAndPreserveExistingMetadata(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, _ := db.DB()
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	ctx := context.Background()
+	if err := MigrateSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var menus []model.Menu
+	if err := db.Find(&menus).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(menus) == 0 {
+		t.Fatal("no menu seeds")
+	}
+	for _, menu := range menus {
+		if !json.Valid([]byte(menu.Meta)) || menu.Meta != "{}" {
+			t.Fatalf("menu %s has invalid initial metadata %q", menu.MenuID, menu.Meta)
+		}
+	}
+	original := ` {"custom":{"visible":true},"items":[1,2]} `
+	if err := db.Model(&model.Menu{}).Where("menu_id = ?", menus[0].MenuID).Update("meta_json", original).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateSchema(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var existing model.Menu
+	if err := db.Where("menu_id = ?", menus[0].MenuID).First(&existing).Error; err != nil {
+		t.Fatal(err)
+	}
+	if existing.Meta != original {
+		t.Fatalf("migration overwrote user metadata: %q", existing.Meta)
+	}
+	var invalid int64
+	if err := db.Model(&model.Menu{}).Where("NOT json_valid(meta_json)").Count(&invalid).Error; err != nil {
+		t.Fatal(err)
+	}
+	if invalid != 0 {
+		t.Fatalf("%d menu seeds contain invalid JSON", invalid)
 	}
 }

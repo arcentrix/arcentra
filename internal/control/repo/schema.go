@@ -95,7 +95,7 @@ func seedAuthorization(ctx context.Context, db *gorm.DB) error {
 			if seed.IsEnabled {
 				enabled = 1
 			}
-			value := model.Menu{MenuID: seed.MenuID, ParentID: seed.ParentID, Name: seed.Name, Title: seed.Title, Path: seed.Path, Component: seed.Component, Icon: seed.Icon, Order: seed.Order, ScopeType: string(seed.ScopeType), PermissionID: seed.PermissionID, Description: seed.Description, IsVisible: visible, IsEnabled: enabled}
+			value := model.Menu{Meta: "{}", MenuID: seed.MenuID, ParentID: seed.ParentID, Name: seed.Name, Title: seed.Title, Path: seed.Path, Component: seed.Component, Icon: seed.Icon, Order: seed.Order, ScopeType: string(seed.ScopeType), PermissionID: seed.PermissionID, Description: seed.Description, IsVisible: visible, IsEnabled: enabled}
 			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&value).Error; err != nil {
 				return err
 			}

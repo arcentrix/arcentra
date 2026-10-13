@@ -54,6 +54,22 @@ func (s *StepRunServiceImpl) CreateStepRun(
 	if strings.Trim(stepRunID, "-") == "" {
 		stepRunID = id.ShortID()
 	}
+	args, err := marshalStepRunStruct(req.Args)
+	if err != nil {
+		return &steprunv1.CreateStepRunResponse{Success: false, Message: "encode step run args failed"}, nil
+	}
+	env, err := marshalStepRunMap(req.Env)
+	if err != nil {
+		return &steprunv1.CreateStepRunResponse{Success: false, Message: "encode step run env failed"}, nil
+	}
+	secrets, err := marshalStepRunMap(req.Secrets)
+	if err != nil {
+		return &steprunv1.CreateStepRunResponse{Success: false, Message: "encode step run secrets failed"}, nil
+	}
+	selector, err := marshalStepRunSelector(req.AgentSelector)
+	if err != nil {
+		return &steprunv1.CreateStepRunResponse{Success: false, Message: "encode step run agent selector failed"}, nil
+	}
 	entity := &model.StepRun{
 		StepRunID:       stepRunID,
 		Name:            strings.TrimSpace(req.StepName),
@@ -64,19 +80,19 @@ func (s *StepRunServiceImpl) CreateStepRun(
 		Status:          int(steprunv1.StepRunStatus_STEP_RUN_STATUS_PENDING),
 		Uses:            strings.TrimSpace(req.Uses),
 		Action:          strings.TrimSpace(req.Action),
-		Args:            mustJSONStruct(req.Args),
+		Args:            args,
 		Workspace:       strings.TrimSpace(req.Workspace),
-		Env:             mustJSON(req.Env),
-		Secrets:         mustJSON(req.Secrets),
+		Env:             env,
+		Secrets:         secrets,
 		Timeout:         strings.TrimSpace(req.Timeout),
 		ContinueOnError: boolToInt(req.ContinueOnError),
 		When:            strings.TrimSpace(req.When),
-		LabelSelector:   mustJSONSelector(req.AgentSelector),
+		LabelSelector:   selector,
 		CreatedBy:       "system",
 	}
 	if err := s.stepRunRepo.Create(ctx, entity); err != nil {
-		log.Errorw("create step run failed", "stepRunID", stepRunID, "error", err)
-		return &steprunv1.CreateStepRunResponse{Success: false, Message: fmt.Sprintf("create step run failed: %v", err)}, nil
+		log.Errorw("create step run failed", "stepRunID", stepRunID)
+		return &steprunv1.CreateStepRunResponse{Success: false, Message: "create step run failed"}, nil
 	}
 	return &steprunv1.CreateStepRunResponse{Success: true, Message: "created", StepRunId: stepRunID}, nil
 }
@@ -91,7 +107,7 @@ func (s *StepRunServiceImpl) GetStepRun(ctx context.Context, req *steprunv1.GetS
 	}
 	entity, err := s.stepRunRepo.GetByStepRunID(ctx, stepRunID)
 	if err != nil {
-		return &steprunv1.GetStepRunResponse{Success: false, Message: fmt.Sprintf("query step run failed: %v", err)}, nil
+		return &steprunv1.GetStepRunResponse{Success: false, Message: "query step run failed"}, nil
 	}
 	if entity == nil {
 		return &steprunv1.GetStepRunResponse{Success: false, Message: "step run not found"}, nil
@@ -124,7 +140,7 @@ func (s *StepRunServiceImpl) ListStepRuns(
 	}
 	stepRuns, total, err := s.stepRunRepo.List(ctx, filter)
 	if err != nil {
-		return &steprunv1.ListStepRunsResponse{Success: false, Message: fmt.Sprintf("list step runs failed: %v", err)}, nil
+		return &steprunv1.ListStepRunsResponse{Success: false, Message: "list step runs failed"}, nil
 	}
 	respRuns := make([]*steprunv1.StepRunDetail, 0, len(stepRuns))
 	for i := range stepRuns {
@@ -161,7 +177,11 @@ func (s *StepRunServiceImpl) UpdateStepRun(
 	}
 	updates := map[string]any{}
 	if req.Env != nil {
-		updates["env"] = mustJSON(req.Env)
+		env, err := marshalStepRunMap(req.Env)
+		if err != nil {
+			return &steprunv1.UpdateStepRunResponse{Success: false, Message: "encode step run env failed"}, nil
+		}
+		updates["env"] = env
 	}
 	if strings.TrimSpace(req.Timeout) != "" {
 		updates["timeout"] = strings.TrimSpace(req.Timeout)
@@ -170,7 +190,7 @@ func (s *StepRunServiceImpl) UpdateStepRun(
 		return &steprunv1.UpdateStepRunResponse{Success: true, Message: "no changes"}, nil
 	}
 	if err := s.stepRunRepo.PatchByStepRunID(ctx, stepRunID, updates); err != nil {
-		return &steprunv1.UpdateStepRunResponse{Success: false, Message: fmt.Sprintf("update step run failed: %v", err)}, nil
+		return &steprunv1.UpdateStepRunResponse{Success: false, Message: "update step run failed"}, nil
 	}
 	return &steprunv1.UpdateStepRunResponse{Success: true, Message: "updated"}, nil
 }
@@ -284,7 +304,9 @@ func convertStepRunModel(item *model.StepRun) *steprunv1.StepRunDetail {
 		CreatedAt:       item.CreatedAt.UnixMilli(),
 		Duration:        item.Duration,
 		CreatedBy:       item.CreatedBy,
-		Metrics:         parseJSONStringMap(item.Secrets),
+		// Metrics has no persisted source. Execution secrets are write-only
+		// for management responses and must never be repurposed as metrics.
+		Metrics: nil,
 	}
 	if item.ExitCode != nil {
 		detail.ExitCode = int32(*item.ExitCode)
@@ -305,37 +327,25 @@ func boolToInt(value bool) int {
 	return 0
 }
 
-func mustJSONStruct(data *structpb.Struct) string {
+func marshalStepRunStruct(data *structpb.Struct) (string, error) {
 	if data == nil {
-		return ""
+		return "{}", nil
 	}
-	encoded, err := sonic.Marshal(data.AsMap())
-	if err != nil {
-		return ""
-	}
-	return string(encoded)
+	return sonic.MarshalString(data.AsMap())
 }
 
-func mustJSON(data map[string]string) string {
+func marshalStepRunMap(data map[string]string) (string, error) {
 	if len(data) == 0 {
-		return ""
+		return "{}", nil
 	}
-	encoded, err := sonic.Marshal(data)
-	if err != nil {
-		return ""
-	}
-	return string(encoded)
+	return sonic.MarshalString(data)
 }
 
-func mustJSONSelector(selector *steprunv1.AgentSelector) string {
+func marshalStepRunSelector(selector *steprunv1.AgentSelector) (string, error) {
 	if selector == nil {
-		return ""
+		return "{}", nil
 	}
-	encoded, err := sonic.Marshal(selector)
-	if err != nil {
-		return ""
-	}
-	return string(encoded)
+	return sonic.MarshalString(selector)
 }
 
 func parseJSONStringMap(raw string) map[string]string {

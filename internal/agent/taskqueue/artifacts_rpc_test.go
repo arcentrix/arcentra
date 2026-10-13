@@ -156,11 +156,17 @@ func TestRemoteArtifactRPCIdentityOwnershipAndAtomicPersistence(t *testing.T) {
 	}
 	jobs, steps := repo.NewJobRunRepo(workerTestDatabase{db}), repo.NewStepRunRepo(workerTestDatabase{db})
 	const agentID = "security-agent"
+	initialJobs := map[string]*model.JobRun{}
 	createJob := func(id string) {
 		t.Helper()
 		if err := jobs.Create(ctx, &model.JobRun{JobRunID: id, PipelineID: "security-pipeline", PipelineRunID: "security-run", AgentID: agentID, Status: 2}); err != nil {
 			t.Fatal(err)
 		}
+		initial, err := jobs.GetByJobRunID(ctx, id)
+		if err != nil || initial == nil {
+			t.Fatalf("read created job: %v", err)
+		}
+		initialJobs[id] = initial
 		if err := steps.Create(ctx, &model.StepRun{StepRunID: id + "-step", JobRunID: id, PipelineID: "security-pipeline", PipelineRunID: "security-run", AgentID: agentID, Status: 4}); err != nil {
 			t.Fatal(err)
 		}
@@ -204,10 +210,10 @@ func TestRemoteArtifactRPCIdentityOwnershipAndAtomicPersistence(t *testing.T) {
 		key := fmt.Sprintf("artifacts/security-run/%s/%s-step/%s/output.txt", id, id, digest)
 		return &agentv1.ReportJobRunStatusRequest{AgentId: agentID, JobRunId: id, Status: 4, ArtifactStorageId: ref.StorageID, ArtifactStorageFingerprint: ref.Fingerprint, ArtifactUris: map[string]string{"output.txt": key}, Artifacts: []*agentv1.ArtifactResult{{StepRunId: id + "-step", Name: "output.txt", StorageKey: key, Size: 7, MediaType: "application/octet-stream", Sha256: digest, ExpiresAt: 1900000000}}}
 	}
-	assertUnchanged := func(id string) {
+	assertUnchanged := func(t *testing.T, id string) {
 		t.Helper()
 		stored, err := jobs.GetByJobRunID(ctx, id)
-		if err != nil || stored.Status != 3 || stored.ArtifactURIs != "" {
+		if err != nil || stored == nil || stored.Status != 3 || stored.ArtifactURIs != initialJobs[id].ArtifactURIs || stored.ArtifactReferences != initialJobs[id].ArtifactReferences || stored.TerminalReportDigest != initialJobs[id].TerminalReportDigest {
 			t.Fatalf("failed metadata changed job: %+v %v", stored, err)
 		}
 		var count int64
@@ -250,7 +256,7 @@ func TestRemoteArtifactRPCIdentityOwnershipAndAtomicPersistence(t *testing.T) {
 			if err := call(req); status.Code(err) != test.code {
 				t.Fatalf("unexpected report result: %v", err)
 			}
-			assertUnchanged(id)
+			assertUnchanged(t, id)
 		})
 	}
 	t.Run("changed_config_rejects_claim", func(t *testing.T) {
@@ -284,7 +290,7 @@ func TestRemoteArtifactRPCIdentityOwnershipAndAtomicPersistence(t *testing.T) {
 		if err := call(req); status.Code(err) != codes.Internal {
 			t.Fatalf("write failure was acknowledged: %v", err)
 		}
-		assertUnchanged(id)
+		assertUnchanged(t, id)
 		if err := db.Callback().Create().Remove(callbackName); err != nil {
 			t.Fatal(err)
 		}
@@ -326,7 +332,7 @@ func TestRemoteArtifactRPCIdentityOwnershipAndAtomicPersistence(t *testing.T) {
 			t.Fatal(err)
 		}
 		stored, _ := jobs.GetByJobRunID(ctx, id)
-		if stored.Status != 4 || stored.ArtifactReferences != "" || stored.ArtifactStorageID != "" {
+		if stored.Status != 4 || stored.ArtifactReferences != initialJobs[id].ArtifactReferences || stored.ArtifactStorageID != "" {
 			t.Fatalf("legacy artifact guessed location: %+v", stored)
 		}
 		var count int64

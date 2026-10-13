@@ -11,6 +11,11 @@ import (
 
 // PatchStatusIfCurrent 防止迟到或并发状态报告覆盖步骤终态
 func (r *StepRunRepo) PatchStatusIfCurrent(ctx context.Context, runID string, current int, updates map[string]any) error {
+	var err error
+	updates, err = normalizeJSONUpdates(updates, stepRunJSONDefaults)
+	if err != nil {
+		return err
+	}
 	updates["updated_at"] = time.Now()
 	result := r.Database().WithContext(ctx).Model(&model.StepRun{}).
 		Where("step_run_id = ? AND status = ?", runID, current).Updates(updates)
@@ -25,6 +30,11 @@ func (r *StepRunRepo) PatchStatusIfCurrent(ctx context.Context, runID string, cu
 
 // PatchStatusIfCurrent 防止迟到或并发状态报告覆盖作业终态
 func (r *JobRunRepo) PatchStatusIfCurrent(ctx context.Context, runID string, current int, updates map[string]any) error {
+	var err error
+	updates, err = normalizeJSONUpdates(updates, jobRunJSONDefaults)
+	if err != nil {
+		return err
+	}
 	if err := rejectSourceUpdates(updates); err != nil {
 		return err
 	}
@@ -45,6 +55,11 @@ func (r *JobRunRepo) PatchStatusIfCurrent(ctx context.Context, runID string, cur
 
 // PatchReportedStatus 原子校验步骤归属与原执行认领后提交状态和终态回执
 func (r *StepRunRepo) PatchReportedStatus(ctx context.Context, expected *model.StepRun, updates map[string]any) error {
+	var err error
+	updates, err = normalizeJSONUpdates(updates, stepRunJSONDefaults)
+	if err != nil {
+		return err
+	}
 	if expected == nil || expected.Status < 1 || expected.Status > 3 {
 		return fmt.Errorf("active step snapshot is required")
 	}
@@ -65,6 +80,11 @@ func (r *StepRunRepo) PatchReportedStatus(ctx context.Context, expected *model.S
 
 // PatchReportedStatus 原子校验作业归属与原执行认领后提交状态和终态回执
 func (r *JobRunRepo) PatchReportedStatus(ctx context.Context, expected *model.JobRun, updates map[string]any) error {
+	var err error
+	updates, err = normalizeJSONUpdates(updates, jobRunJSONDefaults)
+	if err != nil {
+		return err
+	}
 	if expected != nil {
 		if err := validateJobReportIdentityUpdates(expected, updates); err != nil {
 			return err
