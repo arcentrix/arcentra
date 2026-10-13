@@ -93,7 +93,9 @@ func (f adminFixture) request(t *testing.T, user, method, path, body string) (in
 	if user != "" {
 		r.Header.Set("Authorization", "Bearer "+f.tokens[user])
 	}
-	res, err := f.app.Test(r)
+	// Race-instrumented bcrypt can exceed Fiber's default one-second test budget
+	// on a shared CI runner; keep a bounded wait without changing password cost.
+	res, err := f.app.Test(r, 10_000)
 	require.NoError(t, err)
 	defer res.Body.Close()
 	raw, err := io.ReadAll(res.Body)
