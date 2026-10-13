@@ -1,0 +1,64 @@
+# Disposable CI acceptance dependencies only. No production data or credentials.
+# Host ports are loopback-only; each workflow run uses a unique Compose project.
+services:
+  mysql:
+    image: mysql:8.0.40
+    environment:
+      MYSQL_ROOT_PASSWORD: ci-only-mysql-password
+      MYSQL_DATABASE: arcentra_acceptance
+    ports: ["127.0.0.1:13306:3306"]
+    tmpfs: [/var/lib/mysql]
+    mem_limit: 768m
+    healthcheck:
+      test: [CMD, mysqladmin, ping, -h, 127.0.0.1, -pci-only-mysql-password]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:8.0.3
+    command: [redis-server, --save, "", --appendonly, "no"]
+    ports: ["127.0.0.1:16379:6379"]
+    mem_limit: 128m
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  kafka:
+    image: apache/kafka:3.9.1
+    ports: ["127.0.0.1:19092:19092"]
+    mem_limit: 1g
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: BROKER://:9092,CONTROLLER://:9093,HOST://:19092
+      KAFKA_ADVERTISED_LISTENERS: BROKER://kafka:9092,HOST://127.0.0.1:19092
+      KAFKA_INTER_BROKER_LISTENER_NAME: BROKER
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,BROKER:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    healthcheck:
+      test: [CMD-SHELL, "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 8s
+      retries: 20
+  minio:
+    # Built only from the pinned official source in CI; never pull a fallback.
+    image: arcentra-ci-minio:9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+    pull_policy: never
+    read_only: true
+    command: [server, /data, --address, ':9000', --console-address, ':9001', --certs-dir, /tmp/certs]
+    environment:
+      MINIO_UPDATE: "off"
+      MINIO_ROOT_USER: ci-only-s3-user
+      MINIO_ROOT_PASSWORD: ci-only-s3-password
+    ports: ["127.0.0.1:19000:9000"]
+    tmpfs: ["/data:uid=65532,gid=65532,mode=0700", "/tmp:uid=65532,gid=65532,mode=0700"]
+    mem_limit: 512m

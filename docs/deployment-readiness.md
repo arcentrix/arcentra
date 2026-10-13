@@ -27,6 +27,14 @@ Agent configuration continues to use `grpc.tls.enabled`, `caFile` and `serverNam
 
 Legacy plaintext is retained only for a trusted internal transport boundary. It does not enable verified-conflict quarantine or durable enrollment. An existing verified TLS proxy is also supported; its backend path must be private/trusted and cannot be exposed as an alternate unauthenticated public transport. Browser/API HTTP needs its own approved HTTPS termination; gRPC TLS does not encrypt HTTP. Reflection is disabled by default.
 
+## Task queue transport and existing configuration upgrades
+
+The outer Kafka task envelope is the existing Nova JSON `TaskMessage`, including its unchanged task payload bytes. Control and Agent support `taskQueue.messageFormat` and `taskQueue.messageCodec` values `json` or `sonic` only; Sonic is a JSON implementation and both values are wire-compatible. Omitted values default to Sonic. An explicit nonempty `messageCodec` selects the implementation, but both configured fields must be supported. Case and surrounding whitespace are normalized. This does not alter gRPC protobuf APIs or introduce a protobuf task protocol.
+
+Before upgrading an existing installation, replace historical `protobuf` or `blob` values in both Control and Agent configuration with `sonic` (or `json`). Both application startup paths now reject incompatible/unknown values with the exact configuration field and supported alternatives, before connecting to application dependencies. Update both processes' reviewed files and restart explicitly. Existing valid JSON messages require no payload rewrite or broker purge; retain queued work and journals. Do not delete pending messages as an upgrade step.
+
+When Kafka is configured, producer/worker initialization errors are propagated; Control never silently falls back to local execution. Only absent `messageQueue.kafka.bootstrapServers` retains the existing no-Kafka mode. Successful initialization is not a broker reachability/readiness guarantee: Kafka connects asynchronously, so actual enqueue/consume acceptance is still required.
+
 ## Packaging and configuration checklist
 
 - Pin reviewed image versions/digests. The existing release workflow publishes under GHCR, whereas historical Compose/Kubernetes examples name Docker Hub images. Verify the actual image destination and architecture before use; no image was published by this change.

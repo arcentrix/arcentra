@@ -63,7 +63,7 @@ func approvalHTTP(t *testing.T, app *fiber.App, user, method, path, body string)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	res, err := app.Test(req)
+	res, err := app.Test(req, routerTestTimeoutMillis)
 	require.NoError(t, err)
 	defer res.Body.Close()
 	require.Contains(t, res.Header.Get("Cache-Control"), "no-store")

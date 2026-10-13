@@ -15,19 +15,22 @@
 package router
 
 import (
+	"errors"
+	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
 
 // settingRouter registers setting routes.
 func (rt *Router) settingRouter(r fiber.Router, auth fiber.Handler) {
-	settingsGroup := r.Group("/settings")
+	settingsGroup := r.Group("/settings", sensitiveHTTPStatus, auth, rt.liveSensitiveUser(), rt.platformAccess(consts.PermOrgUpdate))
 	{
-		settingsGroup.Get("/", auth, rt.listSettings)          // GET /settings - list every setting
-		settingsGroup.Get("/:name", auth, rt.getSetting)       // GET /settings/:name - get a single setting
-		settingsGroup.Put("/:name", auth, rt.upsertSetting)    // PUT /settings/:name - create or update a setting
-		settingsGroup.Delete("/:name", auth, rt.deleteSetting) // DELETE /settings/:name - delete a setting
+		settingsGroup.Get("/", rt.listSettings)                                                      // GET /settings - list every setting
+		settingsGroup.Get("/:name", rt.getSetting)                                                   // GET /settings/:name - get a single setting
+		settingsGroup.Put("/:name", rt.upsertSetting)                                                // PUT /settings/:name - create or update a setting
+		settingsGroup.Delete("/:name", rt.platformAccess(consts.PermSecretDelete), rt.deleteSetting) // DELETE /settings/:name - delete a setting
 	}
 }
 
@@ -38,7 +41,13 @@ func (rt *Router) listSettings(c *fiber.Ctx) error {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	return http.Detail(c, settings)
+	views := make([]settingView, 0, len(settings))
+	for _, item := range settings {
+		if item != nil {
+			views = append(views, publicSetting(item))
+		}
+	}
+	return http.Detail(c, views)
 }
 
 // getSetting returns a single setting by workspace and name.
@@ -54,7 +63,7 @@ func (rt *Router) getSetting(c *fiber.Ctx) error {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	return http.Detail(c, setting)
+	return http.Detail(c, publicSetting(setting))
 }
 
 // upsertSetting creates or updates a setting.
@@ -70,11 +79,33 @@ func (rt *Router) upsertSetting(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
+	if setting.Name != "" && setting.Name != name {
+		return sensitiveError(c, 400, "setting name must match the path")
+	}
+	setting.Name = name
+	existing, err := rt.Services.Repos().Setting.Get(c.UserContext(), name)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return sensitiveError(c, 503, "configuration is unavailable")
+	}
+	var previous []byte
+	if existing != nil && err == nil {
+		previous = existing.Value
+	}
+	merged, secretInput, err := mergeConfigSecrets(previous, setting.Value, secretField(name))
+	if err != nil {
+		return sensitiveError(c, 400, err.Error())
+	}
+	if secretInput {
+		if err := rt.requirePlatform(c, consts.PermSecretWrite); err != nil || c.Response().StatusCode() != 200 {
+			return err
+		}
+	}
+	setting.Value = merged
 	if err := rt.Services.Setting.UpsertSetting(c.Context(), &setting); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	return http.Detail(c, setting)
+	return http.Detail(c, publicSetting(&setting))
 }
 
 // deleteSetting removes a setting by name.

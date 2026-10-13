@@ -15,24 +15,25 @@
 package router
 
 import (
+	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/gofiber/fiber/v2"
 )
 
 func (rt *Router) userExtRouter(r fiber.Router, auth fiber.Handler) {
-	userExtGroup := r.Group("/users/:userID/ext", auth)
+	userExtGroup := r.Group("/users/:userID/ext", sensitiveHTTPStatus, auth, rt.liveSensitiveUser())
 	{
-		userExtGroup.Get("/", rt.getUserExt)                       // GET /users/:userID/ext - get user ext info
-		userExtGroup.Put("/", rt.updateUserExt)                    // PUT /users/:userID/ext - update user ext info
-		userExtGroup.Put("/timezone", rt.updateTimezone)           // PUT /users/:userID/ext/timezone - update timezone
-		userExtGroup.Put("/invitation", rt.updateInvitationStatus) // PUT /users/:userID/ext/invitation - update invitation status
+		userExtGroup.Get("/", rt.selfOrUserAdmin(), rt.getUserExt)                                                // GET /users/:userID/ext - get user ext info
+		userExtGroup.Put("/", rt.platformAccess(consts.PermOrgManageMember), rt.updateUserExt)                    // PUT /users/:userID/ext - update user ext info
+		userExtGroup.Put("/timezone", rt.selfOrUserAdmin(), rt.updateTimezone)                                    // PUT /users/:userID/ext/timezone - update timezone
+		userExtGroup.Put("/invitation", rt.platformAccess(consts.PermOrgManageMember), rt.updateInvitationStatus) // PUT /users/:userID/ext/invitation - update invitation status
 	}
 }
 
 // getUserExt gets user ext information
 func (rt *Router) getUserExt(c *fiber.Ctx) error {
-	userID := c.Params("userID")
+	userID := sensitiveTargetUserID(c)
 	if userID == "" {
 		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
@@ -49,7 +50,7 @@ func (rt *Router) getUserExt(c *fiber.Ctx) error {
 
 // updateUserExt updates user ext information
 func (rt *Router) updateUserExt(c *fiber.Ctx) error {
-	userID := c.Params("userID")
+	userID := sensitiveTargetUserID(c)
 	if userID == "" {
 		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
@@ -59,6 +60,7 @@ func (rt *Router) updateUserExt(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "invalid request parameters")
 	}
 
+	ext.UserID = userID
 	userExtService := rt.Services.UserExt
 
 	if err := userExtService.UpdateUserExt(c.Context(), userID, &ext); err != nil {
@@ -70,7 +72,7 @@ func (rt *Router) updateUserExt(c *fiber.Ctx) error {
 
 // updateTimezone updates user timezone
 func (rt *Router) updateTimezone(c *fiber.Ctx) error {
-	userID := c.Params("userID")
+	userID := sensitiveTargetUserID(c)
 	if userID == "" {
 		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
@@ -99,7 +101,7 @@ func (rt *Router) updateTimezone(c *fiber.Ctx) error {
 
 // updateInvitationStatus updates invitation status
 func (rt *Router) updateInvitationStatus(c *fiber.Ctx) error {
-	userID := c.Params("userID")
+	userID := sensitiveTargetUserID(c)
 	if userID == "" {
 		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}

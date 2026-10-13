@@ -67,11 +67,22 @@ func NewPipelineRepo(db database.IDatabase) IPipelineRepository {
 
 // Create creates a pipeline.
 func (r *PipelineRepo) Create(ctx context.Context, pipeline *model.Pipeline) error {
+	if pipeline == nil {
+		return gorm.ErrInvalidData
+	}
+	if err := normalizeJSONFields(map[string]*string{"metadata": &pipeline.Metadata}, pipelineJSONDefaults); err != nil {
+		return err
+	}
 	return r.Database().WithContext(ctx).Create(pipeline).Error
 }
 
 // Update updates a pipeline by pipelineID.
 func (r *PipelineRepo) Update(ctx context.Context, pipelineID string, updates map[string]any) error {
+	var err error
+	updates, err = normalizeJSONUpdates(updates, pipelineJSONDefaults)
+	if err != nil {
+		return err
+	}
 	return r.Database().WithContext(ctx).
 		Model(&model.Pipeline{}).
 		Where("pipeline_id = ?", pipelineID).
@@ -133,6 +144,12 @@ func (r *PipelineRepo) List(ctx context.Context, query *PipelineQuery) ([]*model
 
 // CreateRun creates a pipeline run.
 func (r *PipelineRepo) CreateRun(ctx context.Context, run *model.PipelineRun) error {
+	if run == nil {
+		return gorm.ErrInvalidData
+	}
+	if err := normalizeJSONFields(map[string]*string{"env": &run.Env}, pipelineRunJSONDefaults); err != nil {
+		return err
+	}
 	return r.Database().WithContext(ctx).Create(run).Error
 }
 
@@ -149,6 +166,11 @@ func (r *PipelineRepo) GetRun(ctx context.Context, runID string) (*model.Pipelin
 
 // UpdateRun updates a pipeline run by runID.
 func (r *PipelineRepo) UpdateRun(ctx context.Context, runID string, updates map[string]any) error {
+	var err error
+	updates, err = normalizeJSONUpdates(updates, pipelineRunJSONDefaults)
+	if err != nil {
+		return err
+	}
 	return r.Database().WithContext(ctx).
 		Model(&model.PipelineRun{}).
 		Where("run_id = ?", runID).
@@ -231,6 +253,11 @@ func (r *PipelineRepo) RecordRunResult(ctx context.Context, pipelineID string, s
 
 // UpdateRunIfStatus 仅当当前状态匹配时推进运行状态，防止暂停操作覆盖终态
 func (r *PipelineRepo) UpdateRunIfStatus(ctx context.Context, runID string, status int, updates map[string]any) error {
+	var err error
+	updates, err = normalizeJSONUpdates(updates, pipelineRunJSONDefaults)
+	if err != nil {
+		return err
+	}
 	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var run model.PipelineRun
 		if err := tx.Select("pipeline_id").Where("run_id = ?", runID).First(&run).Error; err != nil {

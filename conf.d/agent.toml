@@ -237,7 +237,7 @@ autoCommit = false
 sessionTimeout = 30000
 # MaxPollInterval: kafka max poll interval in milliseconds
 maxPollInterval = 300000
-# MessageFormat: json, sonic, blob, protobuf
-messageFormat = "protobuf"
-# MessageCodec: optional custom codec name (defaults to MessageFormat)
-messageCodec = "protobuf"
+# Task envelopes support json or sonic (JSON-compatible); default: sonic
+messageFormat = "sonic"
+# Optional codec override: json or sonic; both fields are validated
+messageCodec = "sonic"

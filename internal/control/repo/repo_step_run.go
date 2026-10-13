@@ -63,6 +63,9 @@ func (r *StepRunRepo) Create(ctx context.Context, stepRun *model.StepRun) error 
 	if stepRun == nil {
 		return gorm.ErrInvalidData
 	}
+	if err := normalizeJSONFields(map[string]*string{"retry_policy": &stepRun.RetryPolicy, "args": &stepRun.Args, "env": &stepRun.Env, "secrets": &stepRun.Secrets, "label_selector": &stepRun.LabelSelector}, stepRunJSONDefaults); err != nil {
+		return err
+	}
 	return r.Database().WithContext(ctx).Table(stepRun.TableName()).Create(stepRun).Error
 }
 
@@ -166,6 +169,11 @@ func applyStepRunFilters(query *gorm.DB, filter StepRunFilter) *gorm.DB {
 
 // PatchByStepRunID patches step run by stepRunID.
 func (r *StepRunRepo) PatchByStepRunID(ctx context.Context, stepRunID string, updates map[string]any) error {
+	var err error
+	updates, err = normalizeJSONUpdates(updates, stepRunJSONDefaults)
+	if err != nil {
+		return err
+	}
 	if len(updates) == 0 {
 		return nil
 	}

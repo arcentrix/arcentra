@@ -22,6 +22,7 @@ import (
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/internal/agent/config"
+	controlconfig "github.com/arcentrix/arcentra/internal/control/config"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/process"
 	"github.com/arcentrix/arcentra/internal/control/repo"
@@ -102,11 +103,27 @@ type controllerWorkerReceipt struct {
 type controllerWorkerFixtureOptions struct {
 	serverTLS *tls.Config
 	clientTLS agentgrpc.ClientTLSConfig
+	backend   *controllerWorkerBackend
+}
+
+// controllerWorkerBackend 让 opt-in 验收复用同一执行路径，外部依赖必须完整提供
+// 零值保持现有快速集成测试的 SQLite/MockCluster/内存对象存储
+// 接口仅用于测试夹具注入，生产实现不因此改变
+type controllerWorkerBackend struct {
+	db             *gorm.DB
+	brokers        string
+	prepareTopics  func(*testing.T, context.Context, string)
+	store          storage.IStorage
+	storageConfig  *model.StorageConfig
+	reference      taskpayload.ArtifactReference
+	logPublisher   executor.LogPublisher
+	authentication func(*testing.T, context.Context, *repo.Repositories, string) (string, grpc.UnaryServerInterceptor)
 }
 
 type controllerWorkerFixture struct {
 	t                   *testing.T
 	ctx                 context.Context
+	waitTimeout         time.Duration
 	db                  *gorm.DB
 	client              *agentgrpc.ClientWrapper
 	producer            nova.TaskQueue
@@ -135,22 +152,45 @@ type controllerWorkerFixture struct {
 // 仅创建 Project、Pipeline、Agent 和 Storage，所有 JobRun/StepRun 必须由 Submit 创建
 func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...controllerWorkerFixtureOptions) *controllerWorkerFixture {
 	t.Helper()
+	var fixtureOptions controllerWorkerFixtureOptions
+	if len(options) > 0 {
+		fixtureOptions = options[0]
+	}
+	backend := fixtureOptions.backend
 	if testing.Short() {
+		if backend != nil {
+			t.Fatal("real-stack acceptance cannot run with -short")
+		}
 		t.Skip("controller/Agent Kafka wire-protocol integration test")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	timeout, waitTimeout := 45*time.Second, 25*time.Second
+	if backend != nil {
+		if backend.db == nil || backend.brokers == "" || backend.prepareTopics == nil || backend.store == nil || backend.storageConfig == nil || backend.reference.StorageID == "" || backend.reference.Fingerprint == "" || backend.logPublisher == nil || backend.authentication == nil || fixtureOptions.serverTLS == nil || !fixtureOptions.clientTLS.Enabled {
+			t.Fatal("real-stack fixture requires every real dependency and authenticated TLS; no mock fallback")
+		}
+		timeout, waitTimeout = 3*time.Minute, 60*time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	t.Cleanup(cancel)
 	root := t.TempDir()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(root, "controller.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
-	if err != nil {
-		t.Fatal(err)
+	var db *gorm.DB
+	var err error
+	if backend != nil {
+		db = backend.db
+	} else {
+		db, err = gorm.Open(sqlite.Open(filepath.Join(root, "controller.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	sqlDB, err := db.DB()
 	if err != nil {
 		t.Fatal(err)
 	}
-	sqlDB.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = sqlDB.Close() })
+	if backend == nil {
+		sqlDB.SetMaxOpenConns(1)
+		t.Cleanup(func() { _ = sqlDB.Close() })
+	}
 	if err := db.WithContext(ctx).AutoMigrate(&model.Project{}, &model.Pipeline{}, &model.PipelineRun{}, &model.JobRun{}, &model.StepRun{}, &model.StepRunLog{}, &model.ProjectArtifact{}, &model.Agent{}, &model.StorageConfig{}); err != nil {
 		t.Fatal(err)
 	}
@@ -159,12 +199,12 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 		Pipeline: repo.NewPipelineRepo(adapter), JobRun: repo.NewJobRunRepo(adapter), StepRun: repo.NewStepRunRepo(adapter),
 		Log: repo.NewLogRepository(db), Artifact: repo.NewArtifactRepo(adapter), Agent: repo.NewAgentRepo(adapter, nil), Storage: repo.NewStorageRepo(adapter, nil),
 	}
-	f := &controllerWorkerFixture{t: t, ctx: ctx, db: db, tasks: make(map[string]nova.Task), repos: repos, projectID: id.GetUild(), pipelineID: id.GetUild(), receipts: make(map[string][]controllerWorkerReceipt), loseProducerACK: loseProducerACK, store: &controllerWorkerStorage{objects: make(map[string][]byte)}}
+	f := &controllerWorkerFixture{t: t, ctx: ctx, waitTimeout: waitTimeout, db: db, tasks: make(map[string]nova.Task), repos: repos, projectID: id.GetUild(), pipelineID: id.GetUild(), receipts: make(map[string][]controllerWorkerReceipt), loseProducerACK: loseProducerACK}
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(os.TempDir(), "pipelines", f.pipelineID)) })
 	if err := db.WithContext(ctx).Create(&model.Project{ProjectID: f.projectID}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.Pipeline.Create(ctx, &model.Pipeline{PipelineID: f.pipelineID, ProjectID: f.projectID, Name: "controller-agent-roundtrip", IsEnabled: 1}); err != nil {
+	if err := repos.Pipeline.Create(ctx, &model.Pipeline{PipelineID: f.pipelineID, ProjectID: f.projectID, Name: "controller-agent-roundtrip", Metadata: "{}", IsEnabled: 1}); err != nil {
 		t.Fatal(err)
 	}
 	agentID := "roundtrip-" + id.GetUild()
@@ -172,37 +212,61 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 	if err := repos.Agent.Create(ctx, &model.Agent{AgentID: agentID, AgentName: "fixed local test identity", Status: 1, IsEnabled: 1, LastHeartbeat: &now, RegisteredBy: "admin"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repos.Storage.Create(ctx, &model.StorageConfig{StorageID: "rpc-store", StorageType: "s3", IsEnabled: 1, Config: []byte(`{"endpoint":"https://storage.invalid","bucket":"artifacts","region":"test","basePath":"root","useTLS":true}`)}); err != nil {
-		t.Fatal(err)
+	storageConfig := &model.StorageConfig{StorageID: "rpc-store", StorageType: "s3", IsEnabled: 1, Config: []byte(`{"endpoint":"https://storage.invalid","bucket":"artifacts","region":"test","basePath":"root","useTLS":true}`)}
+	if backend == nil {
+		f.store = &controllerWorkerStorage{objects: make(map[string][]byte)}
 	}
-	cluster, err := ckafka.NewMockCluster(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(cluster.Close)
-	for _, prefix := range []string{taskpayload.AgentTopicPrefix(agentID), taskpayload.AgentControlTopicPrefix(agentID)} {
-		for _, suffix := range []string{"_PRIORITY_NORMAL", "_PRIORITY_HIGH", "_PRIORITY_LOW", "_TASKS_DELAY_0"} {
-			if err := cluster.CreateTopic(strings.ToUpper(prefix+suffix), 1, 1); err != nil {
-				t.Fatal(err)
+	var objectStore storage.IStorage = f.store
+	reference := artifactRPCReference()
+	var brokers string
+	authToken := "roundtrip-test-token"
+	var authentication grpc.UnaryServerInterceptor
+	if backend != nil {
+		f.store = nil
+		storageConfig, objectStore, reference = backend.storageConfig, backend.store, backend.reference
+		brokers = backend.brokers
+		backend.prepareTopics(t, ctx, agentID)
+		authToken, authentication = backend.authentication(t, ctx, repos, agentID)
+		if authToken == "" || authentication == nil {
+			t.Fatal("real-stack authentication was not configured")
+		}
+	} else {
+		cluster, err := ckafka.NewMockCluster(1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(cluster.Close)
+		brokers = cluster.BootstrapServers()
+		for _, prefix := range []string{taskpayload.AgentTopicPrefix(agentID), taskpayload.AgentControlTopicPrefix(agentID)} {
+			for _, suffix := range []string{"_PRIORITY_NORMAL", "_PRIORITY_HIGH", "_PRIORITY_LOW", "_TASKS_DELAY_0"} {
+				if err := cluster.CreateTopic(strings.ToUpper(prefix+suffix), 1, 1); err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
+	}
+	if err := repos.Storage.Create(ctx, storageConfig); err != nil {
+		t.Fatal(err)
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var fixtureOptions controllerWorkerFixtureOptions
-	if len(options) > 0 {
-		fixtureOptions = options[0]
-	}
 	serverOptions := []grpc.ServerOption{}
 	if fixtureOptions.serverTLS != nil {
 		serverOptions = append(serverOptions, grpc.Creds(credentials.NewTLS(fixtureOptions.serverTLS)))
 	}
-	serverOptions = append(serverOptions, grpc.UnaryInterceptor(func(ctx context.Context, request any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	interceptors := []grpc.UnaryServerInterceptor{}
+	if authentication != nil {
+		interceptors = append(interceptors, authentication)
+	}
+	interceptors = append(interceptors, func(ctx context.Context, request any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		md, _ := metadata.FromIncomingContext(ctx)
-		if values := md.Get("authorization"); len(values) != 1 || values[0] != "bearer roundtrip-test-token" {
-			return nil, status.Error(codes.Unauthenticated, "fixed test token required")
+		if authentication == nil {
+			if values := md.Get("authorization"); len(values) != 1 || values[0] != "bearer "+authToken {
+				return nil, status.Error(codes.Unauthenticated, "fixed test token required")
+			}
+			ctx = agentidentity.WithIdentity(ctx, agentidentity.Identity{ID: agentID})
 		}
 		var terminalMessage proto.Message
 		switch req := request.(type) {
@@ -234,7 +298,7 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 				hook(ctx)
 			}
 		}
-		response, err := handler(agentidentity.WithIdentity(ctx, agentidentity.Identity{ID: agentID}), request)
+		response, err := handler(ctx, request)
 		if terminalMessage != nil && observeTerminal != nil {
 			observeTerminal(ctx, terminalMessage, response, err)
 		}
@@ -284,34 +348,43 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 			// 服务端已提交事务后才丢弃 ACK；真实工作器负责从持久收据恢复
 			_, stepTerminal := message.(*agentv1.ReportStepRunStatusRequest)
 			if producer && f.loseProducerACK || stepTerminal && f.loseStepTerminalACK {
-				f.loseProducerACK, f.loseStepTerminalACK = false, false
+				if producer {
+					f.loseProducerACK = false
+				} else {
+					f.loseStepTerminalACK = false
+				}
 				f.lostACKs++
 				return nil, status.Error(codes.Unavailable, "committed terminal acknowledgement lost")
 			}
 		}
 		return response, nil
-	}))
+	})
+	serverOptions = append(serverOptions, grpc.ChainUnaryInterceptor(interceptors...))
 	server := grpc.NewServer(serverOptions...)
 	agentv1.RegisterAgentServiceServer(server, controlservice.NewAgentServiceImpl(controlservice.NewAgentService(repos.Agent, repos.StepRun, nil, repos.JobRun), repos.Storage))
 	safe.Go(func() { _ = server.Serve(listener) })
 	t.Cleanup(server.Stop)
-	client, err := agentgrpc.NewGrpcClient(agentgrpc.ClientConf{ServerAddr: listener.Addr().String(), Token: "roundtrip-test-token", ReadWriteTimeout: 2, TLS: fixtureOptions.clientTLS})
+	client, err := agentgrpc.NewGrpcClient(agentgrpc.ClientConf{ServerAddr: listener.Addr().String(), Token: authToken, ReadWriteTimeout: 2, TLS: fixtureOptions.clientTLS})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
 	f.client = client
 	f.conf = &config.AgentConfig{
-		Grpc:         config.GrpcConfig{ServerAddr: listener.Addr().String(), Token: "roundtrip-test-token", TLS: fixtureOptions.clientTLS},
+		Grpc:         config.GrpcConfig{ServerAddr: listener.Addr().String(), Token: authToken, TLS: fixtureOptions.clientTLS},
 		Agent:        config.AgentInfo{ID: agentID, Mode: "baremetal", WorkspaceDir: filepath.Join(root, "agent"), JobTimeout: 30},
-		MessageQueue: config.MqConfig{Kafka: kafkaconfig.Config{BootstrapServers: cluster.BootstrapServers(), SecurityProtocol: "PLAINTEXT"}},
-		TaskQueue:    nova.TaskQueueConfig{DelaySlotCount: 1, DelaySlotDuration: 3600, SessionTimeout: 6000, MaxPollInterval: 120000},
+		MessageQueue: config.MqConfig{Kafka: kafkaconfig.Config{BootstrapServers: brokers, SecurityProtocol: "PLAINTEXT"}},
+		TaskQueue:    nova.TaskQueueConfig{MessageFormat: "json", MessageCodec: "json", DelaySlotCount: 1, DelaySlotDuration: 3600, SessionTimeout: 6000, MaxPollInterval: 120000},
 	}
-	SetStorage(f.store, artifactRPCReference())
+	SetStorage(objectStore, reference)
 	t.Cleanup(func() { SetStorage(nil) })
 	manager := executor.NewExecutorManager()
 	manager.Register(executor.NewShellExecutor())
-	manager.SetLogPublisher(&capturedLogs{})
+	if backend != nil {
+		manager.SetLogPublisher(backend.logPublisher)
+	} else {
+		manager.SetLogPublisher(&capturedLogs{})
+	}
 	queue, err := StartWorker(ctx, f.conf, client, manager)
 	if err != nil {
 		t.Fatal(err)
@@ -322,7 +395,10 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 			t.Error(err)
 		}
 	})
-	producer, err := nova.NewTaskQueue(nova.WithKafka(cluster.BootstrapServers(), nova.WithKafkaAuth("PLAINTEXT", "", "", "")))
+	producer, err := process.ProvideTaskQueueProducer(&controlconfig.AppConfig{
+		MessageQueue: controlconfig.MessageQueueConfig{Kafka: kafkaconfig.Config{BootstrapServers: brokers, SecurityProtocol: "PLAINTEXT"}},
+		TaskQueue:    nova.TaskQueueConfig{MessageFormat: "sonic", MessageCodec: "sonic"},
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +423,7 @@ func (f *controllerWorkerFixture) submit(jobs ...*spec.Job) *model.PipelineRun {
 
 func (f *controllerWorkerFixture) wait(description string, predicate func() bool) {
 	f.t.Helper()
-	deadline := time.NewTimer(25 * time.Second)
+	deadline := time.NewTimer(f.waitTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
@@ -416,11 +492,11 @@ func (f *controllerWorkerFixture) assertReceipt(kind, runID, claim, digest, pipe
 }
 
 func TestControllerWorkerArtifactDAGRoundTrip(t *testing.T) {
-	for _, name := range []string{"success", "committed_job_ack_loss", "committed_step_ack_loss"} {
+	for _, name := range []string{"success", "committed_job_ack_loss", "committed_step_ack_loss", "committed_both_ack_loss"} {
 		t.Run(name, func(t *testing.T) {
-			f := newControllerWorkerFixture(t, name == "committed_job_ack_loss")
+			f := newControllerWorkerFixture(t, name == "committed_job_ack_loss" || name == "committed_both_ack_loss")
 			f.mu.Lock()
-			f.loseStepTerminalACK = name == "committed_step_ack_loss"
+			f.loseStepTerminalACK = name == "committed_step_ack_loss" || name == "committed_both_ack_loss"
 			f.mu.Unlock()
 			run := f.submit(
 				&spec.Job{Name: "build", Steps: []*spec.Step{
@@ -502,18 +578,34 @@ func TestControllerWorkerArtifactDAGRoundTrip(t *testing.T) {
 				t.Errorf("unexpected storage roundtrip: uploads=%d downloads=%d objects=%d", f.store.uploads, f.store.downloads, len(f.store.objects))
 			}
 			f.store.mu.Unlock()
+			// Recheck after drain so every replay is compared with the persisted digest.
+			for _, job := range jobs {
+				f.assertReceipt("job", job.JobRunID, job.ClaimID, job.TerminalReportDigest, run.RunID, job.JobRunID)
+			}
+			for _, step := range steps {
+				f.assertReceipt("step", step.StepRunID, step.ClaimID, step.TerminalReportDigest, run.RunID, step.JobRunID)
+			}
 			f.mu.Lock()
-			if name != "success" {
-				replayed := len(f.receipts["job/"+build.JobRunID]) >= 2
-				if name == "committed_step_ack_loss" {
-					replayed = false
-					for _, step := range steps {
-						replayed = replayed || len(f.receipts["step/"+step.StepRunID]) >= 2
-					}
+			jobReplayed := len(f.receipts["job/"+build.JobRunID]) >= 2
+			stepReplayed := false
+			for _, step := range steps {
+				stepReplayed = stepReplayed || len(f.receipts["step/"+step.StepRunID]) >= 2
+			}
+			wantLost := 0
+			if name == "committed_job_ack_loss" || name == "committed_both_ack_loss" {
+				wantLost++
+				if !jobReplayed {
+					t.Error("committed job ACK loss did not replay")
 				}
-				if f.lostACKs != 1 || !replayed {
-					t.Error("committed ACK loss did not exercise identical terminal replay")
+			}
+			if name == "committed_step_ack_loss" || name == "committed_both_ack_loss" {
+				wantLost++
+				if !stepReplayed {
+					t.Error("committed step ACK loss did not replay")
 				}
+			}
+			if f.lostACKs != wantLost {
+				t.Errorf("lost ACKs=%d want=%d", f.lostACKs, wantLost)
 			}
 			f.mu.Unlock()
 		})

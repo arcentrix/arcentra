@@ -17,6 +17,7 @@ package router
 import (
 	"strconv"
 
+	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/auth"
 	"github.com/arcentrix/arcentra/pkg/http"
@@ -24,11 +25,11 @@ import (
 )
 
 func (rt *Router) registrationTokenRouter(r fiber.Router, authMiddleware fiber.Handler) {
-	group := r.Group("/registration-tokens", authMiddleware)
+	group := r.Group("/registration-tokens", sensitiveHTTPStatus, authMiddleware, rt.liveSensitiveUser())
 	{
-		group.Post("", rt.createRegistrationToken)       // POST /registration-tokens
-		group.Get("", rt.listRegistrationTokens)         // GET /registration-tokens
-		group.Delete("/:id", rt.revokeRegistrationToken) // DELETE /registration-tokens/:id
+		group.Post("", rt.platformAccess(consts.PermAgentRegister), rt.createRegistrationToken)       // POST /registration-tokens
+		group.Get("", rt.platformAccess(consts.PermAgentRead), rt.listRegistrationTokens)             // GET /registration-tokens
+		group.Delete("/:id", rt.platformAccess(consts.PermAgentRegister), rt.revokeRegistrationToken) // DELETE /registration-tokens/:id
 	}
 }
 
@@ -40,7 +41,7 @@ func (rt *Router) createRegistrationToken(c *fiber.Ctx) error {
 	}
 
 	// Auto-populate createdBy from authenticated user
-	if req.CreatedBy == "" {
+	{
 		req.CreatedBy = auth.CurrentUserName(c, rt.HTTP.Auth.SecretKey, func(userID string) string {
 			info, err := rt.Services.User.FetchUserInfo(userID)
 			if err != nil || info == nil {

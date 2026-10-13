@@ -14,7 +14,7 @@ func TestPublicLoginRequiresCredentialsBeforeService(t *testing.T) {
 	for _, body := range []string{`null`, `{}`, `{"username":"root"}`, `{"email":"admin@example.com","password":""}`} {
 		request := httptest.NewRequest("POST", "/login", strings.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
-		response, err := app.Test(request)
+		response, err := app.Test(request, routerTestTimeoutMillis)
 		if err != nil {
 			t.Fatal(err)
 		}

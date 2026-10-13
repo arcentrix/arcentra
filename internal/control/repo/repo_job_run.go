@@ -52,6 +52,9 @@ func (r *JobRunRepo) Create(ctx context.Context, jobRun *model.JobRun) error {
 	if jobRun.SourceExpectationCaptured || jobRun.SourceType != "" || jobRun.SourceRepository != "" || jobRun.SourceRef != "" || jobRun.SourceBindingDigest != "" || jobRun.SourceResolvedCommit != "" || (jobRun.SourceProvenanceState != "" && jobRun.SourceProvenanceState != "unknown") {
 		return gorm.ErrInvalidData
 	}
+	if err := normalizeJSONFields(map[string]*string{"env": &jobRun.Env, "artifact_references": &jobRun.ArtifactReferences, "artifact_uris": &jobRun.ArtifactURIs}, jobRunJSONDefaults); err != nil {
+		return err
+	}
 	return r.Database().WithContext(ctx).Create(jobRun).Error
 }
 
@@ -72,6 +75,11 @@ func (r *JobRunRepo) GetByJobRunID(ctx context.Context, jobRunID string) (*model
 
 // UpdateByJobRunID patches a job run by jobRunID.
 func (r *JobRunRepo) UpdateByJobRunID(ctx context.Context, jobRunID string, updates map[string]any) error {
+	var err error
+	updates, err = normalizeJSONUpdates(updates, jobRunJSONDefaults)
+	if err != nil {
+		return err
+	}
 	if len(updates) == 0 {
 		return nil
 	}

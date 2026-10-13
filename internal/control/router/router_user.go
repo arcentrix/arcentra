@@ -17,6 +17,7 @@ package router
 import (
 	"time"
 
+	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/auth"
 	"github.com/arcentrix/arcentra/pkg/http"
@@ -31,19 +32,20 @@ func (rt *Router) userRouter(r fiber.Router, authMW fiber.Handler) {
 		userGroup.Post("/register", rt.register) // POST /users/register - user registration
 
 		// Session routes (authentication required)
-		userGroup.Post("/logout", authMW, rt.logout)   // POST /users/logout - user logout
-		userGroup.Post("/refresh", authMW, rt.refresh) // POST /users/refresh - refresh token
+		userGroup.Use(sensitiveHTTPStatus, authMW, rt.liveSensitiveUser())
+		userGroup.Post("/logout", rt.logout)   // POST /users/logout - user logout
+		userGroup.Post("/refresh", rt.refresh) // POST /users/refresh - refresh token
 
 		// User resource routes (authentication required)
-		userGroup.Get("/", authMW, rt.getUserList)                   // GET /users - list users with pagination
-		userGroup.Get("/by-role", authMW, rt.getUsersByRole)         // GET /users/by-role - get users by roleID or roleName
-		userGroup.Get("/fetch", authMW, rt.fetchUserInfo)            // GET /users/fetch - get current user info
-		userGroup.Post("/invite", authMW, rt.addUser)                // POST /users/invite - invite user
-		userGroup.Put("/:userID", authMW, rt.updateUser)             // PUT /users/:id - update user info
-		userGroup.Put("/:userID/password", authMW, rt.resetPassword) // PUT /users/:id/password - reset user password
-		userGroup.Post("/fetch/avatar", authMW, rt.uploadAvatar)     // POST /users/me/avatar - upload user avatar
-		// userGroup.Get("/:id", authMW, rt.getUser)          // GET /users/:id - get specific user (to be implemented)
-		// userGroup.Delete("/:id", authMW, rt.deleteUser)    // DELETE /users/:id - delete user (to be implemented)
+		userGroup.Get("/", rt.platformAccess(consts.PermOrgManageMember), rt.getUserList)           // GET /users - list users with pagination
+		userGroup.Get("/by-role", rt.platformAccess(consts.PermOrgManageMember), rt.getUsersByRole) // GET /users/by-role - get users by roleID or roleName
+		userGroup.Get("/fetch", rt.fetchUserInfo)                                                   // GET /users/fetch - get current user info
+		userGroup.Post("/invite", rt.platformAccess(consts.PermOrgManageMember), rt.addUser)        // POST /users/invite - invite user
+		userGroup.Put("/:userID", rt.selfOrUserAdmin(), rt.updateUser)                              // PUT /users/:id - update user info
+		userGroup.Put("/:userID/password", rt.selfOrUserAdmin(), rt.resetPassword)                  // PUT /users/:id/password - reset user password
+		userGroup.Post("/fetch/avatar", rt.uploadAvatar)                                            // POST /users/me/avatar - upload user avatar
+		// userGroup.Get("/:id", rt.getUser)          // GET /users/:id - get specific user (to be implemented)
+		// userGroup.Delete("/:id", rt.deleteUser)    // DELETE /users/:id - delete user (to be implemented)
 	}
 }
 
@@ -86,7 +88,10 @@ func (rt *Router) register(c *fiber.Ctx) error {
 
 func (rt *Router) refresh(c *fiber.Ctx) error {
 	userLogic := rt.Services.User
-	userID := c.Query("userID")
+	userID := auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
+	if requested := c.Query("userID"); requested != "" && requested != userID {
+		return sensitiveError(c, 403, "session owner mismatch")
+	}
 	refreshToken := c.Query("refreshToken")
 
 	token, err := userLogic.Refresh(userID, refreshToken, &rt.HTTP.Auth)
@@ -147,11 +152,19 @@ func (rt *Router) updateUser(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
-	userID := c.Params("userID")
+	userID := sensitiveTargetUserID(c)
 	if userID == "" {
 		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}
 
+	if updateReq == nil {
+		return sensitiveError(c, 400, "user update is required")
+	}
+	if updateReq.IsEnabled != nil {
+		if err := rt.requirePlatform(c, consts.PermOrgManageMember); err != nil || c.Response().StatusCode() != 200 {
+			return err
+		}
+	}
 	if err := userLogic.UpdateUser(userID, updateReq); err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -312,7 +325,7 @@ func (rt *Router) resetPassword(c *fiber.Ctx) error {
 	userLogic := rt.Services.User
 
 	// get user ID from path parameter
-	userID := c.Params("userID")
+	userID := sensitiveTargetUserID(c)
 	if userID == "" {
 		return http.Err(c, http.BadRequest.Code, "user id is required")
 	}

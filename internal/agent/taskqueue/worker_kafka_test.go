@@ -11,6 +11,8 @@ import (
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/internal/agent/config"
+	controlconfig "github.com/arcentrix/arcentra/internal/control/config"
+	"github.com/arcentrix/arcentra/internal/control/process"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	agentgrpc "github.com/arcentrix/arcentra/internal/shared/grpc"
 	kafkaconfig "github.com/arcentrix/arcentra/pkg/mq/kafka"
@@ -41,7 +43,7 @@ func TestKafkaAgentRoutingAndCancellation(t *testing.T) {
 				}
 			}
 		}
-		conf := &config.AgentConfig{Grpc: config.GrpcConfig{ServerAddr: "terminal-test.invalid:9090"}, Agent: config.AgentInfo{ID: id, Mode: "baremetal", WorkspaceDir: filepath.Join(root, id), JobTimeout: 60}, MessageQueue: config.MqConfig{Kafka: kafkaconfig.Config{BootstrapServers: cluster.BootstrapServers(), SecurityProtocol: "PLAINTEXT"}}, TaskQueue: nova.TaskQueueConfig{DelaySlotCount: 1, DelaySlotDuration: 3600, SessionTimeout: 6000, MaxPollInterval: 120000}}
+		conf := &config.AgentConfig{Grpc: config.GrpcConfig{ServerAddr: "terminal-test.invalid:9090"}, Agent: config.AgentInfo{ID: id, Mode: "baremetal", WorkspaceDir: filepath.Join(root, id), JobTimeout: 60}, MessageQueue: config.MqConfig{Kafka: kafkaconfig.Config{BootstrapServers: cluster.BootstrapServers(), SecurityProtocol: "PLAINTEXT"}}, TaskQueue: nova.TaskQueueConfig{MessageFormat: "json", MessageCodec: "json", DelaySlotCount: 1, DelaySlotDuration: 3600, SessionTimeout: 6000, MaxPollInterval: 120000}}
 		manager := executor.NewExecutorManager()
 		manager.Register(executor.NewShellExecutor())
 		queue, err := StartWorker(context.Background(), conf, &agentgrpc.ClientWrapper{AgentClient: &acceptTerminalClient{}}, manager)
@@ -55,7 +57,10 @@ func TestKafkaAgentRoutingAndCancellation(t *testing.T) {
 		})
 	}
 	// 生产端与消费者通过真实 Kafka 协议交互，MockCluster 不替换队列实现
-	producer, err := nova.NewTaskQueue(nova.WithKafka(cluster.BootstrapServers(), nova.WithKafkaAuth("PLAINTEXT", "", "", "")))
+	producer, err := process.ProvideTaskQueueProducer(&controlconfig.AppConfig{
+		MessageQueue: controlconfig.MessageQueueConfig{Kafka: kafkaconfig.Config{BootstrapServers: cluster.BootstrapServers(), SecurityProtocol: "PLAINTEXT"}},
+		TaskQueue:    nova.TaskQueueConfig{MessageFormat: "sonic", MessageCodec: "sonic"},
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

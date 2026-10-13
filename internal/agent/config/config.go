@@ -30,6 +30,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/pprof"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/spf13/viper"
 )
 
@@ -141,6 +142,11 @@ func NewConf(confDir string) (*AgentConfig, error) {
 	conf, err := loadConfigFile(confDir)
 	if err != nil {
 		return nil, err
+	}
+	if conf.MessageQueue.Kafka.BootstrapServers != "" {
+		if _, err := taskqueue.ResolveMessageCodec(conf.TaskQueue.MessageFormat, conf.TaskQueue.MessageCodec); err != nil {
+			return nil, err
+		}
 	}
 	return &conf, nil
 }

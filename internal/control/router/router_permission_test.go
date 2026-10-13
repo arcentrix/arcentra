@@ -60,7 +60,7 @@ func TestPermissionFailsClosedWithoutAuthorizer(t *testing.T) {
 			called = true
 			return c.SendString("private data")
 		})
-		response, err := app.Test(httptest.NewRequest("GET", "/private", nil))
+		response, err := app.Test(httptest.NewRequest("GET", "/private", nil), routerTestTimeoutMillis)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,14 +132,14 @@ func TestProjectScopeIncludesOrganization(t *testing.T) {
 		scopes = append(scopes, scope)
 		return c.SendStatus(fiber.StatusNoContent)
 	})
-	response, err := app.Test(httptest.NewRequest("GET", "/project/project", nil))
+	response, err := app.Test(httptest.NewRequest("GET", "/project/project", nil), routerTestTimeoutMillis)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = response.Body.Close()
 	request := httptest.NewRequest("POST", "/project", strings.NewReader(`{"orgId":"org-create"}`))
 	request.Header.Set("Content-Type", "application/json")
-	response, err = app.Test(request)
+	response, err = app.Test(request, routerTestTimeoutMillis)
 	if err != nil {
 		t.Fatal(err)
 	}

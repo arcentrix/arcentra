@@ -47,6 +47,9 @@ bootstrapServers = "127.0.0.1:9092"
 securityProtocol = "PLAINTEXT"
 
 [taskQueue]
+# Same JSON envelope as Control; json and sonic are wire-compatible
+messageFormat = "sonic"
+messageCodec = "sonic"
 provider = "kafka"
 autoCommit = false
 sessionTimeout = 30000

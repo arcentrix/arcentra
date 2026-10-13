@@ -83,7 +83,7 @@ func deploymentRequest(t *testing.T, app *fiber.App, user, method, path, body st
 		}
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	response, err := app.Test(request)
+	response, err := app.Test(request, routerTestTimeoutMillis)
 	if err != nil {
 		t.Fatal(err)
 	}

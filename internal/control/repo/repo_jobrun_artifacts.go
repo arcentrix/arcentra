@@ -14,6 +14,11 @@ import (
 
 // PatchReportedStatusAndArtifacts 原子提交归属匹配的作业终态、回执与制品，失败保留待上报状态
 func (r *JobRunRepo) PatchReportedStatusAndArtifacts(ctx context.Context, expected *model.JobRun, updates map[string]any, artifacts []*model.ProjectArtifact) error {
+	var err error
+	updates, err = normalizeJSONUpdates(updates, jobRunJSONDefaults)
+	if err != nil {
+		return err
+	}
 	if expected != nil {
 		if err := validateJobReportIdentityUpdates(expected, updates); err != nil {
 			return err

@@ -88,7 +88,7 @@ func TestCopilotHTTPAuthorizationPreviewAndValidation(t *testing.T) {
 				}
 				req.Header.Set("Authorization", "Bearer "+token)
 			}
-			response, err := app.Test(req)
+			response, err := app.Test(req, routerTestTimeoutMillis)
 			if err != nil {
 				t.Fatal(err)
 			}
