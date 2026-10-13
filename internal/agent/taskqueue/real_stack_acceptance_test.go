@@ -172,6 +172,13 @@ func TestRealStackAcceptance(t *testing.T) {
 		}},
 	)
 	completed := f.waitRun(run.RunID, model.PipelineStatusSuccess)
+	// Database completion precedes transport acknowledgement; verify all persisted
+	// receipts only after their independent ACK-loss replays have drained.
+	f.wait("DAG terminal receipts acknowledged", func() bool {
+		f.worker.reports.mu.Lock()
+		defer f.worker.reports.mu.Unlock()
+		return len(f.worker.reports.entries) == 0
+	})
 	if completed.CompletedJobs != 2 || completed.FailedJobs != 0 || completed.EndTime == nil {
 		t.Fatalf("pipeline completion was not persisted in MySQL: %+v", completed)
 	}

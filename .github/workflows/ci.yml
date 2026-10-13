@@ -134,15 +134,17 @@ jobs:
             if [ "$attempt" -eq 60 ]; then exit 1; fi
             sleep 2
           done
-          docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create arcentra_acceptance_realstack
           go run scripts/acceptance/create_bucket.go
 
       - name: Verify real broker, MySQL, S3 and Agent execution
-        env:
-          ARCENTRA_TEST_MYSQL_DSN: "root:ci-only-mysql-password@tcp(127.0.0.1:13306)/arcentra_acceptance_realstack?charset=utf8mb4&parseTime=True&loc=UTC"
         run: |
           set -o pipefail
-          go test -race -count=1 -timeout=8m -run '^TestRealStackAcceptance$' ./internal/agent/taskqueue | tee .acceptance/evidence/real-stack.log
+          for attempt in 1 2; do
+            schema="arcentra_acceptance_realstack_$attempt"
+            docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create "$schema"
+            ARCENTRA_TEST_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
+              go test -race -count=1 -timeout=8m -run '^TestRealStackAcceptance$' ./internal/agent/taskqueue | tee ".acceptance/evidence/real-stack-$attempt.log"
+          done
           go test -race -count=1 -timeout=2m -run '^TestRegisterLoginWithRealRedis$' ./internal/control/service
 
       - name: Check out pinned frontend acceptance client

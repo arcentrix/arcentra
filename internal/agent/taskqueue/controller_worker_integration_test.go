@@ -347,7 +347,11 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 			// 服务端已提交事务后才丢弃 ACK；真实工作器负责从持久收据恢复
 			_, stepTerminal := message.(*agentv1.ReportStepRunStatusRequest)
 			if producer && f.loseProducerACK || stepTerminal && f.loseStepTerminalACK {
-				f.loseProducerACK, f.loseStepTerminalACK = false, false
+				if producer {
+					f.loseProducerACK = false
+				} else {
+					f.loseStepTerminalACK = false
+				}
 				f.lostACKs++
 				return nil, status.Error(codes.Unavailable, "committed terminal acknowledgement lost")
 			}
@@ -484,11 +488,11 @@ func (f *controllerWorkerFixture) assertReceipt(kind, runID, claim, digest, pipe
 }
 
 func TestControllerWorkerArtifactDAGRoundTrip(t *testing.T) {
-	for _, name := range []string{"success", "committed_job_ack_loss", "committed_step_ack_loss"} {
+	for _, name := range []string{"success", "committed_job_ack_loss", "committed_step_ack_loss", "committed_both_ack_loss"} {
 		t.Run(name, func(t *testing.T) {
-			f := newControllerWorkerFixture(t, name == "committed_job_ack_loss")
+			f := newControllerWorkerFixture(t, name == "committed_job_ack_loss" || name == "committed_both_ack_loss")
 			f.mu.Lock()
-			f.loseStepTerminalACK = name == "committed_step_ack_loss"
+			f.loseStepTerminalACK = name == "committed_step_ack_loss" || name == "committed_both_ack_loss"
 			f.mu.Unlock()
 			run := f.submit(
 				&spec.Job{Name: "build", Steps: []*spec.Step{
@@ -570,18 +574,34 @@ func TestControllerWorkerArtifactDAGRoundTrip(t *testing.T) {
 				t.Errorf("unexpected storage roundtrip: uploads=%d downloads=%d objects=%d", f.store.uploads, f.store.downloads, len(f.store.objects))
 			}
 			f.store.mu.Unlock()
+			// Recheck after drain so every replay is compared with the persisted digest.
+			for _, job := range jobs {
+				f.assertReceipt("job", job.JobRunID, job.ClaimID, job.TerminalReportDigest, run.RunID, job.JobRunID)
+			}
+			for _, step := range steps {
+				f.assertReceipt("step", step.StepRunID, step.ClaimID, step.TerminalReportDigest, run.RunID, step.JobRunID)
+			}
 			f.mu.Lock()
-			if name != "success" {
-				replayed := len(f.receipts["job/"+build.JobRunID]) >= 2
-				if name == "committed_step_ack_loss" {
-					replayed = false
-					for _, step := range steps {
-						replayed = replayed || len(f.receipts["step/"+step.StepRunID]) >= 2
-					}
+			jobReplayed := len(f.receipts["job/"+build.JobRunID]) >= 2
+			stepReplayed := false
+			for _, step := range steps {
+				stepReplayed = stepReplayed || len(f.receipts["step/"+step.StepRunID]) >= 2
+			}
+			wantLost := 0
+			if name == "committed_job_ack_loss" || name == "committed_both_ack_loss" {
+				wantLost++
+				if !jobReplayed {
+					t.Error("committed job ACK loss did not replay")
 				}
-				if f.lostACKs != 1 || !replayed {
-					t.Error("committed ACK loss did not exercise identical terminal replay")
+			}
+			if name == "committed_step_ack_loss" || name == "committed_both_ack_loss" {
+				wantLost++
+				if !stepReplayed {
+					t.Error("committed step ACK loss did not replay")
 				}
+			}
+			if f.lostACKs != wantLost {
+				t.Errorf("lost ACKs=%d want=%d", f.lostACKs, wantLost)
 			}
 			f.mu.Unlock()
 		})
