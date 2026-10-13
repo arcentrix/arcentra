@@ -24,7 +24,7 @@ func TestPipelineTriggerRejectsForgedAuditActorBeforeExecution(t *testing.T) {
 		})
 		req := httptest.NewRequest("POST", "/pipelines/example/trigger", strings.NewReader(`{"triggeredBy":"forged-admin"}`))
 		req.Header.Set("Content-Type", "application/json")
-		response, err := app.Test(req)
+		response, err := app.Test(req, routerTestTimeoutMillis)
 		if err != nil {
 			t.Fatal(err)
 		}

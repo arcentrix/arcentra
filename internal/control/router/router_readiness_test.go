@@ -23,7 +23,7 @@ func newProbeTestRouter(manager *shutdown.Manager) *Router {
 
 func probeResponse(t *testing.T, app *fiber.App, method, path string, wantStatus int) string {
 	t.Helper()
-	resp, err := app.Test(httptest.NewRequest(method, path, nil))
+	resp, err := app.Test(httptest.NewRequest(method, path, nil), routerTestTimeoutMillis)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestPublicManagementEndpointsAreAbsent(t *testing.T) {
 			req := httptest.NewRequest(http.MethodOptions, path, nil)
 			req.Header.Set("Origin", "http://localhost:5173")
 			req.Header.Set("Access-Control-Request-Method", http.MethodPost)
-			resp, err := app.Test(req)
+			resp, err := app.Test(req, routerTestTimeoutMillis)
 			if err != nil {
 				t.Fatal(err)
 			}

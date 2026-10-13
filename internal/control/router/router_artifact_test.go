@@ -88,7 +88,7 @@ func artifactRequest(t *testing.T, app *fiber.App, user, path string) *http.Resp
 		}
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
-	response, err := app.Test(request)
+	response, err := app.Test(request, routerTestTimeoutMillis)
 	if err != nil {
 		t.Fatal(err)
 	}

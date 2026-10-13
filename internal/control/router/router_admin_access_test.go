@@ -95,7 +95,7 @@ func (f adminFixture) request(t *testing.T, user, method, path, body string) (in
 	}
 	// Race-instrumented bcrypt can exceed Fiber's default one-second test budget
 	// on a shared CI runner; keep a bounded wait without changing password cost.
-	res, err := f.app.Test(r, 10_000)
+	res, err := f.app.Test(r, routerTestTimeoutMillis)
 	require.NoError(t, err)
 	defer res.Body.Close()
 	raw, err := io.ReadAll(res.Body)
