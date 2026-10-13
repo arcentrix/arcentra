@@ -50,11 +50,15 @@ services:
       timeout: 8s
       retries: 20
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    command: [server, /data, --address, ':9000', --console-address, ':9001']
+    # Built only from the pinned official source in CI; never pull a fallback.
+    image: arcentra-ci-minio:9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+    pull_policy: never
+    read_only: true
+    command: [server, /data, --address, ':9000', --console-address, ':9001', --certs-dir, /tmp/certs]
     environment:
+      MINIO_UPDATE: "off"
       MINIO_ROOT_USER: ci-only-s3-user
       MINIO_ROOT_PASSWORD: ci-only-s3-password
     ports: ["127.0.0.1:19000:9000"]
-    tmpfs: [/data]
+    tmpfs: ["/data:uid=65532,gid=65532,mode=0700", "/tmp:uid=65532,gid=65532,mode=0700"]
     mem_limit: 512m

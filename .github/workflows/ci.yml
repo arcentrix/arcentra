@@ -89,7 +89,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          cache-dependency-path: go.sum
+          cache-dependency-path: |
+            go.sum
+            scripts/acceptance/minio.Dockerfile
 
       - name: Generate and build actual application binaries
         run: |
@@ -98,6 +100,24 @@ jobs:
           go build -o .acceptance/bin/arcentra ./cmd/arcentra
           go build -o .acceptance/bin/arcentra-agent ./cmd/arcentra-agent
           go build -o .acceptance/bin/arcentra-cli ./cmd/cli
+
+      - name: Check out official source-only MinIO release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: minio/minio
+          # RELEASE.2025-10-15T17-29-55Z; official source, no registry credentials.
+          ref: 9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+          path: .acceptance/minio-source
+          persist-credentials: false
+
+      - name: Build disposable MinIO image from verified source
+        timeout-minutes: 12
+        run: |
+          test "$(git -C .acceptance/minio-source rev-parse HEAD)" = 9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+          mkdir -p .acceptance/minio-image
+          (cd .acceptance/minio-source && CGO_ENABLED=0 go build -mod=readonly -trimpath -o ../minio-image/minio .)
+          cp .acceptance/minio-source/LICENSE .acceptance/minio-source/NOTICE .acceptance/minio-image/
+          docker build -f scripts/acceptance/minio.Dockerfile -t arcentra-ci-minio:9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a .acceptance/minio-image
 
       - name: Mask disposable fixture credentials
         run: |
@@ -130,7 +150,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: b5285edbd483b3873867bcf301530eab80465e43
+          ref: 9daa5cb4d6ab3b7c4611339c3c633566d06da86a
           path: .acceptance/frontend
           persist-credentials: false
 

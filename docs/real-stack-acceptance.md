@@ -1,6 +1,6 @@
 # Disposable real-stack and browser acceptance
 
-The normal PR/main CI has a separate, time-bounded acceptance job after the existing quality gate. It uses standard GitHub-hosted Ubuntu, read-only repository permissions, fixed official MySQL/Kafka/Redis/MinIO versions, and the lockfile's official Playwright Chromium. It does not use production secrets, `pull_request_target`, privileged containers, production deployment, or paid infrastructure provisioning.
+The normal PR/main CI has a separate, time-bounded acceptance job after the existing quality gate. It uses standard GitHub-hosted Ubuntu, read-only repository permissions, fixed official MySQL/Kafka/Redis versions and a pinned official MinIO source build, and the lockfile's official Playwright Chromium. It does not use production secrets, `pull_request_target`, privileged containers, production deployment, or paid infrastructure provisioning.
 
 ## Two complementary checks
 
@@ -40,3 +40,9 @@ Current project creation accepts an operator-selected organization identifier; o
 The assistant's cloud workspace has no supported container runtime and Chromium's socket is denied. It can compile these tests, run safeguards and existing process integration, but cannot claim the real services/browser passed here. Do not bypass the restriction or switch to a user's computer. The official hosted-runner result is the evidence for this gate.
 
 References: [GitHub service containers](https://docs.github.com/en/actions/tutorials/use-containerized-services/use-docker-service-containers), [Apache Kafka Docker examples](https://github.com/apache/kafka/tree/trunk/docker/examples), [Playwright CI](https://playwright.dev/docs/ci).
+
+## MinIO source-only test distribution
+
+The former official `quay.io/minio/minio` image returned registry authorization failure on the first hosted acceptance run. CI does not retry it with credentials or use a mirror. The [official source-only guidance](https://github.com/minio/minio/blob/9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a/README.md#source-only-distribution) supports building the public source instead. CI checks out release `RELEASE.2025-10-15T17-29-55Z`, verifies exact commit `9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a`, and builds it with the repository's pinned Go 1.25.6 and upstream readonly module lock. The static binary, AGPL-3.0 license and NOTICE are packaged into a local scratch image, run as UID 65532 with a read-only root and disposable writable tmpfs only. `pull_policy: never` prevents any fallback registry pull. The build has a 12-minute limit within the 35-minute acceptance budget; Go's existing cache covers build dependencies.
+
+This unmodified source build is used only as an isolated S3-compatible test dependency. Its image and binary are not pushed or shipped with Arcentra, and it is not a production storage recommendation or a claim of upstream maintenance. The source license and notices are retained; operators choosing their own production storage must assess its support and license requirements separately. The real tests still exercise MinIO's S3 protocol implementation rather than a mock or a replacement vendor.

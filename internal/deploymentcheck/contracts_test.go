@@ -128,9 +128,26 @@ func TestRealAcceptanceCIHasNoProductionAuthorityOrSilentSkip(t *testing.T) {
 			t.Fatalf("missing acceptance contract %s", required)
 		}
 	}
+	// MinIO 社区分发仅提供源码，CI 只能编译官方固定提交且禁止拉取替代镜像
+	for _, required := range []string{"repository: minio/minio", "ref: 9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a", "CGO_ENABLED=0 go build -mod=readonly -trimpath", "timeout-minutes: 12"} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("missing pinned source build contract %s", required)
+		}
+	}
+	containerfile := source(t, "scripts/acceptance/minio.Dockerfile")
+	for _, required := range []string{"FROM scratch", "COPY LICENSE NOTICE", "USER 65532:65532"} {
+		if !strings.Contains(containerfile, required) {
+			t.Fatalf("missing disposable image contract %s", required)
+		}
+	}
+	if strings.Contains(containerfile, "RUN ") || strings.Contains(workflow, "docker push") {
+		t.Fatal("test image must not download unpinned content or be published")
+	}
 	var compose struct {
 		Services map[string]struct {
 			Image       string   `yaml:"image"`
+			PullPolicy  string   `yaml:"pull_policy"`
+			ReadOnly    bool     `yaml:"read_only"`
 			Ports       []string `yaml:"ports"`
 			Privileged  bool     `yaml:"privileged"`
 			NetworkMode string   `yaml:"network_mode"`
@@ -142,6 +159,10 @@ func TestRealAcceptanceCIHasNoProductionAuthorityOrSilentSkip(t *testing.T) {
 	}
 	if len(compose.Services) != 4 {
 		t.Fatal("expected only four isolated dependency services")
+	}
+	minio := compose.Services["minio"]
+	if minio.PullPolicy != "never" || !minio.ReadOnly || minio.Image != "arcentra-ci-minio:9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a" {
+		t.Fatal("MinIO must use only the locally built pinned read-only test image")
 	}
 	for name, service := range compose.Services {
 		if service.Image == "" || !strings.Contains(service.Image, ":") || strings.HasSuffix(service.Image, ":latest") || service.Privileged || service.NetworkMode != "" || len(service.Volumes) > 0 {
