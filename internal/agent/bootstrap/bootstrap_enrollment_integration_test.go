@@ -27,6 +27,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	"github.com/arcentrix/arcentra/internal/agent/identitystore"
 	agentservice "github.com/arcentrix/arcentra/internal/agent/service"
+	controlconfig "github.com/arcentrix/arcentra/internal/control/config"
 	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/process"
@@ -525,7 +526,10 @@ func TestDynamicEnrollmentRestoresTerminalJournalThroughRealProcessAndWorker(t *
 	if !first.IsReady() || first.TaskQueue == nil {
 		t.Fatal("authenticated dynamic enrollment did not start real workers")
 	}
-	producer, err := nova.NewTaskQueue(nova.WithKafka(cluster.BootstrapServers(), nova.WithKafkaAuth("PLAINTEXT", "", "", "")))
+	producer, err := process.ProvideTaskQueueProducer(&controlconfig.AppConfig{
+		MessageQueue: controlconfig.MessageQueueConfig{Kafka: kafkaconfig.Config{BootstrapServers: cluster.BootstrapServers(), SecurityProtocol: "PLAINTEXT"}},
+		TaskQueue:    nova.TaskQueueConfig{MessageFormat: "sonic", MessageCodec: "sonic"},
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -623,5 +627,25 @@ func TestDynamicEnrollmentRestoresTerminalJournalThroughRealProcessAndWorker(t *
 		if receipt.claim != receipts[0].claim || !bytes.Equal(receipt.payload, receipts[0].payload) {
 			t.Fatal("journal replay changed the original claim or terminal protobuf")
 		}
+	}
+}
+
+func TestAgentKafkaStartupErrorDoesNotExposeBrokerSettings(t *testing.T) {
+	f := newEnrollmentFixture(t, true)
+	app, cleanup := f.lifecycle()
+	defer cleanup()
+	if _, err := app.AgentService.Register(f.ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.AgentService.Heartbeat(f.ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	app.AgentConf.MessageQueue.Kafka = kafkaconfig.Config{BootstrapServers: "127.0.0.1:9092", SecurityProtocol: "CANARY_PRIVATE_BROKER_CONFIG"}
+	err := app.startWorkers()
+	if err == nil || !strings.Contains(err.Error(), "create agent Kafka log publisher") || strings.Contains(err.Error(), "CANARY_PRIVATE") || errors.Unwrap(err) == nil {
+		t.Fatalf("unsafe or missing Kafka startup error: %v", err)
+	}
+	if app.IsReady() || app.TaskQueue != nil {
+		t.Fatal("failed Kafka startup became ready")
 	}
 }

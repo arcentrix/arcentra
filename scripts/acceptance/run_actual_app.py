@@ -372,8 +372,8 @@ sessionTimeout = 10000
 maxPollInterval = 300000
 delaySlotCount = 2
 delaySlotDuration = 60
-messageFormat = "protobuf"
-messageCodec = "protobuf"
+messageFormat = "sonic"
+messageCodec = "sonic"
 [log]
 output = "stdout"
 level = "INFO"

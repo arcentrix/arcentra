@@ -39,6 +39,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/outbox"
 	"github.com/arcentrix/arcentra/pkg/safe"
 	"github.com/arcentrix/arcentra/pkg/shutdown"
+	tasktransport "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/gofiber/fiber/v2"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/connectivity"
@@ -324,7 +325,7 @@ func (app *Agent) startWorkers() error {
 	if app.AgentConf.MessageQueue.Kafka.BootstrapServers != "" && app.logPublisher == nil {
 		pub, err := executor.NewReliableKafkaLogPublisher(app.AgentConf.MessageQueue.Kafka, "arcentra-agent-logs-"+app.AgentConf.Agent.ID, app.AgentConf.LogSpool, filepath.Join(app.AgentConf.Agent.WorkspaceDir, ".build-log-spool"))
 		if err != nil {
-			return err
+			return tasktransport.WrapStartupError("create agent Kafka log publisher", err)
 		}
 		app.logPublisher = pub
 		app.ExecManager.SetLogPublisher(pub)

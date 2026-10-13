@@ -82,6 +82,10 @@ func StartWorker(
 		return nil, nil
 	}
 	queueCfg := agentConf.TaskQueue
+	codec, err := taskqueue.ResolveMessageCodec(queueCfg.MessageFormat, queueCfg.MessageCodec)
+	if err != nil {
+		return nil, fmt.Errorf("configure agent task queue: %w", err)
+	}
 	delaySlotDuration := time.Duration(queueCfg.DelaySlotDuration) * time.Second
 	if agentConf.Agent.ID == "" {
 		return nil, fmt.Errorf("agent must register before starting workers")
@@ -111,6 +115,7 @@ func StartWorker(
 		return nil, err
 	}
 	options := []nova.QueueOption{
+		nova.WithMessageCodec(codec),
 		nova.WithTopicPrefix(taskqueue.AgentTopicPrefix(agentConf.Agent.ID)),
 		nova.WithGroupID("arcentra-agent-" + agentConf.Agent.ID),
 		nova.WithKafka(cfg.BootstrapServers,
@@ -123,15 +128,9 @@ func StartWorker(
 			nova.WithKafkaDelaySlots(queueCfg.DelaySlotCount, delaySlotDuration),
 		),
 	}
-	if opt := withMessageFormat(queueCfg.MessageFormat); opt != nil {
-		options = append(options, opt)
-	}
-	if opt := withMessageCodec(queueCfg.MessageCodec); opt != nil {
-		options = append(options, opt)
-	}
 	queue, err := nova.NewTaskQueue(options...)
 	if err != nil {
-		return nil, fmt.Errorf("create task queue: %w", err)
+		return nil, taskqueue.WrapStartupError("create task queue", err)
 	}
 
 	handler := newWorkerHandler(workerCtx, agentConf, grpcClient, execManager, reports)
@@ -141,7 +140,7 @@ func StartWorker(
 	control, err := nova.NewTaskQueue(controlOptions...)
 	if err != nil {
 		_ = queue.Stop()
-		return nil, fmt.Errorf("create control queue: %w", err)
+		return nil, taskqueue.WrapStartupError("create control queue", err)
 	}
 	if err := control.Start(nova.HandlerFunc(func(_ context.Context, task *nova.Task) error {
 		if task == nil || task.Type != taskqueue.TaskTypeJobCancel {
@@ -159,12 +158,12 @@ func StartWorker(
 	})); err != nil {
 		_ = queue.Stop()
 		_ = control.Stop()
-		return nil, fmt.Errorf("start control queue: %w", err)
+		return nil, taskqueue.WrapStartupError("start control queue", err)
 	}
 	if err := queue.Start(handler); err != nil {
 		_ = control.Stop()
 		_ = queue.Stop()
-		return nil, fmt.Errorf("start task queue: %w", err)
+		return nil, taskqueue.WrapStartupError("start task queue", err)
 	}
 	runCtx, cancelReports := context.WithCancel(workerCtx)
 	result := &workerQueues{TaskQueue: queue, control: control, reports: reports, cancelReports: cancelReports, reportsDone: make(chan struct{})}
@@ -224,26 +223,6 @@ func (q *workerQueues) Stop() error {
 		}
 	})
 	return q.stopErr
-}
-
-func withMessageFormat(value string) nova.QueueOption {
-	value = strings.TrimSpace(strings.ToLower(value))
-	if value == "" {
-		return nil
-	}
-	return nova.WithMessageFormat(nova.MessageFormat(value))
-}
-
-func withMessageCodec(value string) nova.QueueOption {
-	value = strings.TrimSpace(strings.ToLower(value))
-	if value == "" {
-		return nil
-	}
-	codec, err := nova.NewMessageCodec(nova.MessageFormat(value))
-	if err != nil {
-		return nil
-	}
-	return nova.WithMessageCodec(codec)
 }
 
 func executeStepRunViaExecutor(

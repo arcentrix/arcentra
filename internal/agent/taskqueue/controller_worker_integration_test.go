@@ -22,6 +22,7 @@ import (
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/internal/agent/config"
+	controlconfig "github.com/arcentrix/arcentra/internal/control/config"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/process"
 	"github.com/arcentrix/arcentra/internal/control/repo"
@@ -373,7 +374,7 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 		Grpc:         config.GrpcConfig{ServerAddr: listener.Addr().String(), Token: authToken, TLS: fixtureOptions.clientTLS},
 		Agent:        config.AgentInfo{ID: agentID, Mode: "baremetal", WorkspaceDir: filepath.Join(root, "agent"), JobTimeout: 30},
 		MessageQueue: config.MqConfig{Kafka: kafkaconfig.Config{BootstrapServers: brokers, SecurityProtocol: "PLAINTEXT"}},
-		TaskQueue:    nova.TaskQueueConfig{DelaySlotCount: 1, DelaySlotDuration: 3600, SessionTimeout: 6000, MaxPollInterval: 120000},
+		TaskQueue:    nova.TaskQueueConfig{MessageFormat: "json", MessageCodec: "json", DelaySlotCount: 1, DelaySlotDuration: 3600, SessionTimeout: 6000, MaxPollInterval: 120000},
 	}
 	SetStorage(objectStore, reference)
 	t.Cleanup(func() { SetStorage(nil) })
@@ -394,7 +395,10 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 			t.Error(err)
 		}
 	})
-	producer, err := nova.NewTaskQueue(nova.WithKafka(brokers, nova.WithKafkaAuth("PLAINTEXT", "", "", "")))
+	producer, err := process.ProvideTaskQueueProducer(&controlconfig.AppConfig{
+		MessageQueue: controlconfig.MessageQueueConfig{Kafka: kafkaconfig.Config{BootstrapServers: brokers, SecurityProtocol: "PLAINTEXT"}},
+		TaskQueue:    nova.TaskQueueConfig{MessageFormat: "sonic", MessageCodec: "sonic"},
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

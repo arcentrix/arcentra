@@ -15,6 +15,8 @@
 package process
 
 import (
+	"fmt"
+
 	"github.com/arcentrix/arcentra/internal/control/config"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/control/service"
@@ -22,6 +24,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/plugin"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/google/wire"
 )
 
@@ -50,18 +53,25 @@ func ProvideEngine(
 	return engine, nil
 }
 
-// ProvideTaskQueueProducer creates a Kafka-backed task queue for the control
-// plane to enqueue job run tasks. Returns nil when Kafka is not configured,
-// enabling a pure local-execution mode.
-func ProvideTaskQueueProducer(appConf *config.AppConfig, _ *log.Logger) nova.TaskQueue {
+// ProvideTaskQueueProducer 创建控制器任务生产者，未配置 Kafka 时保留本地执行模式
+// 已配置 Kafka 的编码或初始化失败必须阻止启动，不得降级为本地执行
+func ProvideTaskQueueProducer(appConf *config.AppConfig, _ *log.Logger) (nova.TaskQueue, error) {
+	if appConf == nil {
+		return nil, fmt.Errorf("control configuration is required")
+	}
 	kafkaCfg := appConf.MessageQueue.Kafka
 	if kafkaCfg.BootstrapServers == "" {
 		log.Info("Kafka not configured, pipeline process running in local-only mode")
-		return nil
+		return nil, nil
 	}
 
 	queueCfg := appConf.TaskQueue
+	codec, err := taskqueue.ResolveMessageCodec(queueCfg.MessageFormat, queueCfg.MessageCodec)
+	if err != nil {
+		return nil, fmt.Errorf("configure control task queue: %w", err)
+	}
 	options := []nova.QueueOption{
+		nova.WithMessageCodec(codec),
 		nova.WithKafka(kafkaCfg.BootstrapServers,
 			nova.WithKafkaAuth(kafkaCfg.SecurityProtocol, kafkaCfg.Sasl.Mechanism, kafkaCfg.Sasl.Username, kafkaCfg.Sasl.Password),
 			nova.WithKafkaSSL(kafkaCfg.Ssl.CaFile, kafkaCfg.Ssl.CertFile, kafkaCfg.Ssl.KeyFile, kafkaCfg.Ssl.Password),
@@ -69,20 +79,9 @@ func ProvideTaskQueueProducer(appConf *config.AppConfig, _ *log.Logger) nova.Tas
 		),
 	}
 
-	if queueCfg.MessageFormat != "" {
-		options = append(options, nova.WithMessageFormat(nova.MessageFormat(queueCfg.MessageFormat)))
-	}
-	if queueCfg.MessageCodec != "" {
-		codec, err := nova.NewMessageCodec(nova.MessageFormat(queueCfg.MessageCodec))
-		if err == nil {
-			options = append(options, nova.WithMessageCodec(codec))
-		}
-	}
-
 	tq, err := nova.NewTaskQueue(options...)
 	if err != nil {
-		log.Warnw("failed to create task queue producer, running in local-only mode", "error", err)
-		return nil
+		return nil, taskqueue.WrapStartupError("create control task queue producer", err)
 	}
-	return tq
+	return tq, nil
 }

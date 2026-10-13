@@ -52,6 +52,8 @@ class ActualAppFixtureTests(unittest.TestCase):
         self.assertEqual(agent["agent"]["workspaceDir"], str(root / "workspaces"))
         self.assertEqual(tomllib.loads(app.agent_config(root, ""))["grpc"]["registrationToken"], "")
         for config in (control, agent):
+            self.assertEqual(config["taskQueue"]["messageFormat"], "sonic")
+            self.assertEqual(config["taskQueue"]["messageCodec"], "sonic")
             for listener in ("http", "metrics", "pprof"):
                 self.assertEqual(config[listener]["host"], "127.0.0.1")
             self.assertFalse(config["metrics"]["enable"])

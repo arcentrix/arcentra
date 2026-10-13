@@ -8,6 +8,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 
 // initLogPublisher 使用进程级队列，启动即恢复历史日志，不依赖新 Run 的触发。
@@ -16,7 +17,11 @@ func (e *Process) initLogPublisher() {
 		return
 	}
 	publisher, err := executor.NewReliableKafkaLogPublisher(e.appConf.MessageQueue.Kafka, "arcentra-control-logs", e.appConf.LogSpool, "./data/build-log-spool/control")
-	e.logPublisher, e.logInitErr = publisher, err
+	if err != nil {
+		e.logInitErr = taskqueue.WrapStartupError("create control Kafka log publisher", err)
+		return
+	}
+	e.logPublisher = publisher
 	if publisher != nil {
 		e.closeLogs = publisher.Close
 	}
