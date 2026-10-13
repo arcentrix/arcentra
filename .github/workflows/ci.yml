@@ -60,3 +60,124 @@ jobs:
 
       - name: Build all commands
         run: go build ./cmd/...
+
+  acceptance:
+    name: Real dependencies and actual browser journey
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CGO_ENABLED: "1"
+      GOTOOLCHAIN: local
+      ARCENTRA_REAL_STACK: "1"
+      ARCENTRA_REQUIRE_REAL_STACK: "1"
+      ARCENTRA_TEST_MYSQL_DSN: "root:ci-only-mysql-password@tcp(127.0.0.1:13306)/arcentra_acceptance?charset=utf8mb4&parseTime=True&loc=UTC"
+      ARCENTRA_TEST_KAFKA_BROKERS: "127.0.0.1:19092"
+      ARCENTRA_TEST_REDIS_ADDRESS: "127.0.0.1:16379"
+      ARCENTRA_TEST_S3_ENDPOINT: "http://127.0.0.1:19000"
+      ARCENTRA_TEST_S3_ACCESS_KEY: ci-only-s3-user
+      ARCENTRA_TEST_S3_SECRET_KEY: ci-only-s3-password
+      COMPOSE_PROJECT_NAME: arcentra-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out backend under test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Generate and build actual application binaries
+        run: |
+          make codegen
+          mkdir -p .acceptance/bin .acceptance/evidence
+          go build -o .acceptance/bin/arcentra ./cmd/arcentra
+          go build -o .acceptance/bin/arcentra-agent ./cmd/arcentra-agent
+          go build -o .acceptance/bin/arcentra-cli ./cmd/cli
+
+      - name: Mask disposable fixture credentials
+        run: |
+          echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/arcentra-playwright" >> "$GITHUB_ENV"
+          echo "::add-mask::ci-only-mysql-password"
+          echo "::add-mask::ci-only-s3-password"
+          echo "::add-mask::Ci-Only-Password-123!"
+
+      - name: Start disposable loopback dependencies
+        run: |
+          docker compose -f scripts/acceptance/compose.yml up -d --wait --wait-timeout 180
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:19000/minio/health/ready >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then exit 1; fi
+            sleep 2
+          done
+          docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create arcentra_acceptance_realstack
+          go run scripts/acceptance/create_bucket.go
+
+      - name: Verify real broker, MySQL, S3 and Agent execution
+        env:
+          ARCENTRA_TEST_MYSQL_DSN: "root:ci-only-mysql-password@tcp(127.0.0.1:13306)/arcentra_acceptance_realstack?charset=utf8mb4&parseTime=True&loc=UTC"
+        run: |
+          set -o pipefail
+          go test -race -count=1 -timeout=8m -run '^TestRealStackAcceptance$' ./internal/agent/taskqueue | tee .acceptance/evidence/real-stack.log
+          go test -race -count=1 -timeout=2m -run '^TestRegisterLoginWithRealRedis$' ./internal/control/service
+
+      - name: Check out pinned frontend acceptance client
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: arcentrix/arcentra-web
+          # Reviewed acceptance client: immutable cross-repository dependency.
+          ref: df22c7605ae9f126bf2a503236a58cd3e55bbeac
+          path: .acceptance/frontend
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.30.3
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .acceptance/frontend/.nvmrc
+          cache: pnpm
+          cache-dependency-path: .acceptance/frontend/pnpm-lock.yaml
+
+      - name: Install locked frontend and official Chromium
+        working-directory: .acceptance/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+
+      - name: Exercise fresh installation through actual browser
+        run: |
+          python3 scripts/acceptance/run_actual_app.py \
+            --control-bin "$PWD/.acceptance/bin/arcentra" \
+            --agent-bin "$PWD/.acceptance/bin/arcentra-agent" \
+            --cli-bin "$PWD/.acceptance/bin/arcentra-cli" \
+            --evidence-dir "$PWD/.acceptance/evidence" \
+            --browser-cwd "$PWD/.acceptance/frontend" \
+            -- node tests/actual-backend-acceptance.mjs
+
+      - name: Preserve sanitized browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: actual-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .acceptance/evidence/browser/*.png
+            .acceptance/evidence/browser/summary.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Dependency diagnostics
+        if: failure()
+        run: docker compose -f scripts/acceptance/compose.yml logs --no-color --tail=100
+
+      - name: Remove only this run's disposable services
+        if: always()
+        run: docker compose -f scripts/acceptance/compose.yml down --volumes --remove-orphans --timeout 15

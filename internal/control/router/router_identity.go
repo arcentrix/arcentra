@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/pkg/http"
@@ -32,22 +33,15 @@ import (
 func (rt *Router) identityRouter(r fiber.Router, auth fiber.Handler) {
 	identityGroup := r.Group("/identity")
 	{
-		// Provider resource management (authentication required)
-		identityGroup.Get(
-			"/providers",
-			auth,
-			rt.listProviders,
-		) // GET /identity/providers - list all providers (supports ?type=xxx filter)
-		identityGroup.Post("/providers", auth, rt.createProvider)         // POST /identity/providers - create provider
-		identityGroup.Get("/providers/types", auth, rt.listProviderTypes) // GET /identity/providers/types - list all provider types
-		identityGroup.Get("/providers/:name", auth, rt.getProvider)       // GET /identity/providers/:name - get specific provider
-		identityGroup.Put("/providers/:name", auth, rt.updateProvider)    // PUT /identity/providers/:name - update provider
-		identityGroup.Put(
-			"/providers/:name/toggle",
-			auth,
-			rt.toggleProvider,
-		) // PUT /identity/providers/:name/toggle - toggle enabled status
-		identityGroup.Delete("/providers/:name", auth, rt.deleteProvider) // DELETE /identity/providers/:name - delete provider
+		// Provider management is platform-scoped; authentication routes below stay public.
+		providers := identityGroup.Group("/providers", sensitiveHTTPStatus, auth, rt.liveSensitiveUser(), rt.platformAccess(consts.PermOrgUpdate))
+		providers.Get("", rt.listProviders)
+		providers.Get("/types", rt.listProviderTypes)
+		providers.Get("/:name", rt.getProvider)
+		providers.Post("", rt.platformAccess(consts.PermSecretWrite), rt.createProvider)
+		providers.Put("/:name", rt.platformAccess(consts.PermSecretWrite), rt.updateProvider)
+		providers.Put("/:name/toggle", rt.platformAccess(consts.PermSecretWrite), rt.toggleProvider)
+		providers.Delete("/:name", rt.platformAccess(consts.PermSecretDelete), rt.deleteProvider)
 
 		// Authentication flow (no authentication required)
 		identityGroup.Get("/login/providers", rt.listLoginProviders) // GET /identity/login/providers - list providers visible on the login page
@@ -231,7 +225,7 @@ func (rt *Router) getProvider(c *fiber.Ctx) error {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	return http.Detail(c, provider)
+	return http.Detail(c, publicIdentity(provider))
 }
 
 // listProviderTypes lists all provider types
@@ -297,6 +291,11 @@ func (rt *Router) createProvider(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "invalid request parameters")
 	}
 
+	merged, _, err := mergeConfigSecrets(nil, provider.Config, false)
+	if err != nil {
+		return sensitiveError(c, 400, err.Error())
+	}
+	provider.Config = merged
 	// validate required fields
 	if provider.Name == "" || provider.ProviderType == "" {
 		return http.Err(c, http.BadRequest.Code, "name and providerType are required fields")
@@ -306,7 +305,7 @@ func (rt *Router) createProvider(c *fiber.Ctx) error {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	return http.Detail(c, provider)
+	return http.Detail(c, publicIdentity(&provider))
 }
 
 // updateProvider updates an identity provider
@@ -323,6 +322,23 @@ func (rt *Router) updateProvider(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "invalid request parameters")
 	}
 
+	existing, err := identityService.GetProvider(c.UserContext(), name)
+	if err != nil {
+		return sensitiveError(c, 404, "identity provider not found")
+	}
+	if provider.Name != "" && provider.Name != name {
+		return sensitiveError(c, 400, "provider name must match the path")
+	}
+	if provider.ProviderType != "" && provider.ProviderType != existing.ProviderType {
+		return sensitiveError(c, 400, "create a new identity provider to change provider type")
+	}
+	provider.Name = name
+	provider.ProviderType = existing.ProviderType
+	merged, _, mergeErr := mergeConfigSecrets(existing.Config, provider.Config, false)
+	if mergeErr != nil {
+		return sensitiveError(c, 400, mergeErr.Error())
+	}
+	provider.Config = merged
 	if err := identityService.UpdateProvider(c.Context(), name, &provider); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}

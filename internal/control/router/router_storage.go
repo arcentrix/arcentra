@@ -15,6 +15,7 @@
 package router
 
 import (
+	"github.com/arcentrix/arcentra/internal/control/consts"
 	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/gofiber/fiber/v2"
@@ -22,20 +23,20 @@ import (
 
 // storageRouter registers storage related routes
 func (rt *Router) storageRouter(r fiber.Router, auth fiber.Handler) {
-	storageGroup := r.Group("/storage", auth)
+	storageGroup := r.Group("/storage", sensitiveHTTPStatus, auth, rt.liveSensitiveUser(), rt.platformAccess(consts.PermOrgUpdate))
 	{
 		// File upload routes
-		storageGroup.Post("/upload", rt.uploadFile)                       // POST /storage/upload - upload file to default storage
-		storageGroup.Post("/upload/:storageID", rt.uploadFileWithStorage) // POST /storage/upload/:storageID - upload file to specific storage
+		storageGroup.Post("/upload", rt.platformAccess(consts.PermSecretWrite), rt.uploadFile)                       // POST /storage/upload - upload file to default storage
+		storageGroup.Post("/upload/:storageID", rt.platformAccess(consts.PermSecretWrite), rt.uploadFileWithStorage) // POST /storage/upload/:storageID - upload file to specific storage
 
 		// Storage configuration routes
-		storageGroup.Post("/configs", rt.createStorageConfig)                 // POST /storage/configs - create storage config
-		storageGroup.Get("/configs", rt.listStorageConfigs)                   // GET /storage/configs - list storage configs
-		storageGroup.Get("/configs/default", rt.getDefaultStorageConfig)      // GET /storage/configs/default - get default storage config
-		storageGroup.Get("/configs/:id", rt.getStorageConfig)                 // GET /storage/configs/:id - get storage config
-		storageGroup.Put("/configs/:id", rt.updateStorageConfig)              // PUT /storage/configs/:id - update storage config
-		storageGroup.Delete("/configs/:id", rt.deleteStorageConfig)           // DELETE /storage/configs/:id - delete storage config
-		storageGroup.Post("/configs/:id/default", rt.setDefaultStorageConfig) // POST /storage/configs/:id/default - set default storage config
+		storageGroup.Post("/configs", rt.platformAccess(consts.PermSecretWrite), rt.createStorageConfig)                 // POST /storage/configs - create storage config
+		storageGroup.Get("/configs", rt.listStorageConfigs)                                                              // GET /storage/configs - list storage configs
+		storageGroup.Get("/configs/default", rt.getDefaultStorageConfig)                                                 // GET /storage/configs/default - get default storage config
+		storageGroup.Get("/configs/:id", rt.getStorageConfig)                                                            // GET /storage/configs/:id - get storage config
+		storageGroup.Put("/configs/:id", rt.platformAccess(consts.PermSecretWrite), rt.updateStorageConfig)              // PUT /storage/configs/:id - update storage config
+		storageGroup.Delete("/configs/:id", rt.platformAccess(consts.PermSecretDelete), rt.deleteStorageConfig)          // DELETE /storage/configs/:id - delete storage config
+		storageGroup.Post("/configs/:id/default", rt.platformAccess(consts.PermSecretWrite), rt.setDefaultStorageConfig) // POST /storage/configs/:id/default - set default storage config
 	}
 }
 
@@ -98,12 +99,20 @@ func (rt *Router) createStorageConfig(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
+	merged, _, mergeErr := mergeConfigSecrets(nil, req.Config, false)
+	if mergeErr != nil {
+		return sensitiveError(c, 400, mergeErr.Error())
+	}
+	if err := validateStorageEndpoint(merged); err != nil {
+		return sensitiveError(c, 400, err.Error())
+	}
+	req.Config = merged
 	storageConfig, err := storageService.CreateStorageConfig(c.Context(), &req)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	return http.Detail(c, storageConfig)
+	return http.Detail(c, publicStorage(storageConfig))
 }
 
 // listStorageConfigs gets storage configuration list
@@ -115,7 +124,11 @@ func (rt *Router) listStorageConfigs(c *fiber.Ctx) error {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	return http.Detail(c, storageConfigs)
+	views := make([]storageConfigView, 0, len(storageConfigs))
+	for i := range storageConfigs {
+		views = append(views, publicStorage(&storageConfigs[i]))
+	}
+	return http.Detail(c, views)
 }
 
 // getStorageConfig gets a storage configuration by ID
@@ -132,7 +145,7 @@ func (rt *Router) getStorageConfig(c *fiber.Ctx) error {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	return http.Detail(c, storageConfig)
+	return http.Detail(c, publicStorage(storageConfig))
 }
 
 // updateStorageConfig updates a storage configuration
@@ -149,13 +162,34 @@ func (rt *Router) updateStorageConfig(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
+	existing, err := storageService.GetStorageConfig(c.UserContext(), storageID)
+	if err != nil {
+		return sensitiveError(c, 404, "storage configuration not found")
+	}
+	if req.StorageID != "" && req.StorageID != storageID {
+		return sensitiveError(c, 400, "storage id must match the path")
+	}
+	if req.StorageType == "" {
+		req.StorageType = existing.StorageType
+	}
+	if req.StorageType != existing.StorageType {
+		return sensitiveError(c, 400, "create a new configuration to change storage provider")
+	}
+	merged, _, mergeErr := mergeConfigSecrets(existing.Config, req.Config, false)
+	if mergeErr != nil {
+		return sensitiveError(c, 400, mergeErr.Error())
+	}
+	if err := validateStorageEndpoint(merged); err != nil {
+		return sensitiveError(c, 400, err.Error())
+	}
+	req.Config = merged
 	req.StorageID = storageID
 	storageConfig, err := storageService.UpdateStorageConfig(c.Context(), &req)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	return http.Detail(c, storageConfig)
+	return http.Detail(c, publicStorage(storageConfig))
 }
 
 // deleteStorageConfig deletes a storage configuration
@@ -201,5 +235,5 @@ func (rt *Router) getDefaultStorageConfig(c *fiber.Ctx) error {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	return http.Detail(c, storageConfig)
+	return http.Detail(c, publicStorage(storageConfig))
 }

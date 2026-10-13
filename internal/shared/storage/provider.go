@@ -16,6 +16,8 @@ package storage
 
 import (
 	"context"
+	"errors"
+	"gorm.io/gorm"
 
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/google/wire"
@@ -29,6 +31,10 @@ var ProviderSet = wire.NewSet(
 // ProvideStorageFromDB 从数据库提供存储提供者
 func ProvideStorageFromDB(repos *repo.Repositories) (IStorage, error) {
 	dbProvider, err := NewStorageDBProvider(context.Background(), repos.Storage)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 新安装允许先登录配置存储，所有依赖对象存储的操作保持失败关闭
+		return unconfiguredStorage{}, nil
+	}
 	if err != nil {
 		return nil, err
 	}

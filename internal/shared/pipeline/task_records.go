@@ -26,7 +26,7 @@ func (tf *TaskFramework) createRecords(ctx context.Context, task *Task) error {
 	if store != nil {
 		if err := store.CreateJobRun(ctx, &model.JobRun{JobRunID: tf.execCtx.JobRunID, PipelineID: tf.execCtx.PipelineIDRef,
 			PipelineRunID: tf.execCtx.PipelineRunID, JobName: task.Job.Name, Status: model.JobRunStatusPending,
-			Priority: 5, Timeout: task.Job.Timeout, TotalSteps: len(task.Job.Steps), Env: "{}", ArtifactURIs: "{}"}); err != nil {
+			Priority: 5, Timeout: task.Job.Timeout, TotalSteps: len(task.Job.Steps), Env: "{}", ArtifactURIs: "{}", ArtifactReferences: "{}"}); err != nil {
 			return fmt.Errorf("create job run: %w", err)
 		}
 	}

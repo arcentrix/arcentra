@@ -189,17 +189,24 @@ func (ul *UserService) Refresh(userID, rToken string, auth *http.Auth) (map[stri
 }
 
 func (ul *UserService) Register(register *model.Register) error {
-	var err error
+	if register == nil || register.Username == "" || register.Password == "" {
+		return errors.New("username and password are required")
+	}
+	// 注册与登录共用 base64 传输约定，只对解码后的密码生成哈希
+	decoded, err := base64.StdEncoding.Strict().DecodeString(register.Password)
+	if err != nil || len(decoded) == 0 {
+		return errors.New("invalid password format")
+	}
+	password, err := getPassword(string(decoded))
+	if err != nil {
+		return err
+	}
 	register.UserID = id.GetUUIDWithoutDashes()
 	// set default values if not provided
 	if register.FullName == "" {
 		register.FullName = register.Username
 	}
 	register.CreatedAt = time.Now()
-	password, err := getPassword(register.Password)
-	if err != nil {
-		return err
-	}
 	register.Password = string(password)
 	if err = ul.userRepo.Register(register); err != nil {
 		return err

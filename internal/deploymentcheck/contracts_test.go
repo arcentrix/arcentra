@@ -115,3 +115,42 @@ func TestDeploymentProbesAndServiceSelectors(t *testing.T) {
 		})
 	}
 }
+
+func TestRealAcceptanceCIHasNoProductionAuthorityOrSilentSkip(t *testing.T) {
+	workflow := source(t, ".github/workflows/ci.yml")
+	for _, forbidden := range []string{"pull_request_target", "secrets.", "contents: write", "packages: write", "id-token: write", "--privileged"} {
+		if strings.Contains(workflow, forbidden) {
+			t.Fatalf("acceptance workflow must not contain %s", forbidden)
+		}
+	}
+	for _, required := range []string{`ARCENTRA_REAL_STACK: "1"`, `ARCENTRA_REQUIRE_REAL_STACK: "1"`, "'^TestRealStackAcceptance$'", "run_actual_app.py", "--browser-cwd", "down --volumes --remove-orphans", "retention-days: 7"} {
+		if !strings.Contains(workflow, required) {
+			t.Fatalf("missing acceptance contract %s", required)
+		}
+	}
+	var compose struct {
+		Services map[string]struct {
+			Image       string   `yaml:"image"`
+			Ports       []string `yaml:"ports"`
+			Privileged  bool     `yaml:"privileged"`
+			NetworkMode string   `yaml:"network_mode"`
+			Volumes     []string `yaml:"volumes"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal([]byte(source(t, "scripts/acceptance/compose.yml")), &compose); err != nil {
+		t.Fatal(err)
+	}
+	if len(compose.Services) != 4 {
+		t.Fatal("expected only four isolated dependency services")
+	}
+	for name, service := range compose.Services {
+		if service.Image == "" || !strings.Contains(service.Image, ":") || strings.HasSuffix(service.Image, ":latest") || service.Privileged || service.NetworkMode != "" || len(service.Volumes) > 0 {
+			t.Errorf("%s has unsafe or unpinned dependency configuration", name)
+		}
+		for _, port := range service.Ports {
+			if !strings.HasPrefix(port, "127.0.0.1:") {
+				t.Errorf("%s port not loopback-only", name)
+			}
+		}
+	}
+}
