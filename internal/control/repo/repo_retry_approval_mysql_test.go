@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/internal/shared/agentidentity"
 	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	"github.com/arcentrix/arcentra/pkg/safe"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
@@ -747,4 +749,234 @@ func retryApprovalMySQLValidateJSON(db *gorm.DB, entity any) error {
 		}
 	}
 	return nil
+}
+
+// An inspect response is an observation, never a fence. Force both commit orders
+// against the exact generation-aware FAILED CAS used after denied advance.
+func TestRetryApprovalMySQLDeniedAdvanceFinalizationBoundary(t *testing.T) {
+	for _, winner := range []string{"advance-after-first-unused-skip", "failed", "cancel"} {
+		t.Run(winner, func(t *testing.T) {
+			f, other := mysqlRetryApprovalFixture(t)
+			mysqlRetryApprovalAuthority(t, f, other)
+			retryApprovalDeniedAdvanceBoundary(t, f, other, winner, true)
+		})
+	}
+}
+
+// Exercise the same protocol assertions locally without claiming SQLite proves
+// concurrent row locking. The opt-in test above adds independent-pool lock waits.
+func TestRetryApprovalDeniedAdvanceFinalizationBoundaryFixture(t *testing.T) {
+	for _, winner := range []string{"advance-after-first-unused-skip", "failed", "cancel"} {
+		t.Run(winner, func(t *testing.T) {
+			f := gatedPinFixture(t)
+			installRetryApprovalTestAuthority(t, f, nil)
+			retryApprovalDeniedAdvanceBoundary(t, f, f.db, winner, false)
+		})
+	}
+}
+
+func retryApprovalDeniedAdvanceBoundary(t *testing.T, f *generationFixture, other *gorm.DB, winner string, contended bool) {
+	t.Helper()
+	g := f.admission(t)
+	pinned := f.pin(t)
+	approveRetryApproval(t, f)
+	if _, err := f.jobs.ReconcileJobRetryApproval(f.ctx, retryApprovalTestRequest(t, f, g, "admit")); err != nil {
+		t.Fatal(err)
+	}
+	f.failedRound(t, g)
+	advance := f.advance(t, g)
+	jobs2 := &JobRunRepo{IDatabase: statusTestDB{other}}
+	otherFixture := *f
+	otherFixture.db = other
+	otherFixture.jobs = jobs2
+	otherFixture.steps = &StepRunRepo{IDatabase: statusTestDB{other}}
+	setActor := func(enabled int) {
+		t.Helper()
+		if err := other.WithContext(f.ctx).Model(&model.User{}).Where("user_id = ?", "actor").Update("is_enabled", enabled).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Commit revocation before the denied advance, matching the worker fallback.
+	setActor(0)
+	if _, err := jobs2.ReconcileJobGeneration(f.ctx, advance); err == nil {
+		t.Fatal("revoked actor advanced generation")
+	}
+	inspect := taskqueue.JobGenerationTransition{Version: 1, Operation: "inspect", Identity: f.identity, RetryPlanDigest: advance.RetryPlanDigest, InputManifestDigest: pinned}
+	inspect.RequestDigest, _ = inspect.Digest()
+	var before, after model.JobRunGeneration
+	if err := other.Where("generation_id = ?", g.GenerationID).First(&before).Error; err != nil {
+		t.Fatal(err)
+	}
+	observed, err := jobs2.ReconcileJobGeneration(f.ctx, inspect)
+	if err != nil || observed == nil || observed.GenerationID != g.GenerationID || observed.BindingDigest != g.BindingDigest || observed.RuntimeClaimID != g.RuntimeClaimID || observed.ExecutionAllowed {
+		t.Fatal("strict inspect did not return original nonexecuting identity", observed, err)
+	}
+	if err := other.Where("generation_id = ?", g.GenerationID).First(&after).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) || after.State != "active" || after.ClosureDigest != "" {
+		t.Fatal("inspect mutated/fenced original generation")
+	}
+	// Regrant explicitly: a late advance now has live authority and can win. Without
+	// this, a denial could be mistaken for evidence that FAILED/cancel won the CAS.
+	setActor(1)
+	if err := f.report(t, g, "first-2", model.JobRunStatusSkipped, false); err != nil {
+		t.Fatal("original generation could not close first unused attempt", err)
+	}
+	if winner == "failed" {
+		for _, id := range []string{"second-2", "first-3", "second-3"} {
+			if err := f.report(t, g, id, model.JobRunStatusSkipped, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	job, err := jobs2.GetByJobRunID(f.ctx, "job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldJob := *job
+	unusedBefore, err := otherFixture.steps.GetByStepRunID(f.ctx, "second-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := func(r *JobRunRepo) error {
+		snapshot := oldJob
+		return r.PatchReportedStatus(agentidentity.WithGenerationReport(f.ctx, g.GenerationID, g.BindingDigest), &snapshot, map[string]any{"status": model.JobRunStatusFailed, "claim_id": f.identity.ClaimID, "terminal_report_digest": strings.Repeat("c", 64)})
+	}
+	var next *taskqueue.JobGeneration
+	winning := func() error {
+		switch winner {
+		case "advance-after-first-unused-skip":
+			var e error
+			next, e = f.jobs.ReconcileJobGeneration(f.ctx, advance)
+			return e
+		case "failed":
+			return failed(f.jobs)
+		case "cancel":
+			return f.jobs.CancelAgentJobIfCurrent(f.ctx, "job", model.JobRunStatusRunning, map[string]any{"status": model.JobRunStatusCancelled})
+		default:
+			return fmt.Errorf("unknown fixture winner")
+		}
+	}
+	losing := []func() error{func() error { _, e := jobs2.ReconcileJobGeneration(f.ctx, advance); return e }}
+	if winner != "failed" {
+		losing = []func() error{func() error { return failed(jobs2) }}
+	}
+	if winner == "advance-after-first-unused-skip" {
+		losing = append(losing, func() error { return otherFixture.report(t, g, "second-2", model.JobRunStatusSkipped, false) })
+	}
+	checkDenied := func(err error) {
+		t.Helper()
+		var me *drivermysql.MySQLError
+		if err == nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || (errors.As(err, &me) && (me.Number == 1213 || me.Number == 1205)) {
+			t.Fatal("loser must be rejected by binding/state, never timeout/deadlock", err)
+		}
+	}
+	if contended {
+		entered, release := make(chan struct{}), make(chan struct{})
+		var once sync.Once
+		unblock := func() { once.Do(func() { close(release) }) }
+		defer unblock()
+		name := "test:denied-advance-finalization-boundary"
+		if err := f.db.Callback().Update().Before("gorm:update").Register(name, func(tx *gorm.DB) {
+			if tx.Statement.Table != "job_run" {
+				return
+			}
+			select {
+			case <-entered:
+			default:
+				close(entered)
+			}
+			select {
+			case <-release:
+			case <-f.ctx.Done():
+				tx.AddError(f.ctx.Err())
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = f.db.Callback().Update().Remove(name) })
+		won := make(chan error, 1)
+		safe.Go(func() { won <- winning() })
+		select {
+		case <-entered:
+		case <-f.ctx.Done():
+			t.Fatal("winner never held job row at commit boundary")
+		}
+		pending := make([]chan error, len(losing))
+		for i, run := range losing {
+			pending[i] = make(chan error, 1)
+			ch := pending[i]
+			run := run
+			safe.Go(func() { ch <- run() })
+			assertRetryMySQLWaiting(t, ch)
+		}
+		unblock()
+		if err := awaitRetryMySQL(t, won); err != nil {
+			t.Fatal("intended winner failed", err)
+		}
+		for _, ch := range pending {
+			checkDenied(awaitRetryMySQL(t, ch))
+		}
+		if err := f.db.Callback().Update().Remove(name); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err := winning(); err != nil {
+			t.Fatal("intended winner failed", err)
+		}
+		for _, run := range losing {
+			checkDenied(run())
+		}
+	}
+	final, err := jobs2.GetByJobRunID(f.ctx, "job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch winner {
+	case "advance-after-first-unused-skip":
+		if next == nil || next.Number != 2 || final.CurrentGenerationID != next.GenerationID || final.Status != model.JobRunStatusRunning || final.TerminalReportDigest != "" {
+			t.Fatal("late advance did not retain new generation", final, next)
+		}
+		unused, err := otherFixture.steps.GetByStepRunID(f.ctx, "second-2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(unusedBefore, unused) || unused.GenerationID != "" || unused.TerminalReportDigest != "" {
+			t.Fatal("stale unused SKIPPED crossed new generation", unused)
+		}
+		// Cancel after committed advance, then revoke authority: exact transition ACK
+		// must survive both changes while returning no current execution permission.
+		if err := jobs2.CancelAgentJobIfCurrent(f.ctx, "job", model.JobRunStatusRunning, map[string]any{"status": model.JobRunStatusCancelled}); err != nil {
+			t.Fatal(err)
+		}
+		setActor(0)
+		replay, err := jobs2.ReconcileJobGeneration(f.ctx, advance)
+		if err != nil || replay == nil || replay.GenerationID != next.GenerationID || replay.BindingDigest != next.BindingDigest || replay.ExecutionAllowed {
+			t.Fatal("historical exact advance ACK lost or granted execution", replay, err)
+		}
+		changed := advance
+		changed.CleanupReceipt = &taskqueue.JobGenerationCleanupReceipt{}
+		*changed.CleanupReceipt = *advance.CleanupReceipt
+		changed.CleanupReceipt.ResourceOwnerDigest = strings.Repeat("b", 64)
+		changed.RequestDigest, _ = changed.Digest()
+		checkDenied(func() error { _, e := jobs2.ReconcileJobGeneration(f.ctx, changed); return e }())
+	case "failed":
+		if final.Status != model.JobRunStatusFailed || final.CurrentGenerationID != g.GenerationID || final.TerminalReportDigest != strings.Repeat("c", 64) {
+			t.Fatal("FAILED winner was overwritten", final)
+		}
+	case "cancel":
+		if final.Status != model.JobRunStatusCancelled || final.CurrentGenerationID != g.GenerationID || final.CancellationClaimID != f.identity.ClaimID || final.TerminalReportDigest != "" {
+			t.Fatal("old FAILED overwrote controller cancellation", final)
+		}
+	}
+	// Historical committed step receipt survives generation/status changes; service
+	// terminal replay uses this exact digest rather than attempting a new repo CAS.
+	historical, err := otherFixture.steps.GetByStepRunID(f.ctx, "first-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if historical.Status != model.JobRunStatusFailed || historical.TerminalReportDigest != strings.Repeat("5", 64) || historical.GenerationID != g.GenerationID {
+		t.Fatal("historical failure receipt changed", historical)
+	}
 }

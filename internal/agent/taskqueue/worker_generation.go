@@ -165,6 +165,56 @@ func callGenerationTransition(ctx context.Context, client *agentgrpc.ClientWrapp
 	return empty, last
 }
 
+// confirmRejectedGenerationAdvance 只观察并持久化仍为已清理前代的状态，不授予执行或删除转换意图
+// 最终失败报告仍由控制面当前代次 CAS 仲裁与延迟 advance 或取消的竞争
+func confirmRejectedGenerationAdvance(ctx context.Context, client *agentgrpc.ClientWrapper, runtime offlineGenerationRuntime, transition taskpayload.JobGenerationTransition, previous *generationExecution) error {
+	if client == nil || client.AgentClient == nil || !client.ControllerAuthenticated() || previous == nil || previous.payload == nil || !previous.payload.RetryApprovalRequired || transition.Operation != "advance" || transition.CleanupReceipt == nil {
+		return fmt.Errorf("authenticated gated predecessor observation required")
+	}
+	expected := previous.generation
+	if transition.PreviousGenerationID != expected.GenerationID || transition.Identity != generationInputIdentity(ctx, previous.payload) || transition.RetryPlanDigest != expected.RetryPlanDigest {
+		return fmt.Errorf("rejected transition differs from original predecessor")
+	}
+	if err := transition.CleanupReceipt.ValidateGeneration(expected); err != nil {
+		return err
+	}
+	inspect := taskpayload.JobGenerationTransition{Version: 1, Operation: "inspect", Identity: transition.Identity, RetryPlanDigest: transition.RetryPlanDigest, InputManifestDigest: transition.InputManifestDigest}
+	var err error
+	inspect.RequestDigest, err = inspect.Digest()
+	if err != nil {
+		return err
+	}
+	encoded, err := inspect.Canonical()
+	if err != nil {
+		return err
+	}
+	rpcCtx, cancel := client.WithTimeoutAndAuth(ctx)
+	defer cancel()
+	response, err := client.AgentClient.ReconcileJobGeneration(withExecutionClaim(rpcCtx, "job", transition.Identity.JobRunID), &agentv1.ReconcileJobGenerationRequest{AgentId: transition.Identity.AgentID, TransitionJson: encoded})
+	if err != nil {
+		return err
+	}
+	if response == nil {
+		return fmt.Errorf("missing predecessor observation")
+	}
+	observed, err := taskpayload.ParseJobGeneration(response.GenerationJson)
+	if err != nil {
+		return err
+	}
+	if observed.ExecutionAllowed {
+		return fmt.Errorf("observation is not a closed executed predecessor")
+	}
+	expected.ExecutionAllowed = false
+	expected.PreparationOnly = observed.PreparationOnly
+	if *observed != expected {
+		return fmt.Errorf("generation changed while resolving rejected advance")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return runtime.RecordGenerationAdmission(ctx, transition, *observed)
+}
+
 func readGenerationInputDigest(ctx context.Context, client *agentgrpc.ClientWrapper, payload *taskpayload.JobRunTaskPayload) (string, error) {
 	identity := generationInputIdentity(ctx, payload)
 	expected, err := taskpayload.NewJobInputManifest("", payload.ArtifactURIs, payload.ArtifactReferences)
@@ -296,6 +346,14 @@ func executeContainerGenerations(ctx, jobCtx context.Context, conf *config.Agent
 		result.journalRequired = true
 		generation, err := callGenerationTransition(jobCtx, client, transition)
 		if err != nil {
+			if payload.RetryApprovalRequired && transition.Operation == "advance" && grpcstatus.Code(err) == codes.FailedPrecondition {
+				if observationErr := confirmRejectedGenerationAdvance(jobCtx, client, runtime, transition, generationFromContext(result.ctx)); observationErr == nil {
+					result.err = fmt.Errorf("successor admission denied after verified predecessor cleanup: %w", err)
+					break
+				} else {
+					err = errors.Join(err, observationErr)
+				}
+			}
 			result.err = &terminalDeliveryError{fmt.Errorf("generation admission is unresolved; preserve journal and reconcile offline: %w", err)}
 			result.uncertain = true
 			return result

@@ -111,6 +111,17 @@ must freshly authorize execution. Historical receipts and votes remain
 inspectable after revocation; replaying them alone never grants permission.
 Unconfirmed admission, cleanup or ownership fails closed.
 
+If an approved retry successor is explicitly refused, the Agent may inspect the
+exact original claim and already-cleaned predecessor over authenticated TLS. Only
+an unchanged predecessor with no execution permission permits an attempt to
+finalize that predecessor as failed. The observation is not a durable revocation
+of the advance request: the existing current-generation transaction arbitrates
+late advance, cancellation and terminal reports. If a successor already exists,
+a competing transition wins, inspection is uncertain, or persistence fails, the
+Agent retains the original intent and receipts for read-only/offline recovery.
+It does not start a successor or discard evidence. The journal is cleared only
+after the final terminal acknowledgement is durably confirmed.
+
 Restart does not resume this wait or execute a new generation. Preserve journals
 and receipts, use documented read-only inspection/offline recovery when needed,
 and create a separately authorized fresh run. Changing the source, input set,
