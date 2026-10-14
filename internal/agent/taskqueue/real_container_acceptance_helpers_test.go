@@ -228,6 +228,7 @@ func startContainerAcceptanceWorker(ctx context.Context, conf *config.AgentConfi
 
 type containerAcceptanceJournal struct {
 	Record *struct {
+		RunID     string              `json:"pipelineRunID"`
 		JobRunID  string              `json:"jobRunID"`
 		Claim     string              `json:"executionClaimID"`
 		Binding   string              `json:"runtimeBindingDigest"`

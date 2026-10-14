@@ -27,6 +27,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	controlservice "github.com/arcentrix/arcentra/internal/control/service"
+	"github.com/arcentrix/arcentra/internal/shared/agentidentity"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/id"
@@ -351,11 +352,14 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	var cancelRecord containerAcceptanceJournal
 	f.wait("real container command starts before Kafka cancellation", func() bool {
 		records, err := containerAcceptanceRecords(journal)
-		if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
 			return false
 		}
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, record := range records {
-			if record.Record.Phase == "executing" {
+			if record.Record.RunID == cancelRun.RunID && record.Record.Phase == "executing" {
 				if _, err := os.Stat(filepath.Join(workspace, record.Record.Directory, "started")); err == nil {
 					cancelRecord = record
 					return true
@@ -368,19 +372,27 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.waitRun(cancelRun.RunID, model.PipelineStatusCancelled)
-	containerAcceptanceDrain(t, f)
+	controllerWorkerWaitReceipts(t, f, controllerReceiptExpectation{jobID: cancelRecord.Record.JobRunID, runID: cancelRun.RunID, claim: cancelRecord.Record.Claim, runtimeBinding: cancelRecord.Record.Binding, status: model.JobRunStatusCancelled, steps: map[string]int{"wait": 6, "never": 6}})
 	cancelJob := containerAcceptanceJob(t, f, cancelRun.RunID, model.JobRunStatusCancelled)
-	containerAcceptanceStoppedSteps(t, f, cancelJob, 6)
+	if cancelJob.CancellationClaimID != cancelRecord.Record.Claim {
+		t.Fatal("cancellation changed the original execution claim")
+	}
+	containerAcceptanceStoppedSteps(t, f, cancelJob, map[string]int{"wait": 6, "never": 6})
 	containerAcceptanceRemoved(t, f, cancelRecord)
-	timeoutRun := containerAcceptanceSubmit(t, f, settings, &spec.Job{Name: "timeout", Timeout: "8s", Steps: []*spec.Step{controllerWorkerShell("wait", "printf started > started; sleep 60; printf forbidden > after-timeout"), controllerWorkerShell("never", "printf forbidden > later")}})
+	timeoutStep := controllerWorkerShell("wait", "printf started > started; sleep 60; printf forbidden > after-timeout")
+	timeoutStep.Timeout = "2s"
+	timeoutRun := containerAcceptanceSubmit(t, f, settings, &spec.Job{Name: "agent-step-timeout", Timeout: "20s", Steps: []*spec.Step{timeoutStep, controllerWorkerShell("never", "printf forbidden > later")}})
 	var timeoutRecord containerAcceptanceJournal
 	f.wait("real container command starts before its deadline", func() bool {
 		records, err := containerAcceptanceRecords(journal)
-		if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
 			return false
 		}
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, record := range records {
-			if record.Record.Phase == "executing" {
+			if record.Record.RunID == timeoutRun.RunID && record.Record.Phase == "executing" {
 				if _, err := os.Stat(filepath.Join(workspace, record.Record.Directory, "started")); err == nil {
 					timeoutRecord = record
 					return true
@@ -390,17 +402,18 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 		return false
 	})
 	f.waitRun(timeoutRun.RunID, model.PipelineStatusFailed)
+	controllerWorkerWaitReceipts(t, f, controllerReceiptExpectation{jobID: timeoutRecord.Record.JobRunID, runID: timeoutRun.RunID, claim: timeoutRecord.Record.Claim, runtimeBinding: timeoutRecord.Record.Binding, status: model.JobRunStatusTimeout, steps: map[string]int{"wait": 7, "never": 8}})
 	timeoutJob := containerAcceptanceJob(t, f, timeoutRun.RunID, model.JobRunStatusTimeout)
 	if !strings.Contains(timeoutJob.ErrorMessage, "timeout") && !strings.Contains(timeoutJob.ErrorMessage, "deadline") {
 		t.Fatalf("timeout result lost cause: %s", timeoutJob.ErrorMessage)
 	}
-	containerAcceptanceDrain(t, f)
-	containerAcceptanceStoppedSteps(t, f, timeoutJob, 7)
+	containerAcceptanceStoppedSteps(t, f, timeoutJob, map[string]int{"wait": 7, "never": 8})
 	containerAcceptanceRemoved(t, f, timeoutRecord)
 	healthy := containerAcceptanceSubmit(t, f, settings, &spec.Job{Name: "after-timeout", Steps: []*spec.Step{controllerWorkerShell("healthy", "printf 'container-after-timeout\\n'")}})
 	f.waitRun(healthy.RunID, model.PipelineStatusSuccess)
 	containerAcceptanceDrain(t, f)
 	assertControllerQueueCommitted(t, f, 6)
+	containerAcceptanceControllerTimeout(t, f, settings, publisher)
 	for _, ref := range observedStore.refs {
 		state, err := f.worker.offline.backend.InspectOwned(f.ctx, ref)
 		if err != nil || state != (sandbox.ResourceState{}) {
@@ -423,17 +436,26 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	t.Log("real control-queue cancellation, timeout, subsequent healthy execution and exact owned cleanup verified; offline artifact-input DAG remains unsupported and is not claimed")
 }
 
-func containerAcceptanceStoppedSteps(t *testing.T, f *controllerWorkerFixture, job *model.JobRun, want int) {
+func containerAcceptanceStoppedSteps(t *testing.T, f *controllerWorkerFixture, job *model.JobRun, expected map[string]int) {
 	t.Helper()
 	steps, count, err := f.repos.StepRun.List(f.ctx, repo.StepRunFilter{PipelineRunID: job.PipelineRunID})
 	if err != nil || count != 2 {
 		t.Fatalf("interrupted job steps=%d: %v", count, err)
 	}
 	for _, step := range steps {
-		if int(step.Status) != want || step.EndTime == nil || step.TerminalReportDigest == "" || step.AgentID != job.AgentID {
+		want, exists := expected[step.Name]
+		if !exists || int(step.Status) != want || step.EndTime == nil || step.TerminalReportDigest == "" || step.AgentID != job.AgentID {
 			t.Fatalf("interrupted real step result was not persisted: %+v", step)
 		}
-		f.assertReceipt("step", step.StepRunID, step.ClaimID, step.TerminalReportDigest, job.PipelineRunID, job.JobRunID)
+		claim := agentidentity.StepClaimID(job.ClaimID, step.StepRunID)
+		if step.Name == "never" && want == model.JobRunStatusCancelled {
+			if step.ClaimID != "" || step.CancellationClaimID != job.ClaimID {
+				t.Fatal("unstarted cancellation invented execution ownership")
+			}
+		} else if step.ClaimID != claim {
+			t.Fatal("step receipt changed the original derived execution claim")
+		}
+		f.assertReceipt("step", step.StepRunID, claim, step.TerminalReportDigest, job.PipelineRunID, job.JobRunID)
 	}
 	f.assertReceipt("job", job.JobRunID, job.ClaimID, job.TerminalReportDigest, job.PipelineRunID, job.JobRunID)
 }
@@ -487,7 +509,14 @@ func containerAcceptanceDrain(t *testing.T, f *controllerWorkerFixture) {
 		f.worker.reports.mu.Lock()
 		empty := len(f.worker.reports.entries) == 0
 		f.worker.reports.mu.Unlock()
-		return empty && len(f.worker.offline.controller.Recoveries()) == 0 && f.worker.OfflineRuntimeReady()
+		records, err := containerAcceptanceRecords(f.conf.Agent.Sandbox.Containerd.JournalDir)
+		if errors.Is(err, os.ErrNotExist) {
+			return false
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return empty && len(records) == 0 && f.worker.OfflineRuntimeReady()
 	})
 }
 
