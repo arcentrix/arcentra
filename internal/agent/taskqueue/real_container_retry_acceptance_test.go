@@ -165,6 +165,7 @@ type containerRetryObservation struct {
 	actualHeads      map[int]string
 	uploads          map[string]containerAcceptanceJournal
 	downloads        map[string]int
+	downstreamReads  map[string]int
 	advanceRequests  []string
 	advanceResponses []string
 	branchAdvanced   bool
@@ -191,7 +192,7 @@ func containerAcceptanceWholeJobRetry(t *testing.T, f *controllerWorkerFixture, 
 		t.Fatal("retry acceptance must explicitly opt in its fixture policy")
 	}
 	sourceURL, initialCommit, changedCommit, advanceBranch := containerAcceptanceMutableRetrySource(t, f.ctx)
-	observation := &containerRetryObservation{staged: make(map[int]containerAcceptanceJournal), actualHeads: make(map[int]string), uploads: make(map[string]containerAcceptanceJournal), downloads: make(map[string]int), commandClaims: make(map[string]int)}
+	observation := &containerRetryObservation{staged: make(map[int]containerAcceptanceJournal), actualHeads: make(map[int]string), uploads: make(map[string]containerAcceptanceJournal), downloads: make(map[string]int), downstreamReads: make(map[string]int), commandClaims: make(map[string]int)}
 	store.mu.Lock()
 	initialUploads := store.sealedUploads
 	store.afterUpload = func(ctx context.Context, key string, owner containerAcceptanceJournal) error {
@@ -256,12 +257,30 @@ func containerAcceptanceWholeJobRetry(t *testing.T, f *controllerWorkerFixture, 
 			return fmt.Errorf("retry input preceded exact immutable manifest pin: %v", err)
 		}
 		manifest, err := taskpayload.ParseJobInputManifest(consumer.InputManifest)
-		if err != nil || len(manifest.Artifacts) != 1 {
+		if err != nil {
 			return fmt.Errorf("retry consumer manifest has unexpected inputs: %v", err)
 		}
-		input, row := manifest.Artifacts[0], rows[0]
-		if input.Key != key || input.Reference.SHA256 != row.SHA256 || input.Reference.Size == nil || *input.Reference.Size != row.Size || input.Reference.StorageID != row.StorageID || input.Reference.Fingerprint != row.StorageFingerprint || row.ExpiresAt == nil || input.Reference.ExpiresAt != row.ExpiresAt.Unix() {
-			return fmt.Errorf("retry input changed registered content/storage metadata")
+		published, total, err := f.repos.Artifact.List(ctx, repo.ArtifactQuery{ProjectID: f.projectID, RunID: consumer.PipelineRunID, Limit: 20})
+		if err != nil || total != int64(len(published)) {
+			return fmt.Errorf("retry input registration snapshot is incomplete: %v", err)
+		}
+		registered := make(map[string]model.ProjectArtifact, len(published))
+		for _, row := range published {
+			observation.mu.Lock()
+			owner, observed := observation.uploads[row.StoragePath]
+			observation.mu.Unlock()
+			publishedJob, err := f.repos.JobRun.GetByJobRunID(ctx, row.JobRunID)
+			if err != nil || publishedJob == nil || publishedJob.PipelineRunID != consumer.PipelineRunID || publishedJob.Status != model.JobRunStatusSuccess || publishedJob.TerminalReportDigest == "" || !observed || owner.Record == nil || owner.Record.JobRunID != row.JobRunID || owner.Record.Claim != publishedJob.ClaimID {
+				return fmt.Errorf("retry manifest includes an unobserved or uncommitted producer: %v", err)
+			}
+			name := publishedJob.JobName + "/" + row.Name
+			if _, duplicate := registered[name]; duplicate {
+				return fmt.Errorf("retry manifest registration has duplicate names")
+			}
+			registered[name] = row
+		}
+		if err := containerAcceptanceRetryInputs(manifest, consumer.JobName, initialCommit, key, registered); err != nil {
+			return err
 		}
 		state, err = f.worker.offline.backend.InspectOwned(ctx, target.Record.Resource)
 		if err != nil || state != (sandbox.ResourceState{}) {
@@ -301,11 +320,12 @@ func containerAcceptanceWholeJobRetry(t *testing.T, f *controllerWorkerFixture, 
 			observation.downloads[key]++
 			return nil
 		}
-		if consumer.JobName != "retry-c" || producerJob.JobName != "retry-b" {
+		if consumer.JobName != "retry-c" || (producerJob.JobName != "retry-a" && producerJob.JobName != "retry-b") {
 			return fmt.Errorf("unexpected downstream retry-chain target")
 		}
 		observation.mu.Lock()
 		observation.downloads[key]++
+		observation.downstreamReads[key]++
 		observation.mu.Unlock()
 		return nil
 	}
@@ -482,7 +502,7 @@ func containerAcceptanceWholeJobRetry(t *testing.T, f *controllerWorkerFixture, 
 		&spec.Job{Name: "retry-a", Steps: []*spec.Step{controllerWorkerShell("produce", "mkdir seed; printf upstream-input > seed/input.txt"), containerAcceptanceArtifactStep("seed", "upload", map[string]any{"paths": []any{"seed/input.txt"}, "expireIn": "7d"})}},
 		&spec.Job{Name: "retry-b", Source: &spec.Source{Type: "git", Repo: sourceURL, Branch: "main"}, DependsOn: []string{"retry-a"}, Retry: &spec.Retry{Mode: "whole_job", MaxAttempts: 2, Idempotent: true, AllowedExitCodes: []int32{9}, Delay: "100ms"}, Steps: []*spec.Step{
 			containerAcceptanceArtifactStep("fetch", "download", map[string]any{"job": "retry-a", "paths": []any{"seed/*"}}), controllerWorkerShell("retry-command", command), containerAcceptanceArtifactStep("publish", "upload", map[string]any{"paths": []any{"proof/result.txt"}, "expireIn": "7d"})}},
-		&spec.Job{Name: "retry-c", DependsOn: []string{"retry-b"}, Steps: []*spec.Step{containerAcceptanceArtifactStep("fetch-proof", "download", map[string]any{"job": "retry-b", "paths": []any{"proof/*"}}), controllerWorkerShell("verify-proof", fmt.Sprintf("test \"$(cat proof/result.txt)\" = 'retry-generation-2 %s upstream-input'; cmp proof/result.txt .artifacts/retry-b/proof/result.txt; test ! -e failed-workspace-marker; printf 'retry-downstream-proof\\n'", initialCommit))}},
+		&spec.Job{Name: "retry-c", DependsOn: []string{"retry-b"}, Steps: []*spec.Step{containerAcceptanceArtifactStep("fetch-proof", "download", map[string]any{"job": "retry-b", "paths": []any{"proof/*"}}), controllerWorkerShell("verify-proof", fmt.Sprintf("test \"$(cat proof/result.txt)\" = 'retry-generation-2 %s upstream-input'; cmp proof/result.txt .artifacts/retry-b/proof/result.txt; test \"$(cat .artifacts/retry-a/seed/input.txt)\" = 'upstream-input'; test ! -e seed/input.txt; test ! -e failed-workspace-marker; printf 'retry-downstream-proof\\n'", initialCommit))}},
 	)
 	completed := f.waitRun(run.RunID, model.PipelineStatusSuccess)
 	if completed.TotalJobs != 3 || completed.CompletedJobs != 3 || completed.FailedJobs != 0 {
@@ -588,6 +608,10 @@ func containerAcceptanceWholeJobRetry(t *testing.T, f *controllerWorkerFixture, 
 	for key, n := range observation.downloads {
 		observedDownloads[key] = n
 	}
+	observedDownstreamReads := make(map[string]int, len(observation.downstreamReads))
+	for key, n := range observation.downstreamReads {
+		observedDownstreamReads[key] = n
+	}
 	observation.mu.Unlock()
 	if observationErr != nil {
 		t.Fatal(observationErr)
@@ -609,11 +633,14 @@ func containerAcceptanceWholeJobRetry(t *testing.T, f *controllerWorkerFixture, 
 			t.Fatal("registered artifact lacks actual observed upload")
 		}
 		want := []byte("upstream-input")
-		downloads := 4
+		// Both B generations prefetch and explicitly download A; C also prefetches A.
+		downloads := 5
+		downstreamReads := 1
 		if row.JobRunID == consumer.JobRunID {
 			winning++
 			want = []byte("retry-generation-2 " + initialCommit + " upstream-input")
 			downloads = 2
+			downstreamReads = 2
 			if owner.Record.Generation == nil || owner.Record.Generation.Number != 2 {
 				t.Fatal("output came from failed generation")
 			}
@@ -627,7 +654,7 @@ func containerAcceptanceWholeJobRetry(t *testing.T, f *controllerWorkerFixture, 
 				t.Fatal("winning artifact registration points at an old or unrelated attempt")
 			}
 		}
-		if observedDownloads[row.StoragePath] != downloads || row.Size != int64(len(want)) || row.SHA256 != fmt.Sprintf("%x", sha256.Sum256(want)) {
+		if observedDownloads[row.StoragePath] != downloads || observedDownstreamReads[row.StoragePath] != downstreamReads || row.Size != int64(len(want)) || row.SHA256 != fmt.Sprintf("%x", sha256.Sum256(want)) {
 			t.Fatal("retry transferred altered bytes or repeated/unexpected input rounds")
 		}
 		reader, err := store.S3Storage.DownloadStream(f.ctx, row.StoragePath)
