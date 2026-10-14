@@ -184,9 +184,9 @@ func (o *containerRetryObservation) fail(err error) {
 
 // containerAcceptanceWholeJobRetry 在同一已授权 fixture 内验证三作业链及两个新会话代次
 // 不添加运行时、宿主权限、网络能力、工作流入口或测试总时间预算
-func containerAcceptanceWholeJobRetry(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage) {
+func containerAcceptanceWholeJobRetry(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, retainedAudit map[string]string) {
 	t.Helper()
-	containerAcceptanceDrain(t, f)
+	containerAcceptanceDrainWithAudit(t, f, retainedAudit)
 	if !f.conf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetry {
 		t.Fatal("retry acceptance must explicitly opt in its fixture policy")
 	}
@@ -488,7 +488,7 @@ func containerAcceptanceWholeJobRetry(t *testing.T, f *controllerWorkerFixture, 
 	if completed.TotalJobs != 3 || completed.CompletedJobs != 3 || completed.FailedJobs != 0 {
 		t.Fatalf("retry chain did not complete three original jobs: %+v", completed)
 	}
-	containerAcceptanceDrain(t, f)
+	containerAcceptanceDrainWithAudit(t, f, retainedAudit)
 	jobs, err := f.repos.JobRun.ListByPipelineRunID(f.ctx, run.RunID)
 	if err != nil || len(jobs) != 3 {
 		t.Fatalf("retry created unexpected logical jobs: count=%d %v", len(jobs), err)

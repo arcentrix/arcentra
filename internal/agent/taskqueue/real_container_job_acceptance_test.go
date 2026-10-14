@@ -44,6 +44,7 @@ import (
 
 func TestRealContainerAcceptanceGate(t *testing.T) {
 	t.Run("generation-admission-observer", testContainerAcceptanceAdmissionObserver)
+	t.Run("exact-retained-quarantine-drain", testContainerAcceptanceRetainedAuditDrain)
 	image := "docker.io/library/alpine@sha256:" + strings.Repeat("a", 64)
 	complete := map[string]string{"ARCENTRA_CONTAINERD_ACCEPTANCE": "1", "ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE": "1", "ARCENTRA_REAL_STACK": "1", "ARCENTRA_REQUIRE_REAL_STACK": "1", "ARCENTRA_TEST_MYSQL_DSN": "synthetic", "ARCENTRA_TEST_KAFKA_BROKERS": "127.0.0.1:19092", "ARCENTRA_TEST_S3_ENDPOINT": "http://127.0.0.1:19000", "ARCENTRA_TEST_S3_ACCESS_KEY": "synthetic", "ARCENTRA_TEST_S3_SECRET_KEY": "synthetic", "ARCENTRA_CONTAINERD_SOCKET": "/tmp/acceptance/containerd.sock", "ARCENTRA_SANDBOX_TEST_IMAGE": image, "ARCENTRA_TEST_CONTAINERD_NAMESPACE": "arcentra-containerjob-acceptance-synthetic", "ARCENTRA_TEST_CONTAINERD_ROOT": "/tmp/acceptance/job", "ARCENTRA_CONTAINERD_RUNC_ROOT": "/tmp/acceptance/runc", "ARCENTRA_CONTAINERD_FIFO_DIR": "/tmp/acceptance/fifo"}
 	if cfg, err := realContainerEnvironment(func(string) string { return "" }); cfg != nil || err != nil {
@@ -417,10 +418,13 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	f.waitRun(healthy.RunID, model.PipelineStatusSuccess)
 	containerAcceptanceDrain(t, f)
 	assertControllerQueueCommitted(t, f, 6)
-	containerAcceptanceControllerTimeout(t, f, settings, publisher)
+	retainedAudit := containerAcceptanceControllerTimeout(t, f, settings, publisher)
 	containerAcceptanceArtifactChain(t, f, settings, observedStore)
-	containerAcceptanceWholeJobRetry(t, f, settings, observedStore)
+	containerAcceptanceWholeJobRetry(t, f, settings, observedStore, retainedAudit)
 	testRealContainerGenerationCancellationFence(t, f)
+	if !containerAcceptanceAuditMatches(retainedAudit, controllerTerminalRecords(f)) {
+		t.Fatal("completed acceptance changed retained timeout audit or left new terminal receipts")
+	}
 	for _, ref := range observedStore.refs {
 		state, err := f.worker.offline.backend.InspectOwned(f.ctx, ref)
 		if err != nil || state != (sandbox.ResourceState{}) {
@@ -519,10 +523,20 @@ func containerAcceptanceBoundJob(t *testing.T, f *controllerWorkerFixture, job *
 
 func containerAcceptanceDrain(t *testing.T, f *controllerWorkerFixture) {
 	t.Helper()
+	containerAcceptanceDrainWithAudit(t, f, nil)
+}
+
+func containerAcceptanceDrainWithAudit(t *testing.T, f *controllerWorkerFixture, retainedAudit map[string]string) {
+	t.Helper()
+	var snapshot containerAcceptanceDrainState
+	defer func() {
+		if !snapshot.drained() {
+			t.Logf("drain state: terminal_records=%d expected_audit=%d exact_audit=%t runtime_records=%d recoveries=%d ready=%t", snapshot.terminalRecords, len(retainedAudit), snapshot.exactAudit, snapshot.runtimeRecords, snapshot.recoveries, snapshot.ready)
+		}
+	}()
 	f.wait("terminal receipts and runtime tombstones drain", func() bool {
-		f.worker.reports.mu.Lock()
-		empty := len(f.worker.reports.entries) == 0
-		f.worker.reports.mu.Unlock()
+		terminalRecords := controllerTerminalRecords(f)
+		snapshot = containerAcceptanceDrainState{terminalRecords: len(terminalRecords), exactAudit: containerAcceptanceAuditMatches(retainedAudit, terminalRecords), runtimeRecords: -1, recoveries: len(f.worker.offline.controller.Recoveries()), ready: f.worker.OfflineRuntimeReady()}
 		records, err := containerAcceptanceRecords(f.conf.Agent.Sandbox.Containerd.JournalDir)
 		if errors.Is(err, os.ErrNotExist) {
 			return false
@@ -530,7 +544,8 @@ func containerAcceptanceDrain(t *testing.T, f *controllerWorkerFixture) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return empty && len(records) == 0 && len(f.worker.offline.controller.Recoveries()) == 0 && f.worker.OfflineRuntimeReady()
+		snapshot.runtimeRecords = len(records)
+		return snapshot.drained()
 	})
 }
 
