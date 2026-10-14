@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/arcentrix/arcentra/pkg/sandbox"
+	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/google/uuid"
 )
 
@@ -44,11 +45,16 @@ type ControllerOptions struct {
 // Recovery 表示中断或完成清理后仍待确认的执行身份，不表示作业执行成功
 // CleanupComplete 仅证明运行时和工作目录已删除，不能用于推断业务执行结果
 type Recovery struct {
-	PipelineRunID        string
-	JobRunID             string
-	ExecutionClaimID     string
-	RuntimeBindingDigest string
-	CleanupComplete      bool
+	PipelineRunID         string
+	JobRunID              string
+	ExecutionClaimID      string
+	RuntimeBindingDigest  string
+	CleanupComplete       bool
+	Generation            *taskpayload.JobGeneration
+	CleanupReceipt        *taskpayload.JobGenerationCleanupReceipt
+	TransitionIntent      *taskpayload.JobGenerationTransition
+	SuccessorAdmission    *taskpayload.JobGeneration
+	GenerationObservation *taskpayload.JobGeneration
 }
 
 // Controller 独占持久日志，在接受作业前恢复已记录的准确资源
@@ -66,6 +72,7 @@ type Controller struct {
 	workspaceInfo         os.FileInfo
 	runtimeIOIdentity     string
 	records               map[string]journalRecord
+	admissions            map[string]generationAdmission
 	sessions              map[string]*Session
 	runtimeBlocked        map[string]error
 	ready                 bool
@@ -103,7 +110,7 @@ func openController(ctx context.Context, backend DurableBackend, opts Controller
 	if pathsOverlap(opts.JournalRoot, opts.WorkspaceRoot) {
 		return nil, fmt.Errorf("sandbox journal must be separate from the workspace root")
 	}
-	c := &Controller{opts: opts, backend: backend, records: make(map[string]journalRecord), sessions: make(map[string]*Session), runtimeBlocked: make(map[string]error), hook: hook}
+	c := &Controller{opts: opts, backend: backend, records: make(map[string]journalRecord), admissions: make(map[string]generationAdmission), sessions: make(map[string]*Session), runtimeBlocked: make(map[string]error), hook: hook}
 	defer func() {
 		if resultErr != nil {
 			_ = c.closeHandles()
@@ -161,7 +168,7 @@ func openController(ctx context.Context, backend DurableBackend, opts Controller
 		return nil, err
 	}
 	c.ready = true
-	c.reconciliationPending = len(c.records) > 0
+	c.reconciliationPending = len(c.records)+len(c.admissions) > 0
 	return c, nil
 }
 
@@ -184,6 +191,7 @@ func (c *Controller) load(ctx context.Context) error {
 		return fmt.Errorf("sandbox journal record quota exceeded")
 	}
 	names := make([]string, 0, len(entries))
+	admissionNames := make([]string, 0, len(entries))
 	hasBinding := false
 	for _, entry := range entries {
 		name := entry.Name()
@@ -202,6 +210,14 @@ func (c *Controller) load(ctx context.Context) error {
 		case journalBindingFile:
 			hasBinding = true
 		default:
+			if strings.HasPrefix(name, "admission-") {
+				id, err := uuid.Parse(strings.TrimSuffix(strings.TrimPrefix(name, "admission-"), ".json"))
+				if err != nil || name != "admission-"+id.String()+".json" {
+					return fmt.Errorf("invalid admission journal filename")
+				}
+				admissionNames = append(admissionNames, name)
+				continue
+			}
 			id, err := uuid.Parse(strings.TrimSuffix(name, ".json"))
 			if err != nil || name != id.String()+".json" {
 				return fmt.Errorf("sandbox journal has unknown or interrupted files; operator review required")
@@ -210,7 +226,7 @@ func (c *Controller) load(ctx context.Context) error {
 		}
 	}
 	if !hasBinding {
-		if len(names) != 0 {
+		if len(names)+len(admissionNames) != 0 {
 			return fmt.Errorf("sandbox journal owner binding is missing")
 		}
 		return c.writeJournal(ctx, journalBindingFile, nil)
@@ -222,7 +238,17 @@ func (c *Controller) load(ctx context.Context) error {
 	if binding != nil {
 		return fmt.Errorf("sandbox journal owner binding contains a session")
 	}
-	jobs, claims := make(map[string]bool), make(map[string]bool)
+	sort.Strings(admissionNames)
+	for _, name := range admissionNames {
+		admission, err := c.readAdmission(ctx, name)
+		if err != nil {
+			return err
+		}
+		if name != admissionFilename(admission.Request) {
+			return fmt.Errorf("admission journal identity mismatch")
+		}
+		c.admissions[name] = *admission
+	}
 	sort.Strings(names)
 	for _, name := range names {
 		record, err := c.readJournal(ctx, name)
@@ -232,13 +258,9 @@ func (c *Controller) load(ctx context.Context) error {
 		if err := c.validateRecord(record, name); err != nil {
 			return err
 		}
-		if jobs[record.JobRunID] || claims[record.ExecutionClaimID] {
-			return fmt.Errorf("sandbox journal contains duplicate job or execution claim")
-		}
-		jobs[record.JobRunID], claims[record.ExecutionClaimID] = true, true
 		c.records[record.ID] = *record
 	}
-	return nil
+	return c.validateGenerationHistory()
 }
 
 func (c *Controller) reconcile(ctx context.Context) (resultErr error) {
@@ -322,7 +344,14 @@ func (c *Controller) reconcile(ctx context.Context) (resultErr error) {
 		if err := c.workspaceDir.Sync(); err != nil {
 			return err
 		}
+		if err := c.verifyCleanupAbsent(ctx, record); err != nil {
+			return err
+		}
 		record.Phase = phaseRecovered
+		if record.Generation != nil && record.Inode != 0 {
+			receipt := c.generationCleanupReceipt(record)
+			record.CleanupReceipt = &receipt
+		}
 		if err := c.persist(ctx, record); err != nil {
 			return err
 		}
@@ -381,12 +410,16 @@ func (c *Controller) persist(ctx context.Context, record journalRecord) error {
 // Allocate 持久化完整资源意图并分配工作目录，不创建或启动任何容器
 // 调用方在可信输入暂存成功后调用 Start，输入凭据不会写入日志
 func (c *Controller) Allocate(ctx context.Context, opts Options) (*Session, error) {
+	return c.allocate(ctx, opts, nil)
+}
+
+func (c *Controller) allocate(ctx context.Context, opts Options, generation *taskpayload.JobGeneration) (*Session, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := c.check(ctx); err != nil {
 		return nil, err
 	}
-	if c.reconciliationPending || len(c.runtimeBlocked) != 0 {
+	if c.reconciliationPending || len(c.runtimeBlocked) != 0 || c.pendingGenerationHandoff() {
 		return nil, fmt.Errorf("sandbox startup has unacknowledged execution outcomes")
 	}
 	if opts.WorkspaceRoot != "" && opts.WorkspaceRoot != c.opts.WorkspaceRoot {
@@ -405,18 +438,19 @@ func (c *Controller) Allocate(ctx context.Context, opts Options) (*Session, erro
 	if err := validateDurableUser(user); err != nil {
 		return nil, err
 	}
-	for _, record := range c.records {
-		if record.JobRunID == opts.JobRunID || record.ExecutionClaimID == opts.ExecutionClaimID {
-			return nil, fmt.Errorf("sandbox job or execution claim is already recorded; reconcile its outcome before retrying")
-		}
+	if err := c.validateGenerationAllocation(ctx, opts, generation); err != nil {
+		return nil, err
 	}
-	if len(c.records) >= c.opts.MaxRecords {
+	if len(c.records)+len(c.admissions) >= c.opts.MaxRecords {
 		return nil, fmt.Errorf("sandbox journal record quota exceeded")
 	}
 	id := uuid.NewString()
+	if generation != nil {
+		id = generation.RuntimeClaimID
+	}
 	record := journalRecord{
 		ID: id, PipelineRunID: opts.PipelineRunID, JobRunID: opts.JobRunID, ExecutionClaimID: opts.ExecutionClaimID,
-		RuntimeBindingDigest: opts.RuntimeBindingDigest, Directory: "job-" + id, Phase: phaseIntent,
+		RuntimeBindingDigest: opts.RuntimeBindingDigest, Directory: "job-" + id, Phase: phaseIntent, Generation: generation,
 	}
 	ref, err := c.backend.PrepareResource(ctx, "arcentra-"+id, "pending-owner-resolution")
 	if err != nil {
@@ -429,6 +463,15 @@ func (c *Controller) Allocate(ctx context.Context, opts Options) (*Session, erro
 	record.Resource.Owner = c.resourceOwner(record)
 	if err := c.validateRecord(&record, id+".json"); err != nil {
 		return nil, err
+	}
+	if generation != nil {
+		state, err := c.backend.InspectOwned(ctx, record.Resource)
+		if err != nil {
+			return nil, err
+		}
+		if state.TaskExists || state.ContainerExists || state.SnapshotExists {
+			return nil, fmt.Errorf("new generation resource identity is already in use")
+		}
 	}
 	if err := c.persist(ctx, record); err != nil {
 		return nil, err
@@ -475,13 +518,18 @@ func (c *Controller) Allocate(ctx context.Context, opts Options) (*Session, erro
 func (c *Controller) Ready() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.ready && !c.closed && c.fatal == nil && !c.reconciliationPending && len(c.runtimeBlocked) == 0
+	return c.ready && !c.closed && c.fatal == nil && !c.reconciliationPending && len(c.runtimeBlocked) == 0 && !c.pendingGenerationHandoff()
 }
 
 // HasJob 判断作业是否仍有执行记录或等待业务结果确认的墓碑
 func (c *Controller) HasJob(jobRunID string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	for _, admission := range c.admissions {
+		if admission.Request.Identity.JobRunID == jobRunID {
+			return true
+		}
+	}
 	for _, record := range c.records {
 		if record.JobRunID == jobRunID {
 			return true
@@ -500,10 +548,31 @@ func (c *Controller) Recoveries() []Recovery {
 			records = append(records, Recovery{
 				PipelineRunID: record.PipelineRunID, JobRunID: record.JobRunID, ExecutionClaimID: record.ExecutionClaimID,
 				RuntimeBindingDigest: record.RuntimeBindingDigest, CleanupComplete: true,
+				Generation: copyGeneration(record.Generation), CleanupReceipt: copyCleanupReceipt(record.CleanupReceipt),
+				TransitionIntent: copyGenerationTransition(record.TransitionIntent), SuccessorAdmission: copyGeneration(record.SuccessorAdmission), GenerationObservation: copyGeneration(record.GenerationObservation),
 			})
 		}
 	}
-	sort.Slice(records, func(i, j int) bool { return records[i].JobRunID < records[j].JobRunID })
+	for _, admission := range c.admissions {
+		hasRecord := false
+		for _, record := range c.records {
+			if record.ExecutionClaimID == admission.Request.Identity.ClaimID {
+				hasRecord = true
+				break
+			}
+		}
+		if !hasRecord {
+			identity := admission.Request.Identity
+			records = append(records, Recovery{PipelineRunID: identity.PipelineRunID, JobRunID: identity.JobRunID, ExecutionClaimID: identity.ClaimID,
+				RuntimeBindingDigest: identity.RuntimeBindingDigest, CleanupComplete: true, Generation: copyGeneration(admission.Generation), TransitionIntent: copyGenerationTransition(&admission.Request), GenerationObservation: copyGeneration(admission.Observation)})
+		}
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].JobRunID != records[j].JobRunID {
+			return records[i].JobRunID < records[j].JobRunID
+		}
+		return records[i].Generation != nil && records[j].Generation != nil && records[i].Generation.Number < records[j].Generation.Number
+	})
 	return records
 }
 
@@ -532,6 +601,7 @@ func (c *Controller) AcknowledgeCompletion(ctx context.Context, executionClaimID
 	if err := c.check(ctx); err != nil {
 		return err
 	}
+	var ids []string
 	for id, record := range c.records {
 		if record.ExecutionClaimID != executionClaimID {
 			continue
@@ -543,15 +613,60 @@ func (c *Controller) AcknowledgeCompletion(ctx context.Context, executionClaimID
 		if err != nil || disk == nil || !reflect.DeepEqual(*disk, record) {
 			return c.poison(fmt.Errorf("sandbox completion record changed"))
 		}
+		if err := c.verifyCleanupAbsent(ctx, record); err != nil {
+			return c.poison(err)
+		}
+		ids = append(ids, id)
+	}
+	var admissionIDs []string
+	for name, admission := range c.admissions {
+		if admission.Request.Identity.ClaimID != executionClaimID {
+			continue
+		}
+		disk, err := c.readAdmission(ctx, name)
+		if err != nil || disk == nil || !reflect.DeepEqual(*disk, admission) {
+			return c.poison(fmt.Errorf("sandbox admission completion record changed"))
+		}
+		admissionIDs = append(admissionIDs, name)
+	}
+	if len(ids)+len(admissionIDs) == 0 {
+		return fmt.Errorf("sandbox execution claim is not recorded")
+	}
+	sort.Strings(ids)
+	sort.Strings(admissionIDs)
+	for _, name := range admissionIDs {
+		admission := c.admissions[name]
+		if !admission.FinalAcknowledged {
+			admission.FinalAcknowledged = true
+			if err := c.persistAdmission(ctx, admission); err != nil {
+				return err
+			}
+		}
+	}
+	// 最终 ACK 先落盘，再删除任意一代；部分删除崩溃仍保留明确终态来源
+	for _, id := range ids {
+		record := c.records[id]
+		if record.Generation != nil && !record.FinalAcknowledged {
+			record.FinalAcknowledged = true
+			if err := c.persist(ctx, record); err != nil {
+				return err
+			}
+		}
+	}
+	for _, id := range ids {
 		if err := c.removeJournalRecord(ctx, id); err != nil {
 			return c.poison(err)
 		}
-		if len(c.records) == 0 {
-			c.reconciliationPending = false
-		}
-		return nil
 	}
-	return fmt.Errorf("sandbox execution claim is not recorded")
+	for _, name := range admissionIDs {
+		if err := c.removeAdmission(ctx, name); err != nil {
+			return c.poison(err)
+		}
+	}
+	if len(c.records)+len(c.admissions) == 0 {
+		c.reconciliationPending = false
+	}
+	return nil
 }
 
 // Close 只在全部会话已清理后释放独占日志锁，不丢弃失败记录

@@ -80,9 +80,7 @@ changes or production secrets, a 25-minute limit, and mandatory cleanup evidence
 - Trusted host Git checkout before the container runs; trusted host artifact
   publication only after every container process is sealed. Host Git, object-store
   and image operations may use network access. Container commands cannot.
-- No automatic retries, execution resumption or takeover after a crash. Recovery
-  removes only exact journaled resources and reconciles the original authenticated
-  terminal outcome. A retry requires an explicitly requested fresh run.
+- Explicit bounded `whole_job` retry requires a separate default-off operator permission and fresh journaled generation per round. `failed_step`, execution resumption and takeover after a crash remain unsupported. Recovery removes only exact journaled resources and reconciles original authenticated facts; interrupted work needs an explicitly requested fresh run.
 - Multiple jobs must form one explicit dependency chain: one root, at most one
   predecessor and successor per job, and all jobs reachable from that root.
   Disconnected roots, branches, joins, cycles and mixed host/deployment execution
@@ -173,11 +171,7 @@ jobs:
           script: test "$(cat dist/result.txt)" = "offline artifact"
 ```
 
-Container `failed_step` and `whole_job` retry policies are still rejected when
-saving or triggering a definition, before work is dispatched. Their session,
-workspace and staging semantics require a separate implementation; existing
-trusted-baremetal retry modes are unchanged. Branches, joins and disconnected
-roots are intentionally outside this linear-chain extension.
+Container `whole_job` retries use the separate opt-in [fresh-generation contract](pipeline/retries.md#offline-container-whole-job-generations). `failed_step` and approval-bearing retry jobs are rejected before dispatch. Existing trusted-baremetal retry modes are unchanged. Branches, joins and disconnected roots remain outside this linear-chain profile.
 
 ## Immutable source and artifact inputs
 
@@ -210,9 +204,7 @@ and historical terminal receipt replay remain unchanged.
 
 Apply the [explicit immutable-input migration](migrations/005_immutable_job_inputs.md)
 before upgrading container Agents. Existing records remain `unknown`; terminal
-source observations are never backfilled as first-checkout pins. This prerequisite
-does not enable `failed_step` or `whole_job` container retry, automatic generation
-dispatch, or command re-execution after restart.
+source observations are never backfilled as first-checkout pins. The input prerequisite alone does not enable retry. Whole-job generations additionally require [migration 006](migrations/006_container_job_generations.md), explicit operator retry permission and capable Agents; failed-step retry and command re-execution after restart remain unsupported.
 
 ## Review-only configuration template
 
@@ -228,6 +220,7 @@ Control:
 ```toml
 [pipeline.offlineRuntime]
 enabled = false
+allowWholeJobRetry = false
 allowedImages = ["docker.io/library/alpine@sha256:1f3591b8a02ea153f41c5bba878ad477f63ab3d19349762cb77504db02a23e15"]
 maxCpu = "500m"
 maxMemory = "64Mi"
@@ -279,6 +272,7 @@ memory = ""
 
 [agent.sandbox.containerd.policy]
 enabled = false
+allowWholeJobRetry = false
 allowedImages = ["docker.io/library/alpine@sha256:1f3591b8a02ea153f41c5bba878ad477f63ab3d19349762cb77504db02a23e15"]
 maxCpu = "500m"
 maxMemory = "64Mi"

@@ -34,6 +34,7 @@ func schemaModels() []any {
 		&model.GatewayEventCursor{},
 		&model.Identity{},
 		&model.JobRun{},
+		&model.JobRunGeneration{},
 		&model.Menu{},
 		&model.NotificationChannel{},
 		&model.NotificationLog{},

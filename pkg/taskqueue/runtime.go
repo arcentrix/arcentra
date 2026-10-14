@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"math"
 	"math/big"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bytedance/sonic"
 )
@@ -58,10 +60,11 @@ func (r *RuntimeRequest) UnmarshalJSON(data []byte) error {
 
 // OfflineRuntimePolicy 保存操作者配置，不得由流水线或队列请求扩大
 type OfflineRuntimePolicy struct {
-	Enabled       bool     `json:"enabled" mapstructure:"enabled"`
-	AllowedImages []string `json:"allowedImages" mapstructure:"allowedImages"`
-	MaxCPU        string   `json:"maxCpu" mapstructure:"maxCpu"`
-	MaxMemory     string   `json:"maxMemory" mapstructure:"maxMemory"`
+	Enabled            bool     `json:"enabled" mapstructure:"enabled"`
+	AllowWholeJobRetry bool     `json:"allowWholeJobRetry" mapstructure:"allowWholeJobRetry"`
+	AllowedImages      []string `json:"allowedImages" mapstructure:"allowedImages"`
+	MaxCPU             string   `json:"maxCpu" mapstructure:"maxCpu"`
+	MaxMemory          string   `json:"maxMemory" mapstructure:"maxMemory"`
 }
 
 // Clone 返回独立策略快照
@@ -226,8 +229,19 @@ func ValidateJobRuntime(payload *JobRunTaskPayload, policy OfflineRuntimePolicy)
 	if err := ValidateRuntimeRequest(payload.Runtime, policy); err != nil {
 		return err
 	}
-	if payload.Retry != nil {
-		return fmt.Errorf("offline runtime retries are unsupported; start a fresh run")
+	if err := ValidateRuntimeRetry(payload.Retry, policy); err != nil {
+		return err
+	}
+	if err := ValidateJobRetryPlan(payload); err != nil {
+		return err
+	}
+	if _, exists := payload.Env[RuntimeGenerationEnv]; exists {
+		return fmt.Errorf("offline runtime reserves its generation environment variable")
+	}
+	for _, step := range payload.Steps {
+		if _, exists := step.Env[RuntimeGenerationEnv]; exists {
+			return fmt.Errorf("offline runtime reserves its generation environment variable")
+		}
 	}
 	if payload.Workspace != "" {
 		return fmt.Errorf("runtime job cannot override the host workspace")
@@ -241,7 +255,11 @@ func ValidateJobRuntime(payload *JobRunTaskPayload, policy OfflineRuntimePolicy)
 			return fmt.Errorf("runtime source cannot use host paths or local transport")
 		}
 	}
-	if err := ValidateRuntimeSteps(payload.Steps); err != nil {
+	attempts := 1
+	if payload.Retry != nil {
+		attempts = int(payload.Retry.MaxAttempts)
+	}
+	if err := validateRuntimeSteps(payload.Steps, attempts); err != nil {
 		return err
 	}
 	digest, err := RuntimeBindingDigest(payload.PipelineID, payload.PipelineRunID, payload.JobRunID, payload.AgentID, payload.Runtime)
@@ -263,10 +281,12 @@ func ValidateStandaloneRuntime(payload *StepRunTaskPayload) error {
 }
 
 // ValidateRuntimeSteps 限定下载前缀、Shell 主体和上传后缀，不允许交错或隐式宿主执行
-func ValidateRuntimeSteps(steps []StepPayload) error {
+func ValidateRuntimeSteps(steps []StepPayload) error { return validateRuntimeSteps(steps, 1) }
+
+func validateRuntimeSteps(steps []StepPayload, attempts int) error {
 	phase, shells := 0, 0
 	for _, step := range steps {
-		if len(step.AttemptRunIDs) > 1 {
+		if len(step.AttemptRunIDs) > attempts {
 			return fmt.Errorf("offline runtime does not support retry attempts")
 		}
 		switch step.Uses {
@@ -375,6 +395,42 @@ func runtimeArtifactPath(name string) error {
 	for _, component := range strings.Split(name, "/") {
 		if component == ".." {
 			return fmt.Errorf("runtime artifact path escapes workspace")
+		}
+	}
+	return nil
+}
+
+// RuntimeGenerationEnv 是受信任工作器设置的轮次变量，用户配置不得覆盖
+const RuntimeGenerationEnv = "ARCENTRA_JOB_GENERATION"
+
+// ValidateRuntimeRetry 校验默认关闭的整作业新会话重试策略
+func ValidateRuntimeRetry(retry *pipelinev1.Retry, policy OfflineRuntimePolicy) error {
+	if retry == nil {
+		return nil
+	}
+	if !policy.AllowWholeJobRetry {
+		return fmt.Errorf("offline runtime retries are unsupported unless operator allowWholeJobRetry is enabled")
+	}
+	if retry.Mode != "whole_job" {
+		return fmt.Errorf("offline runtime supports whole_job retry only; failed_step requires a proven quiescence boundary")
+	}
+	if !retry.Idempotent || retry.MaxAttempts < 2 || retry.MaxAttempts > 5 {
+		return fmt.Errorf("offline whole_job retry requires idempotent=true and maxAttempts between 2 and 5")
+	}
+	if len(retry.AllowedExitCodes) == 0 {
+		return fmt.Errorf("offline retry requires explicit allowedExitCodes")
+	}
+	seen := map[int32]bool{}
+	for _, code := range retry.AllowedExitCodes {
+		if code < 1 || code > 125 || seen[code] {
+			return fmt.Errorf("offline retry requires distinct allowed exit codes between 1 and 125")
+		}
+		seen[code] = true
+	}
+	if retry.Delay != "" {
+		delay, err := time.ParseDuration(retry.Delay)
+		if err != nil || delay < 0 || delay > time.Hour {
+			return fmt.Errorf("offline retry delay must be between 0s and 1h")
 		}
 	}
 	return nil

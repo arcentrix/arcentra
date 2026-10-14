@@ -23,6 +23,8 @@ option go_package = "github.com/arcentrix/arcentra/api/agent/v1;agentv1";
 
 // AgentService - Main interface for communication between Agent and Server
 service AgentService {
+  // Bounded authenticated generation admission/advance; inspect never authorizes execution.
+  rpc ReconcileJobGeneration(ReconcileJobGenerationRequest) returns (ReconcileJobGenerationResponse) {}
   // Get before checkout; record once before staging. Never starts or retries execution.
   rpc GetOrRecordJobInputs(GetOrRecordJobInputsRequest) returns (GetOrRecordJobInputsResponse) {}
   // Read-only confirmation for recovery of the original runtime execution.
@@ -139,6 +141,7 @@ enum AgentStatus {
 message RuntimeCapabilities {
   bool containerd_offline_v1 = 1;
   string execution_mode = 2; // baremetal or containerd-offline-v1, independent of readiness
+  bool containerd_whole_job_retry_v1 = 3; // Explicit operator permission and ready generation controller
 }
 
 message HeartbeatRequest {
@@ -282,6 +285,9 @@ message ReportStepRunStatusRequest {
   int64 start_time = 6;                  // Start time (Unix timestamp in seconds)
   int64 end_time = 7;                    // End time (Unix timestamp in seconds)
   map<string, string> metrics = 8;       // Step run execution metrics
+  string generation_id = 9;
+  string generation_binding_digest = 10;
+  bool retryable_shell_exit = 11; // Explicit pure command failure evidence, false for mixed failures
 }
 
 // Report step run status response
@@ -331,6 +337,8 @@ message ReportJobRunStatusRequest {
   repeated ArtifactResult artifacts = 10; // Complete uploaded file metadata
   SourceCheckout source_checkout = 11;     // Agent-reported initial checkout, captured before user steps
   string runtime_binding_digest = 12;      // Required for every report of a runtime job
+  string generation_id = 13;
+  string generation_binding_digest = 14;
 }
 
 // SourceCheckout binds the initial Agent checkout to the controller source expectation.
@@ -436,4 +444,13 @@ message GetOrRecordJobInputsResponse {
   string state = 1; // unknown or pinned; legacy terminal observations are never promoted
   string manifest_json = 2;
   string manifest_digest = 3;
+}
+
+// Canonical bounded v1 contracts are shared with the durable Agent journal.
+message ReconcileJobGenerationRequest {
+  string agent_id = 1;
+  string transition_json = 2;
+}
+message ReconcileJobGenerationResponse {
+  string generation_json = 1;
 }

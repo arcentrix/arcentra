@@ -31,7 +31,7 @@ import (
 
 // containerAcceptanceControllerTimeout 区分控制面先截止的拒收审计与 Agent 超时正常确认
 // 拒收不写 ACK；精确资源清理后保留运行时墓碑，重启由认证查询独立确认权威终态
-func containerAcceptanceControllerTimeout(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, publisher executor.LogPublisher) {
+func containerAcceptanceControllerTimeout(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, publisher executor.LogPublisher) map[string]string {
 	t.Helper()
 	var delayed atomic.Bool
 	delayed.Store(true)
@@ -274,6 +274,11 @@ func containerAcceptanceControllerTimeout(t *testing.T, f *controllerWorkerFixtu
 	}
 	assertControllerConflictSnapshot(t, f, job, snapshots...)
 	t.Log("controller-first timeout verified: original late receipts rejected with exact authenticated conflict evidence; authority unchanged, resources removed, tombstone retained until same-identity restart inspection, quarantine audit survives and later jobs complete")
+	audit, err := containerAcceptanceRetainedAudit(quarantined)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return audit
 }
 
 func containerAcceptanceJournalBytes(t *testing.T, f *controllerWorkerFixture) map[string][]byte {

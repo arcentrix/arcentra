@@ -23,6 +23,11 @@ func (e *Process) selectAgentForRuntime(ctx context.Context, job *spec.Job, runt
 	if err := taskqueue.ValidateRuntimeRequest(runtime, e.offlineRuntimePolicy); err != nil {
 		return "", err
 	}
+	if runtime != nil {
+		if err := taskqueue.ValidateRuntimeRetry(job.Retry, e.offlineRuntimePolicy); err != nil {
+			return "", err
+		}
+	}
 	if e.repos == nil || e.repos.Agent == nil {
 		return "", fmt.Errorf("agent repository is unavailable")
 	}
@@ -46,7 +51,7 @@ func (e *Process) selectAgentForRuntime(ctx context.Context, job *spec.Job, runt
 					continue
 				}
 			case taskqueue.RuntimeContainerdOfflineV1:
-				if runtime == nil || agent.OS != "linux" || !capabilities.ContainerdOfflineV1 {
+				if runtime == nil || agent.OS != "linux" || !capabilities.ContainerdOfflineV1 || job.Retry != nil && !capabilities.ContainerdWholeJobRetryV1 {
 					continue
 				}
 			default:
@@ -156,6 +161,12 @@ func decodeAgentRuntimeCapabilities(data []byte) (taskqueue.AgentRuntimeCapabili
 				return result, fmt.Errorf("invalid runtime readiness")
 			}
 			result.ContainerdOfflineV1 = ready
+		case "containerdWholeJobRetryV1":
+			ready, ok := value.(bool)
+			if !ok {
+				return result, fmt.Errorf("invalid runtime retry readiness")
+			}
+			result.ContainerdWholeJobRetryV1 = ready
 		default:
 			return result, fmt.Errorf("unknown runtime capability field")
 		}

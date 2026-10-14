@@ -36,6 +36,10 @@ func patchAgentJobStatus(ctx context.Context, repository any, expected *model.Jo
 }
 
 func (a *AgentServiceImpl) prepareJobArtifacts(ctx context.Context, job *model.JobRun, req *agentv1.ReportJobRunStatusRequest, updates map[string]any) ([]*model.ProjectArtifact, error) {
+	if job.RetryPlan != "" && (len(req.Artifacts) > 0 || len(req.ArtifactUris) > 0) && (req.Status != model.JobRunStatusSuccess || len(req.Artifacts) == 0) {
+		return nil, status.Error(codes.FailedPrecondition, "generation artifacts require complete final-success publication")
+	}
+
 	if len(req.Artifacts) > 1000 || len(req.ArtifactUris) > 1000 {
 		return nil, status.Error(codes.InvalidArgument, "artifact report exceeds 1000 files")
 	}

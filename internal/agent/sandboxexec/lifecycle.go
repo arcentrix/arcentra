@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 )
 
@@ -43,6 +44,13 @@ func (s *Session) advance(ctx context.Context, phase string) error {
 		return c.poison(fmt.Errorf("sandbox session journal disappeared"))
 	}
 	record.Phase = phase
+	if phase == phaseClosed && record.Generation != nil {
+		receipt := c.generationCleanupReceipt(record)
+		if err := receipt.ValidateGeneration(*record.Generation); err != nil {
+			return c.poison(err)
+		}
+		record.CleanupReceipt = &receipt
+	}
 	return c.persist(ctx, record)
 }
 
@@ -230,11 +238,20 @@ func (s *Session) closeDurable(ctx context.Context) error {
 	if _, err := s.controller.verifyRecordWorkspace(record, allowMissing); err != nil {
 		return s.stopOwnedOnFailure(ctx, err)
 	}
+	if err := s.controller.fault(cleanupCtx, "workspace.remove"); err != nil {
+		return s.stopOwnedOnFailure(ctx, err)
+	}
 	if err := s.controller.workspaceRoot.RemoveAll(record.Directory); err != nil {
 		return s.stopOwnedOnFailure(ctx, fmt.Errorf("remove recorded workspace: %w", err))
 	}
+	if err := s.controller.fault(cleanupCtx, "workspace.sync"); err != nil {
+		return s.stopOwnedOnFailure(ctx, err)
+	}
 	if err := s.controller.workspaceDir.Sync(); err != nil {
 		return s.stopOwnedOnFailure(ctx, fmt.Errorf("persist workspace removal: %w", err))
+	}
+	if err := s.controller.verifyCleanupAbsent(cleanupCtx, record); err != nil {
+		return s.stopOwnedOnFailure(ctx, err)
 	}
 	if err := s.advance(cleanupCtx, phaseClosed); err != nil {
 		return s.stopOwnedOnFailure(ctx, err)
@@ -246,4 +263,26 @@ func (s *Session) closeDurable(ctx context.Context) error {
 	delete(c.runtimeBlocked, s.recordID)
 	c.mu.Unlock()
 	return nil
+}
+
+// verifyCleanupAbsent 在破坏性清理后独立检查所有精确资源及目录均已消失
+// RemoveOwned 的成功返回值本身不构成允许下一代执行的证据
+func (c *Controller) verifyCleanupAbsent(ctx context.Context, record journalRecord) error {
+	if err := c.fault(ctx, "cleanup.verify"); err != nil {
+		return err
+	}
+	if err := c.verifyRoots(ctx); err != nil {
+		return err
+	}
+	state, err := c.backend.InspectOwned(ctx, record.Resource)
+	if err != nil {
+		return fmt.Errorf("verify cleaned sandbox ownership: %w", err)
+	}
+	if state.TaskExists || state.ContainerExists || state.SnapshotExists {
+		return fmt.Errorf("sandbox owned runtime resources remain after cleanup")
+	}
+	if _, err := c.workspaceRoot.Lstat(record.Directory); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("sandbox workspace absence is not confirmed")
+	}
+	return c.verifyRoots(ctx)
 }

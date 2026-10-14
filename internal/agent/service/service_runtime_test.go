@@ -28,3 +28,21 @@ func TestOfflineRuntimeCapabilityRequiresActualReadinessProbe(t *testing.T) {
 		t.Fatal("nil probe advertises runtime")
 	}
 }
+
+func TestWholeJobRetryCapabilityRequiresReadinessAndOperatorOptIn(t *testing.T) {
+	conf := &config.AgentConfig{Agent: config.AgentInfo{Mode: "sandbox"}}
+	service := NewAgentServiceImpl(conf, nil, nil)
+	ready := true
+	service.SetOfflineRuntimeReadiness(func() bool { return ready })
+	if service.runtimeCapabilitiesLocked().ContainerdWholeJobRetryV1 {
+		t.Fatal("default config advertised retry")
+	}
+	conf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetry = true
+	if !service.runtimeCapabilitiesLocked().ContainerdWholeJobRetryV1 {
+		t.Fatal("ready opt-in retry capability missing")
+	}
+	ready = false
+	if service.runtimeCapabilitiesLocked().ContainerdWholeJobRetryV1 {
+		t.Fatal("failed runtime retained retry capability")
+	}
+}

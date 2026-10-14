@@ -17,12 +17,14 @@ package repo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/database"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // IStepRunRepository defines step run persistence with context support.
@@ -62,7 +64,7 @@ func NewStepRunRepo(db database.IDatabase) IStepRunRepository {
 
 // Create inserts a new step run.
 func (r *StepRunRepo) Create(ctx context.Context, stepRun *model.StepRun) error {
-	if stepRun == nil {
+	if stepRun == nil || stepRun.GenerationID != "" || stepRun.GenerationBindingDigest != "" || stepRun.RetryableShellExit {
 		return gorm.ErrInvalidData
 	}
 	if err := normalizeJSONFields(map[string]*string{"retry_policy": &stepRun.RetryPolicy, "args": &stepRun.Args, "env": &stepRun.Env, "secrets": &stepRun.Secrets, "label_selector": &stepRun.LabelSelector}, stepRunJSONDefaults); err != nil {
@@ -174,6 +176,9 @@ func applyStepRunFilters(query *gorm.DB, filter StepRunFilter) *gorm.DB {
 
 // PatchByStepRunID patches step run by stepRunID.
 func (r *StepRunRepo) PatchByStepRunID(ctx context.Context, stepRunID string, updates map[string]any) error {
+	if err := rejectStepGenerationUpdates(updates); err != nil {
+		return err
+	}
 	var err error
 	updates, err = normalizeJSONUpdates(updates, stepRunJSONDefaults)
 	if err != nil {
@@ -183,18 +188,40 @@ func (r *StepRunRepo) PatchByStepRunID(ctx context.Context, stepRunID string, up
 		return nil
 	}
 	updates["updated_at"] = time.Now()
-	return r.Database().WithContext(ctx).
+	return reportedStatusResult(excludeRetryPlanSteps(r.Database().WithContext(ctx).
 		Table((&model.StepRun{}).TableName()).
-		Where("step_run_id = ?", stepRunID).
-		Updates(updates).Error
+		Where("step_run_id = ?", stepRunID)).
+		Updates(updates))
 }
 
-// DeleteByStepRunID deletes a step run by stepRunID.
+// DeleteByStepRunID 仅删除未被固定重试计划或代次回执引用的步骤
 func (r *StepRunRepo) DeleteByStepRunID(ctx context.Context, stepRunID string) error {
-	return r.Database().WithContext(ctx).
-		Table((&model.StepRun{}).TableName()).
-		Where("step_run_id = ?", stepRunID).
-		Delete(&model.StepRun{}).Error
+	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var step model.StepRun
+		if err := tx.Select("step_run_id", "job_run_id", "generation_id", "generation_binding_digest").Where("step_run_id = ?", stepRunID).First(&step).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return err
+		}
+		if step.StepRunID != stepRunID {
+			return fmt.Errorf("exact step identity is required")
+		}
+		if step.GenerationID != "" || step.GenerationBindingDigest != "" {
+			return fmt.Errorf("generation attempt evidence cannot be deleted")
+		}
+		if step.JobRunID != "" {
+			var parent model.JobRun
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id", "retry_plan", "retry_plan_digest").Where("job_run_id = ?", step.JobRunID).First(&parent).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err == nil && (parent.JobRunID != step.JobRunID || parent.RetryPlan != "" || parent.RetryPlanDigest != "") {
+				return fmt.Errorf("captured retry attempts and receipts cannot be deleted")
+			}
+		}
+		return reportedStatusResult(tx.Where("step_run_id = ? AND job_run_id = ? AND generation_id = ? AND generation_binding_digest = ?", stepRunID, step.JobRunID, "", "").Delete(&model.StepRun{}))
+	})
 }
 
 // ListArtifactsByStepRunID returns artifacts by stepRunID.

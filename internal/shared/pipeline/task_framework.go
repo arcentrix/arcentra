@@ -301,17 +301,40 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 			return err
 		}
 		payload.Runtime = &runtime
+		if payload.Retry != nil {
+			plan, planErr := taskqueue.NewJobRetryPlan(payload)
+			if planErr != nil {
+				return planErr
+			}
+			payload.RetryPlan = plan
+			payload.RetryPlanDigest, planErr = plan.Digest(payload.PipelineID, payload.PipelineRunID, payload.JobRunID, payload.AgentID, payload.Runtime.BindingDigest)
+			if planErr != nil {
+				return planErr
+			}
+		}
 		if err := taskqueue.ValidateJobRuntime(payload, tf.execCtx.RuntimePolicy); err != nil {
 			return err
 		}
-		capture, ok := tf.getJobRunStore().(interface {
-			CaptureRuntimeInputExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest, map[string]string, map[string]taskqueue.ArtifactReference) error
-		})
-		if !ok {
-			return fmt.Errorf("atomic job runtime capture unavailable")
-		}
-		if err := capture.CaptureRuntimeInputExpectation(ctx, payload.PipelineID, payload.PipelineRunID, payload.JobRunID, agentID, binding, payload.Runtime, payload.ArtifactURIs, payload.ArtifactReferences); err != nil {
-			return err
+		if payload.Retry != nil {
+			capture, ok := tf.getJobRunStore().(interface {
+				CaptureRuntimeRetryExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest, map[string]string, map[string]taskqueue.ArtifactReference, *taskqueue.JobRetryPlan) error
+			})
+			if !ok {
+				return fmt.Errorf("atomic retry plan capture unavailable")
+			}
+			if err := capture.CaptureRuntimeRetryExpectation(ctx, payload.PipelineID, payload.PipelineRunID, payload.JobRunID, agentID, binding, payload.Runtime, payload.ArtifactURIs, payload.ArtifactReferences, payload.RetryPlan); err != nil {
+				return err
+			}
+		} else {
+			capture, ok := tf.getJobRunStore().(interface {
+				CaptureRuntimeInputExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest, map[string]string, map[string]taskqueue.ArtifactReference) error
+			})
+			if !ok {
+				return fmt.Errorf("atomic job runtime capture unavailable")
+			}
+			if err := capture.CaptureRuntimeInputExpectation(ctx, payload.PipelineID, payload.PipelineRunID, payload.JobRunID, agentID, binding, payload.Runtime, payload.ArtifactURIs, payload.ArtifactReferences); err != nil {
+				return err
+			}
 		}
 	}
 	data, err := sonic.Marshal(payload)

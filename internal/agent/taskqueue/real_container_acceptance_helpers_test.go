@@ -228,14 +228,18 @@ func startContainerAcceptanceWorker(ctx context.Context, conf *config.AgentConfi
 
 type containerAcceptanceJournal struct {
 	Record *struct {
-		SessionID string              `json:"id"`
-		RunID     string              `json:"pipelineRunID"`
-		JobRunID  string              `json:"jobRunID"`
-		Claim     string              `json:"executionClaimID"`
-		Binding   string              `json:"runtimeBindingDigest"`
-		Directory string              `json:"directory"`
-		Phase     string              `json:"phase"`
-		Resource  sandbox.ResourceRef `json:"resource"`
+		SessionID      string                                   `json:"id"`
+		RunID          string                                   `json:"pipelineRunID"`
+		JobRunID       string                                   `json:"jobRunID"`
+		Claim          string                                   `json:"executionClaimID"`
+		Binding        string                                   `json:"runtimeBindingDigest"`
+		Directory      string                                   `json:"directory"`
+		Phase          string                                   `json:"phase"`
+		Device         uint64                                   `json:"device"`
+		Inode          uint64                                   `json:"inode"`
+		Resource       sandbox.ResourceRef                      `json:"resource"`
+		Generation     *taskpayload.JobGeneration               `json:"generation,omitempty"`
+		CleanupReceipt *taskpayload.JobGenerationCleanupReceipt `json:"cleanupReceipt,omitempty"`
 	} `json:"record"`
 }
 
@@ -257,6 +261,12 @@ func containerAcceptanceRecords(root string) ([]containerAcceptanceJournal, erro
 		}
 		if err != nil {
 			return nil, err
+		}
+		if strings.HasPrefix(entry.Name(), "admission-") {
+			if err := validateContainerAcceptanceAdmission(root, entry.Name(), data); err != nil {
+				return nil, err
+			}
+			continue
 		}
 		var record containerAcceptanceJournal
 		if err := sonic.Unmarshal(data, &record); err != nil {
@@ -292,6 +302,12 @@ func (s *containerAcceptanceStorage) UploadStream(ctx context.Context, key strin
 	for i := range records {
 		record := records[i].Record
 		if strings.HasPrefix(key, "artifacts/"+record.RunID+"/"+record.JobRunID+"/") {
+			if record.Phase == "closed" && record.Generation != nil && record.CleanupReceipt != nil {
+				if err := record.CleanupReceipt.ValidateGeneration(*record.Generation); err != nil {
+					return err
+				}
+				continue
+			}
 			if owner != nil || record.Phase != "sealed" {
 				return fmt.Errorf("artifact read occurred before exact whole-job sealing")
 			}

@@ -22,45 +22,48 @@ import (
 // 根据 DSL: Step → StepRun
 type StepRun struct {
 	BaseModel
-	DeploymentReleaseID  string     `gorm:"column:deployment_release_id;type:varchar(64);index" json:"deploymentReleaseId"`
-	StepRunID            string     `gorm:"column:step_run_id;type:varchar(64);uniqueIndex:uk_step_run_business_id" json:"stepRunId"`
-	Name                 string     `gorm:"column:name" json:"name"`
-	PipelineID           string     `gorm:"column:pipeline_id" json:"pipelineId"`
-	PipelineRunID        string     `gorm:"column:pipeline_run_id;type:varchar(64);index:idx_step_run_pipeline_run" json:"pipelineRunId"`
-	StageID              string     `gorm:"column:stage_id" json:"stageId"`
-	JobID                string     `gorm:"column:job_id" json:"jobId"`
-	JobRunID             string     `gorm:"column:job_run_id" json:"jobRunId"`
-	Attempt              int        `gorm:"column:attempt;not null;default:1" json:"attempt"`
-	RetryPolicy          string     `gorm:"column:retry_policy;type:json" json:"-"`
-	RetryMode            string     `gorm:"column:retry_mode;type:varchar(32)" json:"retryMode"`
-	PreviousStepRunID    string     `gorm:"column:previous_step_run_id;type:varchar(64)" json:"previousStepRunId"`
-	StepIndex            int        `gorm:"column:step_index" json:"stepIndex"`
-	AgentID              string     `gorm:"column:agent_id" json:"agentId"`
-	ClaimID              string     `gorm:"column:claim_id;type:varchar(64);default:''" json:"-"`
-	CancellationClaimID  string     `gorm:"column:cancellation_claim_id;type:varchar(64);not null;default:''" json:"-"` // 原作业认领，仅由控制面取消事务写入
-	TerminalReportDigest string     `gorm:"column:terminal_report_digest;type:varchar(64);not null;default:''" json:"-"`
-	Status               int        `gorm:"column:status" json:"status"`       // 1:等待 2:入队 3:运行中 4:成功 5:失败 6:已取消 7:超时 8:已跳过
-	Priority             int        `gorm:"column:priority" json:"priority"`   // 1:最高 5:普通 10:最低
-	Uses                 string     `gorm:"column:uses" json:"uses"`           // 插件标识
-	Action               string     `gorm:"column:action" json:"action"`       // 插件动作
-	Args                 string     `gorm:"column:args;type:json" json:"args"` // JSON格式
-	Workspace            string     `gorm:"column:workspace" json:"workspace"`
-	Env                  string     `gorm:"column:env;type:json" json:"env"`         // JSON格式
-	Secrets              string     `gorm:"column:secrets;type:json" json:"secrets"` // JSON格式
-	Timeout              string     `gorm:"column:timeout" json:"timeout"`           // 超时时间（如 "30m", "1h"）
-	RetryCount           int        `gorm:"column:retry_count" json:"retryCount"`
-	CurrentRetry         int        `gorm:"column:current_retry" json:"currentRetry"`
-	AllowFailure         int        `gorm:"column:allow_failure" json:"allowFailure"`             // 0:否 1:是
-	ContinueOnError      int        `gorm:"column:continue_on_error" json:"continueOnError"`      // 0:否 1:是
-	When                 string     `gorm:"column:when" json:"when"`                              // 条件表达式
-	LabelSelector        string     `gorm:"column:label_selector;type:json" json:"labelSelector"` // JSON格式
-	DependsOn            string     `gorm:"column:depends_on" json:"dependsOn"`                   // 逗号分隔
-	ExitCode             *int       `gorm:"column:exit_code" json:"exitCode"`
-	ErrorMessage         string     `gorm:"column:error_message;type:text" json:"errorMessage"`
-	StartTime            *time.Time `gorm:"column:start_time" json:"startTime"`
-	EndTime              *time.Time `gorm:"column:end_time" json:"endTime"`
-	Duration             int64      `gorm:"column:duration" json:"duration"` // 毫秒
-	CreatedBy            string     `gorm:"column:created_by" json:"createdBy"`
+	DeploymentReleaseID     string     `gorm:"column:deployment_release_id;type:varchar(64);index" json:"deploymentReleaseId"`
+	StepRunID               string     `gorm:"column:step_run_id;type:varchar(64);uniqueIndex:uk_step_run_business_id" json:"stepRunId"`
+	Name                    string     `gorm:"column:name" json:"name"`
+	PipelineID              string     `gorm:"column:pipeline_id" json:"pipelineId"`
+	PipelineRunID           string     `gorm:"column:pipeline_run_id;type:varchar(64);index:idx_step_run_pipeline_run" json:"pipelineRunId"`
+	StageID                 string     `gorm:"column:stage_id" json:"stageId"`
+	JobID                   string     `gorm:"column:job_id" json:"jobId"`
+	JobRunID                string     `gorm:"column:job_run_id" json:"jobRunId"`
+	Attempt                 int        `gorm:"column:attempt;not null;default:1" json:"attempt"`
+	RetryPolicy             string     `gorm:"column:retry_policy;type:json" json:"-"`
+	RetryMode               string     `gorm:"column:retry_mode;type:varchar(32)" json:"retryMode"`
+	PreviousStepRunID       string     `gorm:"column:previous_step_run_id;type:varchar(64)" json:"previousStepRunId"`
+	StepIndex               int        `gorm:"column:step_index" json:"stepIndex"`
+	AgentID                 string     `gorm:"column:agent_id" json:"agentId"`
+	ClaimID                 string     `gorm:"column:claim_id;type:varchar(64);default:''" json:"-"`
+	CancellationClaimID     string     `gorm:"column:cancellation_claim_id;type:varchar(64);not null;default:''" json:"-"` // 原作业认领，仅由控制面取消事务写入
+	GenerationID            string     `gorm:"column:generation_id;type:varchar(64);not null;default:''" json:"-"`
+	GenerationBindingDigest string     `gorm:"column:generation_binding_digest;type:varchar(67);not null;default:''" json:"-"`
+	RetryableShellExit      bool       `gorm:"column:retryable_shell_exit;not null;default:false" json:"-"`
+	TerminalReportDigest    string     `gorm:"column:terminal_report_digest;type:varchar(64);not null;default:''" json:"-"`
+	Status                  int        `gorm:"column:status" json:"status"`       // 1:等待 2:入队 3:运行中 4:成功 5:失败 6:已取消 7:超时 8:已跳过
+	Priority                int        `gorm:"column:priority" json:"priority"`   // 1:最高 5:普通 10:最低
+	Uses                    string     `gorm:"column:uses" json:"uses"`           // 插件标识
+	Action                  string     `gorm:"column:action" json:"action"`       // 插件动作
+	Args                    string     `gorm:"column:args;type:json" json:"args"` // JSON格式
+	Workspace               string     `gorm:"column:workspace" json:"workspace"`
+	Env                     string     `gorm:"column:env;type:json" json:"env"`         // JSON格式
+	Secrets                 string     `gorm:"column:secrets;type:json" json:"secrets"` // JSON格式
+	Timeout                 string     `gorm:"column:timeout" json:"timeout"`           // 超时时间（如 "30m", "1h"）
+	RetryCount              int        `gorm:"column:retry_count" json:"retryCount"`
+	CurrentRetry            int        `gorm:"column:current_retry" json:"currentRetry"`
+	AllowFailure            int        `gorm:"column:allow_failure" json:"allowFailure"`             // 0:否 1:是
+	ContinueOnError         int        `gorm:"column:continue_on_error" json:"continueOnError"`      // 0:否 1:是
+	When                    string     `gorm:"column:when" json:"when"`                              // 条件表达式
+	LabelSelector           string     `gorm:"column:label_selector;type:json" json:"labelSelector"` // JSON格式
+	DependsOn               string     `gorm:"column:depends_on" json:"dependsOn"`                   // 逗号分隔
+	ExitCode                *int       `gorm:"column:exit_code" json:"exitCode"`
+	ErrorMessage            string     `gorm:"column:error_message;type:text" json:"errorMessage"`
+	StartTime               *time.Time `gorm:"column:start_time" json:"startTime"`
+	EndTime                 *time.Time `gorm:"column:end_time" json:"endTime"`
+	Duration                int64      `gorm:"column:duration" json:"duration"` // 毫秒
+	CreatedBy               string     `gorm:"column:created_by" json:"createdBy"`
 }
 
 func (StepRun) TableName() string {

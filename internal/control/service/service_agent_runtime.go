@@ -23,6 +23,7 @@ func agentRuntimeCapabilities(capabilities *agentv1.RuntimeCapabilities, os stri
 	case taskqueue.ExecutionModeBaremetal:
 	case taskqueue.RuntimeContainerdOfflineV1:
 		report.ContainerdOfflineV1 = os == "linux" && capabilities.ContainerdOfflineV1
+		report.ContainerdWholeJobRetryV1 = report.ContainerdOfflineV1 && capabilities.ContainerdWholeJobRetryV1
 	case "":
 		if capabilities.ContainerdOfflineV1 {
 			report.ExecutionMode = "unknown"

@@ -80,6 +80,22 @@ func (s *JobRunStore) UpdateStepRun(ctx context.Context, stepRunID string, updat
 
 // UpdateJobRunIfStatus 只更新仍处于观察状态的作业，保护 Agent 并发终态报告
 func (s *JobRunStore) UpdateJobRunIfStatus(ctx context.Context, jobRunID string, status int, updates map[string]any) error {
+	current, err := s.jobRunRepo.GetByJobRunID(ctx, jobRunID)
+	if err != nil {
+		return err
+	}
+	if current != nil && (current.RetryPlan != "" || current.RetryPlanDigest != "") {
+		if current.JobRunID != jobRunID || current.Status != status {
+			return fmt.Errorf("retry job changed before controller finalization")
+		}
+		finalizer, ok := s.jobRunRepo.(interface {
+			FinalizeRetryJobIfCurrent(context.Context, *model.JobRun, map[string]any) error
+		})
+		if !ok {
+			return fmt.Errorf("fenced retry job finalization unavailable")
+		}
+		return finalizer.FinalizeRetryJobIfCurrent(ctx, current, updates)
+	}
 	if next, _ := updates["status"].(int); next == model.JobRunStatusCancelled {
 		canceller, ok := s.jobRunRepo.(interface {
 			CancelAgentJobIfCurrent(context.Context, string, int, map[string]any) error
@@ -156,4 +172,15 @@ func (s *JobRunStore) CaptureRuntimeInputExpectation(ctx context.Context, pipeli
 		return fmt.Errorf("atomic job input capture unavailable")
 	}
 	return writer.CaptureRuntimeInputExpectation(ctx, pipelineID, runID, jobID, agentID, binding, runtime, uris, refs)
+}
+
+// CaptureRuntimeRetryExpectation 保存不可扩大重试计划及原始输入授权
+func (s *JobRunStore) CaptureRuntimeRetryExpectation(ctx context.Context, pipelineID, runID, jobID, agentID string, binding *sourceprovenance.Binding, runtime *taskqueue.RuntimeRequest, uris map[string]string, refs map[string]taskqueue.ArtifactReference, plan *taskqueue.JobRetryPlan) error {
+	writer, ok := s.jobRunRepo.(interface {
+		CaptureRuntimeRetryExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest, map[string]string, map[string]taskqueue.ArtifactReference, *taskqueue.JobRetryPlan) error
+	})
+	if !ok {
+		return fmt.Errorf("atomic retry plan capture unavailable")
+	}
+	return writer.CaptureRuntimeRetryExpectation(ctx, pipelineID, runID, jobID, agentID, binding, runtime, uris, refs, plan)
 }

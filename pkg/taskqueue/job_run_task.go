@@ -31,6 +31,8 @@ const (
 // JobRunTaskPayload is the Kafka payload for dispatching a complete job to an Agent.
 // The Agent receives the entire job definition and executes all steps sequentially.
 type JobRunTaskPayload struct {
+	RetryPlan          *JobRetryPlan                `json:"retryPlan,omitempty"`
+	RetryPlanDigest    string                       `json:"retryPlanDigest,omitempty"`
 	Runtime            *RuntimeRequest              `json:"runtime,omitempty"`
 	Retry              *pipelinev1.Retry            `json:"retry,omitempty"`
 	PipelineID         string                       `json:"pipelineId"`

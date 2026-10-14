@@ -136,6 +136,7 @@ type controllerWorkerFixture struct {
 	beforeTerminal      func(context.Context, proto.Message) error
 	observeTerminal     func(context.Context, proto.Message, any, error)
 	observeRequest      func(context.Context, any)
+	afterGeneration     func(context.Context, *agentv1.ReconcileJobGenerationRequest, *agentv1.ReconcileJobGenerationResponse, error) error
 	repos               *repo.Repositories
 	engine              *process.Process
 	worker              *workerQueues
@@ -200,7 +201,7 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 		sqlDB.SetMaxOpenConns(1)
 		t.Cleanup(func() { _ = sqlDB.Close() })
 	}
-	if err := db.WithContext(ctx).AutoMigrate(&model.Project{}, &model.Pipeline{}, &model.PipelineRun{}, &model.JobRun{}, &model.StepRun{}, &model.StepRunLog{}, &model.ProjectArtifact{}, &model.Agent{}, &model.StorageConfig{}); err != nil {
+	if err := db.WithContext(ctx).AutoMigrate(&model.Project{}, &model.Pipeline{}, &model.PipelineRun{}, &model.JobRun{}, &model.JobRunGeneration{}, &model.StepRun{}, &model.StepRunLog{}, &model.ProjectArtifact{}, &model.Agent{}, &model.StorageConfig{}); err != nil {
 		t.Fatal(err)
 	}
 	adapter := workerTestDatabase{db}
@@ -314,6 +315,17 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 			}
 		}
 		response, err := handler(ctx, request)
+		if generationRequest, ok := request.(*agentv1.ReconcileJobGenerationRequest); ok {
+			f.mu.Lock()
+			hook := f.afterGeneration
+			f.mu.Unlock()
+			if hook != nil {
+				generationResponse, _ := response.(*agentv1.ReconcileJobGenerationResponse)
+				if hookErr := hook(ctx, generationRequest, generationResponse, err); hookErr != nil {
+					return nil, hookErr
+				}
+			}
+		}
 		if terminalMessage != nil && observeTerminal != nil {
 			observeTerminal(ctx, terminalMessage, response, err)
 		}

@@ -20,6 +20,9 @@ func (r *JobRunRepo) PatchReportedStatusAndArtifacts(ctx context.Context, expect
 		return err
 	}
 	if expected != nil {
+		if next, _ := updates["status"].(int); expected.RetryPlan != "" && len(artifacts) > 0 && next != model.JobRunStatusSuccess {
+			return fmt.Errorf("generation output publication requires final success")
+		}
 		if len(artifacts) > 0 && expected.InputExpectation != "" && expected.InputManifestState != "pinned" {
 			return fmt.Errorf("outputs require pinned container inputs")
 		}
@@ -36,6 +39,11 @@ func (r *JobRunRepo) PatchReportedStatusAndArtifacts(ctx context.Context, expect
 	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockReportedJob(ctx, tx, expected); err != nil {
 			return err
+		}
+		if next, _ := updates["status"].(int); next != 0 {
+			if err := validateGenerationJobReport(ctx, tx, expected, next); err != nil {
+				return err
+			}
 		}
 		if next, _ := updates["status"].(int); next >= 4 {
 			if err := ensureJobAttemptsTerminal(ctx, tx, expected.JobRunID); err != nil {
@@ -57,7 +65,10 @@ func (r *JobRunRepo) PatchReportedStatusAndArtifacts(ctx context.Context, expect
 			if step.AgentID != job.AgentID || step.JobRunID != job.JobRunID || step.PipelineID != job.PipelineID || step.PipelineRunID != job.PipelineRunID {
 				return fmt.Errorf("artifact step ownership mismatch")
 			}
-			if err := UpsertArtifact(ctx, tx, item); err != nil {
+			if err := validateGenerationArtifact(ctx, tx, expected, item.StepRunID); err != nil {
+				return err
+			}
+			if err := UpsertArtifact(withGenerationArtifactPublication(ctx), tx, item); err != nil {
 				return err
 			}
 		}

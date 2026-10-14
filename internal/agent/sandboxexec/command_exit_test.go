@@ -74,3 +74,40 @@ func TestSessionProducesCommandExitOnlyForVerifiedResult(t *testing.T) {
 		})
 	}
 }
+
+func TestRetryCommandExitCodeRequiresConsistentAllowedLeaves(t *testing.T) {
+	exit := &CommandExitError{Code: 9}
+	for _, tc := range []struct {
+		name    string
+		err     error
+		allowed []int32
+		want    bool
+	}{
+		{"plain", exit, []int32{9}, true},
+		{"wrapped", fmt.Errorf("command: %w", exit), []int32{9}, true},
+		{"same code", errors.Join(exit, &CommandExitError{Code: 9}), []int32{9}, true},
+		{"different codes", errors.Join(exit, &CommandExitError{Code: 10}), []int32{9, 10}, false},
+		{"cleanup", errors.Join(exit, errors.New("cleanup failed")), []int32{9}, false},
+		{"log", errors.Join(exit, errors.New("log append failed")), []int32{9}, false},
+		{"cancel", errors.Join(exit, context.Canceled), []int32{9}, false},
+		{"deadline", errors.Join(exit, context.DeadlineExceeded), []int32{9}, false},
+		{"text", errors.New("sandbox command exited with code 9"), []int32{9}, false},
+		{"not allowed", exit, []int32{10}, false},
+		{"no allowlist", exit, nil, false},
+		{"zero", &CommandExitError{Code: 0}, []int32{0}, false},
+		{"negative", &CommandExitError{Code: -9}, []int32{-9}, false},
+		{"signal", &CommandExitError{Code: 137}, []int32{137}, false},
+		{"reserved 126", &CommandExitError{Code: 126}, []int32{126}, false},
+		{"reserved 127", &CommandExitError{Code: 127}, []int32{127}, false},
+		{"nil", nil, []int32{9}, false},
+		{"typed nil", (*CommandExitError)(nil), []int32{9}, false},
+		{"cycle", &cyclicExitWrapper{}, []int32{9}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, ok := RetryCommandExitCode(tc.err, tc.allowed)
+			if ok != tc.want || ok && code != 9 || !ok && code != 0 {
+				t.Fatalf("code=%d eligible=%v want=%v", code, ok, tc.want)
+			}
+		})
+	}
+}
