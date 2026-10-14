@@ -580,6 +580,16 @@ func realStackCleanupDatabase(t *testing.T, f *controllerWorkerFixture, storageI
 			t.Errorf("delete acceptance logs: %v", err)
 		}
 	}
+	var jobIDs []string
+	if err := f.db.WithContext(ctx).Model(&model.JobRun{}).Where("pipeline_id = ?", f.pipelineID).Pluck("job_run_id", &jobIDs).Error; err != nil {
+		t.Errorf("find acceptance generation owners: %v", err)
+		return
+	}
+	if len(jobIDs) > 0 {
+		if err := f.db.WithContext(ctx).Where("job_run_id IN ?", jobIDs).Delete(&model.JobRunGeneration{}).Error; err != nil {
+			t.Errorf("delete exact acceptance generations: %v", err)
+		}
+	}
 	for _, entity := range []any{&model.ProjectArtifact{}, &model.StepRun{}, &model.JobRun{}, &model.PipelineRun{}, &model.Pipeline{}} {
 		if err := f.db.WithContext(ctx).Where("pipeline_id = ?", f.pipelineID).Delete(entity).Error; err != nil {
 			t.Errorf("delete acceptance %T: %v", entity, err)

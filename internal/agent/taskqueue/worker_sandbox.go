@@ -27,6 +27,21 @@ type offlineJobRuntime interface {
 	Ready() bool
 }
 
+// offlineGenerationRuntime 为显式整作业重试提供持久代次交接，旧会话不会隐式升级
+type offlineGenerationRuntime interface {
+	offlineJobRuntime
+	AdmissionDone() <-chan struct{}
+	AllocateGeneration(context.Context, *taskpayload.JobRunTaskPayload, string, taskpayload.JobGeneration) (offlineSession, error)
+	RecordGenerationIntent(context.Context, taskpayload.JobGenerationTransition) error
+	RecordGenerationAdmission(context.Context, taskpayload.JobGenerationTransition, taskpayload.JobGeneration) error
+}
+
+// offlineGenerationSession 仅由精确清理后的持久代次会话提供回执
+type offlineGenerationSession interface {
+	offlineSession
+	CleanupReceipt(context.Context) (taskpayload.JobGenerationCleanupReceipt, error)
+}
+
 type offlineRuntimeContextKey struct{}
 type runtimeBindingContextKey struct{}
 
@@ -59,7 +74,7 @@ func offlineJobValidation(ctx context.Context, conf *config.AgentConfig, payload
 		return nil, nil
 	}
 	request := payload.Runtime
-	structuralPolicy := taskpayload.OfflineRuntimePolicy{Enabled: true, AllowedImages: []string{request.Image}, MaxCPU: request.Resources.CPU, MaxMemory: request.Resources.Memory}
+	structuralPolicy := taskpayload.OfflineRuntimePolicy{Enabled: true, AllowWholeJobRetry: true, AllowedImages: []string{request.Image}, MaxCPU: request.Resources.CPU, MaxMemory: request.Resources.Memory}
 	if err := taskpayload.ValidateJobRuntime(payload, structuralPolicy); err != nil {
 		return nil, err
 	}
@@ -72,6 +87,9 @@ func offlineJobValidation(ctx context.Context, conf *config.AgentConfig, payload
 	}
 	if err := taskpayload.ValidateRuntimeRequest(payload.Runtime, conf.Agent.Sandbox.Containerd.Policy); err != nil {
 		return fmt.Errorf("offline runtime denied by current Agent policy"), nil
+	}
+	if err := taskpayload.ValidateRuntimeRetry(payload.Retry, conf.Agent.Sandbox.Containerd.Policy); err != nil {
+		return fmt.Errorf("offline runtime retry denied by current Agent policy"), nil
 	}
 	return nil, nil
 }

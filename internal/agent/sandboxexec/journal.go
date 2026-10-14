@@ -16,11 +16,13 @@ import (
 	"strings"
 
 	"github.com/arcentrix/arcentra/pkg/sandbox"
+	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
 	"github.com/google/uuid"
 )
 
 const journalVersion = 1
+const generationJournalVersion = 2
 const maxJournalRecordBytes = 16 * 1024
 const journalBindingFile = "owner.json"
 const journalLockFile = ".lock"
@@ -42,16 +44,22 @@ const (
 )
 
 type journalRecord struct {
-	ID                   string              `json:"id"`
-	PipelineRunID        string              `json:"pipelineRunID"`
-	JobRunID             string              `json:"jobRunID"`
-	ExecutionClaimID     string              `json:"executionClaimID"`
-	RuntimeBindingDigest string              `json:"runtimeBindingDigest"`
-	Directory            string              `json:"directory"`
-	Device               uint64              `json:"device"`
-	Inode                uint64              `json:"inode"`
-	Phase                string              `json:"phase"`
-	Resource             sandbox.ResourceRef `json:"resource"`
+	ID                    string                                   `json:"id"`
+	PipelineRunID         string                                   `json:"pipelineRunID"`
+	JobRunID              string                                   `json:"jobRunID"`
+	ExecutionClaimID      string                                   `json:"executionClaimID"`
+	RuntimeBindingDigest  string                                   `json:"runtimeBindingDigest"`
+	Directory             string                                   `json:"directory"`
+	Device                uint64                                   `json:"device"`
+	Inode                 uint64                                   `json:"inode"`
+	Phase                 string                                   `json:"phase"`
+	Resource              sandbox.ResourceRef                      `json:"resource"`
+	Generation            *taskpayload.JobGeneration               `json:"generation,omitempty"`
+	CleanupReceipt        *taskpayload.JobGenerationCleanupReceipt `json:"cleanupReceipt,omitempty"`
+	TransitionIntent      *taskpayload.JobGenerationTransition     `json:"transitionIntent,omitempty"`
+	SuccessorAdmission    *taskpayload.JobGeneration               `json:"successorAdmission,omitempty"`
+	GenerationObservation *taskpayload.JobGeneration               `json:"generationObservation,omitempty"`
+	FinalAcknowledged     bool                                     `json:"finalAcknowledged,omitempty"`
 }
 
 type journalDocument struct {
@@ -66,8 +74,12 @@ type journalDocument struct {
 }
 
 func (c *Controller) document(record *journalRecord) journalDocument {
+	version := journalVersion
+	if record != nil && record.Generation != nil {
+		version = generationJournalVersion
+	}
 	return journalDocument{
-		Version: journalVersion, ControllerID: c.opts.ControllerID, AgentID: c.opts.AgentID,
+		Version: version, ControllerID: c.opts.ControllerID, AgentID: c.opts.AgentID,
 		WorkspaceRoot: c.opts.WorkspaceRoot, Namespace: c.backend.Namespace(), RuntimeIOIdentity: c.runtimeIOIdentity, Record: record,
 	}
 }
@@ -92,7 +104,7 @@ func (c *Controller) decodeJournal(data []byte) (*journalRecord, error) {
 	if err != nil || !bytes.Equal(data, canonical) {
 		return nil, fmt.Errorf("sandbox journal checksum or canonical encoding mismatch")
 	}
-	expected := c.document(nil)
+	expected := c.document(document.Record)
 	if document.Version != expected.Version ||
 		document.ControllerID != expected.ControllerID ||
 		document.AgentID != expected.AgentID ||
@@ -225,6 +237,14 @@ func (c *Controller) openJournalFile(ctx context.Context, name string, create bo
 }
 
 func (c *Controller) readJournal(ctx context.Context, name string) (*journalRecord, error) {
+	data, err := c.readJournalBytes(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	return c.decodeJournal(data)
+}
+
+func (c *Controller) readJournalBytes(ctx context.Context, name string) ([]byte, error) {
 	file, err := c.openJournalFile(ctx, name, false)
 	if err != nil {
 		return nil, err
@@ -238,7 +258,7 @@ func (c *Controller) readJournal(ctx context.Context, name string) (*journalReco
 	if err != nil || len(data) > maxJournalRecordBytes {
 		return nil, fmt.Errorf("read sandbox journal failed")
 	}
-	return c.decodeJournal(data)
+	return data, nil
 }
 
 func (c *Controller) fault(ctx context.Context, point string) error {
@@ -264,6 +284,16 @@ func (c *Controller) writeJournal(ctx context.Context, name string, record *jour
 	}
 	data, err := encodeJournal(c.document(record))
 	if err != nil || len(data) > maxJournalRecordBytes {
+		return fmt.Errorf("sandbox journal record exceeds allowed size")
+	}
+	return c.writeJournalData(ctx, name, data)
+}
+
+func (c *Controller) writeJournalData(ctx context.Context, name string, data []byte) error {
+	if err := c.verifyRoots(ctx); err != nil {
+		return err
+	}
+	if len(data) == 0 || len(data) > maxJournalRecordBytes {
 		return fmt.Errorf("sandbox journal record exceeds allowed size")
 	}
 	stage := ".pending-" + uuid.NewString()
@@ -300,11 +330,15 @@ func (c *Controller) writeJournal(ctx context.Context, name string, record *jour
 }
 
 func (c *Controller) resourceOwner(record journalRecord) string {
-	body, _ := sonic.Marshal([]string{
+	identity := []string{
 		c.opts.ControllerID, c.opts.AgentID, record.PipelineRunID, record.JobRunID, record.ExecutionClaimID,
 		record.RuntimeBindingDigest, record.ID, c.opts.WorkspaceRoot, record.Directory,
 		record.Resource.ID, record.Resource.Namespace, record.Resource.Snapshotter,
-	})
+	}
+	if record.Generation != nil {
+		identity = append(identity, "generation-v2", record.Generation.GenerationID, record.Generation.RuntimeClaimID, record.Generation.BindingDigest)
+	}
+	body, _ := sonic.Marshal(identity)
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
 }
@@ -329,6 +363,9 @@ func (c *Controller) validateRecord(record *journalRecord, name string) error {
 		strings.ContainsAny(record.Resource.Snapshotter, "\x00\r\n/\\") ||
 		record.Resource.Owner != c.resourceOwner(*record) {
 		return fmt.Errorf("sandbox journal resource identity is invalid")
+	}
+	if err := c.validateGenerationRecord(*record); err != nil {
+		return err
 	}
 	switch record.Phase {
 	case phaseIntent:

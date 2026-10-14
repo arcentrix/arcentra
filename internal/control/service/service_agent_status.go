@@ -2,9 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/binary"
-	"encoding/hex"
 	"strings"
 	"time"
 
@@ -76,17 +73,11 @@ func patchAgentStepStatus(ctx context.Context, repository any, expected *model.S
 
 // terminalReportDigest 绑定完整结果与执行身份，避免把恢复生成的终态误认为已提交回执
 func terminalReportDigest(request proto.Message, claim string, executionScope ...string) (string, error) {
-	encoded, err := (proto.MarshalOptions{Deterministic: true}).Marshal(proto.Clone(request))
+	digest, err := agentidentity.TerminalReceiptDigest(request, claim, executionScope...)
 	if err != nil {
 		return "", status.Error(codes.InvalidArgument, "invalid terminal report")
 	}
-	digest := sha256.New()
-	for _, value := range append([]string{"arcentra-terminal-report-v1", string(request.ProtoReflect().Descriptor().FullName()), claim}, executionScope...) {
-		_, _ = digest.Write(binary.BigEndian.AppendUint64(nil, uint64(len(value))))
-		_, _ = digest.Write([]byte(value))
-	}
-	_, _ = digest.Write(encoded)
-	return hex.EncodeToString(digest.Sum(nil)), nil
+	return digest, nil
 }
 
 func validateTerminalReplay(stored, reported string) error {

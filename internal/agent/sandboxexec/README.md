@@ -153,3 +153,43 @@ or install runtime software merely because the test compiles. Those remain a
 separate authorized acceptance stage. Follow the existing hosted harness; a passing
 implementation or ordinary-entry test does not automatically opt in a deployment
 or certify its packaged services, release OCI images or destination infrastructure.
+
+### Bounded whole-job generation journals
+
+Retry-aware callers retain the original JobRun execution claim. Before the first
+admission RPC they persist its exact canonical request with
+`RecordGenerationIntent`; an `admission-<UUID>.json` document contains only that
+identity and request, never fabricated runtime resources. The exact controller
+response is persisted with `RecordGenerationAdmission` before
+`AllocateGeneration`. Initial preparation-only admission permits allocation and
+trusted input staging; it does not replace the controller's pinned-input and
+step-RUNNING checks. An inspection response is retained separately and cannot
+become runnable by changing its authority flags.
+
+Each admitted generation receives a distinct controller-issued runtime claim
+UUID, container/snapshot identity, owner digest and workspace. Generation
+session documents use version 2. Existing non-retry version-1 documents retain
+their original canonical encoding and ownership digest; they cannot be promoted
+into generation records. Mixed, downgraded, missing or contradictory ownership
+evidence fails closed before cleanup and is not silently rewritten.
+
+After `Close`, `CleanupReceipt` independently verifies that the exact owned task,
+container, snapshot and workspace are absent. The durable receipt contains
+resource names, namespace, snapshotter, owner digest, workspace device/inode and
+original/generation identities. The backend does not create an independent lease,
+so the receipt does not invent lease cleanup evidence. A successor transition
+must contain that exact receipt. Its request is persisted before the advance RPC,
+and its exact response before allocating any new workspace. Only the consecutive
+successor of a completely closed generation can allocate; duplicate, stale,
+changed-binding and simultaneously live generations are rejected.
+
+Intermediate acknowledgements retain all admission, cleanup and response evidence.
+Only the real authoritative final job ACK permits `AcknowledgeCompletion` to remove
+all generations under the original claim. Final-ACK markers make an interrupted
+multi-record deletion recoverable without inventing another business result.
+Startup always cleans/replays or blocks for explicit reconciliation. An
+admitted-but-unallocated generation is never executed automatically, including
+crashes before or after the first admission RPC. A pending handoff blocks readiness.
+
+Injected ordinary tests cover these lifecycle and persistence boundaries. They do
+not establish real-container retry acceptance or enable an operator retry policy.

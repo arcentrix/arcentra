@@ -61,6 +61,13 @@ func RecoverInterruptedRuns(ctx context.Context, db *gorm.DB, runIDs []string, a
 		if !apply {
 			return nil
 		}
+		// 显式离线恢复只能撤销活动代次，保留原绑定及转换回执，不制造清理证明
+		if tx.Migrator().HasTable(&model.JobRunGeneration{}) {
+			activeJobs := tx.Session(&gorm.Session{NewDB: true}).Model(&model.JobRun{}).Select("job_run_id").Where("pipeline_run_id IN ? AND status IN ?", ids, []int{1, 2, 3})
+			if err := tx.Model(&model.JobRunGeneration{}).Where("job_run_id IN (?) AND state IN ?", activeJobs, []string{"preparing", "active"}).Updates(map[string]any{"state": "aborted", "updated_at": time.Now()}).Error; err != nil {
+				return err
+			}
+		}
 		now := time.Now()
 		reason := "interrupted execution reconciled offline; inspect external effects before starting a new run"
 		if err := tx.Model(&model.JobRun{}).Where("pipeline_run_id IN ? AND status IN ?", ids, []int{1, 2, 3}).Updates(map[string]any{"status": model.JobRunStatusFailed, "end_time": now, "updated_at": now, "error_message": reason, "terminal_report_digest": ""}).Error; err != nil {

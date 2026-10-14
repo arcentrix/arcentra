@@ -35,15 +35,14 @@ jobs:
   application-defined permission failures that share a generic exit code cannot
   be reliably inferred from output. Do not allowlist such a code.
 
-The same policy runner is used by the control-plane TaskFramework and whole-job
-Agent worker. Missing executors, invalid configuration, source/condition errors,
+The existing policy runner is used by baremetal control-plane and Agent work. The container generation loop below uses the same explicit policy bounds with a separate fresh-session lifecycle. Missing executors, invalid configuration, source/condition errors,
 permission/system errors, conventional shell 126/127 errors, signals,
 cancellation, deadline expiry, artifact failures, and log or terminal-record
 persistence failures are not retry triggers. Infrastructure persistence failures
 also stop later commands despite `continueOnError`. An ordinary command failure
 with `continueOnError` remains a recorded failure and proceeds without retry.
 
-## Scope and workspace contract
+## Baremetal scope and workspace contract
 
 `failed_step` repeats just the failed step in the still-live job workspace.
 Earlier successful commands are not repeated. The existing source snapshot,
@@ -104,3 +103,21 @@ failure classification. An exit code alone is not independent proof that log
 persistence succeeded, and the controller does not infer such proof from error
 text. This admission protocol is not a defense against a compromised registered
 Agent fabricating results.
+
+## Offline container whole-job generations
+
+For `containerd-offline-v1`, only `mode: whole_job` is supported, and only when both Control `pipeline.offlineRuntime.allowWholeJobRetry` and Agent `agent.sandbox.containerd.policy.allowWholeJobRetry` are explicitly true. Both default to false. Runtime readiness advertises a separate versioned retry capability; labels or an older Agent cannot substitute for it. `failed_step` is rejected because the current runtime cannot prove a nondestructive process-quiescence boundary while preserving the previous writable rootfs/tmpfs and legitimate background work.
+
+Each round has a fresh container, rootfs, tmpfs and workspace. All explicit steps repeat; external side effects are not rolled back. The first full source commit and registered input artifact set remain fixed across rounds. Checkout uses that full commit even when a branch moves; source/staging/hash/length failures stop the job. The reserved `ARCENTRA_JOB_GENERATION` environment value is the 1-based round number; job/step/runtime/Agent overrides are rejected. It is a diagnostic/testing value, not a permission or secret.
+
+The controller captures the complete policy, executable-definition digest and every preallocated attempt before dispatch. The original JobRun claim is retained; each generation receives independent controller-issued generation/runtime identities. A first-generation preparation admission can precede checkout solely to allocate a journaled workspace. It cannot execute a command: the first and every subsequent Step RUNNING transaction require pinned inputs and the current active generation. Read-only inspection never authorizes allocation.
+
+Only one acknowledged, non-continued, allowlisted pure shell exit can advance a round. Every error leaf must be the same eligible command exit; mixed runtime/log/receipt/cleanup errors do not qualify. The failed round and skipped remainder must have committed receipts. All owned processes/resources/workspace must be removed before a successor is admitted. Both first admission and successor handoffs persist intent before RPC and the exact response before allocation. Lost ACKs retry the identical transition; they do not mint another generation or rerun a command. Old-round terminal replays remain valid, but old rounds cannot claim work or publish winning outputs. Only a successful final generation registers outputs; partially uploaded objects from a failed finalization are not promoted and are not silently deleted.
+
+Job/pipeline cancellation, disabled Agent, changed inputs, exhausted policy, cleanup failure and drain all fence successor admission. The overall deadline includes every round and delay. Draining finishes and cleans the current round, then starts no successor. A cancelled/expired request may have been admitted before its cancellation became visible; no user command may proceed without the subsequent live step claim, and owned unstarted resources are cleaned.
+
+Jobs carrying approval are currently rejected for container retry: existing first-run approval is not treated as approval of a broader retry plan. Deployment targets/steps remain outside this offline profile. This limitation is explicit at save/trigger and in the editor; removing approval is not an automatic workaround.
+
+There is no automatic continuation after Agent/controller restart or an unresolved handoff. Preserve journals, receipts and generation rows. Read-only inspection does not resume execution. Use the existing explicitly offline reconciliation procedure only after all controllers/Agents and external work are stopped, then start a separately authorized fresh run. Never delete journals or rewrite claims to retry an ambiguous operation. Apply migration [006](../migrations/006_container_job_generations.md) explicitly after the immutable-input migration; no startup migration or historical retry-plan backfill occurs.
+
+The registered Agent remains trusted to report command and cleanup facts. These bindings prevent accidental cross-round authority and replay mistakes; they are not attestation against a compromised Agent or rootful runtime operator. The container remains offline and no network, host socket, privilege or capacity expansion is implied.

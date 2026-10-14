@@ -76,3 +76,30 @@ func TestExecutionModeKeepsUnreadySandboxAgentsOutOfBaremetalQueues(t *testing.T
 		})
 	}
 }
+
+func TestWholeJobRetrySelectionRequiresIndependentCapability(t *testing.T) {
+	image := "registry.example/build@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	now := time.Now()
+	base := model.Agent{AgentID: "agent", OS: "linux", IsEnabled: 1, Status: 1, LastHeartbeat: &now}
+	policy := taskqueue.OfflineRuntimePolicy{Enabled: true, AllowWholeJobRetry: true, AllowedImages: []string{image}, MaxCPU: "1", MaxMemory: "128Mi"}
+	job := &spec.Job{Retry: &spec.Retry{Mode: "whole_job", MaxAttempts: 2, Idempotent: true, AllowedExitCodes: []int32{9}}}
+	runtime := &taskqueue.RuntimeRequest{Type: taskqueue.RuntimeContainerdOfflineV1, Image: image, Resources: taskqueue.RuntimeResources{CPU: "1", Memory: "64Mi"}}
+	for _, raw := range []string{`{"executionMode":"containerd-offline-v1","containerdOfflineV1":true}`, `{"executionMode":"containerd-offline-v1","containerdOfflineV1":true,"containerdWholeJobRetryV1":false}`, `{"executionMode":"containerd-offline-v1","containerdOfflineV1":true,"containerdWholeJobRetryV1":"true"}`} {
+		agent := base
+		agent.RuntimeCapabilities = []byte(raw)
+		agent.Labels = []byte(`{"containerdWholeJobRetryV1":"true"}`)
+		engine := &Process{repos: &repo.Repositories{Agent: &runtimeAgentRepository{agents: []model.Agent{agent}}}, offlineRuntimePolicy: policy}
+		if _, err := engine.selectAgentForRuntime(context.Background(), job, runtime); err == nil {
+			t.Fatal("legacy/forged capability selected")
+		}
+	}
+	base.RuntimeCapabilities = []byte(`{"executionMode":"containerd-offline-v1","containerdOfflineV1":true,"containerdWholeJobRetryV1":true}`)
+	engine := &Process{repos: &repo.Repositories{Agent: &runtimeAgentRepository{agents: []model.Agent{base}}}, offlineRuntimePolicy: policy}
+	if got, err := engine.selectAgentForRuntime(context.Background(), job, runtime); err != nil || got != "agent" {
+		t.Fatalf("capable Agent rejected: %s %v", got, err)
+	}
+	engine.offlineRuntimePolicy.AllowWholeJobRetry = false
+	if _, err := engine.selectAgentForRuntime(context.Background(), job, runtime); err == nil {
+		t.Fatal("operator default-off bypassed")
+	}
+}

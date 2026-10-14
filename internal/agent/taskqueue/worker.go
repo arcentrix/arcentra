@@ -27,6 +27,7 @@ import (
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	steprunv1 "github.com/arcentrix/arcentra/api/steprun/v1"
 	"github.com/arcentrix/arcentra/internal/agent/config"
+	"github.com/arcentrix/arcentra/internal/agent/sandboxexec"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/internal/shared/storage"
@@ -224,6 +225,9 @@ type workerQueues struct {
 func (q *workerQueues) Stop() error {
 	// 工作队列先停止，使已开始的任务能在控制队列和 RPC 关闭前上报结束状态
 	q.stopOnce.Do(func() {
+		if q.offline != nil {
+			q.offline.BeginDrain()
+		}
 		q.stopErr = errors.Join(q.TaskQueue.Stop(), q.control.Stop())
 		if q.cancelReports != nil {
 			q.cancelReports()
@@ -339,6 +343,12 @@ func executeStepRunViaExecutor(
 		execErr = fmt.Errorf("step failed: %s", errMsg)
 	}
 	return retainStepReport(ctx, payload.StepRunID, execErr, func(reportCtx context.Context) error {
+		if generation := generationFromContext(reportCtx); generation != nil && generation.retryableStep(payload.StepRunID) && status == steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED {
+			code, eligible := sandboxexec.RetryCommandExitCode(execErr, generation.payload.Retry.AllowedExitCodes)
+			if eligible && code == exitCode {
+				reportCtx = context.WithValue(reportCtx, generationPureExitKey{}, true)
+			}
+		}
 		return reportStepRunStatus(reportCtx, grpcClient, agentConf, payload.StepRunID, status, exitCode, errMsg, start, end, metrics)
 	})
 }
@@ -491,31 +501,41 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 	workspace := ""
 	var initialCheckout *agentv1.SourceCheckout
 	var session *offlineJobSession
-	if jobErr == nil {
-		if payload.Runtime != nil {
-			var allocated offlineSession
-			allocated, jobErr = offlineRuntimeFromContext(ctx).Allocate(jobCtx, payload, executionClaimID(ctx, "job", payload.JobRunID))
-			if allocated != nil {
-				session = &offlineJobSession{offlineSession: allocated}
-				workspace = allocated.Workspace()
-			}
-			if jobErr == nil && (allocated == nil || workspace == "" || !filepath.IsAbs(workspace)) {
-				jobErr = fmt.Errorf("offline runtime returned no valid allocated workspace")
-			}
-		} else {
-			workspace, jobErr = prepareWorkspace(agentConf, payload)
+	runtimeCompletionRequired := false
+	if jobErr == nil && payload.Runtime != nil && payload.Retry != nil {
+		generated := executeContainerGenerations(ctx, jobCtx, agentConf, grpcClient, execManager, payload, st, reference, start)
+		if generated.uncertain {
+			return generated.err
 		}
-	}
-	if jobErr == nil {
-		initialCheckout, jobErr = checkoutJobInputs(jobCtx, grpcClient, agentConf, payload, workspace)
-	}
-	if jobErr == nil {
-		jobErr = validateArtifactReferences(payload.ArtifactURIs, payload.ArtifactReferences, reference, time.Now())
+		ctx, artifacts, initialCheckout, session, jobErr = generated.ctx, generated.artifacts, generated.checkout, generated.session, generated.err
+		runtimeCompletionRequired = generated.journalRequired
+	} else {
 		if jobErr == nil {
-			jobErr = handleArtifactDownload(jobCtx, payload.ArtifactURIs, payload.ArtifactReferences, workspace, st)
+			if payload.Runtime != nil {
+				var allocated offlineSession
+				allocated, jobErr = offlineRuntimeFromContext(ctx).Allocate(jobCtx, payload, executionClaimID(ctx, "job", payload.JobRunID))
+				if allocated != nil {
+					session = &offlineJobSession{offlineSession: allocated}
+					workspace = allocated.Workspace()
+				}
+				if jobErr == nil && (allocated == nil || workspace == "" || !filepath.IsAbs(workspace)) {
+					jobErr = fmt.Errorf("offline runtime returned no valid allocated workspace")
+				}
+			} else {
+				workspace, jobErr = prepareWorkspace(agentConf, payload)
+			}
 		}
+		if jobErr == nil {
+			initialCheckout, jobErr = checkoutJobInputs(jobCtx, grpcClient, agentConf, payload, workspace)
+		}
+		if jobErr == nil {
+			jobErr = validateArtifactReferences(payload.ArtifactURIs, payload.ArtifactReferences, reference, time.Now())
+			if jobErr == nil {
+				jobErr = handleArtifactDownload(jobCtx, payload.ArtifactURIs, payload.ArtifactReferences, workspace, st)
+			}
+		}
+		jobErr = executeJobAttempts(ctx, jobCtx, agentConf, grpcClient, execManager, payload, artifacts, workspace, jobErr, start, session)
 	}
-	jobErr = executeJobAttempts(ctx, jobCtx, agentConf, grpcClient, execManager, payload, artifacts, workspace, jobErr, start, session)
 
 	if session != nil {
 		jobErr = errors.Join(jobErr, session.finish(ctx))
@@ -546,7 +566,7 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 	}
 	end := time.Now().Unix()
 	dependencies := allJobAttemptIDs(payload)
-	receipt := &executionReceipt{runtimeCompletionRequired: session != nil, runtimeBinding: runtimeBindingFromContext(ctx), jobClaim: executionClaimID(ctx, "job", payload.JobRunID), executionErr: jobErr, report: func(reportCtx context.Context) error {
+	receipt := &executionReceipt{runtimeCompletionRequired: session != nil || runtimeCompletionRequired, runtimeBinding: runtimeBindingFromContext(ctx), jobClaim: executionClaimID(ctx, "job", payload.JobRunID), executionErr: jobErr, report: func(reportCtx context.Context) error {
 		for _, stepID := range dependencies {
 			if pending, ok := pendingStepReports.Load(receiptKey(ctx, "step", stepID)); ok {
 				var err error
@@ -567,6 +587,7 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 		reportCtx = withInitialSourceCheckout(reportCtx, initialCheckout)
 		return reportJobRunStatus(reportCtx, grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_IDLE, int32(status), errMsg, start, end, artifacts)
 	}}
+	receipt.report = freezeGenerationReport(ctx, receipt.report)
 	pendingJobReports.Store(receiptKey(ctx, "job", payload.JobRunID), receipt)
 	return deliverJobReceipt(ctx, payload, receipt)
 }
@@ -660,11 +681,15 @@ func reportJobRunStatus(
 		EndTime:              endUnix,
 		RuntimeBindingDigest: runtimeBindingFromContext(reportCtx),
 	}
+	if generation := generationFromContext(reportCtx); generation != nil {
+		req.GenerationId = generation.generation.GenerationID
+		req.GenerationBindingDigest = generation.generation.BindingDigest
+	}
 	if len(artifacts) > 0 && artifacts[0] != nil {
 		files := artifacts[0]
 		req.ArtifactStorageId = files.reference.StorageID
 		req.ArtifactStorageFingerprint = files.reference.Fingerprint
-		if status >= int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS) {
+		if status >= int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS) && (generationFromContext(reportCtx) == nil || status == int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS)) {
 			req.ArtifactUris = files.uploaded
 			req.Artifacts = files.results
 		}
@@ -736,6 +761,12 @@ func reportStepRunStatus(
 		EndTime:      endUnix,
 		Metrics:      metrics,
 	}
+	if generation := generationFromContext(reportCtx); generation != nil {
+		req.GenerationId = generation.generation.GenerationID
+		req.GenerationBindingDigest = generation.generation.BindingDigest
+		pure, _ := reportCtx.Value(generationPureExitKey{}).(bool)
+		req.RetryableShellExit = pure
+	}
 	if status >= steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS {
 		return reportTerminalStatus(reportCtx, grpcClient, agentConf, "step", stepRunID, req)
 	}
@@ -765,7 +796,7 @@ func parseTimeout(raw string, defaultSeconds int) time.Duration {
 
 // retainStepReport 缓存所有步骤终态上报，避免临时 RPC 故障丢失跳过或失败结果
 func retainStepReport(ctx context.Context, stepRunID string, executionErr error, report func(context.Context) error) error {
-	receipt := &executionReceipt{executionErr: executionErr, report: report}
+	receipt := &executionReceipt{executionErr: executionErr, report: freezeGenerationReport(ctx, report)}
 	pendingStepReports.Store(receiptKey(ctx, "step", stepRunID), receipt)
 	return receipt.deliver(ctx, &pendingStepReports, receiptKey(ctx, "step", stepRunID))
 }

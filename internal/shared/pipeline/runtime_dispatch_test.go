@@ -17,8 +17,9 @@ import (
 
 type runtimeDispatchStore struct {
 	jobRunStoreIface
-	captured *taskqueue.RuntimeRequest
-	err      error
+	captured  *taskqueue.RuntimeRequest
+	retryPlan *taskqueue.JobRetryPlan
+	err       error
 }
 
 func (s *runtimeDispatchStore) CaptureRuntimeInputExpectation(_ context.Context, pipelineID, runID, jobID, agentID string, _ *sourceprovenance.Binding, runtime *taskqueue.RuntimeRequest, _ map[string]string, _ map[string]taskqueue.ArtifactReference) error {
@@ -117,5 +118,35 @@ func TestRuntimeContextCannotFallBackToLocalOrStandaloneRunners(t *testing.T) {
 	tf.execCtx.Runtime = nil
 	if err := tf.prepare(context.Background(), task); err == nil {
 		t.Fatal("missing runtime snapshot fell back to host")
+	}
+}
+
+func (s *runtimeDispatchStore) CaptureRuntimeRetryExpectation(ctx context.Context, pipelineID, runID, jobID, agentID string, binding *sourceprovenance.Binding, runtime *taskqueue.RuntimeRequest, uris map[string]string, refs map[string]taskqueue.ArtifactReference, plan *taskqueue.JobRetryPlan) error {
+	s.retryPlan = plan
+	return s.CaptureRuntimeInputExpectation(ctx, pipelineID, runID, jobID, agentID, binding, runtime, uris, refs)
+}
+
+func TestRuntimeRetryDispatchCapturesCompletePlanBeforeQueue(t *testing.T) {
+	framework, task, store, queue := runtimeDispatchFixture(t)
+	framework.execCtx.RuntimePolicy.AllowWholeJobRetry = true
+	task.Job.Retry = &spec.Retry{Mode: "whole_job", MaxAttempts: 2, Idempotent: true, AllowedExitCodes: []int32{9}}
+	framework.execCtx.StepAttemptIDs = map[string][]string{"shell": {"step-first", "step-second"}}
+	framework.execCtx.StepRunIDs = map[string]string{"shell": "step-first"}
+	if err := framework.queue(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	var payload taskqueue.JobRunTaskPayload
+	if err := sonic.Unmarshal(queue.data, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if store.retryPlan == nil || payload.RetryPlan == nil || payload.RetryPlanDigest == "" {
+		t.Fatal("retry plan not persisted before dispatch")
+	}
+	if err := taskqueue.ValidateJobRetryPlan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	payload.Steps[0].Args["run"] = "changed"
+	if err := taskqueue.ValidateJobRetryPlan(&payload); err == nil {
+		t.Fatal("changed executable escaped plan binding")
 	}
 }

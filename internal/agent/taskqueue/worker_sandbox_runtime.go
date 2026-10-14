@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -22,6 +23,9 @@ import (
 
 type durableOfflineRuntime struct {
 	stopping   atomic.Bool
+	drainOnce  sync.Once
+	drainMu    sync.Mutex
+	drainDone  chan struct{}
 	backend    *sandbox.Containerd
 	controller *sandboxexec.Controller
 	user       string
@@ -72,7 +76,7 @@ func newOfflineRuntime(ctx context.Context, conf *config.AgentConfig, client *ag
 		_ = backend.Close()
 		return nil, fmt.Errorf("offline runtime ownership recovery failed; preserve journal and resources: %w", err)
 	}
-	result := &durableOfflineRuntime{backend: backend, controller: controller, user: cfg.User}
+	result := &durableOfflineRuntime{backend: backend, controller: controller, user: cfg.User, drainDone: make(chan struct{})}
 	if err := confirmOfflineRecoveries(ctx, controller, conf, client); err != nil {
 		_ = result.Close(ctx)
 		return nil, err
@@ -91,7 +95,22 @@ type offlineRecoveryController interface {
 }
 
 func confirmOfflineRecoveries(ctx context.Context, controller offlineRecoveryController, conf *config.AgentConfig, client *agentgrpc.ClientWrapper) error {
-	for _, record := range controller.Recoveries() {
+	recoveries := controller.Recoveries()
+	identities := make(map[string]sandboxexec.Recovery)
+	for _, record := range recoveries {
+		if !record.CleanupComplete {
+			return fmt.Errorf("offline runtime cleanup remains unconfirmed")
+		}
+		if previous, ok := identities[record.ExecutionClaimID]; ok && (previous.JobRunID != record.JobRunID || previous.PipelineRunID != record.PipelineRunID || previous.RuntimeBindingDigest != record.RuntimeBindingDigest) {
+			return fmt.Errorf("offline recovery original claim has inconsistent ownership")
+		}
+		identities[record.ExecutionClaimID] = record
+	}
+	acknowledged := make(map[string]bool)
+	for _, record := range recoveries {
+		if acknowledged[record.ExecutionClaimID] {
+			continue
+		}
 		if !record.CleanupComplete {
 			return fmt.Errorf("offline runtime cleanup remains unconfirmed")
 		}
@@ -104,10 +123,16 @@ func confirmOfflineRecoveries(ctx context.Context, controller offlineRecoveryCon
 		if err := controller.AcknowledgeCompletion(ctx, record.ExecutionClaimID); err != nil {
 			return err
 		}
+		acknowledged[record.ExecutionClaimID] = true
 	}
 	return nil
 }
 func (r *durableOfflineRuntime) Allocate(ctx context.Context, payload *taskpayload.JobRunTaskPayload, claim string) (offlineSession, error) {
+	if r == nil || payload == nil || payload.Runtime == nil {
+		return nil, fmt.Errorf("offline allocation requires a bound runtime payload")
+	}
+	r.drainMu.Lock()
+	defer r.drainMu.Unlock()
 	if !r.Ready() {
 		return nil, fmt.Errorf("offline runtime is not ready")
 	}
@@ -117,9 +142,45 @@ func (r *durableOfflineRuntime) Allocate(ctx context.Context, payload *taskpaylo
 	}
 	return session, err
 }
+func (r *durableOfflineRuntime) AllocateGeneration(ctx context.Context, payload *taskpayload.JobRunTaskPayload, claim string, generation taskpayload.JobGeneration) (offlineSession, error) {
+	if r == nil {
+		return nil, fmt.Errorf("offline generation runtime is unavailable")
+	}
+	r.drainMu.Lock()
+	defer r.drainMu.Unlock()
+	if !r.Ready() {
+		return nil, fmt.Errorf("offline generation runtime is not ready")
+	}
+	if payload == nil || payload.Runtime == nil {
+		return nil, fmt.Errorf("generation requires a bound runtime payload")
+	}
+	session, err := r.controller.AllocateGeneration(ctx, sandboxexec.Options{
+		JobRunID: payload.JobRunID, PipelineRunID: payload.PipelineRunID, ExecutionClaimID: claim,
+		RuntimeBindingDigest: payload.Runtime.BindingDigest, Image: payload.Runtime.Image,
+		Resources: &sandbox.Resources{CPU: payload.Runtime.Resources.CPU, Memory: payload.Runtime.Resources.Memory}, User: r.user,
+	}, generation)
+	if session == nil {
+		return nil, err
+	}
+	return session, err
+}
+func (r *durableOfflineRuntime) RecordGenerationIntent(ctx context.Context, request taskpayload.JobGenerationTransition) error {
+	if r == nil || r.stopping.Load() {
+		return fmt.Errorf("offline runtime is stopping")
+	}
+	return r.controller.RecordGenerationIntent(ctx, request)
+}
+func (r *durableOfflineRuntime) RecordGenerationAdmission(ctx context.Context, request taskpayload.JobGenerationTransition, generation taskpayload.JobGeneration) error {
+	// 已收到的准入即使遇到 drain 仍要保存，停止状态只阻止下一次分配
+	if r == nil {
+		return fmt.Errorf("offline runtime is unavailable")
+	}
+	return r.controller.RecordGenerationAdmission(ctx, request, generation)
+}
+
 func (r *durableOfflineRuntime) HasJob(job string) bool { return r.controller.HasJob(job) }
 func (r *durableOfflineRuntime) Ready() bool {
-	return r != nil && !r.stopping.Load() && r.controller.Ready()
+	return r != nil && r.controller != nil && !r.stopping.Load() && r.controller.Ready()
 }
 func (r *durableOfflineRuntime) Acknowledge(ctx context.Context, job, claim string) error {
 	if !r.controller.HasJob(job) {
@@ -132,8 +193,35 @@ func (r *durableOfflineRuntime) Acknowledge(ctx context.Context, job, claim stri
 	}
 	return fmt.Errorf("offline runtime completion identity or cleanup was not confirmed")
 }
+
+// BeginDrain 阻止新的代次准入并唤醒重试等待，不中断当前代次命令
+func (r *durableOfflineRuntime) BeginDrain() {
+	if r == nil {
+		return
+	}
+	r.drainOnce.Do(func() {
+		r.drainMu.Lock()
+		defer r.drainMu.Unlock()
+		r.stopping.Store(true)
+		if r.drainDone == nil {
+			r.drainDone = make(chan struct{})
+		}
+		close(r.drainDone)
+	})
+}
+
+// AdmissionDone 返回停止重试准入的单次通知通道
+func (r *durableOfflineRuntime) AdmissionDone() <-chan struct{} {
+	r.drainMu.Lock()
+	defer r.drainMu.Unlock()
+	if r.drainDone == nil {
+		r.drainDone = make(chan struct{})
+	}
+	return r.drainDone
+}
+
 func (r *durableOfflineRuntime) Close(ctx context.Context) error {
-	r.stopping.Store(true)
+	r.BeginDrain()
 	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	return errors.Join(r.controller.Close(closeCtx), r.backend.Close())

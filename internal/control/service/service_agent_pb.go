@@ -437,6 +437,7 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 	if err != nil {
 		return nil, err
 	}
+	ctx = agentidentity.WithGenerationReport(ctx, req.GenerationId, req.GenerationBindingDigest)
 	if err := a.validateRuntimeStepReport(ctx, entity, claimID, int(req.Status)); err != nil {
 		return nil, err
 	}
@@ -497,6 +498,9 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 		updates["terminal_report_digest"] = digest
 	}
 	updates["exit_code"] = req.ExitCode
+	updates["generation_id"] = req.GenerationId
+	updates["generation_binding_digest"] = req.GenerationBindingDigest
+	updates["retryable_shell_exit"] = req.RetryableShellExit
 	if workspace := strings.TrimSpace(req.Metrics["workspace"]); workspace != "" {
 		updates["workspace"] = workspace
 	}
@@ -543,6 +547,7 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 	if err != nil {
 		return nil, err
 	}
+	ctx = agentidentity.WithGenerationReport(ctx, req.GenerationId, req.GenerationBindingDigest)
 	sourceUpdates, err := prepareJobSource(entity, req, claimID)
 	if err != nil {
 		return nil, err

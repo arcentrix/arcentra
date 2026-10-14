@@ -37,6 +37,12 @@ func ResolveRuntime(pipeline *spec.Pipeline, policy taskqueue.OfflineRuntimePoli
 	if runtime.Type != taskqueue.RuntimeContainerdOfflineV1 {
 		return nil, fmt.Errorf("runtime type %q is unsupported", runtime.Type)
 	}
+	if _, exists := runtime.Env[taskqueue.RuntimeGenerationEnv]; exists {
+		return nil, fmt.Errorf("offline runtime reserves its generation environment variable")
+	}
+	if _, exists := pipeline.Variables[taskqueue.RuntimeGenerationEnv]; exists {
+		return nil, fmt.Errorf("offline runtime reserves its generation variable")
+	}
 	if len(spec.StructAsMap(runtime.Config)) > 0 {
 		return nil, fmt.Errorf("offline runtime does not accept isolation flags, mounts, host paths, or network configuration")
 	}
@@ -51,7 +57,7 @@ func ResolveRuntime(pipeline *spec.Pipeline, policy taskqueue.OfflineRuntimePoli
 		return nil, err
 	}
 	for _, job := range pipeline.Jobs {
-		if err := validateOfflineRuntimeJob(job); err != nil {
+		if err := validateOfflineRuntimeJob(job, policy); err != nil {
 			return nil, fmt.Errorf("offline runtime job %q: %w", job.Name, err)
 		}
 	}
@@ -115,12 +121,18 @@ func validateOfflineRuntimeChain(jobs []*spec.Job) error {
 	return nil
 }
 
-func validateOfflineRuntimeJob(job *spec.Job) error {
+func validateOfflineRuntimeJob(job *spec.Job, policy taskqueue.OfflineRuntimePolicy) error {
 	if job.Target != nil {
 		return fmt.Errorf("offline runtime does not support deployment targets")
 	}
-	if job.Retry != nil {
-		return fmt.Errorf("offline runtime retries are unsupported; start a fresh run")
+	if err := taskqueue.ValidateRuntimeRetry(job.Retry, policy); err != nil {
+		return err
+	}
+	if job.Retry != nil && job.Approval != nil {
+		return fmt.Errorf("offline retry with approval is unsupported until durable approval binds the complete retry plan")
+	}
+	if _, exists := job.Env[taskqueue.RuntimeGenerationEnv]; exists {
+		return fmt.Errorf("offline runtime reserves its generation environment variable")
 	}
 	if job.Source != nil {
 		parsed, err := url.Parse(job.Source.Repo)
@@ -132,6 +144,9 @@ func validateOfflineRuntimeJob(job *spec.Job) error {
 	for _, step := range job.Steps {
 		if step == nil {
 			return fmt.Errorf("runtime step is nil")
+		}
+		if _, exists := step.Env[taskqueue.RuntimeGenerationEnv]; exists {
+			return fmt.Errorf("offline runtime reserves its generation environment variable")
 		}
 		if !step.RunOnAgent {
 			return fmt.Errorf("offline runtime requires every step to run on the selected Agent")

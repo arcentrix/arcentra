@@ -77,6 +77,9 @@ func (r *JobRunRepo) CommitCancellationReceiptWithSource(ctx context.Context, ex
 		if err := lockReportedJob(ctx, tx, expected); err != nil {
 			return err
 		}
+		if err := validateGenerationCancellationReceipt(ctx, tx, expected, nil); err != nil {
+			return err
+		}
 		if err := ensureJobAttemptsTerminal(ctx, tx, expected.JobRunID); err != nil {
 			return err
 		}
@@ -100,15 +103,19 @@ func (r *StepRunRepo) CommitCancellationReceipt(ctx context.Context, expected *m
 	}
 	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var parent model.JobRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id").
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).
 			Where("job_run_id = ? AND pipeline_id = ? AND pipeline_run_id = ? AND agent_id = ?", expected.JobRunID, expected.PipelineID, expected.PipelineRunID, expected.AgentID).
 			Where("status = ? AND claim_id = ? AND cancellation_claim_id = ?", model.JobRunStatusCancelled, expected.CancellationClaimID, expected.CancellationClaimID).First(&parent).Error; err != nil {
+			return err
+		}
+		if err := validateGenerationCancellationReceipt(ctx, tx, &parent, expected); err != nil {
 			return err
 		}
 		return reportedStatusResult(tx.Model(&model.StepRun{}).
 			Where("step_run_id = ? AND job_run_id = ? AND pipeline_id = ? AND pipeline_run_id = ? AND agent_id = ?", expected.StepRunID, expected.JobRunID, expected.PipelineID, expected.PipelineRunID, expected.AgentID).
 			Where("status = ? AND claim_id = ? AND cancellation_claim_id = ? AND terminal_report_digest = ?", model.JobRunStatusCancelled, expected.ClaimID, expected.CancellationClaimID, "").
 			Where("attempt = ? AND step_index = ? AND previous_step_run_id = ?", expected.Attempt, expected.StepIndex, expected.PreviousStepRunID).
+			Where("generation_id = ? AND generation_binding_digest = ?", expected.GenerationID, expected.GenerationBindingDigest).
 			UpdateColumn("terminal_report_digest", digest))
 	})
 }

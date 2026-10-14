@@ -114,6 +114,9 @@ func reportTerminalStatus(ctx context.Context, client *agentgrpc.ClientWrapper, 
 			return &terminalDeliveryError{err}
 		}
 	}
+	if err := observeGenerationStepReceipt(ctx, record); err != nil {
+		return terminalPersistenceFailure(err)
+	}
 	completeExecutionClaim(ctx, kind, runID)
 	return nil
 }
