@@ -2940,6 +2940,168 @@ func (x *InspectJobExecutionResponse) GetTerminal() bool {
 	return false
 }
 
+// Immutable inputs are separate from v1 task/source/runtime bindings.
+type GetOrRecordJobInputsRequest struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	AgentId              string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	PipelineId           string                 `protobuf:"bytes,2,opt,name=pipeline_id,json=pipelineId,proto3" json:"pipeline_id,omitempty"`
+	PipelineRunId        string                 `protobuf:"bytes,3,opt,name=pipeline_run_id,json=pipelineRunId,proto3" json:"pipeline_run_id,omitempty"`
+	JobRunId             string                 `protobuf:"bytes,4,opt,name=job_run_id,json=jobRunId,proto3" json:"job_run_id,omitempty"`
+	OriginalClaimId      string                 `protobuf:"bytes,5,opt,name=original_claim_id,json=originalClaimId,proto3" json:"original_claim_id,omitempty"`
+	RuntimeBindingDigest string                 `protobuf:"bytes,6,opt,name=runtime_binding_digest,json=runtimeBindingDigest,proto3" json:"runtime_binding_digest,omitempty"`
+	SourceBindingDigest  string                 `protobuf:"bytes,7,opt,name=source_binding_digest,json=sourceBindingDigest,proto3" json:"source_binding_digest,omitempty"`
+	// Empty reads the current manifest; nonempty records canonical v1 JSON once.
+	ManifestJson  string `protobuf:"bytes,8,opt,name=manifest_json,json=manifestJson,proto3" json:"manifest_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetOrRecordJobInputsRequest) Reset() {
+	*x = GetOrRecordJobInputsRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetOrRecordJobInputsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetOrRecordJobInputsRequest) ProtoMessage() {}
+
+func (x *GetOrRecordJobInputsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetOrRecordJobInputsRequest.ProtoReflect.Descriptor instead.
+func (*GetOrRecordJobInputsRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *GetOrRecordJobInputsRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *GetOrRecordJobInputsRequest) GetPipelineId() string {
+	if x != nil {
+		return x.PipelineId
+	}
+	return ""
+}
+
+func (x *GetOrRecordJobInputsRequest) GetPipelineRunId() string {
+	if x != nil {
+		return x.PipelineRunId
+	}
+	return ""
+}
+
+func (x *GetOrRecordJobInputsRequest) GetJobRunId() string {
+	if x != nil {
+		return x.JobRunId
+	}
+	return ""
+}
+
+func (x *GetOrRecordJobInputsRequest) GetOriginalClaimId() string {
+	if x != nil {
+		return x.OriginalClaimId
+	}
+	return ""
+}
+
+func (x *GetOrRecordJobInputsRequest) GetRuntimeBindingDigest() string {
+	if x != nil {
+		return x.RuntimeBindingDigest
+	}
+	return ""
+}
+
+func (x *GetOrRecordJobInputsRequest) GetSourceBindingDigest() string {
+	if x != nil {
+		return x.SourceBindingDigest
+	}
+	return ""
+}
+
+func (x *GetOrRecordJobInputsRequest) GetManifestJson() string {
+	if x != nil {
+		return x.ManifestJson
+	}
+	return ""
+}
+
+type GetOrRecordJobInputsResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	State          string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"` // unknown or pinned; legacy terminal observations are never promoted
+	ManifestJson   string                 `protobuf:"bytes,2,opt,name=manifest_json,json=manifestJson,proto3" json:"manifest_json,omitempty"`
+	ManifestDigest string                 `protobuf:"bytes,3,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GetOrRecordJobInputsResponse) Reset() {
+	*x = GetOrRecordJobInputsResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetOrRecordJobInputsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetOrRecordJobInputsResponse) ProtoMessage() {}
+
+func (x *GetOrRecordJobInputsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetOrRecordJobInputsResponse.ProtoReflect.Descriptor instead.
+func (*GetOrRecordJobInputsResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *GetOrRecordJobInputsResponse) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *GetOrRecordJobInputsResponse) GetManifestJson() string {
+	if x != nil {
+		return x.ManifestJson
+	}
+	return ""
+}
+
+func (x *GetOrRecordJobInputsResponse) GetManifestDigest() string {
+	if x != nil {
+		return x.ManifestDigest
+	}
+	return ""
+}
+
 var File_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_agent_v1_agent_proto_rawDesc = "" +
@@ -3209,7 +3371,22 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x16runtime_binding_digest\x18\x04 \x01(\tR\x14runtimeBindingDigest\"Q\n" +
 	"\x1bInspectJobExecutionResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\x05R\x06status\x12\x1a\n" +
-	"\bterminal\x18\x02 \x01(\bR\bterminal*Q\n" +
+	"\bterminal\x18\x02 \x01(\bR\bterminal\"\xda\x02\n" +
+	"\x1bGetOrRecordJobInputsRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1f\n" +
+	"\vpipeline_id\x18\x02 \x01(\tR\n" +
+	"pipelineId\x12&\n" +
+	"\x0fpipeline_run_id\x18\x03 \x01(\tR\rpipelineRunId\x12\x1c\n" +
+	"\n" +
+	"job_run_id\x18\x04 \x01(\tR\bjobRunId\x12*\n" +
+	"\x11original_claim_id\x18\x05 \x01(\tR\x0foriginalClaimId\x124\n" +
+	"\x16runtime_binding_digest\x18\x06 \x01(\tR\x14runtimeBindingDigest\x122\n" +
+	"\x15source_binding_digest\x18\a \x01(\tR\x13sourceBindingDigest\x12#\n" +
+	"\rmanifest_json\x18\b \x01(\tR\fmanifestJson\"\x82\x01\n" +
+	"\x1cGetOrRecordJobInputsResponse\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\x12#\n" +
+	"\rmanifest_json\x18\x02 \x01(\tR\fmanifestJson\x12'\n" +
+	"\x0fmanifest_digest\x18\x03 \x01(\tR\x0emanifestDigest*Q\n" +
 	"\tAckStatus\x12\x1a\n" +
 	"\x16ACK_STATUS_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rACK_STATUS_OK\x10\x01\x12\x15\n" +
@@ -3224,8 +3401,9 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x1bPLUGIN_LOCATION_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16PLUGIN_LOCATION_SERVER\x10\x01\x12\x1b\n" +
 	"\x17PLUGIN_LOCATION_STORAGE\x10\x02\x12\x1c\n" +
-	"\x18PLUGIN_LOCATION_REGISTRY\x10\x032\xa2\a\n" +
-	"\fAgentService\x12d\n" +
+	"\x18PLUGIN_LOCATION_REGISTRY\x10\x032\x8b\b\n" +
+	"\fAgentService\x12g\n" +
+	"\x14GetOrRecordJobInputs\x12%.agent.v1.GetOrRecordJobInputsRequest\x1a&.agent.v1.GetOrRecordJobInputsResponse\"\x00\x12d\n" +
 	"\x13InspectJobExecution\x12$.agent.v1.InspectJobExecutionRequest\x1a%.agent.v1.InspectJobExecutionResponse\"\x00\x12F\n" +
 	"\tHeartbeat\x12\x1a.agent.v1.HeartbeatRequest\x1a\x1b.agent.v1.HeartbeatResponse\"\x00\x12C\n" +
 	"\bRegister\x12\x19.agent.v1.RegisterRequest\x1a\x1a.agent.v1.RegisterResponse\"\x00\x12I\n" +
@@ -3254,59 +3432,61 @@ func file_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
+var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
 var file_agent_v1_agent_proto_goTypes = []any{
-	(AckStatus)(0),                      // 0: agent.v1.AckStatus
-	(AgentStatus)(0),                    // 1: agent.v1.AgentStatus
-	(PluginLocation)(0),                 // 2: agent.v1.PluginLocation
-	(*ConnectRequest)(nil),              // 3: agent.v1.ConnectRequest
-	(*ConnectResponse)(nil),             // 4: agent.v1.ConnectResponse
-	(*ConnectHeartbeat)(nil),            // 5: agent.v1.ConnectHeartbeat
-	(*TaskDispatch)(nil),                // 6: agent.v1.TaskDispatch
-	(*TaskCancel)(nil),                  // 7: agent.v1.TaskCancel
-	(*TaskAck)(nil),                     // 8: agent.v1.TaskAck
-	(*TaskStatus)(nil),                  // 9: agent.v1.TaskStatus
-	(*RuntimeCapabilities)(nil),         // 10: agent.v1.RuntimeCapabilities
-	(*HeartbeatRequest)(nil),            // 11: agent.v1.HeartbeatRequest
-	(*HeartbeatResponse)(nil),           // 12: agent.v1.HeartbeatResponse
-	(*RegisterRequest)(nil),             // 13: agent.v1.RegisterRequest
-	(*RegisterResponse)(nil),            // 14: agent.v1.RegisterResponse
-	(*StorageConfig)(nil),               // 15: agent.v1.StorageConfig
-	(*UnregisterRequest)(nil),           // 16: agent.v1.UnregisterRequest
-	(*UnregisterResponse)(nil),          // 17: agent.v1.UnregisterResponse
-	(*FetchStepRunRequest)(nil),         // 18: agent.v1.FetchStepRunRequest
-	(*FetchStepRunResponse)(nil),        // 19: agent.v1.FetchStepRunResponse
-	(*StepRun)(nil),                     // 20: agent.v1.StepRun
-	(*ArtifactConfig)(nil),              // 21: agent.v1.ArtifactConfig
-	(*ReportStepRunStatusRequest)(nil),  // 22: agent.v1.ReportStepRunStatusRequest
-	(*ReportStepRunStatusResponse)(nil), // 23: agent.v1.ReportStepRunStatusResponse
-	(*CancelStepRunRequest)(nil),        // 24: agent.v1.CancelStepRunRequest
-	(*CancelStepRunResponse)(nil),       // 25: agent.v1.CancelStepRunResponse
-	(*UpdateLabelsRequest)(nil),         // 26: agent.v1.UpdateLabelsRequest
-	(*UpdateLabelsResponse)(nil),        // 27: agent.v1.UpdateLabelsResponse
-	(*ReportJobRunStatusRequest)(nil),   // 28: agent.v1.ReportJobRunStatusRequest
-	(*SourceCheckout)(nil),              // 29: agent.v1.SourceCheckout
-	(*ArtifactResult)(nil),              // 30: agent.v1.ArtifactResult
-	(*ReportJobRunStatusResponse)(nil),  // 31: agent.v1.ReportJobRunStatusResponse
-	(*CancelJobRunRequest)(nil),         // 32: agent.v1.CancelJobRunRequest
-	(*CancelJobRunResponse)(nil),        // 33: agent.v1.CancelJobRunResponse
-	(*AgentSelector)(nil),               // 34: agent.v1.AgentSelector
-	(*LabelExpression)(nil),             // 35: agent.v1.LabelExpression
-	(*PluginInfo)(nil),                  // 36: agent.v1.PluginInfo
-	(*InspectJobExecutionRequest)(nil),  // 37: agent.v1.InspectJobExecutionRequest
-	(*InspectJobExecutionResponse)(nil), // 38: agent.v1.InspectJobExecutionResponse
-	nil,                                 // 39: agent.v1.TaskStatus.MetricsEntry
-	nil,                                 // 40: agent.v1.RegisterRequest.LabelsEntry
-	nil,                                 // 41: agent.v1.RegisterResponse.LabelsEntry
-	nil,                                 // 42: agent.v1.StepRun.EnvEntry
-	nil,                                 // 43: agent.v1.StepRun.SecretsEntry
-	nil,                                 // 44: agent.v1.ReportStepRunStatusRequest.MetricsEntry
-	nil,                                 // 45: agent.v1.UpdateLabelsRequest.LabelsEntry
-	nil,                                 // 46: agent.v1.UpdateLabelsResponse.LabelsEntry
-	nil,                                 // 47: agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
-	nil,                                 // 48: agent.v1.AgentSelector.MatchLabelsEntry
-	(v1.StepRunStatus)(0),               // 49: steprun.v1.StepRunStatus
-	(*structpb.Struct)(nil),             // 50: google.protobuf.Struct
+	(AckStatus)(0),                       // 0: agent.v1.AckStatus
+	(AgentStatus)(0),                     // 1: agent.v1.AgentStatus
+	(PluginLocation)(0),                  // 2: agent.v1.PluginLocation
+	(*ConnectRequest)(nil),               // 3: agent.v1.ConnectRequest
+	(*ConnectResponse)(nil),              // 4: agent.v1.ConnectResponse
+	(*ConnectHeartbeat)(nil),             // 5: agent.v1.ConnectHeartbeat
+	(*TaskDispatch)(nil),                 // 6: agent.v1.TaskDispatch
+	(*TaskCancel)(nil),                   // 7: agent.v1.TaskCancel
+	(*TaskAck)(nil),                      // 8: agent.v1.TaskAck
+	(*TaskStatus)(nil),                   // 9: agent.v1.TaskStatus
+	(*RuntimeCapabilities)(nil),          // 10: agent.v1.RuntimeCapabilities
+	(*HeartbeatRequest)(nil),             // 11: agent.v1.HeartbeatRequest
+	(*HeartbeatResponse)(nil),            // 12: agent.v1.HeartbeatResponse
+	(*RegisterRequest)(nil),              // 13: agent.v1.RegisterRequest
+	(*RegisterResponse)(nil),             // 14: agent.v1.RegisterResponse
+	(*StorageConfig)(nil),                // 15: agent.v1.StorageConfig
+	(*UnregisterRequest)(nil),            // 16: agent.v1.UnregisterRequest
+	(*UnregisterResponse)(nil),           // 17: agent.v1.UnregisterResponse
+	(*FetchStepRunRequest)(nil),          // 18: agent.v1.FetchStepRunRequest
+	(*FetchStepRunResponse)(nil),         // 19: agent.v1.FetchStepRunResponse
+	(*StepRun)(nil),                      // 20: agent.v1.StepRun
+	(*ArtifactConfig)(nil),               // 21: agent.v1.ArtifactConfig
+	(*ReportStepRunStatusRequest)(nil),   // 22: agent.v1.ReportStepRunStatusRequest
+	(*ReportStepRunStatusResponse)(nil),  // 23: agent.v1.ReportStepRunStatusResponse
+	(*CancelStepRunRequest)(nil),         // 24: agent.v1.CancelStepRunRequest
+	(*CancelStepRunResponse)(nil),        // 25: agent.v1.CancelStepRunResponse
+	(*UpdateLabelsRequest)(nil),          // 26: agent.v1.UpdateLabelsRequest
+	(*UpdateLabelsResponse)(nil),         // 27: agent.v1.UpdateLabelsResponse
+	(*ReportJobRunStatusRequest)(nil),    // 28: agent.v1.ReportJobRunStatusRequest
+	(*SourceCheckout)(nil),               // 29: agent.v1.SourceCheckout
+	(*ArtifactResult)(nil),               // 30: agent.v1.ArtifactResult
+	(*ReportJobRunStatusResponse)(nil),   // 31: agent.v1.ReportJobRunStatusResponse
+	(*CancelJobRunRequest)(nil),          // 32: agent.v1.CancelJobRunRequest
+	(*CancelJobRunResponse)(nil),         // 33: agent.v1.CancelJobRunResponse
+	(*AgentSelector)(nil),                // 34: agent.v1.AgentSelector
+	(*LabelExpression)(nil),              // 35: agent.v1.LabelExpression
+	(*PluginInfo)(nil),                   // 36: agent.v1.PluginInfo
+	(*InspectJobExecutionRequest)(nil),   // 37: agent.v1.InspectJobExecutionRequest
+	(*InspectJobExecutionResponse)(nil),  // 38: agent.v1.InspectJobExecutionResponse
+	(*GetOrRecordJobInputsRequest)(nil),  // 39: agent.v1.GetOrRecordJobInputsRequest
+	(*GetOrRecordJobInputsResponse)(nil), // 40: agent.v1.GetOrRecordJobInputsResponse
+	nil,                                  // 41: agent.v1.TaskStatus.MetricsEntry
+	nil,                                  // 42: agent.v1.RegisterRequest.LabelsEntry
+	nil,                                  // 43: agent.v1.RegisterResponse.LabelsEntry
+	nil,                                  // 44: agent.v1.StepRun.EnvEntry
+	nil,                                  // 45: agent.v1.StepRun.SecretsEntry
+	nil,                                  // 46: agent.v1.ReportStepRunStatusRequest.MetricsEntry
+	nil,                                  // 47: agent.v1.UpdateLabelsRequest.LabelsEntry
+	nil,                                  // 48: agent.v1.UpdateLabelsResponse.LabelsEntry
+	nil,                                  // 49: agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
+	nil,                                  // 50: agent.v1.AgentSelector.MatchLabelsEntry
+	(v1.StepRunStatus)(0),                // 51: steprun.v1.StepRunStatus
+	(*structpb.Struct)(nil),              // 52: google.protobuf.Struct
 }
 var file_agent_v1_agent_proto_depIdxs = []int32{
 	5,  // 0: agent.v1.ConnectRequest.heartbeat:type_name -> agent.v1.ConnectHeartbeat
@@ -3318,55 +3498,57 @@ var file_agent_v1_agent_proto_depIdxs = []int32{
 	10, // 6: agent.v1.ConnectHeartbeat.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
 	20, // 7: agent.v1.TaskDispatch.step_runs:type_name -> agent.v1.StepRun
 	0,  // 8: agent.v1.TaskAck.status:type_name -> agent.v1.AckStatus
-	49, // 9: agent.v1.TaskStatus.status:type_name -> steprun.v1.StepRunStatus
-	39, // 10: agent.v1.TaskStatus.metrics:type_name -> agent.v1.TaskStatus.MetricsEntry
+	51, // 9: agent.v1.TaskStatus.status:type_name -> steprun.v1.StepRunStatus
+	41, // 10: agent.v1.TaskStatus.metrics:type_name -> agent.v1.TaskStatus.MetricsEntry
 	1,  // 11: agent.v1.HeartbeatRequest.status:type_name -> agent.v1.AgentStatus
 	10, // 12: agent.v1.HeartbeatRequest.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
-	40, // 13: agent.v1.RegisterRequest.labels:type_name -> agent.v1.RegisterRequest.LabelsEntry
+	42, // 13: agent.v1.RegisterRequest.labels:type_name -> agent.v1.RegisterRequest.LabelsEntry
 	10, // 14: agent.v1.RegisterRequest.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
-	41, // 15: agent.v1.RegisterResponse.labels:type_name -> agent.v1.RegisterResponse.LabelsEntry
+	43, // 15: agent.v1.RegisterResponse.labels:type_name -> agent.v1.RegisterResponse.LabelsEntry
 	15, // 16: agent.v1.RegisterResponse.storage:type_name -> agent.v1.StorageConfig
 	20, // 17: agent.v1.FetchStepRunResponse.step_runs:type_name -> agent.v1.StepRun
-	50, // 18: agent.v1.StepRun.args:type_name -> google.protobuf.Struct
-	42, // 19: agent.v1.StepRun.env:type_name -> agent.v1.StepRun.EnvEntry
-	43, // 20: agent.v1.StepRun.secrets:type_name -> agent.v1.StepRun.SecretsEntry
+	52, // 18: agent.v1.StepRun.args:type_name -> google.protobuf.Struct
+	44, // 19: agent.v1.StepRun.env:type_name -> agent.v1.StepRun.EnvEntry
+	45, // 20: agent.v1.StepRun.secrets:type_name -> agent.v1.StepRun.SecretsEntry
 	21, // 21: agent.v1.StepRun.artifacts:type_name -> agent.v1.ArtifactConfig
 	34, // 22: agent.v1.StepRun.agent_selector:type_name -> agent.v1.AgentSelector
 	36, // 23: agent.v1.StepRun.plugins:type_name -> agent.v1.PluginInfo
-	49, // 24: agent.v1.ReportStepRunStatusRequest.status:type_name -> steprun.v1.StepRunStatus
-	44, // 25: agent.v1.ReportStepRunStatusRequest.metrics:type_name -> agent.v1.ReportStepRunStatusRequest.MetricsEntry
-	45, // 26: agent.v1.UpdateLabelsRequest.labels:type_name -> agent.v1.UpdateLabelsRequest.LabelsEntry
-	46, // 27: agent.v1.UpdateLabelsResponse.labels:type_name -> agent.v1.UpdateLabelsResponse.LabelsEntry
-	47, // 28: agent.v1.ReportJobRunStatusRequest.artifact_uris:type_name -> agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
+	51, // 24: agent.v1.ReportStepRunStatusRequest.status:type_name -> steprun.v1.StepRunStatus
+	46, // 25: agent.v1.ReportStepRunStatusRequest.metrics:type_name -> agent.v1.ReportStepRunStatusRequest.MetricsEntry
+	47, // 26: agent.v1.UpdateLabelsRequest.labels:type_name -> agent.v1.UpdateLabelsRequest.LabelsEntry
+	48, // 27: agent.v1.UpdateLabelsResponse.labels:type_name -> agent.v1.UpdateLabelsResponse.LabelsEntry
+	49, // 28: agent.v1.ReportJobRunStatusRequest.artifact_uris:type_name -> agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
 	30, // 29: agent.v1.ReportJobRunStatusRequest.artifacts:type_name -> agent.v1.ArtifactResult
 	29, // 30: agent.v1.ReportJobRunStatusRequest.source_checkout:type_name -> agent.v1.SourceCheckout
-	48, // 31: agent.v1.AgentSelector.match_labels:type_name -> agent.v1.AgentSelector.MatchLabelsEntry
+	50, // 31: agent.v1.AgentSelector.match_labels:type_name -> agent.v1.AgentSelector.MatchLabelsEntry
 	35, // 32: agent.v1.AgentSelector.match_expressions:type_name -> agent.v1.LabelExpression
 	2,  // 33: agent.v1.PluginInfo.location:type_name -> agent.v1.PluginLocation
-	37, // 34: agent.v1.AgentService.InspectJobExecution:input_type -> agent.v1.InspectJobExecutionRequest
-	11, // 35: agent.v1.AgentService.Heartbeat:input_type -> agent.v1.HeartbeatRequest
-	13, // 36: agent.v1.AgentService.Register:input_type -> agent.v1.RegisterRequest
-	16, // 37: agent.v1.AgentService.Unregister:input_type -> agent.v1.UnregisterRequest
-	18, // 38: agent.v1.AgentService.FetchStepRun:input_type -> agent.v1.FetchStepRunRequest
-	22, // 39: agent.v1.AgentService.ReportStepRunStatus:input_type -> agent.v1.ReportStepRunStatusRequest
-	28, // 40: agent.v1.AgentService.ReportJobRunStatus:input_type -> agent.v1.ReportJobRunStatusRequest
-	24, // 41: agent.v1.AgentService.CancelStepRun:input_type -> agent.v1.CancelStepRunRequest
-	32, // 42: agent.v1.AgentService.CancelJobRun:input_type -> agent.v1.CancelJobRunRequest
-	26, // 43: agent.v1.AgentService.UpdateLabels:input_type -> agent.v1.UpdateLabelsRequest
-	3,  // 44: agent.v1.AgentService.Connect:input_type -> agent.v1.ConnectRequest
-	38, // 45: agent.v1.AgentService.InspectJobExecution:output_type -> agent.v1.InspectJobExecutionResponse
-	12, // 46: agent.v1.AgentService.Heartbeat:output_type -> agent.v1.HeartbeatResponse
-	14, // 47: agent.v1.AgentService.Register:output_type -> agent.v1.RegisterResponse
-	17, // 48: agent.v1.AgentService.Unregister:output_type -> agent.v1.UnregisterResponse
-	19, // 49: agent.v1.AgentService.FetchStepRun:output_type -> agent.v1.FetchStepRunResponse
-	23, // 50: agent.v1.AgentService.ReportStepRunStatus:output_type -> agent.v1.ReportStepRunStatusResponse
-	31, // 51: agent.v1.AgentService.ReportJobRunStatus:output_type -> agent.v1.ReportJobRunStatusResponse
-	25, // 52: agent.v1.AgentService.CancelStepRun:output_type -> agent.v1.CancelStepRunResponse
-	33, // 53: agent.v1.AgentService.CancelJobRun:output_type -> agent.v1.CancelJobRunResponse
-	27, // 54: agent.v1.AgentService.UpdateLabels:output_type -> agent.v1.UpdateLabelsResponse
-	4,  // 55: agent.v1.AgentService.Connect:output_type -> agent.v1.ConnectResponse
-	45, // [45:56] is the sub-list for method output_type
-	34, // [34:45] is the sub-list for method input_type
+	39, // 34: agent.v1.AgentService.GetOrRecordJobInputs:input_type -> agent.v1.GetOrRecordJobInputsRequest
+	37, // 35: agent.v1.AgentService.InspectJobExecution:input_type -> agent.v1.InspectJobExecutionRequest
+	11, // 36: agent.v1.AgentService.Heartbeat:input_type -> agent.v1.HeartbeatRequest
+	13, // 37: agent.v1.AgentService.Register:input_type -> agent.v1.RegisterRequest
+	16, // 38: agent.v1.AgentService.Unregister:input_type -> agent.v1.UnregisterRequest
+	18, // 39: agent.v1.AgentService.FetchStepRun:input_type -> agent.v1.FetchStepRunRequest
+	22, // 40: agent.v1.AgentService.ReportStepRunStatus:input_type -> agent.v1.ReportStepRunStatusRequest
+	28, // 41: agent.v1.AgentService.ReportJobRunStatus:input_type -> agent.v1.ReportJobRunStatusRequest
+	24, // 42: agent.v1.AgentService.CancelStepRun:input_type -> agent.v1.CancelStepRunRequest
+	32, // 43: agent.v1.AgentService.CancelJobRun:input_type -> agent.v1.CancelJobRunRequest
+	26, // 44: agent.v1.AgentService.UpdateLabels:input_type -> agent.v1.UpdateLabelsRequest
+	3,  // 45: agent.v1.AgentService.Connect:input_type -> agent.v1.ConnectRequest
+	40, // 46: agent.v1.AgentService.GetOrRecordJobInputs:output_type -> agent.v1.GetOrRecordJobInputsResponse
+	38, // 47: agent.v1.AgentService.InspectJobExecution:output_type -> agent.v1.InspectJobExecutionResponse
+	12, // 48: agent.v1.AgentService.Heartbeat:output_type -> agent.v1.HeartbeatResponse
+	14, // 49: agent.v1.AgentService.Register:output_type -> agent.v1.RegisterResponse
+	17, // 50: agent.v1.AgentService.Unregister:output_type -> agent.v1.UnregisterResponse
+	19, // 51: agent.v1.AgentService.FetchStepRun:output_type -> agent.v1.FetchStepRunResponse
+	23, // 52: agent.v1.AgentService.ReportStepRunStatus:output_type -> agent.v1.ReportStepRunStatusResponse
+	31, // 53: agent.v1.AgentService.ReportJobRunStatus:output_type -> agent.v1.ReportJobRunStatusResponse
+	25, // 54: agent.v1.AgentService.CancelStepRun:output_type -> agent.v1.CancelStepRunResponse
+	33, // 55: agent.v1.AgentService.CancelJobRun:output_type -> agent.v1.CancelJobRunResponse
+	27, // 56: agent.v1.AgentService.UpdateLabels:output_type -> agent.v1.UpdateLabelsResponse
+	4,  // 57: agent.v1.AgentService.Connect:output_type -> agent.v1.ConnectResponse
+	46, // [46:58] is the sub-list for method output_type
+	34, // [34:46] is the sub-list for method input_type
 	34, // [34:34] is the sub-list for extension type_name
 	34, // [34:34] is the sub-list for extension extendee
 	0,  // [0:34] is the sub-list for field type_name
@@ -3392,7 +3574,7 @@ func file_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_v1_agent_proto_rawDesc), len(file_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   46,
+			NumMessages:   48,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

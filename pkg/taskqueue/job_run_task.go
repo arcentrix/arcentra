@@ -15,8 +15,11 @@
 package taskqueue
 
 import (
-	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
+	"fmt"
 	"strings"
+
+	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
+	artifactutil "github.com/arcentrix/arcentra/pkg/artifact"
 )
 
 const (
@@ -84,9 +87,21 @@ func JobRunKey(payload *JobRunTaskPayload) string {
 	return strings.Trim(strings.Join(parts, ":"), ":")
 }
 
-// ArtifactReference 绑定上游制品的存储位置和有效期，不包含凭据
+// ArtifactReference 绑定上游制品的存储位置、内容及有效期，不包含凭据
 type ArtifactReference struct {
 	StorageID   string `json:"storageId"`
 	Fingerprint string `json:"fingerprint"`
 	ExpiresAt   int64  `json:"expiresAt,omitempty"`
+	// SHA256 保存认证登记的规范小写内容摘要
+	SHA256 string `json:"sha256,omitempty"`
+	// Size 使用指针区分已登记的空文件与缺少长度的历史制品
+	Size *int64 `json:"size,omitempty"`
+}
+
+// ValidateIntegrity 拒绝缺失或不规范的内容元数据，历史记录不得冒充不可变输入
+func (r ArtifactReference) ValidateIntegrity() error {
+	if r.Size == nil || *r.Size < 0 || artifactutil.Digest(r.SHA256) != nil {
+		return fmt.Errorf("artifact SHA256 and explicit non-negative size are required")
+	}
+	return nil
 }

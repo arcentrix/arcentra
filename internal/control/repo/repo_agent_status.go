@@ -121,7 +121,8 @@ func reportedJobQuery(tx *gorm.DB, expected *model.JobRun) *gorm.DB {
 		Where("terminal_report_digest = ? AND cancellation_claim_id = ?", expected.TerminalReportDigest, expected.CancellationClaimID).
 		Where("source_expectation_captured = ? AND source_type = ? AND source_repository = ? AND source_ref = ?", expected.SourceExpectationCaptured, expected.SourceType, expected.SourceRepository, expected.SourceRef).
 		Where("source_binding_digest = ? AND source_resolved_commit = ? AND source_provenance_state = ?", expected.SourceBindingDigest, expected.SourceResolvedCommit, expected.SourceProvenanceState).
-		Where("runtime_type = ? AND runtime_image = ? AND runtime_cpu = ? AND runtime_memory = ? AND runtime_binding_digest = ?", expected.RuntimeType, expected.RuntimeImage, expected.RuntimeCPU, expected.RuntimeMemory, expected.RuntimeBindingDigest)
+		Where("runtime_type = ? AND runtime_image = ? AND runtime_cpu = ? AND runtime_memory = ? AND runtime_binding_digest = ?", expected.RuntimeType, expected.RuntimeImage, expected.RuntimeCPU, expected.RuntimeMemory, expected.RuntimeBindingDigest).
+		Where("input_expectation = ? AND input_manifest_state = ? AND input_manifest = ? AND input_manifest_digest = ?", expected.InputExpectation, expected.InputManifestState, expected.InputManifest, expected.InputManifestDigest)
 }
 
 func reportedStatusResult(result *gorm.DB) error {

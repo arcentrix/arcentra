@@ -188,6 +188,9 @@ func (e *artifactExecutor) download(ctx context.Context, workspace string, args 
 		for _, file := range e.results {
 			ref := e.reference
 			ref.ExpiresAt = file.ExpiresAt
+			ref.SHA256 = file.Sha256
+			size := file.Size
+			ref.Size = &size
 			references[file.Name] = ref
 		}
 	}
@@ -211,7 +214,7 @@ func (e *artifactExecutor) download(ctx context.Context, workspace string, args 
 	}
 	defer root.Close()
 	for _, name := range files {
-		if err := downloadArtifactFile(ctx, root, name, available[name], st); err != nil {
+		if err := downloadArtifactFile(ctx, root, name, available[name], references[name], st); err != nil {
 			return nil, fmt.Errorf("download artifact %s: %w", name, err)
 		}
 	}
@@ -219,9 +222,14 @@ func (e *artifactExecutor) download(ctx context.Context, workspace string, args 
 }
 
 // handleArtifactDownload 预取上游制品，按作业和相对路径保存在工作目录的 .artifacts 中
-func handleArtifactDownload(ctx context.Context, uris map[string]string, workspace string, st storage.IStorage) error {
+func handleArtifactDownload(ctx context.Context, uris map[string]string, references map[string]taskqueue.ArtifactReference, workspace string, st storage.IStorage) error {
 	if len(uris) == 0 {
 		return nil
+	}
+	for name := range uris {
+		if err := references[name].ValidateIntegrity(); err != nil {
+			return fmt.Errorf("artifact %s: %w", name, err)
+		}
 	}
 	stream, err := artifactStorage(st)
 	if err != nil {
@@ -237,7 +245,7 @@ func handleArtifactDownload(ctx context.Context, uris map[string]string, workspa
 	}
 	defer root.Close()
 	for _, name := range files {
-		if err := downloadArtifactFile(ctx, root, path.Join(".artifacts", name), uris[name], stream); err != nil {
+		if err := downloadArtifactFile(ctx, root, path.Join(".artifacts", name), uris[name], references[name], stream); err != nil {
 			return fmt.Errorf("prefetch artifact %s: %w", name, err)
 		}
 	}
@@ -486,7 +494,8 @@ func uploadArtifactFile(ctx context.Context, root *os.Root, name, prefix string,
 	return &agentv1.ArtifactResult{Name: name, StorageKey: key, Size: size, MediaType: "application/octet-stream", Sha256: hash}, nil
 }
 
-// validateArtifactReferences 拒绝过期、身份缺失或位置不匹配的上游制品
+// validateArtifactReferences 拒绝过期、身份缺失、位置不匹配或内容未绑定的上游制品
+// 历史裸机终态仍可回执和展示，但缺少摘要或长度时不得继续下载或进入不可变重试
 func validateArtifactReferences(uris map[string]string, references map[string]taskqueue.ArtifactReference, current taskqueue.ArtifactReference, now time.Time) error {
 	for name := range uris {
 		ref := references[name]
@@ -496,12 +505,19 @@ func validateArtifactReferences(uris map[string]string, references map[string]ta
 		if ref.ExpiresAt != 0 && ref.ExpiresAt <= now.Unix() {
 			return fmt.Errorf("artifact %s has expired", name)
 		}
+		if err := ref.ValidateIntegrity(); err != nil {
+			return fmt.Errorf("artifact %s: %w", name, err)
+		}
 	}
 	return nil
 }
 
-// downloadArtifactFile 使用原子重命名提交下载，读取失败或取消不会截断已有制品
-func downloadArtifactFile(ctx context.Context, root *os.Root, name, key string, st storage.IStreamingStorage) error {
+// downloadArtifactFile 验证流式下载的摘要及长度后原子提交，失败或取消不截断已有制品
+func downloadArtifactFile(ctx context.Context, root *os.Root, name, key string, reference taskqueue.ArtifactReference, st storage.IStreamingStorage) error {
+	if err := reference.ValidateIntegrity(); err != nil {
+		return err
+	}
+	expectedSize, expectedSHA256 := *reference.Size, reference.SHA256
 	if err := checkArtifactPath(ctx, root, name, true); err != nil {
 		return err
 	}
@@ -521,18 +537,54 @@ func downloadArtifactFile(ctx context.Context, root *os.Root, name, key string, 
 	if err != nil {
 		return artifactStorageError(err)
 	}
-	defer input.Close()
+	inputClosed := false
+	defer func() {
+		if !inputClosed {
+			_ = input.Close()
+		}
+	}()
+	// 独立私有目录使其他用户无法替换暂存文件；同 UID 的恶意写入不属于隔离边界
 	temporary := path.Join(dir, ".arcentra-artifact-"+rand.Text())
-	output, err := root.OpenFile(filepath.FromSlash(temporary), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err := root.Mkdir(filepath.FromSlash(temporary), 0o700); err != nil {
+		return err
+	}
+	defer func() { _ = root.Remove(filepath.FromSlash(temporary)) }()
+	directoryInfo, err := root.Lstat(filepath.FromSlash(temporary))
+	if err != nil || !directoryInfo.IsDir() {
+		return fmt.Errorf("artifact staging directory changed")
+	}
+	staging, err := root.OpenRoot(filepath.FromSlash(temporary))
 	if err != nil {
 		return err
 	}
-	defer func() { _ = output.Close(); _ = root.Remove(filepath.FromSlash(temporary)) }()
-	if _, err := io.Copy(output, &artifactReader{ctx: ctx, Reader: artifactStorageReader{Reader: input}}); err != nil {
+	defer staging.Close()
+	actualDirectory, err := staging.Stat(".")
+	if err != nil || !os.SameFile(directoryInfo, actualDirectory) {
+		return fmt.Errorf("artifact staging directory changed")
+	}
+	const stagedName = "content"
+	output, err := staging.OpenFile(stagedName, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+	if err != nil {
 		return err
 	}
+	defer func() { _ = output.Close(); _ = staging.Remove(stagedName) }()
+	fileInfo, err := output.Stat()
+	if err != nil || !fileInfo.Mode().IsRegular() {
+		return fmt.Errorf("artifact staging file is not regular")
+	}
+	if err := copyVerifiedArtifactContent(ctx, output, artifactStorageReader{Reader: input}, expectedSize, expectedSHA256); err != nil {
+		return err
+	}
+	inputClosed = true
 	if err := input.Close(); err != nil {
 		return artifactStorageError(err)
+	}
+	// 校验实际打开文件，避免供应商 Close 回调或其他暂存修改替换已验证的流字节
+	if _, err := output.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if err := copyVerifiedArtifactContent(ctx, io.Discard, output, expectedSize, expectedSHA256); err != nil {
+		return err
 	}
 	if err := output.Close(); err != nil {
 		return err
@@ -540,7 +592,50 @@ func downloadArtifactFile(ctx context.Context, root *os.Root, name, key string, 
 	if err := checkArtifactPath(ctx, root, name, true); err != nil {
 		return err
 	}
-	return root.Rename(filepath.FromSlash(temporary), filepath.FromSlash(name))
+	if info, err := root.Lstat(filepath.FromSlash(name)); err == nil && !info.Mode().IsRegular() {
+		return fmt.Errorf("artifact destination is not a regular file: %s", name)
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	// 普通 Rename 不支持 inode 条件交换：这些检查检测替换，但不承诺防御同 UID
+	// 在最后检查与重命名间持续竞态写入；工作区必须由可信 Agent 独占暂存
+	if err := checkArtifactPath(ctx, root, temporary, false); err != nil {
+		return err
+	}
+	currentDirectory, err := root.Lstat(filepath.FromSlash(temporary))
+	if err != nil || !currentDirectory.IsDir() || !os.SameFile(directoryInfo, currentDirectory) {
+		return fmt.Errorf("artifact staging directory changed before publication")
+	}
+	currentFile, err := staging.Lstat(stagedName)
+	if err != nil || !currentFile.Mode().IsRegular() || !os.SameFile(fileInfo, currentFile) || currentFile.Size() != expectedSize {
+		return fmt.Errorf("artifact staging file changed before publication")
+	}
+	return root.Rename(filepath.FromSlash(path.Join(temporary, stagedName)), filepath.FromSlash(name))
+}
+
+func copyVerifiedArtifactContent(ctx context.Context, destination io.Writer, source io.Reader, expectedSize int64, expectedSHA256 string) error {
+	reader := &artifactReader{ctx: ctx, Reader: source}
+	digest := sha256.New()
+	// 最多读取声明长度再探测一个字节，不把超长对象全部下载或写入磁盘
+	size, err := io.Copy(io.MultiWriter(destination, digest), io.LimitReader(reader, expectedSize))
+	if err != nil {
+		return err
+	}
+	if size != expectedSize {
+		return fmt.Errorf("artifact content size does not match registered metadata")
+	}
+	var extra [1]byte
+	n, err := io.ReadFull(reader, extra[:])
+	if n != 0 {
+		return fmt.Errorf("artifact content exceeds registered size")
+	}
+	if !errors.Is(err, io.EOF) {
+		return err
+	}
+	if hex.EncodeToString(digest.Sum(nil)) != expectedSHA256 {
+		return fmt.Errorf("artifact content SHA256 does not match registered metadata")
+	}
+	return nil
 }
 
 type artifactReader struct {

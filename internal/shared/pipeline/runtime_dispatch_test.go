@@ -21,7 +21,7 @@ type runtimeDispatchStore struct {
 	err      error
 }
 
-func (s *runtimeDispatchStore) CaptureRuntimeExpectation(_ context.Context, pipelineID, runID, jobID, agentID string, _ *sourceprovenance.Binding, runtime *taskqueue.RuntimeRequest) error {
+func (s *runtimeDispatchStore) CaptureRuntimeInputExpectation(_ context.Context, pipelineID, runID, jobID, agentID string, _ *sourceprovenance.Binding, runtime *taskqueue.RuntimeRequest, _ map[string]string, _ map[string]taskqueue.ArtifactReference) error {
 	copy := *runtime
 	s.captured = &copy
 	return s.err

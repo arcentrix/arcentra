@@ -116,7 +116,8 @@ func (a *AgentServiceImpl) prepareJobArtifacts(ctx context.Context, job *model.J
 		}
 		artifacts = append(artifacts, item)
 		uris[file.Name] = key
-		refs[file.Name] = taskqueue.ArtifactReference{StorageID: job.ArtifactStorageID, Fingerprint: job.ArtifactStorageFingerprint, ExpiresAt: file.ExpiresAt}
+		size := file.Size
+		refs[file.Name] = taskqueue.ArtifactReference{StorageID: job.ArtifactStorageID, Fingerprint: job.ArtifactStorageFingerprint, ExpiresAt: file.ExpiresAt, SHA256: file.Sha256, Size: &size}
 	}
 	if len(req.ArtifactUris) != len(uris) {
 		return nil, status.Error(codes.InvalidArgument, "artifact keys do not match file metadata")

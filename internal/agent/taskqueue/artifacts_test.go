@@ -122,8 +122,8 @@ func TestRemoteArtifactsUploadDownloadPreservePathsAndRunIsolation(t *testing.T)
 		}
 	}
 	workspace := t.TempDir()
-	consumer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{JobName: "consume", ArtifactURIs: upstream, ArtifactReferences: artifactTestReferences(upstream)}, storage: st, reference: artifactTestReference()}
-	if err := handleArtifactDownload(ctx, upstream, workspace, st); err != nil {
+	consumer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{JobName: "consume", ArtifactURIs: upstream, ArtifactReferences: artifactTestReferences(upstream, st.objects)}, storage: st, reference: artifactTestReference()}
+	if err := handleArtifactDownload(ctx, upstream, consumer.job.ArtifactReferences, workspace, st); err != nil {
 		t.Fatal(err)
 	}
 	if got := artifactTestRead(t, workspace, ".artifacts/build/dist/a.txt"); got != "run-one" {
@@ -192,7 +192,7 @@ func TestRemoteArtifactsRejectUnsafePathsAndSymlinks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := downloadArtifactFile(ctx, root, name, "key", st); err == nil {
+		if err := downloadArtifactFile(ctx, root, name, "key", artifactTestContentReference("bytes"), st); err == nil {
 			t.Fatalf("unsafe download target %q accepted", name)
 		}
 		_ = root.Close()
@@ -200,10 +200,10 @@ func TestRemoteArtifactsRejectUnsafePathsAndSymlinks(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(workspace, ".artifacts")); err != nil {
 		t.Fatal(err)
 	}
-	if err := handleArtifactDownload(ctx, map[string]string{"build/secret": "key"}, workspace, st); err == nil {
+	if err := handleArtifactDownload(ctx, map[string]string{"build/secret": "key"}, map[string]taskpayload.ArtifactReference{"build/secret": artifactTestContentReference("bytes")}, workspace, st); err == nil {
 		t.Fatal("prefetch followed a symlink")
 	}
-	if err := handleArtifactDownload(ctx, map[string]string{"../secret": "key"}, workspace, st); err == nil {
+	if err := handleArtifactDownload(ctx, map[string]string{"../secret": "key"}, map[string]taskpayload.ArtifactReference{"../secret": artifactTestContentReference("bytes")}, workspace, st); err == nil {
 		t.Fatal("prefetch accepted path traversal")
 	}
 	if st.downloads != 0 {
@@ -250,7 +250,7 @@ func TestRemoteArtifactCancellationAndAtomicDownload(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer root.Close()
-			err = downloadArtifactFile(ctx, root, "dist/existing", "key", st)
+			err = downloadArtifactFile(ctx, root, "dist/existing", "key", artifactTestContentReference("partial content"), st)
 			if cancelled && !errors.Is(err, context.Canceled) || !cancelled && !errors.Is(err, io.ErrUnexpectedEOF) {
 				t.Fatalf("transfer error lost: %v", err)
 			}
@@ -340,7 +340,7 @@ func TestJobArtifactBuiltinReportsURIsAndRetriedReportDoesNotUploadAgain(t *test
 	if report.Status != 4 || !reflect.DeepEqual(report.ArtifactUris, want) {
 		t.Fatalf("terminal artifacts missing: %+v", report)
 	}
-	consumer := &taskpayload.JobRunTaskPayload{PipelineRunID: "artifact-run", JobRunID: "artifact-consumer", JobName: "consume", ArtifactURIs: map[string]string{"build/dist/nested/file": want["dist/nested/file"]}, ArtifactReferences: artifactTestReferences(map[string]string{"build/dist/nested/file": ""}), Steps: []taskpayload.StepPayload{
+	consumer := &taskpayload.JobRunTaskPayload{PipelineRunID: "artifact-run", JobRunID: "artifact-consumer", JobName: "consume", ArtifactURIs: map[string]string{"build/dist/nested/file": want["dist/nested/file"]}, ArtifactReferences: artifactTestReferences(map[string]string{"build/dist/nested/file": want["dist/nested/file"]}, st.objects), Steps: []taskpayload.StepPayload{
 		{Name: "download", StepRunID: "artifact-download", Uses: "builtin:artifacts", Action: "download", Args: map[string]any{"job": "build", "path": "dist"}},
 		{Name: "consume", StepRunID: "artifact-consume", Args: map[string]any{"run": `test "$(cat dist/nested/file)" = artifact; test "$(cat .artifacts/build/dist/nested/file)" = artifact`}},
 	}}
@@ -360,7 +360,7 @@ func TestPreparationArtifactFailureRedactsJobCredentials(t *testing.T) {
 	t.Cleanup(func() { SetStorage(nil) })
 	client := &artifactStatusClient{}
 	wrapper := &agentgrpc.ClientWrapper{AgentClient: client}
-	payload := &taskpayload.JobRunTaskPayload{PipelineRunID: "run", JobRunID: "redact-artifact-prep", Env: map[string]string{"secrets.TEST": "env-secret"}, ArtifactURIs: map[string]string{"build/file": "object"}, ArtifactReferences: artifactTestReferences(map[string]string{"build/file": ""})}
+	payload := &taskpayload.JobRunTaskPayload{PipelineRunID: "run", JobRunID: "redact-artifact-prep", Env: map[string]string{"secrets.TEST": "env-secret"}, ArtifactURIs: map[string]string{"build/file": "object"}, ArtifactReferences: map[string]taskpayload.ArtifactReference{"build/file": artifactTestContentReference("bytes")}}
 	conf := &config.AgentConfig{Agent: config.AgentInfo{ID: "agent", WorkspaceDir: t.TempDir()}}
 	err := executeJobRun(context.Background(), conf, wrapper, nil, payload)
 	if err == nil || strings.Contains(err.Error(), "env-secret") {
@@ -374,10 +374,22 @@ func TestPreparationArtifactFailureRedactsJobCredentials(t *testing.T) {
 func artifactTestReference() taskpayload.ArtifactReference {
 	return taskpayload.ArtifactReference{StorageID: "test-store", Fingerprint: strings.Repeat("a", 64)}
 }
-func artifactTestReferences(uris map[string]string) map[string]taskpayload.ArtifactReference {
+func artifactTestContentReference(content string) taskpayload.ArtifactReference {
+	ref := artifactTestReference()
+	size := int64(len(content))
+	ref.Size, ref.SHA256 = &size, fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
+	return ref
+}
+
+func artifactTestReferences(uris map[string]string, objects ...map[string][]byte) map[string]taskpayload.ArtifactReference {
 	refs := make(map[string]taskpayload.ArtifactReference, len(uris))
-	for name := range uris {
+	for name, key := range uris {
 		refs[name] = artifactTestReference()
+		if len(objects) != 0 {
+			if content, exists := objects[0][key]; exists {
+				refs[name] = artifactTestContentReference(string(content))
+			}
+		}
 	}
 	return refs
 }
@@ -403,7 +415,7 @@ func TestArtifactReferencesFailClosedAndExpiry(t *testing.T) {
 			}
 		})
 	}
-	if err := validateArtifactReferences(uris, artifactTestReferences(uris), reference, now); err != nil {
+	if err := validateArtifactReferences(uris, map[string]taskpayload.ArtifactReference{"build/file": artifactTestContentReference("bytes")}, reference, now); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -464,5 +476,232 @@ func TestRemoteArtifactStorageErrorsDoNotExposeCredentials(t *testing.T) {
 	}
 	if len(producer.results) != 0 {
 		t.Fatal("failed upload registered")
+	}
+}
+
+type countedArtifactReader struct {
+	io.Reader
+	bytesRead int
+	closeErr  error
+}
+
+func (r *countedArtifactReader) Read(p []byte) (int, error) {
+	n, err := r.Reader.Read(p)
+	r.bytesRead += n
+	return n, err
+}
+func (r *countedArtifactReader) Close() error { return r.closeErr }
+
+func TestArtifactDownloadVerifiesRegisteredContentBeforeReplacement(t *testing.T) {
+	for _, test := range []struct {
+		name, content string
+		mutate        func(*taskpayload.ArtifactReference)
+		closeErr      error
+		wantError     string
+		wantRead      int
+	}{
+		{name: "valid", content: "replacement", wantRead: len("replacement")},
+		{name: "empty", content: "", wantRead: 0},
+		{name: "wrong_digest", content: "replacement", mutate: func(ref *taskpayload.ArtifactReference) { ref.SHA256 = strings.Repeat("0", 64) }, wantError: "SHA256 does not match", wantRead: len("replacement")},
+		{name: "short", content: "replacement", mutate: func(ref *taskpayload.ArtifactReference) { *ref.Size += 1 }, wantError: "size does not match", wantRead: len("replacement")},
+		{name: "long", content: strings.Repeat("x", 1<<20), mutate: func(ref *taskpayload.ArtifactReference) { *ref.Size = 5 }, wantError: "exceeds registered size", wantRead: 6},
+		{name: "unexpected_nonempty", content: "bytes", mutate: func(ref *taskpayload.ArtifactReference) { *ref.Size = 0 }, wantError: "exceeds registered size", wantRead: 1},
+		{name: "missing_size", content: "replacement", mutate: func(ref *taskpayload.ArtifactReference) { ref.Size = nil }, wantError: "explicit non-negative size", wantRead: 0},
+		{name: "missing_digest", content: "replacement", mutate: func(ref *taskpayload.ArtifactReference) { ref.SHA256 = "" }, wantError: "SHA256", wantRead: 0},
+		{name: "invalid_digest", content: "replacement", mutate: func(ref *taskpayload.ArtifactReference) { ref.SHA256 = strings.Repeat("Z", 64) }, wantError: "SHA256", wantRead: 0},
+		{name: "negative_size", content: "replacement", mutate: func(ref *taskpayload.ArtifactReference) { *ref.Size = -1 }, wantError: "explicit non-negative size", wantRead: 0},
+		{name: "max_size_no_overflow", content: "replacement", mutate: func(ref *taskpayload.ArtifactReference) { *ref.Size = 1<<63 - 1 }, wantError: "size does not match", wantRead: len("replacement")},
+		{name: "close_error", content: "replacement", closeErr: errors.New("secret provider error"), wantError: "object storage operation failed", wantRead: len("replacement")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			artifactTestWrite(t, workspace, "existing", "original")
+			root, err := openArtifactWorkspace(context.Background(), workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			reference := artifactTestContentReference(test.content)
+			if test.mutate != nil {
+				test.mutate(&reference)
+			}
+			reader := &countedArtifactReader{Reader: strings.NewReader(test.content), closeErr: test.closeErr}
+			st := &memoryArtifactStorage{download: func(context.Context, string) (io.ReadCloser, error) { return reader, nil }}
+			err = downloadArtifactFile(context.Background(), root, "existing", "registered-object", reference, st)
+			if test.wantError == "" && err != nil || test.wantError != "" && (err == nil || !strings.Contains(err.Error(), test.wantError)) {
+				t.Fatalf("download error = %v; want %q", err, test.wantError)
+			}
+			want := test.content
+			if test.wantError != "" {
+				want = "original"
+			}
+			if got := artifactTestRead(t, workspace, "existing"); got != want {
+				t.Fatalf("destination = %q; want %q", got, want)
+			}
+			if reader.bytesRead != test.wantRead {
+				t.Fatalf("read %d bytes; want %d", reader.bytesRead, test.wantRead)
+			}
+			if reference.ValidateIntegrity() != nil && st.downloads != 0 {
+				t.Fatal("invalid metadata started a storage download")
+			}
+			entries, err := os.ReadDir(workspace)
+			if err != nil || len(entries) != 1 || entries[0].Name() != "existing" {
+				t.Fatalf("temporary file leaked: %v %v", entries, err)
+			}
+		})
+	}
+}
+
+func TestArtifactPrefetchAndBuiltinRejectLegacyMetadata(t *testing.T) {
+	uris := map[string]string{"build/file": "registered-object"}
+	for _, reference := range []taskpayload.ArtifactReference{{}, artifactTestReference()} {
+		for _, builtin := range []bool{false, true} {
+			workspace := t.TempDir()
+			artifactTestWrite(t, workspace, "file", "original")
+			artifactTestWrite(t, workspace, ".artifacts/build/file", "prefetched-original")
+			st := &memoryArtifactStorage{objects: map[string][]byte{"registered-object": []byte("unverified")}}
+			refs := map[string]taskpayload.ArtifactReference{"build/file": reference}
+			var err error
+			if builtin {
+				consumer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{JobName: "consume", ArtifactURIs: uris, ArtifactReferences: refs}, storage: st, reference: artifactTestReference()}
+				_, err = consumer.Execute(context.Background(), artifactTestRequest(workspace, "download", map[string]any{"job": "build"}))
+			} else {
+				err = handleArtifactDownload(context.Background(), uris, refs, workspace, st)
+			}
+			if err == nil || st.downloads != 0 {
+				t.Fatalf("legacy metadata allowed a download: builtin=%v error=%v downloads=%d", builtin, err, st.downloads)
+			}
+			if artifactTestRead(t, workspace, "file") != "original" || artifactTestRead(t, workspace, ".artifacts/build/file") != "prefetched-original" {
+				t.Fatal("legacy metadata changed existing files")
+			}
+		}
+	}
+}
+
+func TestArtifactBuiltinOwnUploadsRetainIntegrityMetadata(t *testing.T) {
+	workspace := t.TempDir()
+	artifactTestWrite(t, workspace, "empty", "")
+	artifactTestWrite(t, workspace, "file", "uploaded")
+	st := &memoryArtifactStorage{}
+	producer := &artifactExecutor{job: &taskpayload.JobRunTaskPayload{PipelineRunID: "run", JobRunID: "job", JobName: "build"}, storage: st, reference: artifactTestReference()}
+	if _, err := producer.Execute(context.Background(), artifactTestRequest(workspace, "upload", map[string]any{"paths": []string{"empty", "file"}})); err != nil {
+		t.Fatal(err)
+	}
+	artifactTestWrite(t, workspace, "file", "changed")
+	if _, err := producer.Execute(context.Background(), artifactTestRequest(workspace, "download", map[string]any{})); err != nil {
+		t.Fatal(err)
+	}
+	if artifactTestRead(t, workspace, "file") != "uploaded" || artifactTestRead(t, workspace, "empty") != "" {
+		t.Fatal("own uploaded content was not restored")
+	}
+	st.objects[producer.uploaded["file"]] = []byte("modified")
+	if _, err := producer.Execute(context.Background(), artifactTestRequest(workspace, "download", map[string]any{"path": "file"})); err == nil {
+		t.Fatal("own uploaded metadata did not detect a same-length object replacement")
+	}
+	if artifactTestRead(t, workspace, "file") != "uploaded" {
+		t.Fatal("corrupt uploaded object replaced existing content")
+	}
+}
+
+type artifactCloseCallbackReader struct {
+	io.Reader
+	close func() error
+}
+
+func (r *artifactCloseCallbackReader) Close() error { return r.close() }
+
+func TestArtifactDownloadRejectsStagingSubstitutionOnStreamClose(t *testing.T) {
+	for _, replacement := range []string{"regular_file", "symlink", "same_inode_content", "same_inode_truncate", "same_inode_append", "directory", "directory_symlink"} {
+		t.Run(replacement, func(t *testing.T) {
+			workspace, outside := t.TempDir(), t.TempDir()
+			artifactTestWrite(t, workspace, "destination", "original destination")
+			artifactTestWrite(t, outside, "content", "outside content")
+			root, err := openArtifactWorkspace(context.Background(), workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			var stagingPath string
+			closes := 0
+			reader := &artifactCloseCallbackReader{Reader: strings.NewReader("verified"), close: func() error {
+				closes++
+				entries, err := os.ReadDir(workspace)
+				if err != nil {
+					return err
+				}
+				for _, entry := range entries {
+					if strings.HasPrefix(entry.Name(), ".arcentra-artifact-") {
+						stagingPath = filepath.Join(workspace, entry.Name())
+						break
+					}
+				}
+				if stagingPath == "" {
+					return errors.New("no staging directory available for substitution")
+				}
+				temporary := filepath.Join(stagingPath, "content")
+				directoryInfo, err := os.Stat(stagingPath)
+				if err != nil || directoryInfo.Mode().Perm()&0o077 != 0 {
+					t.Fatalf("staging directory is not private: %v %v", directoryInfo, err)
+				}
+				fileInfo, err := os.Stat(temporary)
+				if err != nil || fileInfo.Mode().Perm()&0o077 != 0 {
+					t.Fatalf("staging file is not private: %v %v", fileInfo, err)
+				}
+				switch replacement {
+				case "regular_file", "symlink":
+					if err := os.Remove(temporary); err != nil {
+						return err
+					}
+					if replacement == "symlink" {
+						return os.Symlink(filepath.Join(outside, "content"), temporary)
+					}
+					return os.WriteFile(temporary, []byte("tampered"), 0o600)
+				case "same_inode_content":
+					return os.WriteFile(temporary, []byte("tampered"), 0o600)
+				case "same_inode_truncate":
+					return os.WriteFile(temporary, []byte("short"), 0o600)
+				case "same_inode_append":
+					return os.WriteFile(temporary, []byte("verified-extra"), 0o600)
+				case "directory", "directory_symlink":
+					if err := os.Rename(stagingPath, filepath.Join(workspace, "moved-staging")); err != nil {
+						return err
+					}
+					if replacement == "directory_symlink" {
+						return os.Symlink(outside, stagingPath)
+					}
+					if err := os.Mkdir(stagingPath, 0o700); err != nil {
+						return err
+					}
+					return os.WriteFile(temporary, []byte("replacement directory content"), 0o600)
+				}
+				return nil
+			}}
+			st := &memoryArtifactStorage{download: func(context.Context, string) (io.ReadCloser, error) { return reader, nil }}
+			if err := downloadArtifactFile(context.Background(), root, "destination", "object", artifactTestContentReference("verified"), st); err == nil {
+				t.Fatal("staging substitution reported successful integrity verification")
+			}
+			if closes != 1 {
+				t.Fatalf("storage stream closed %d times", closes)
+			}
+			if artifactTestRead(t, workspace, "destination") != "original destination" || artifactTestRead(t, outside, "content") != "outside content" {
+				t.Fatal("staging substitution changed the destination or external data")
+			}
+			if strings.HasPrefix(replacement, "directory") {
+				// 恶意同 UID 可将整个目录改名到未知路径；固定句柄仍清掉原暂存内容
+				entries, err := os.ReadDir(filepath.Join(workspace, "moved-staging"))
+				if err != nil || len(entries) != 0 {
+					t.Fatalf("original staging content was not removed: %v %v", entries, err)
+				}
+			}
+			if replacement == "directory" {
+				// 不递归清理已由其他目录取代的路径，避免删除非本次下载拥有的数据
+				data, err := os.ReadFile(filepath.Join(stagingPath, "content"))
+				if err != nil || string(data) != "replacement directory content" {
+					t.Fatalf("cleanup modified an unrelated replacement directory: %q %v", data, err)
+				}
+			} else if _, err := os.Lstat(stagingPath); !os.IsNotExist(err) {
+				t.Fatalf("staging file or symlink leaked: %v", err)
+			}
+		})
 	}
 }

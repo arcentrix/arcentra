@@ -14,14 +14,14 @@ import (
 )
 
 var jobSourceColumns = []string{"source_expectation_captured", "source_type", "source_repository", "source_ref", "source_binding_digest", "source_resolved_commit", "source_provenance_state"}
-var jobSnapshotColumns = append([]string{"job_run_id", "pipeline_id", "pipeline_run_id", "agent_id", "claim_id", "status", "cancellation_claim_id", "terminal_report_digest"}, append(jobSourceColumns, jobRuntimeColumns...)...)
+var jobSnapshotColumns = append([]string{"job_run_id", "pipeline_id", "pipeline_run_id", "agent_id", "claim_id", "status", "cancellation_claim_id", "terminal_report_digest"}, append(append(jobSourceColumns, jobRuntimeColumns...), jobInputColumns...)...)
 
 // CaptureSourceExpectation 在派发前原子保存一次源身份和目标 Agent，不允许重新绑定或重复排队
 func (r *JobRunRepo) CaptureSourceExpectation(ctx context.Context, pipelineID, runID, jobID, agentID string, binding *sourceprovenance.Binding) error {
-	return r.captureDispatchExpectation(ctx, pipelineID, runID, jobID, agentID, binding, nil)
+	return r.captureDispatchExpectation(ctx, pipelineID, runID, jobID, agentID, binding, nil, nil)
 }
 
-func (r *JobRunRepo) captureDispatchExpectation(ctx context.Context, pipelineID, runID, jobID, agentID string, binding *sourceprovenance.Binding, runtime *taskqueue.RuntimeRequest) error {
+func (r *JobRunRepo) captureDispatchExpectation(ctx context.Context, pipelineID, runID, jobID, agentID string, binding *sourceprovenance.Binding, runtime *taskqueue.RuntimeRequest, inputs *taskqueue.JobInputManifest) error {
 	if pipelineID == "" || runID == "" || jobID == "" || agentID == "" {
 		return fmt.Errorf("job dispatch identity is required")
 	}
@@ -38,10 +38,22 @@ func (r *JobRunRepo) captureDispatchExpectation(ctx context.Context, pipelineID,
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ?", jobID).First(&current).Error; err != nil {
 			return err
 		}
-		if !emptyRuntime(&current) || current.JobRunID != jobID || current.PipelineID != pipelineID || current.PipelineRunID != runID || current.ClaimID != "" || current.CancellationClaimID != "" || current.TerminalReportDigest != "" || (current.Status != 1 && current.Status != 2) || current.SourceExpectationCaptured || current.SourceBindingDigest != "" || current.SourceType != "" || current.SourceRepository != "" || current.SourceRef != "" || current.SourceResolvedCommit != "" || (current.SourceProvenanceState != "" && current.SourceProvenanceState != "unknown") || (current.AgentID != "" && current.AgentID != agentID) {
+		if !emptyJobInputs(&current) || !emptyRuntime(&current) || current.JobRunID != jobID || current.PipelineID != pipelineID || current.PipelineRunID != runID || current.ClaimID != "" || current.CancellationClaimID != "" || current.TerminalReportDigest != "" || (current.Status != 1 && current.Status != 2) || current.SourceExpectationCaptured || current.SourceBindingDigest != "" || current.SourceType != "" || current.SourceRepository != "" || current.SourceRef != "" || current.SourceResolvedCommit != "" || (current.SourceProvenanceState != "" && current.SourceProvenanceState != "unknown") || (current.AgentID != "" && current.AgentID != agentID) {
 			return fmt.Errorf("source expectation requires an unclaimed uncaptured job")
 		}
+		if inputs != nil {
+			if err := validateRegisteredInputArtifacts(ctx, tx, &current, inputs); err != nil {
+				return err
+			}
+		}
 		updates := map[string]any{"source_expectation_captured": true, "source_provenance_state": "unknown", "agent_id": agentID, "status": model.JobRunStatusQueued, "updated_at": time.Now()}
+		if inputs != nil {
+			encoded, err := inputs.Canonical()
+			if err != nil {
+				return err
+			}
+			updates["input_expectation"] = encoded
+		}
 		if runtime != nil {
 			updates["runtime_type"], updates["runtime_image"], updates["runtime_cpu"], updates["runtime_memory"], updates["runtime_binding_digest"] = runtime.Type, runtime.Image, runtime.Resources.CPU, runtime.Resources.Memory, runtime.BindingDigest
 		}
@@ -78,14 +90,14 @@ func jobSourceEqual(a, b *model.JobRun) bool {
 	return a.SourceExpectationCaptured == b.SourceExpectationCaptured && a.SourceType == b.SourceType && a.SourceRepository == b.SourceRepository && a.SourceRef == b.SourceRef && a.SourceBindingDigest == b.SourceBindingDigest && a.SourceResolvedCommit == b.SourceResolvedCommit && a.SourceProvenanceState == b.SourceProvenanceState
 }
 func jobSnapshotEqual(a, b *model.JobRun) bool {
-	return a.JobRunID == b.JobRunID && a.PipelineID == b.PipelineID && a.PipelineRunID == b.PipelineRunID && a.AgentID == b.AgentID && a.ClaimID == b.ClaimID && a.Status == b.Status && a.CancellationClaimID == b.CancellationClaimID && a.TerminalReportDigest == b.TerminalReportDigest && jobSourceEqual(a, b) && jobRuntimeEqual(a, b)
+	return a.JobRunID == b.JobRunID && a.PipelineID == b.PipelineID && a.PipelineRunID == b.PipelineRunID && a.AgentID == b.AgentID && a.ClaimID == b.ClaimID && a.Status == b.Status && a.CancellationClaimID == b.CancellationClaimID && a.TerminalReportDigest == b.TerminalReportDigest && jobSourceEqual(a, b) && jobRuntimeEqual(a, b) && jobInputsEqual(a, b)
 }
 func sourceField(key string) bool {
 	return strings.HasPrefix(strings.ReplaceAll(strings.ToLower(key), "_", ""), "source")
 }
 func rejectSourceUpdates(updates map[string]any) error {
 	for key := range updates {
-		if sourceField(key) || runtimeField(key) {
+		if sourceField(key) || runtimeField(key) || inputField(key) {
 			return fmt.Errorf("source and runtime expectations require a dedicated atomic operation")
 		}
 	}
@@ -101,8 +113,11 @@ func changesJobIdentity(updates map[string]any) bool {
 	return false
 }
 func validateSourceReportUpdates(expected *model.JobRun, updates map[string]any, cancellation bool) error {
+	if err := validatePinnedSourceUpdates(expected, updates); err != nil {
+		return err
+	}
 	for key := range updates {
-		if runtimeField(key) {
+		if runtimeField(key) || inputField(key) {
 			return fmt.Errorf("runtime expectation is immutable")
 		}
 	}

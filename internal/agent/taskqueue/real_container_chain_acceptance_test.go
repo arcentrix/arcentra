@@ -36,6 +36,26 @@ import (
 // 所有 JobRun 和 StepRun 都由实际 Process.Submit 创建，观察钩子不替换传输或运行时
 func containerAcceptanceArtifactChain(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage) {
 	t.Helper()
+	sourceURL, initialCommit := containerAcceptanceSource(t, f.ctx, func() error {
+		records, err := containerAcceptanceRecords(f.conf.Agent.Sandbox.Containerd.JournalDir)
+		if err != nil {
+			return err
+		}
+		allocated := 0
+		for _, record := range records {
+			if record.Record.Phase == "allocated" {
+				state, err := f.worker.offline.backend.InspectOwned(f.ctx, record.Record.Resource)
+				if err != nil || state != (sandbox.ResourceState{}) {
+					return fmt.Errorf("chain source staging occurred after runtime creation: %+v %v", state, err)
+				}
+				allocated++
+			}
+		}
+		if allocated != 1 {
+			return fmt.Errorf("chain source staging requires one allocated session: %d", allocated)
+		}
+		return nil
+	})
 	var mu sync.Mutex
 	uploads := make(map[string]containerAcceptanceJournal)
 	downloads := make(map[string]int)
@@ -98,6 +118,30 @@ func containerAcceptanceArtifactChain(t *testing.T, f *controllerWorkerFixture, 
 		if consumer.Record == nil || consumer.Record.SessionID == "" || consumer.Record.SessionID == owner.Record.SessionID || consumer.Record.Claim == owner.Record.Claim || consumer.Record.Directory == owner.Record.Directory || consumer.Record.Resource.ID == owner.Record.Resource.ID {
 			return fmt.Errorf("producer and consumer do not own distinct allocated sessions, claims and workspaces")
 		}
+		consumerJob, err := f.repos.JobRun.GetByJobRunID(ctx, consumer.Record.JobRunID)
+		if err != nil || consumerJob == nil || consumerJob.InputManifestState != "pinned" || consumerJob.ClaimID != consumer.Record.Claim {
+			return fmt.Errorf("consumer transfer preceded its original immutable input pin: %v", err)
+		}
+		manifest, err := taskpayload.ParseJobInputManifest(consumerJob.InputManifest)
+		if err != nil || manifest.SourceCommit != initialCommit || len(manifest.Artifacts) != 2 {
+			return fmt.Errorf("consumer transfer lost exact source and artifact inputs: %v", err)
+		}
+		identity := taskpayload.JobInputIdentity{PipelineID: consumerJob.PipelineID, PipelineRunID: consumerJob.PipelineRunID, JobRunID: consumerJob.JobRunID, AgentID: consumerJob.AgentID, ClaimID: consumerJob.ClaimID, RuntimeBindingDigest: consumerJob.RuntimeBindingDigest, SourceBindingDigest: consumerJob.SourceBindingDigest}
+		digest, err := manifest.Digest(identity)
+		if err != nil || digest != consumerJob.InputManifestDigest {
+			return fmt.Errorf("consumer transfer lost immutable execution identity: %v", err)
+		}
+		pinnedRegistered := false
+		for _, input := range manifest.Artifacts {
+			for _, row := range rows {
+				if input.Key == key && row.StoragePath == key && input.Name == "chain-a/"+row.Name && input.Reference.StorageID == row.StorageID && input.Reference.Fingerprint == row.StorageFingerprint && input.Reference.SHA256 == row.SHA256 && input.Reference.Size != nil && *input.Reference.Size == row.Size && row.ExpiresAt != nil && input.Reference.ExpiresAt == row.ExpiresAt.Unix() {
+					pinnedRegistered = true
+				}
+			}
+		}
+		if !pinnedRegistered {
+			return fmt.Errorf("consumer transferred an object outside its hash/size-bound registered manifest")
+		}
 		state, err = f.worker.offline.backend.InspectOwned(ctx, consumer.Record.Resource)
 		if err != nil || state != (sandbox.ResourceState{}) {
 			return fmt.Errorf("consumer runtime existed during host input staging: %+v %v", state, err)
@@ -138,6 +182,7 @@ func containerAcceptanceArtifactChain(t *testing.T, f *controllerWorkerFixture, 
 	f.mu.Unlock()
 	produce := `test "$(pwd)" = /workspace
  test "$(ls /sys/class/net)" = lo
+ test "$(cat source.txt)" = 'initial checkout'
  test "$(cat tolerated-exit)" = x
  printf x >> executions
  printf 'must stay private' > producer-private.txt
@@ -146,6 +191,7 @@ func containerAcceptanceArtifactChain(t *testing.T, f *controllerWorkerFixture, 
  cp executions dist/executions`
 	consume := `test "$(pwd)" = /workspace
  test "$(ls /sys/class/net)" = lo
+ test "$(cat source.txt)" = 'initial checkout'
  test ! -e producer-private.txt
  test ! -e tolerated-exit
  test ! -e .artifacts/chain-a/producer-private.txt
@@ -161,12 +207,12 @@ func containerAcceptanceArtifactChain(t *testing.T, f *controllerWorkerFixture, 
 	tolerated := controllerWorkerShell("allowed-failure", "printf x > tolerated-exit; exit 9")
 	tolerated.ContinueOnError = true
 	run := containerAcceptanceSubmit(t, f, cfg,
-		&spec.Job{Name: "chain-a", Steps: []*spec.Step{
+		&spec.Job{Name: "chain-a", Source: &spec.Source{Type: "git", Repo: sourceURL, Branch: "main"}, Steps: []*spec.Step{
 			tolerated,
 			controllerWorkerShell("produce", produce),
 			containerAcceptanceArtifactStep("publish", "upload", map[string]any{"paths": []any{"dist"}, "expireIn": "7d"}),
 		}},
-		&spec.Job{Name: "chain-b", DependsOn: []string{"chain-a"}, Steps: []*spec.Step{
+		&spec.Job{Name: "chain-b", Source: &spec.Source{Type: "git", Repo: sourceURL, Branch: "main"}, DependsOn: []string{"chain-a"}, Steps: []*spec.Step{
 			containerAcceptanceArtifactStep("fetch", "download", map[string]any{"job": "chain-a", "paths": []any{"dist/*"}}),
 			controllerWorkerShell("verify", consume),
 			containerAcceptanceArtifactStep("proof", "upload", map[string]any{"paths": []any{"proof"}, "expireIn": "7d"}),
@@ -184,6 +230,17 @@ func containerAcceptanceArtifactChain(t *testing.T, f *controllerWorkerFixture, 
 	for _, job := range jobs {
 		containerAcceptanceBoundJob(t, f, job, model.JobRunStatusSuccess)
 		byName[job.JobName] = job
+		manifest, err := taskpayload.ParseJobInputManifest(job.InputManifest)
+		if err != nil || manifest.SourceCommit != initialCommit || job.SourceResolvedCommit != initialCommit {
+			t.Fatalf("chain did not pin the original full source commit: %v", err)
+		}
+		wantInputs := 0
+		if job.JobName == "chain-b" {
+			wantInputs = 2
+		}
+		if len(manifest.Artifacts) != wantInputs {
+			t.Fatalf("%s pinned unexpected input artifact count: %d", job.JobName, len(manifest.Artifacts))
+		}
 	}
 	producer, consumer := byName["chain-a"], byName["chain-b"]
 	if producer == nil || consumer == nil || producer.ClaimID == consumer.ClaimID || producer.RuntimeBindingDigest == consumer.RuntimeBindingDigest {
@@ -282,7 +339,7 @@ func containerAcceptanceArtifactChain(t *testing.T, f *controllerWorkerFixture, 
 		if job == producer {
 			name := "chain-a/" + row.Name
 			ref := payload.ArtifactReferences[name]
-			if payload.ArtifactURIs[name] != row.StoragePath || ref.StorageID != row.StorageID || ref.Fingerprint != row.StorageFingerprint || row.ExpiresAt == nil || ref.ExpiresAt != row.ExpiresAt.Unix() {
+			if payload.ArtifactURIs[name] != row.StoragePath || ref.StorageID != row.StorageID || ref.Fingerprint != row.StorageFingerprint || ref.SHA256 != row.SHA256 || ref.Size == nil || *ref.Size != row.Size || row.ExpiresAt == nil || ref.ExpiresAt != row.ExpiresAt.Unix() {
 				t.Fatal("Process dispatched an input outside the registered producer/storage identity")
 			}
 		}
@@ -313,7 +370,7 @@ func containerAcceptanceArtifactChain(t *testing.T, f *controllerWorkerFixture, 
 	if uploadCount != 4 {
 		t.Fatalf("ACK loss or duplicate task repeated actual S3 uploads: %d", uploadCount)
 	}
-	t.Log("real Process-created container A -> registered S3 artifacts -> fresh container B verified byte-for-byte, including binary data and allowed nonzero shell exit; distinct claims/session/workspaces, seal/cleanup/terminal-before-staging, private-file isolation, both committed ACK losses and duplicate Kafka deliveries verified")
+	t.Log("real Process-created source-SHA/input-manifest-pinned container A -> hash/size-bound registered S3 artifacts -> fresh container B verified byte-for-byte, including binary data and allowed nonzero shell exit; distinct claims/session/workspaces, seal/cleanup/terminal-before-staging, private-file isolation, both committed ACK losses and duplicate Kafka deliveries verified")
 }
 
 func containerAcceptanceArtifactStep(name, action string, args map[string]any) *spec.Step {

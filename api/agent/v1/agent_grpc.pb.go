@@ -33,17 +33,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentService_InspectJobExecution_FullMethodName = "/agent.v1.AgentService/InspectJobExecution"
-	AgentService_Heartbeat_FullMethodName           = "/agent.v1.AgentService/Heartbeat"
-	AgentService_Register_FullMethodName            = "/agent.v1.AgentService/Register"
-	AgentService_Unregister_FullMethodName          = "/agent.v1.AgentService/Unregister"
-	AgentService_FetchStepRun_FullMethodName        = "/agent.v1.AgentService/FetchStepRun"
-	AgentService_ReportStepRunStatus_FullMethodName = "/agent.v1.AgentService/ReportStepRunStatus"
-	AgentService_ReportJobRunStatus_FullMethodName  = "/agent.v1.AgentService/ReportJobRunStatus"
-	AgentService_CancelStepRun_FullMethodName       = "/agent.v1.AgentService/CancelStepRun"
-	AgentService_CancelJobRun_FullMethodName        = "/agent.v1.AgentService/CancelJobRun"
-	AgentService_UpdateLabels_FullMethodName        = "/agent.v1.AgentService/UpdateLabels"
-	AgentService_Connect_FullMethodName             = "/agent.v1.AgentService/Connect"
+	AgentService_GetOrRecordJobInputs_FullMethodName = "/agent.v1.AgentService/GetOrRecordJobInputs"
+	AgentService_InspectJobExecution_FullMethodName  = "/agent.v1.AgentService/InspectJobExecution"
+	AgentService_Heartbeat_FullMethodName            = "/agent.v1.AgentService/Heartbeat"
+	AgentService_Register_FullMethodName             = "/agent.v1.AgentService/Register"
+	AgentService_Unregister_FullMethodName           = "/agent.v1.AgentService/Unregister"
+	AgentService_FetchStepRun_FullMethodName         = "/agent.v1.AgentService/FetchStepRun"
+	AgentService_ReportStepRunStatus_FullMethodName  = "/agent.v1.AgentService/ReportStepRunStatus"
+	AgentService_ReportJobRunStatus_FullMethodName   = "/agent.v1.AgentService/ReportJobRunStatus"
+	AgentService_CancelStepRun_FullMethodName        = "/agent.v1.AgentService/CancelStepRun"
+	AgentService_CancelJobRun_FullMethodName         = "/agent.v1.AgentService/CancelJobRun"
+	AgentService_UpdateLabels_FullMethodName         = "/agent.v1.AgentService/UpdateLabels"
+	AgentService_Connect_FullMethodName              = "/agent.v1.AgentService/Connect"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -52,6 +53,8 @@ const (
 //
 // AgentService - Main interface for communication between Agent and Server
 type AgentServiceClient interface {
+	// Get before checkout; record once before staging. Never starts or retries execution.
+	GetOrRecordJobInputs(ctx context.Context, in *GetOrRecordJobInputsRequest, opts ...grpc.CallOption) (*GetOrRecordJobInputsResponse, error)
 	// Read-only confirmation for recovery of the original runtime execution.
 	InspectJobExecution(ctx context.Context, in *InspectJobExecutionRequest, opts ...grpc.CallOption) (*InspectJobExecutionResponse, error)
 	// Heartbeat - Agent periodically sends heartbeat to Server
@@ -82,6 +85,16 @@ type agentServiceClient struct {
 
 func NewAgentServiceClient(cc grpc.ClientConnInterface) AgentServiceClient {
 	return &agentServiceClient{cc}
+}
+
+func (c *agentServiceClient) GetOrRecordJobInputs(ctx context.Context, in *GetOrRecordJobInputsRequest, opts ...grpc.CallOption) (*GetOrRecordJobInputsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOrRecordJobInputsResponse)
+	err := c.cc.Invoke(ctx, AgentService_GetOrRecordJobInputs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *agentServiceClient) InspectJobExecution(ctx context.Context, in *InspectJobExecutionRequest, opts ...grpc.CallOption) (*InspectJobExecutionResponse, error) {
@@ -203,6 +216,8 @@ type AgentService_ConnectClient = grpc.BidiStreamingClient[ConnectRequest, Conne
 //
 // AgentService - Main interface for communication between Agent and Server
 type AgentServiceServer interface {
+	// Get before checkout; record once before staging. Never starts or retries execution.
+	GetOrRecordJobInputs(context.Context, *GetOrRecordJobInputsRequest) (*GetOrRecordJobInputsResponse, error)
 	// Read-only confirmation for recovery of the original runtime execution.
 	InspectJobExecution(context.Context, *InspectJobExecutionRequest) (*InspectJobExecutionResponse, error)
 	// Heartbeat - Agent periodically sends heartbeat to Server
@@ -235,6 +250,9 @@ type AgentServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAgentServiceServer struct{}
 
+func (UnimplementedAgentServiceServer) GetOrRecordJobInputs(context.Context, *GetOrRecordJobInputsRequest) (*GetOrRecordJobInputsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetOrRecordJobInputs not implemented")
+}
 func (UnimplementedAgentServiceServer) InspectJobExecution(context.Context, *InspectJobExecutionRequest) (*InspectJobExecutionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InspectJobExecution not implemented")
 }
@@ -287,6 +305,24 @@ func RegisterAgentServiceServer(s grpc.ServiceRegistrar, srv AgentServiceServer)
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&AgentService_ServiceDesc, srv)
+}
+
+func _AgentService_GetOrRecordJobInputs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOrRecordJobInputsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).GetOrRecordJobInputs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_GetOrRecordJobInputs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).GetOrRecordJobInputs(ctx, req.(*GetOrRecordJobInputsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _AgentService_InspectJobExecution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -483,6 +519,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "agent.v1.AgentService",
 	HandlerType: (*AgentServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetOrRecordJobInputs",
+			Handler:    _AgentService_GetOrRecordJobInputs_Handler,
+		},
 		{
 			MethodName: "InspectJobExecution",
 			Handler:    _AgentService_InspectJobExecution_Handler,

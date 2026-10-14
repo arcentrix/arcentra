@@ -288,10 +288,11 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 		steps = append(steps, taskqueue.StepPayload{AttemptRunIDs: tf.execCtx.StepAttemptIDs[step.Name], Name: step.Name, StepIndex: int32(i), StepRunID: stepRunID, Uses: step.Uses, Action: step.Action,
 			Args: tf.execCtx.ResolveVariables(spec.StructAsMap(step.Args)), Env: tf.execCtx.ResolveStepEnv(task.Job, step), ContinueOnError: step.ContinueOnError, Timeout: step.Timeout, When: step.When})
 	}
+	artifactURIs, artifactReferences := tf.execCtx.ArtifactInputSnapshot()
 	payload := &taskqueue.JobRunTaskPayload{PipelineID: tf.execCtx.PipelineIDRef, PipelineRunID: tf.execCtx.PipelineRunID,
 		JobRunID: tf.execCtx.JobRunID, JobName: task.Job.Name, AgentID: agentID, Steps: steps, Retry: task.Job.Retry,
 		Env: tf.execCtx.ResolveStepEnv(task.Job, nil), Variables: tf.execCtx.Pipeline.Variables,
-		Timeout: task.Job.Timeout, ArtifactURIs: tf.execCtx.ArtifactSnapshot(), ArtifactReferences: tf.execCtx.ArtifactReferenceSnapshot()}
+		Timeout: task.Job.Timeout, ArtifactURIs: artifactURIs, ArtifactReferences: artifactReferences}
 	payload.Source = source
 	if tf.execCtx.Runtime != nil {
 		runtime := *tf.execCtx.Runtime
@@ -304,12 +305,12 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 			return err
 		}
 		capture, ok := tf.getJobRunStore().(interface {
-			CaptureRuntimeExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest) error
+			CaptureRuntimeInputExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest, map[string]string, map[string]taskqueue.ArtifactReference) error
 		})
 		if !ok {
 			return fmt.Errorf("atomic job runtime capture unavailable")
 		}
-		if err := capture.CaptureRuntimeExpectation(ctx, payload.PipelineID, payload.PipelineRunID, payload.JobRunID, agentID, binding, payload.Runtime); err != nil {
+		if err := capture.CaptureRuntimeInputExpectation(ctx, payload.PipelineID, payload.PipelineRunID, payload.JobRunID, agentID, binding, payload.Runtime, payload.ArtifactURIs, payload.ArtifactReferences); err != nil {
 			return err
 		}
 	}

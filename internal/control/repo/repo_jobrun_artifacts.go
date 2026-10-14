@@ -20,6 +20,9 @@ func (r *JobRunRepo) PatchReportedStatusAndArtifacts(ctx context.Context, expect
 		return err
 	}
 	if expected != nil {
+		if len(artifacts) > 0 && expected.InputExpectation != "" && expected.InputManifestState != "pinned" {
+			return fmt.Errorf("outputs require pinned container inputs")
+		}
 		if err := validateJobReportIdentityUpdates(expected, updates); err != nil {
 			return err
 		}

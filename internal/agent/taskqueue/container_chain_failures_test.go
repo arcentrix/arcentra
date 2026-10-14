@@ -300,6 +300,9 @@ func assertChainFixtureReceipt(t *testing.T, f *controllerWorkerFixture, run *mo
 	if err != nil || payload.Runtime.BindingDigest != digest || job.RuntimeBindingDigest != digest || job.AgentID != f.conf.Agent.ID || job.Status != wantStatus || job.StartTime == nil || job.EndTime == nil {
 		t.Fatalf("job lost runtime/Agent/terminal binding: %+v, %v", job, err)
 	}
+	if wantStatus == model.JobRunStatusSuccess {
+		assertImmutableJobInputRecord(t, job, &payload)
+	}
 	f.assertReceipt("job", job.JobRunID, job.ClaimID, job.TerminalReportDigest, run.RunID, job.JobRunID)
 	f.wait("terminal outbox drained", func() bool {
 		f.worker.reports.mu.Lock()
@@ -533,14 +536,14 @@ func TestControllerWorkerOfflineChainCommandExitMayContinue(t *testing.T) {
 
 // TestOfflineChainInputFailureNeverStartsSession 直接工作器补充测试，不声称使用真实控制面或容器
 func TestOfflineChainInputFailureNeverStartsSession(t *testing.T) {
-	for _, failure := range []string{"expired", "storage_changed", "storage_missing", "empty_object_key", "missing_object", "traversal", "symlink", "interrupted"} {
+	for _, failure := range []string{"expired", "storage_changed", "storage_missing", "empty_object_key", "missing_object", "traversal", "symlink", "interrupted", "sha256_mismatch", "size_mismatch"} {
 		t.Run(failure, func(t *testing.T) {
 			conf, payload, runtime := offlineWorkerFixture(t)
 			payload.JobName = "consumer"
 			const name = "producer/dist/result.txt"
 			payload.ArtifactURIs = map[string]string{name: "object"}
-			reference := artifactTestReference()
-			payload.ArtifactReferences = map[string]taskpayload.ArtifactReference{name: reference}
+			payload.ArtifactReferences = artifactTestReferences(payload.ArtifactURIs, map[string][]byte{"object": []byte("input")})
+			reference := payload.ArtifactReferences[name]
 			st := &memoryArtifactStorage{objects: map[string][]byte{"object": []byte("input")}}
 			outside := t.TempDir()
 			artifactTestWrite(t, outside, "sentinel", "unchanged")
@@ -553,27 +556,36 @@ func TestOfflineChainInputFailureNeverStartsSession(t *testing.T) {
 				wantError = "expired"
 			case "storage_changed":
 				ref := reference
-				ref.Fingerprint = "changed"
+				ref.Fingerprint = strings.Repeat("b", 64)
 				payload.ArtifactReferences[name] = ref
 				wantError = "storage identity"
 			case "storage_missing":
 				payload.ArtifactReferences = nil
-				wantError = "storage identity"
+				wantError = "complete references"
 			case "empty_object_key":
 				payload.ArtifactURIs[name] = " \t"
-				wantError = "no storage key"
+				wantError = "invalid or unordered input artifact"
 			case "missing_object":
 				payload.ArtifactURIs[name] = "missing-object"
 				wantError = "artifact"
 			case "traversal":
 				payload.ArtifactURIs = map[string]string{"../outside": "object"}
 				payload.ArtifactReferences = map[string]taskpayload.ArtifactReference{"../outside": reference}
-				wantError = "invalid artifact entry"
+				wantError = "invalid or unordered input artifact"
 			case "symlink":
 				if err := os.Symlink(outside, filepath.Join(runtime.session.workspace, ".artifacts")); err != nil {
 					t.Fatal(err)
 				}
 				wantError = "symbolic artifact links"
+			case "sha256_mismatch", "size_mismatch":
+				artifactTestWrite(t, runtime.session.workspace, ".artifacts/"+name, "original")
+				if failure == "sha256_mismatch" {
+					st.objects["object"] = []byte("other")
+					wantError = "SHA256 does not match"
+				} else {
+					st.objects["object"] = []byte("longer input")
+					wantError = "exceeds registered size"
+				}
 			case "interrupted":
 				artifactTestWrite(t, runtime.session.workspace, ".artifacts/"+name, "original")
 				st.download = func(context.Context, string) (io.ReadCloser, error) { return &interruptedArtifactReader{}, nil }
@@ -583,7 +595,7 @@ func TestOfflineChainInputFailureNeverStartsSession(t *testing.T) {
 			t.Cleanup(func() { SetStorage(nil) })
 			manager := executor.NewExecutorManager()
 			manager.Register(executor.NewShellExecutor())
-			client := &artifactStatusClient{}
+			client := newImmutableInputFixtureClient(payload, &artifactStatusClient{})
 			err := executeJobRun(withOfflineJobRuntime(context.Background(), runtime), conf, &agentgrpc.ClientWrapper{AgentClient: client}, manager, payload)
 			if err == nil || !strings.Contains(err.Error(), wantError) {
 				t.Fatalf("input failure not propagated: %v", err)
@@ -600,19 +612,28 @@ func TestOfflineChainInputFailureNeverStartsSession(t *testing.T) {
 				}
 			}
 			wantDownloads := 0
-			if failure == "interrupted" || failure == "missing_object" {
+			if failure == "interrupted" || failure == "missing_object" || failure == "sha256_mismatch" || failure == "size_mismatch" {
 				wantDownloads = 1
 			}
 			if st.downloads != wantDownloads {
 				t.Fatalf("rejected input reached storage: %d downloads", st.downloads)
 			}
-			if failure == "interrupted" {
+			if failure == "sha256_mismatch" || failure == "size_mismatch" {
+				if client.inputCalls != 2 || client.pinned == nil {
+					t.Fatal("corrupt transfer was not checked against an already pinned input")
+				}
+				manifest, err := taskpayload.ParseJobInputManifest(client.pinned.ManifestJson)
+				if err != nil || len(manifest.Artifacts) != 1 || manifest.Artifacts[0].Reference.SHA256 != reference.SHA256 || *manifest.Artifacts[0].Reference.Size != *reference.Size {
+					t.Fatalf("corrupt transfer changed the original expected content: %v", err)
+				}
+			}
+			if failure == "interrupted" || failure == "sha256_mismatch" || failure == "size_mismatch" {
 				if st.downloads != 1 || artifactTestRead(t, runtime.session.workspace, ".artifacts/"+name) != "original" {
-					t.Fatal("interrupted staging replaced the existing destination")
+					t.Fatal("failed staging replaced the existing destination")
 				}
 				matches, err := filepath.Glob(filepath.Join(runtime.session.workspace, ".artifacts", "producer", "dist", ".arcentra-artifact-*"))
 				if err != nil || len(matches) != 0 {
-					t.Fatalf("interrupted staging retained partial files: %v %v", matches, err)
+					t.Fatalf("failed staging retained partial files: %v %v", matches, err)
 				}
 			}
 			if artifactTestRead(t, outside, "sentinel") != "unchanged" {

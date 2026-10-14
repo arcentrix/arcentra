@@ -13,6 +13,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/agent/config"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	agentgrpc "github.com/arcentrix/arcentra/internal/shared/grpc"
+	"github.com/arcentrix/arcentra/pkg/id"
 	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 
@@ -73,7 +74,7 @@ func offlineWorkerFixture(t *testing.T) (*config.AgentConfig, *taskpayload.JobRu
 	t.Helper()
 	image := "registry.example/approved@sha256:" + strings.Repeat("a", 64)
 	conf := &config.AgentConfig{Agent: config.AgentInfo{ID: "sandbox-agent", Mode: "sandbox", Sandbox: config.SandboxConfig{Enable: true, Runtime: "containerd", Containerd: config.ContainerdConfig{Policy: taskpayload.OfflineRuntimePolicy{Enabled: true, AllowedImages: []string{image}, MaxCPU: "1", MaxMemory: "128Mi"}}}}}
-	payload := &taskpayload.JobRunTaskPayload{PipelineID: "p", PipelineRunID: "run", JobRunID: t.Name(), AgentID: conf.Agent.ID, Steps: []taskpayload.StepPayload{{Name: "shell", StepRunID: t.Name() + "-step", Uses: "shell", Args: map[string]any{"run": "touch host-fallback-marker"}}}, Runtime: &taskpayload.RuntimeRequest{Type: taskpayload.RuntimeContainerdOfflineV1, Image: image, Resources: taskpayload.RuntimeResources{CPU: "500m", Memory: "64Mi"}}}
+	payload := &taskpayload.JobRunTaskPayload{PipelineID: "p", PipelineRunID: "run", JobRunID: id.GetUUID(), AgentID: conf.Agent.ID, Steps: []taskpayload.StepPayload{{Name: "shell", StepRunID: id.GetUUID(), Uses: "shell", Args: map[string]any{"run": "touch host-fallback-marker"}}}, Runtime: &taskpayload.RuntimeRequest{Type: taskpayload.RuntimeContainerdOfflineV1, Image: image, Resources: taskpayload.RuntimeResources{CPU: "500m", Memory: "64Mi"}}}
 	digest, err := taskpayload.RuntimeBindingDigest(payload.PipelineID, payload.PipelineRunID, payload.JobRunID, payload.AgentID, payload.Runtime)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +88,7 @@ func TestOfflineWorkerNeverFallsBackToHost(t *testing.T) {
 	conf, payload, runtime := offlineWorkerFixture(t)
 	manager := executor.NewExecutorManager()
 	manager.Register(executor.NewShellExecutor())
-	client := &artifactStatusClient{}
+	client := newImmutableInputFixtureClient(payload, &artifactStatusClient{})
 	err := executeJobRun(withOfflineJobRuntime(context.Background(), runtime), conf, &agentgrpc.ClientWrapper{AgentClient: client}, manager, payload)
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +102,9 @@ func TestOfflineWorkerNeverFallsBackToHost(t *testing.T) {
 	if runtime.acknowledgements != 1 {
 		t.Fatalf("acknowledgements: %d", runtime.acknowledgements)
 	}
+	if client.inputCalls != 2 || client.pinned == nil {
+		t.Fatal("worker did not read and pin its exact immutable inputs before execution")
+	}
 	for _, report := range client.jobReports {
 		if report.RuntimeBindingDigest != payload.Runtime.BindingDigest {
 			t.Fatal("runtime binding missing from job report")
@@ -112,7 +116,7 @@ func TestOfflineWorkerStartupFailureNeverFallsBack(t *testing.T) {
 	runtime.session.startErr = errors.New("fixture runtime unavailable")
 	manager := executor.NewExecutorManager()
 	manager.Register(executor.NewShellExecutor())
-	client := &artifactStatusClient{}
+	client := newImmutableInputFixtureClient(payload, &artifactStatusClient{})
 	err := executeJobRun(withOfflineJobRuntime(context.Background(), runtime), conf, &agentgrpc.ClientWrapper{AgentClient: client}, manager, payload)
 	if err == nil {
 		t.Fatal("runtime failure succeeded")
@@ -182,7 +186,7 @@ func TestOfflineWorkerLostTerminalACKRetainsOriginalSession(t *testing.T) {
 	conf, payload, runtime := offlineWorkerFixture(t)
 	manager := executor.NewExecutorManager()
 	manager.Register(executor.NewShellExecutor())
-	client := &artifactStatusClient{failJobTerminals: 1}
+	client := newImmutableInputFixtureClient(payload, &artifactStatusClient{failJobTerminals: 1})
 	ctx := withOfflineJobRuntime(context.Background(), runtime)
 	wrapper := &agentgrpc.ClientWrapper{AgentClient: client}
 	if err := executeJobRun(ctx, conf, wrapper, manager, payload); err == nil {
@@ -205,7 +209,7 @@ func TestOfflineWorkerCleanupFailureIsNotSuccess(t *testing.T) {
 	runtime.session.closeErr = errors.New("fixture cleanup failure")
 	manager := executor.NewExecutorManager()
 	manager.Register(executor.NewShellExecutor())
-	client := &artifactStatusClient{}
+	client := newImmutableInputFixtureClient(payload, &artifactStatusClient{})
 	if err := executeJobRun(withOfflineJobRuntime(context.Background(), runtime), conf, &agentgrpc.ClientWrapper{AgentClient: client}, manager, payload); err == nil {
 		t.Fatal("cleanup failure accepted")
 	}
@@ -225,7 +229,7 @@ func TestOfflineWorkerTerminalReplayFreezesRuntimeBindingAndClaim(t *testing.T) 
 	ctx := withTerminalOutbox(withOfflineJobRuntime(context.Background(), runtime), reports)
 	manager := executor.NewExecutorManager()
 	manager.Register(executor.NewShellExecutor())
-	client := &artifactStatusClient{failJobTerminals: 1}
+	client := newImmutableInputFixtureClient(payload, &artifactStatusClient{failJobTerminals: 1})
 	wrapper := &agentgrpc.ClientWrapper{AgentClient: client}
 	if err := executeJobRun(ctx, conf, wrapper, manager, payload); err == nil {
 		t.Fatal("ACK loss was not exercised")
@@ -261,7 +265,7 @@ func TestOfflineWorkerRejectsNilSuccessfulAllocation(t *testing.T) {
 	conf, payload, runtime := offlineWorkerFixture(t)
 	manager := executor.NewExecutorManager()
 	manager.Register(executor.NewShellExecutor())
-	client := &artifactStatusClient{}
+	client := newImmutableInputFixtureClient(payload, &artifactStatusClient{})
 	if err := executeJobRun(withOfflineJobRuntime(context.Background(), nilOfflineRuntime{runtime}), conf, &agentgrpc.ClientWrapper{AgentClient: client}, manager, payload); err == nil {
 		t.Fatal("nil allocation succeeded")
 	}
@@ -287,7 +291,7 @@ func TestOfflineStagingFailureReceiptHasStableEndTime(t *testing.T) {
 	ctx := withTerminalOutbox(withOfflineJobRuntime(context.Background(), runtime), reports)
 	manager := executor.NewExecutorManager()
 	manager.Register(executor.NewShellExecutor())
-	client := &artifactStatusClient{failStepTerminals: 3}
+	client := newImmutableInputFixtureClient(payload, &artifactStatusClient{failStepTerminals: 3})
 	wrapper := &agentgrpc.ClientWrapper{AgentClient: client}
 	if err := executeJobRun(ctx, conf, wrapper, manager, payload); err == nil {
 		t.Fatal("step ACK loss was not exercised")
@@ -321,7 +325,7 @@ func TestOfflineWorkerRetainsReceiptAfterJournalACKFailure(t *testing.T) {
 	runtime.ackFailures = 1
 	manager := executor.NewExecutorManager()
 	manager.Register(executor.NewShellExecutor())
-	client := &artifactStatusClient{}
+	client := newImmutableInputFixtureClient(payload, &artifactStatusClient{})
 	wrapper := &agentgrpc.ClientWrapper{AgentClient: client}
 	ctx := withOfflineJobRuntime(context.Background(), runtime)
 	if err := executeJobRun(ctx, conf, wrapper, manager, payload); err == nil {
@@ -352,7 +356,7 @@ func TestOfflinePolicyChangeFailsBoundJobWithoutExecuting(t *testing.T) {
 			}
 			manager := executor.NewExecutorManager()
 			manager.Register(executor.NewShellExecutor())
-			client := &artifactStatusClient{failJobTerminals: 1}
+			client := newImmutableInputFixtureClient(payload, &artifactStatusClient{failJobTerminals: 1})
 			wrapper := &agentgrpc.ClientWrapper{AgentClient: client}
 			if err := executeJobRun(ctx, conf, wrapper, manager, payload); err == nil {
 				t.Fatal("lost failed ACK was not exercised")
@@ -387,7 +391,7 @@ func TestOfflinePolicyChangeFailsBoundJobWithoutExecuting(t *testing.T) {
 func TestOfflineForgedBindingCannotClaim(t *testing.T) {
 	conf, payload, runtime := offlineWorkerFixture(t)
 	payload.Runtime.BindingDigest = "v1:" + strings.Repeat("f", 64)
-	client := &artifactStatusClient{}
+	client := newImmutableInputFixtureClient(payload, &artifactStatusClient{})
 	if err := executeJobRun(withOfflineJobRuntime(context.Background(), runtime), conf, &agentgrpc.ClientWrapper{AgentClient: client}, executor.NewExecutorManager(), payload); err == nil {
 		t.Fatal("forged binding accepted")
 	}
@@ -401,7 +405,7 @@ type unavailableOfflineRuntime struct{ *fixtureOfflineRuntime }
 func (unavailableOfflineRuntime) Ready() bool { return false }
 func TestOfflineUnreadyRecoveryDoesNotClaimOrAcknowledge(t *testing.T) {
 	conf, payload, runtime := offlineWorkerFixture(t)
-	client := &artifactStatusClient{}
+	client := newImmutableInputFixtureClient(payload, &artifactStatusClient{})
 	err := executeJobRun(withOfflineJobRuntime(context.Background(), unavailableOfflineRuntime{runtime}), conf, &agentgrpc.ClientWrapper{AgentClient: client}, executor.NewExecutorManager(), payload)
 	if err == nil || acknowledgeCompleted(err) == nil {
 		t.Fatal("unresolved recovery must retain queued task")

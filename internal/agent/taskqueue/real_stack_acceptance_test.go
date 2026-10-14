@@ -319,6 +319,7 @@ func realStackDatabase(t *testing.T, ctx context.Context, dsn string) *gorm.DB {
 			t.Fatalf("real MySQL migration pass %d: %v", i+1, err)
 		}
 	}
+	realStackAssertInputManifestSchema(t, ctx, db)
 	var agents int64
 	if err := db.WithContext(ctx).Model(&model.Agent{}).Count(&agents).Error; err != nil {
 		t.Fatal(err)
@@ -327,6 +328,83 @@ func realStackDatabase(t *testing.T, ctx context.Context, dsn string) *gorm.DB {
 		t.Fatal("acceptance schema contains existing Agents; recreate the disposable real-stack schema before running")
 	}
 	return db
+}
+
+// realStackAssertInputManifestSchema 在现有一次性 MySQL 迁移后验证列宽、默认值和大清单回读
+func realStackAssertInputManifestSchema(t *testing.T, ctx context.Context, db *gorm.DB) {
+	t.Helper()
+	jobID := "schema-input-" + id.GetUild()
+	// 在任何断言和写入之前注册精确清理，不触发运行、Agent 或外部服务
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if err := db.WithContext(cleanupCtx).Where("job_run_id = ?", jobID).Delete(&model.JobRun{}).Error; err != nil {
+			t.Errorf("clean synthetic input schema row: %v", err)
+		}
+	}()
+	columns, err := db.WithContext(ctx).Migrator().ColumnTypes(&model.JobRun{})
+	if err != nil {
+		t.Fatalf("read real MySQL input column metadata: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, column := range columns {
+		if column.Name() != "input_expectation" && column.Name() != "input_manifest" {
+			continue
+		}
+		if !strings.EqualFold(column.DatabaseTypeName(), "mediumtext") {
+			t.Fatalf("real MySQL %s has insufficient type %s", column.Name(), column.DatabaseTypeName())
+		}
+		if nullable, ok := column.Nullable(); !ok || nullable {
+			t.Fatalf("real MySQL %s must be NOT NULL", column.Name())
+		}
+		seen[column.Name()] = true
+	}
+	if len(seen) != 2 {
+		t.Fatal("real MySQL immutable input columns are absent")
+	}
+	if err := db.WithContext(ctx).Model(&model.JobRun{}).Create(map[string]any{"job_run_id": jobID}).Error; err != nil {
+		t.Fatalf("insert synthetic default input row: %v", err)
+	}
+	var before model.JobRun
+	if err := db.WithContext(ctx).Select("job_run_id", "input_expectation", "input_manifest_state", "input_manifest", "input_manifest_digest").Where("job_run_id = ?", jobID).First(&before).Error; err != nil {
+		t.Fatal(err)
+	}
+	if before.JobRunID != jobID || before.InputManifestState != "unknown" || before.InputExpectation != "" || before.InputManifest != "" || before.InputManifestDigest != "" {
+		t.Fatal("real MySQL legacy defaults fabricated immutable input evidence")
+	}
+	uris, refs := make(map[string]string), make(map[string]taskpayload.ArtifactReference)
+	for index := range 128 {
+		name := fmt.Sprintf("producer/%03d/%s", index, strings.Repeat("x", 500))
+		size := int64(index)
+		uris[name] = "artifacts/run/producer/step/" + strings.Repeat("a", 64) + "/" + strings.TrimPrefix(name, "producer/")
+		refs[name] = taskpayload.ArtifactReference{StorageID: "synthetic-store", Fingerprint: strings.Repeat("b", 64), SHA256: strings.Repeat("a", 64), Size: &size}
+	}
+	manifest, err := taskpayload.NewJobInputManifest("", uris, refs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := manifest.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.SourceCommit = strings.Repeat("c", 40)
+	encoded, err := manifest.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expected) <= 65535 || len(encoded) <= 65535 {
+		t.Fatal("large MySQL manifest fixture does not exceed TEXT capacity")
+	}
+	if err := db.WithContext(ctx).Model(&model.JobRun{}).Where("job_run_id = ?", jobID).Updates(map[string]any{"input_expectation": expected, "input_manifest": encoded}).Error; err != nil {
+		t.Fatalf("persist large synthetic MySQL input manifests: %v", err)
+	}
+	var after model.JobRun
+	if err := db.WithContext(ctx).Select("job_run_id", "input_expectation", "input_manifest_state", "input_manifest", "input_manifest_digest").Where("job_run_id = ?", jobID).First(&after).Error; err != nil {
+		t.Fatal(err)
+	}
+	if after.JobRunID != jobID || after.InputExpectation != expected || after.InputManifest != encoded || after.InputManifestState != "unknown" || after.InputManifestDigest != "" {
+		t.Fatal("real MySQL truncated or promoted synthetic manifest storage")
+	}
 }
 
 func realStackStorage(t *testing.T, ctx context.Context, cfg *realStackSettings) (*storage.S3Storage, *model.StorageConfig, taskpayload.ArtifactReference) {

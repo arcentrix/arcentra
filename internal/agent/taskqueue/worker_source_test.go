@@ -174,8 +174,7 @@ func TestJobInitialSourceCheckoutUnknownAndInterruptedCases(t *testing.T) {
 				wantStatus = 5
 			default:
 				payload.ArtifactURIs = map[string]string{"producer/input.txt": "fixture-object"}
-				payload.ArtifactReferences = artifactTestReferences(payload.ArtifactURIs)
-				st := &memoryArtifactStorage{download: func(ctx context.Context, _ string) (io.ReadCloser, error) {
+				st := &memoryArtifactStorage{objects: map[string][]byte{"fixture-object": []byte("artifact")}, download: func(ctx context.Context, _ string) (io.ReadCloser, error) {
 					if head := sourceTestGit(t, workspace, "rev-parse", "HEAD"); head != initial {
 						t.Fatalf("source was not cloned before artifact download: %s", head)
 					}
@@ -192,6 +191,7 @@ func TestJobInitialSourceCheckoutUnknownAndInterruptedCases(t *testing.T) {
 					}
 					return io.NopCloser(strings.NewReader("artifact")), nil
 				}}
+				payload.ArtifactReferences = artifactTestReferences(payload.ArtifactURIs, st.objects)
 				SetStorage(st, artifactTestReference())
 				t.Cleanup(func() { SetStorage(nil); cancelledJobs.Delete(payload.JobRunID) })
 				if name == "artifact_failure" {

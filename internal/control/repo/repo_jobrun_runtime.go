@@ -26,7 +26,7 @@ func (r *JobRunRepo) CaptureRuntimeExpectation(ctx context.Context, pipelineID, 
 	if err != nil || digest != copy.BindingDigest {
 		return fmt.Errorf("runtime binding does not match execution identity")
 	}
-	return r.captureDispatchExpectation(ctx, pipelineID, runID, jobID, agentID, source, &copy)
+	return r.captureDispatchExpectation(ctx, pipelineID, runID, jobID, agentID, source, &copy, nil)
 }
 
 func runtimeField(key string) bool {
