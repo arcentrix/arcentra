@@ -40,7 +40,7 @@ const cleanupTimeout = 20 * time.Second
 const maxCapturedBytes = 4 * 1024 * 1024
 
 // Containerd 提供显式生命周期的离线 containerd 执行后端
-// Agent 接线仍受关闭的真实验收门禁保护，不能作为不可信多租户代码的安全保证
+// Agent 仅支持经专用主机验收的显式离线策略，不能作为不可信多租户代码的安全保证
 type Containerd struct {
 	backend      runtimeBackend
 	namespace    string

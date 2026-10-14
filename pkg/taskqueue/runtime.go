@@ -26,8 +26,9 @@ const ExecutionModeBaremetal = "baremetal"
 // RuntimeContainerdOfflineV1 标识仅支持可信代码、离线单作业的版本化执行契约
 const RuntimeContainerdOfflineV1 = "containerd-offline-v1"
 
-// OfflineRuntimeAccepted 表示真实运行时验收已完成；本阶段禁止通过配置绕过验收
-const OfflineRuntimeAccepted = false
+// OfflineRuntimeAccepted 表示限定离线单作业 profile 已通过专用主机验收
+// 操作者策略仍默认关闭，启用必须通过配置、身份和生命周期校验
+const OfflineRuntimeAccepted = true
 
 // RuntimeResources 保存明确的硬资源上限，不接受宿主路径或可选运行时参数
 type RuntimeResources struct {

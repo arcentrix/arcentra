@@ -17,9 +17,6 @@ import (
 func TestContainerAcceptancePolicyGuards(t *testing.T) {
 	const image = "docker.io/library/alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	policy := taskqueue.OfflineRuntimePolicy{Enabled: true, AllowedImages: []string{image}, MaxCPU: "500m", MaxMemory: "64Mi"}
-	if taskqueue.OfflineRuntimeAccepted {
-		t.Fatal("these acceptance-only constructors require the production gate to remain closed")
-	}
 	for _, test := range []struct {
 		name      string
 		enabled   string
@@ -73,6 +70,15 @@ func TestContainerAcceptancePolicyClonesOnce(t *testing.T) {
 	t.Setenv("ARCENTRA_SANDBOX_TEST_IMAGE", image)
 	policy := taskqueue.OfflineRuntimePolicy{Enabled: true, AllowedImages: []string{image}, MaxCPU: "500m", MaxMemory: "64Mi"}
 	e := &Process{}
+	if taskqueue.OfflineRuntimeAccepted {
+		if err := e.ConfigureContainerAcceptancePolicy(policy); err == nil {
+			t.Fatal("accepted runtime allowed obsolete test-only injection")
+		}
+		if e.offlineRuntimePolicy.Enabled {
+			t.Fatal("rejected obsolete injection mutated policy")
+		}
+		return
+	}
 	if err := e.ConfigureContainerAcceptancePolicy(policy); err != nil {
 		t.Fatal(err)
 	}

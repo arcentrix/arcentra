@@ -1,14 +1,12 @@
 # Agent sandbox integration boundary
 
-## Current status: wired, hard-disabled, not runtime-accepted
+## Current status: hosted implementation accepted; production-entry candidate pending
 
-The current branch contains `containerd-offline-v1` plumbing across pipeline validation, immutable dispatch payloads and persisted job bindings, Agent capability/readiness reporting, runtime-aware selection, the queue worker, whole-job sessions and durable runtime recovery. This is under-development implementation, not a released or validated isolation capability.
+The bounded `containerd-offline-v1` implementation passed [hosted run 38508866022](https://github.com/arcentrix/arcentra/actions/runs/38508866022) on 2026-10-14. PR head `e7132be275c144a2eadc03b61e3c4f16dd302c4e` was tested as merge commit `12e6cd81e2ca6f79bb5967f457aa6b3f377b1a9d`. Backend, session, durable recovery, active crash/recovery and real Process/Kafka/Agent/MySQL/S3 scenarios passed, with no FIFO or runtime-resource leaks. See [exact evidence, remaining gate and explicit operator configuration](offline-runtime-acceptance.md).
 
-Production remains fail-closed. The default policy is disabled and `pkg/taskqueue.OfflineRuntimeAccepted` is `false`; production configuration validation rejects opt-in while that hard gate is closed. Setting a policy flag, editing an Agent label, or requesting sandbox mode cannot enable execution. A runtime job must never fall back to host shell, HTTP or native plugin execution. The existing trusted baremetal path remains available with its existing retry semantics.
+That run retained `OfflineRuntimeAccepted = false` and used narrowly build-tagged policy/worker assembly to exercise the actual implementation. The next `OfflineRuntimeAccepted = true` candidate must pass the suite through ordinary production Control configuration and Agent `StartWorker` entry points; that result is still pending. Operator policies remain disabled by default, and no runtime request may fall back to host execution. The compiled gate change does not enable existing deployments automatically.
 
-V10's successful [backend main CI](https://github.com/arcentrix/arcentra/actions/runs/38393872734) at `6c24bd389d76fe749ad07a8e23fc049d6cd46c93` establishes the earlier trusted-baremetal real-service/browser baseline. It does not validate the new sandbox branch. The local final-code uncached full-repository race suite passed for this implementation stage. No successful real containerd run is claimed here. Fake-backend tests and compile-only acceptance checks cannot prove namespace, cgroup, process termination or filesystem isolation behavior.
-
-The implementation environment has no usable containerd/runc/socket/cgroup-v2 setup. The separately authorized [disposable GitHub runtime workflow](../scripts/acceptance/CONTAINERD_RUNTIME.md) provisions only an isolated temporary daemon on a dedicated hosted VM. It does not reconfigure the system daemon or host security settings. The production acceptance gate remains closed until exact-revision runtime checks and independent review succeed; merely adding the workflow is not a passing result. Keep backend, adapter and end-to-end worker acceptance distinct.
+The V10 [backend main CI](https://github.com/arcentrix/arcentra/actions/runs/38393872734) remains the earlier trusted-baremetal real-service/browser baseline. The separate runtime evidence came from an authorized disposable GitHub VM, not privileged execution in the restricted implementation workspace. The [runtime harness](../scripts/acceptance/CONTAINERD_RUNTIME.md) owns only its temporary daemon and preserves the original 25-minute/no-production-secret boundary. Neither result certifies release OCI images, production infrastructure or hostile multi-tenancy.
 
 ## Bounded offline job profile
 
@@ -21,7 +19,9 @@ The request and validation plumbing restricts the initial profile to:
 - Only a prefix of explicit `builtin:artifacts` downloads, one or more `shell`/`builtin:shell` steps, and a suffix of explicit artifact uploads. Shell action must be empty or `run`. Source checkout is an explicit trusted host preparation operation using a remote Git URL.
 - No automatic retry policy, alternate attempt IDs, HTTP steps, arbitrary native plugins, Kubernetes/deployment steps or targets, standalone StepRun runtime tasks, caller-chosen host workspace, local source transport, custom mounts or extra isolation flags. An interrupted or failed job needs an explicitly requested fresh run; baremetal retry policies are unchanged.
 
-Operator policy belongs to Control and Agent configuration, not the pipeline or queue payload. Runtime capabilities are separate from labels and are checked with Agent availability/readiness. A reported capability is not acceptance evidence or HA admission/fencing. Production gate checks still apply before this profile can be enabled.
+A rootful containerd socket grants the trusted Agent/operator host-high-privilege access, effectively root-equivalent. The non-root Agent process is not itself a host-security isolation boundary. Only the bounded job container is isolated by this profile; it never receives the socket, Agent configuration, identity/journal/FIFO roots or sibling job roots. Operators must securely provision runtime access on a dedicated host; no credential creation or system-socket permission change is implicit.
+
+Operator policy belongs to Control and Agent configuration, not the pipeline or queue payload. Runtime capabilities are separate from labels and are checked with Agent availability/readiness. A reported capability is not acceptance evidence or HA admission/fencing. Production gate admission and both explicit operator policies still apply; the gate-enabled production-entry result is tracked separately.
 
 ## Staging, execution, sealing and output
 
@@ -78,16 +78,11 @@ Required regression evidence includes runtime schema/claim/digest rejection, rea
 
 After explicit authorization, follow the prerequisites in [backend acceptance](sandbox-containerd.md): a dedicated disposable Linux host, a working rootful containerd/runc setup, usable cgroup-v2 CPU/memory controllers and an approved Alpine-compatible digest image. Run the backend test first and retain its complete output. These commands do not grant permission to install components or change host security settings.
 
-```sh
-export ARCENTRA_SANDBOX_SESSION_ACCEPTANCE=1
-export ARCENTRA_CONTAINERD_SOCKET=/run/containerd/containerd.sock
-export ARCENTRA_SANDBOX_TEST_IMAGE='your-approved-alpine-image@sha256:YOUR_VERIFIED_DIGEST'
-go test -tags=sandbox_acceptance -count=1 -timeout=5m -run '^TestSessionContainerdAcceptance$' -v ./internal/agent/sandboxexec
-```
+Use the [complete hosted harness](../scripts/acceptance/CONTAINERD_RUNTIME.md), which supplies the private socket, runc root, FIFO root, namespace and workspace/journal roots. Do not copy the historical default-system-socket command or run the Go tests through sudo. The reproducible harness is the entry point for this authorized acceptance; manually provisioned environments need their own approval and explicit private-path configuration.
 
 The explicit test fails rather than skips when opt-in or prerequisites are absent. It exercises real standalone session creation, shell environment/output streaming, workspace visibility, sequential steps, nonzero exits, timeout poisoning, canceled-context cleanup, repeated `Close`, and container/snapshot/workspace removal. It does not run Kafka, gRPC, a production Agent, host source cloning, object-storage transfer or durable-controller restart recovery. Images remain cached; cleanup failures retain evidence for operator inspection.
 
-Record the exact code revision, host/runtime versions, approved image digest, command and complete output. Before considering activation, additionally prove the integrated staging/session/sealing/publication/recovery path on the same bounded profile. Passing a standalone backend or adapter test must not silently open the production gate. Release-image startup, production infrastructure and hostile multi-tenant isolation remain separate validation work.
+Record the exact code revision, host/runtime versions, approved image digest, command and complete output. The linked run now proves the integrated staging/session/sealing/publication/recovery path for this bounded profile; the gate-enabled production-entry and destination-specific rollout checks remain separate. Passing a standalone backend or adapter test must not silently open the production gate. Release-image startup, production infrastructure and hostile multi-tenant isolation remain separate validation work.
 
 ## Adjacent limits: native plugins and concurrency
 

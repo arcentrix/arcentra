@@ -162,10 +162,19 @@ func TestOfflineStagingCannotInterleave(t *testing.T) {
 
 func (r *fixtureOfflineRuntime) Ready() bool { return true }
 
-func TestOfflineWorkerRejectsUnvalidatedProductionConfiguration(t *testing.T) {
+func TestOfflineWorkerRequiresExplicitOperatorPolicy(t *testing.T) {
 	conf, _, _ := offlineWorkerFixture(t)
-	if err := ValidateExecutionConfig(conf); err == nil || !strings.Contains(err.Error(), "acceptance") {
-		t.Fatalf("unvalidated runtime enabled: %v", err)
+	if err := ValidateExecutionConfig(conf); err != nil {
+		t.Fatalf("accepted bounded worker policy rejected: %v", err)
+	}
+	conf.Agent.Sandbox.Containerd.Policy.Enabled = false
+	if err := ValidateExecutionConfig(conf); err == nil {
+		t.Fatal("disabled runtime policy enabled a worker")
+	}
+	conf.Agent.Sandbox.Containerd.Policy.Enabled = true
+	conf.Agent.Sandbox.Containerd.Policy.AllowedImages = nil
+	if err := ValidateExecutionConfig(conf); err == nil {
+		t.Fatal("unbounded runtime policy enabled a worker")
 	}
 }
 

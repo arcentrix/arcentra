@@ -48,3 +48,16 @@ References: [GitHub service containers](https://docs.github.com/en/actions/tutor
 The former official `quay.io/minio/minio` image returned registry authorization failure on the first hosted acceptance run. CI does not retry it with credentials or use a mirror. The [official source-only guidance](https://github.com/minio/minio/blob/9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a/README.md#source-only-distribution) supports building the public source instead. CI checks out release `RELEASE.2025-10-15T17-29-55Z`, verifies exact commit `9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a`, and builds it with the repository's pinned Go 1.25.6 and upstream readonly module lock. The static binary, AGPL-3.0 license and NOTICE are packaged into a local scratch image, run as UID 65532 with a read-only root and disposable writable tmpfs only. `pull_policy: never` prevents any fallback registry pull. The build has a 12-minute limit within the 35-minute acceptance budget; Go's existing cache covers build dependencies.
 
 This unmodified source build is used only as an isolated S3-compatible test dependency. Its image and binary are not pushed or shipped with Arcentra, and it is not a production storage recommendation or a claim of upstream maintenance. The source license and notices are retained; operators choosing their own production storage must assess its support and license requirements separately. The real tests still exercise MinIO's S3 protocol implementation rather than a mock or a replacement vendor.
+
+## Separate offline-containerd evidence
+
+The baremetal/browser jobs above do not certify containers. The distinct authorized
+[runtime run 38508866022](https://github.com/arcentrix/arcentra/actions/runs/38508866022)
+passed implementation-level container execution and cleanup at PR head
+`e7132be275c144a2eadc03b61e3c4f16dd302c4e` (tested merge
+`12e6cd81e2ca6f79bb5967f457aa6b3f377b1a9d`). It reuses these synthetic dependencies
+in another fresh schema, while its jobs run with a non-root Agent and private
+rootful containerd. Its compiled production gate was false; the gate-on ordinary
+configuration/worker-entry candidate remains pending. See [exact evidence and
+unchanged offline profile limits](offline-runtime-acceptance.md). Production OCI
+image startup and destination-specific acceptance remain separate.

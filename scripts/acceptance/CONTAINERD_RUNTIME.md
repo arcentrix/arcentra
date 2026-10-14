@@ -4,9 +4,12 @@
 fresh GitHub-hosted `ubuntu-24.04` VM, with a 25-minute job limit. It runs for PRs
 and pushes to `main`; it does not use `pull_request_target`, self-hosted runners,
 repository secrets, OIDC, write permissions, or retained checkout credentials.
-The production `pkg/taskqueue.OfflineRuntimeAccepted` gate remains **false**;
-`ValidateProduction` continues to reject container jobs. This job alone does
-not enable container jobs or establish production readiness.
+The first implementation-level run passed with
+`pkg/taskqueue.OfflineRuntimeAccepted = false`. The separate gate-on candidate
+must verify normal production configuration/worker entry points; that result is
+still pending. Operator policies remain disabled by default. This job alone does
+not opt in deployments or establish production readiness. See [the exact acceptance
+record and configuration](../../docs/offline-runtime-acceptance.md).
 
 ## Scope and execution
 
@@ -32,7 +35,11 @@ is accessible to this VM's runner only. The Go tests run with nonzero UID/GID an
 a clean environment, private HOME/TMPDIR, and explicit synthetic fixture values.
 They never run through sudo. The client-side FIFO root is a precreated,
 runner-owned mode-0700 `work/fifo` directory inside this same private run root;
-it is separate from the daemon's privileged state.
+it is separate from the daemon's privileged state. The rootful API socket grants
+the trusted runner/Agent effectively root-equivalent host access; a non-root Go
+process does not isolate the VM from that caller. The tested boundary is the job
+container, which never receives that socket or the Agent configuration/state roots.
+This privilege exists only in the authorized disposable VM.
 
 Version-4 containerd configuration explicitly names both server sockets and the
 shim socket directory; overriding just `state` is insufficient. CRI, NRI, the
@@ -169,4 +176,11 @@ go test -tags=sandbox_acceptance -run '^$' \
 
 Offline checks and a committed workflow are not proof of runtime acceptance.
 Only the exact commit's completed hosted job, all named tests, and a clean cleanup
-receipt establish that result. The separate production feature gate stays false.
+receipt establish that result. [Run 38508866022](https://github.com/arcentrix/arcentra/actions/runs/38508866022)
+now provides the gate-off implementation result at PR head
+`e7132be275c144a2eadc03b61e3c4f16dd302c4e` (tested merge
+`12e6cd81e2ca6f79bb5967f457aa6b3f377b1a9d`). Its artifact
+`11868404908` SHA-256 is
+`2c391b491628347a0ca3b2f2a497f781e211f943af7659cc9f247bc4a5efa4b3`;
+cleanup reported no leaks or errors. The gate-on ordinary-entry result remains
+pending and must not be inferred from this earlier pass.

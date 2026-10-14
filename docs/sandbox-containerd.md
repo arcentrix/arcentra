@@ -2,9 +2,9 @@
 
 ## Status and scope
 
-The `pkg/sandbox` backend contains containerd lifecycle, strict offline/spec validation and injectable test support. The current branch also adds exact-owner resource recovery and [whole-job Agent integration plumbing](sandbox-agent-integration.md), including immutable runtime requests, selection/readiness, staged sessions and a durable runtime journal. **Production activation remains hard-disabled:** the default policy is off and `OfflineRuntimeAccepted = false` rejects production opt-in. Implemented wiring is not successful runtime acceptance.
+The backend, adapter, durable recovery and integrated single-job runtime paths passed [hosted run 38508866022](https://github.com/arcentrix/arcentra/actions/runs/38508866022) on 2026-10-14. The exact PR head was `e7132be275c144a2eadc03b61e3c4f16dd302c4e`, tested as merge `12e6cd81e2ca6f79bb5967f457aa6b3f377b1a9d`. Cleanup reported no FIFO/resource leaks or errors. [The acceptance record](offline-runtime-acceptance.md) preserves hashes, supported scope and operator configuration.
 
-The successful V10 [backend main CI](https://github.com/arcentrix/arcentra/actions/runs/38393872734) covers trusted baremetal execution with real disposable services and a browser, not this new runtime work. No final-code test success for the in-development runtime stage is claimed here. Unit/spec success is not proof of actual isolation. The restricted implementation environment has no usable containerd/runc runtime or containerd socket and no mounted cgroup hierarchy. Real runtime acceptance remains pending on an explicitly authorized capable host. Installing a runtime, changing privileged host settings or adding a runtime CI job requires separate approval; this work does not do those things.
+That successful implementation-level run kept the compiled production gate false. The candidate that sets it true must separately pass ordinary Control configuration/provider and Agent `StartWorker` entry points; that result is pending. Operator policies stay off by default. This evidence does not certify production deployment, release OCI images or hostile multi-tenant isolation. No privileged operation was performed in the restricted development workspace.
 
 ## Runtime-independent checks
 
@@ -23,27 +23,20 @@ Coverage includes command/env/cwd/user forwarding, output capture/streaming, str
 
 Use a dedicated, disposable Linux development host or CI runner authorized to execute test containers:
 
-- Working containerd 1.7-compatible daemon and `runc`, with access to the selected Unix socket
+- Supported rootful containerd/runc versions and an explicitly isolated Unix socket; the verified baseline is containerd 2.3.6/runc 1.5.2, using the existing 1.7 client API
 - A working rootful OCI runtime, an available snapshotter, and an accessible cgroup-v2 hierarchy with usable CPU/memory controllers
 - Ability to inspect the daemon's task PIDs through this host's `/proc` and corresponding cgroup paths. The test expects the daemon and test process to share this host view
-- An operator-approved Alpine-compatible image containing `sh`, `sleep`, `id`, `cat`, `readlink`, and `ip`, preferably selected by immutable digest
+- An operator-approved Alpine-compatible image containing `sh`, `sleep`, `id`, `cat`, `readlink`, and `ip`, selected by verified immutable digest
 - Image already available/unpacked or permission and host connectivity to pull it. Container commands run without external networking
-- Enough disk/memory for the image, a writable temporary workspace, and permission for bind mounts and runtime-created namespaces
+- A non-root test user, separate pre-existing mode-0700 user-owned workspace/journal/FIFO roots, an explicit daemon-side runc root, and enough disk/memory for the image and runtime mounts
 
 This test does not install components, enable privileges or change host security settings. A rootless or differently arranged daemon may need a separately designed acceptance test; this command must not be reported as passed in that situation.
 
 ## Explicit acceptance command
 
-Set the socket and approved image, then run:
+Use the [reproducible hosted harness](../scripts/acceptance/CONTAINERD_RUNTIME.md). It supplies all opt-ins and private paths and runs the compiled tests as the unprivileged runner. Only its isolated daemon supervisor uses the already authorized disposable-VM privilege. This guide does not authorize a different host or permission changes.
 
-```sh
-export ARCENTRA_SANDBOX_ACCEPTANCE=1
-export ARCENTRA_CONTAINERD_SOCKET=/run/containerd/containerd.sock
-export ARCENTRA_SANDBOX_TEST_IMAGE='your-approved-alpine-image@sha256:YOUR_VERIFIED_DIGEST'
-go test -tags=sandbox_acceptance -count=1 -timeout=5m -run '^TestContainerdAcceptance$' -v ./pkg/sandbox
-```
-
-Replace the image placeholder with an actual verified image reference. Do not run this test on a shared production host.
+For a separately approved preprovisioned environment, the backend test additionally requires explicit `ARCENTRA_CONTAINERD_SOCKET`, `ARCENTRA_CONTAINERD_RUNC_ROOT`, `ARCENTRA_CONTAINERD_FIFO_DIR`, `ARCENTRA_SANDBOX_TEST_IMAGE` and `ARCENTRA_SANDBOX_ACCEPTANCE=1`. Do not substitute default system paths or run `go test` as root.
 
 The build-tagged test fails, rather than skips, when opt-in or a prerequisite is absent. Once requested, a missing runtime, denied mount, unavailable image, wrong effective limit, or failed cleanup is a failed/blocked acceptance run. Never describe an explicit compile-only check or prerequisite failure as a successful runtime run.
 
@@ -59,4 +52,4 @@ The test reports cleanup errors. It does not remove the downloaded image cache. 
 
 ## Required evidence before runtime activation
 
-Record the successful command, exact code revision, host/runtime versions, approved image digest and complete test output. Investigate any leak or missing controller rather than weakening assertions. Even a successful run validates only these bounded backend behaviors; it does not establish suitability for hostile multi-tenant code or certify the new Agent wiring. The separate adapter and integrated whole-job path still need real runtime evidence, including trusted staging, all-process sealing before artifact reads, cancellation, exact-owner restart cleanup and authenticated terminal-state reconciliation. Keep the hard production gate closed until the required acceptance evidence and activation review are complete; no passing compile-only, mock or standalone check opens it automatically.
+Record the successful command, exact code revision, host/runtime versions, approved image digest and complete test output. Investigate any leak or missing controller rather than weakening assertions. Even a successful run validates only these bounded backend behaviors; it does not establish suitability for hostile multi-tenant code or certify the new Agent wiring. The linked run supplies adapter and integrated whole-job evidence for trusted staging, all-process sealing before artifact reads, cancellation, exact-owner restart cleanup and authenticated terminal-state reconciliation. Ordinary gate-enabled startup admission remains pending. Treat the gate-on candidate as unverified until its own ordinary-entry run and activation review complete; no passing compile-only, mock or standalone check opens it automatically.
