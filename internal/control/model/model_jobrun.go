@@ -44,6 +44,10 @@ type JobRun struct {
 	RuntimeCPU                 string     `gorm:"column:runtime_cpu;type:varchar(64);not null;default:''" json:"runtimeCpu,omitempty"`
 	RuntimeMemory              string     `gorm:"column:runtime_memory;type:varchar(64);not null;default:''" json:"runtimeMemory,omitempty"`
 	RuntimeBindingDigest       string     `gorm:"column:runtime_binding_digest;type:varchar(67);not null;default:''" json:"-"`
+	InputExpectation           string     `gorm:"column:input_expectation;type:mediumtext;not null;default:('')" json:"-"`
+	InputManifestState         string     `gorm:"column:input_manifest_state;type:varchar(16);not null;default:'unknown'" json:"-"`
+	InputManifest              string     `gorm:"column:input_manifest;type:mediumtext;not null;default:('')" json:"-"`
+	InputManifestDigest        string     `gorm:"column:input_manifest_digest;type:varchar(67);not null;default:''" json:"-"`
 	Status                     int        `gorm:"column:status" json:"status"`
 	Priority                   int        `gorm:"column:priority" json:"priority"`
 	Env                        string     `gorm:"column:env;type:json" json:"env"`

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -95,13 +96,21 @@ func TestArtifactURIsRoundTripThroughControlPlaneRPC(t *testing.T) {
 		t.Fatal(err)
 	}
 	var uris map[string]string
+	var references map[string]taskpayload.ArtifactReference
 	if err := sonic.UnmarshalString(stored.ArtifactURIs, &uris); err != nil {
 		t.Fatal(err)
+	}
+	if err := sonic.UnmarshalString(stored.ArtifactReferences, &references); err != nil {
+		t.Fatal(err)
+	}
+	registered := references["dist/output.txt"]
+	if registered.Size == nil || *registered.Size != int64(len("persisted artifact")) || registered.SHA256 != fmt.Sprintf("%x", sha256.Sum256([]byte("persisted artifact"))) {
+		t.Fatalf("registered artifact integrity metadata missing: %+v", registered)
 	}
 	if stored.Status != 4 || uris["dist/output.txt"] != fmt.Sprintf("artifacts/rpc-run/rpc-producer/rpc-producer-step/%x/dist/output.txt", sha256.Sum256([]byte("persisted artifact"))) {
 		t.Fatalf("artifact status/URIs not persisted: %+v", stored)
 	}
-	consumer := &taskpayload.JobRunTaskPayload{PipelineID: "pipeline", PipelineRunID: "rpc-run", JobRunID: "rpc-consumer", JobName: "consume", AgentID: agentID, ArtifactURIs: map[string]string{"build/dist/output.txt": uris["dist/output.txt"]}, ArtifactReferences: map[string]taskpayload.ArtifactReference{"build/dist/output.txt": artifactRPCReference()}, Steps: []taskpayload.StepPayload{
+	consumer := &taskpayload.JobRunTaskPayload{PipelineID: "pipeline", PipelineRunID: "rpc-run", JobRunID: "rpc-consumer", JobName: "consume", AgentID: agentID, ArtifactURIs: map[string]string{"build/dist/output.txt": uris["dist/output.txt"]}, ArtifactReferences: map[string]taskpayload.ArtifactReference{"build/dist/output.txt": registered}, Steps: []taskpayload.StepPayload{
 		{Name: "download", StepRunID: "rpc-consumer-step", Uses: "builtin:artifacts", Action: "download", Args: map[string]any{"job": "build", "paths": []string{"dist/*.txt"}}},
 	}}
 	if err := executeJobRun(ctx, conf, client, nil, consumer); err != nil {
@@ -238,6 +247,7 @@ func TestRemoteArtifactRPCIdentityOwnershipAndAtomicPersistence(t *testing.T) {
 		{"changed_store", func(r *agentv1.ReportJobRunStatusRequest) { r.ArtifactStorageId = "other-store" }, codes.PermissionDenied},
 		{"wrong_agent", func(r *agentv1.ReportJobRunStatusRequest) { r.AgentId = "other-agent" }, codes.PermissionDenied},
 		{"bad_digest", func(r *agentv1.ReportJobRunStatusRequest) { r.Artifacts[0].Sha256 = "invalid" }, codes.InvalidArgument},
+		{"negative_size", func(r *agentv1.ReportJobRunStatusRequest) { r.Artifacts[0].Size = -1 }, codes.InvalidArgument},
 		{"missing_metadata", func(r *agentv1.ReportJobRunStatusRequest) { r.Artifacts = nil }, codes.FailedPrecondition},
 		{"oversized_report", func(r *agentv1.ReportJobRunStatusRequest) {
 			for len(r.Artifacts) <= 1000 {
@@ -317,6 +327,86 @@ func TestRemoteArtifactRPCIdentityOwnershipAndAtomicPersistence(t *testing.T) {
 		req.ArtifactUris = map[string]string{"late.txt": req.Artifacts[0].StorageKey}
 		if err := call(req); status.Code(err) != codes.FailedPrecondition {
 			t.Fatalf("late metadata added: %v", err)
+		}
+	})
+	t.Run("old_reference_receipt_replay_does_not_rewrite_terminal", func(t *testing.T) {
+		id := "old-reference-receipt"
+		createJob(id)
+		if err := call(claim(id)); err != nil {
+			t.Fatal(err)
+		}
+		req := report(id)
+		if err := call(req); err != nil {
+			t.Fatal(err)
+		}
+		// 模拟升级前已原子登记的终态：原报告含摘要及长度，但缓存引用尚未富化
+		legacyReference := artifactRPCReference()
+		legacyReference.ExpiresAt = req.Artifacts[0].ExpiresAt
+		legacyJSON, err := sonic.Marshal(map[string]taskpayload.ArtifactReference{"output.txt": legacyReference})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.WithContext(ctx).Model(&model.JobRun{}).Where("job_run_id = ?", id).Update("artifact_references", string(legacyJSON)).Error; err != nil {
+			t.Fatal(err)
+		}
+		before, err := jobs.GetByJobRunID(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var registeredBefore model.ProjectArtifact
+		if err := db.WithContext(ctx).Where("job_run_id = ?", id).First(&registeredBefore).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := call(req); err != nil {
+			t.Fatalf("ACK-lost replay of original receipt rejected after metadata upgrade: %v", err)
+		}
+		foreignAgent := proto.Clone(req).(*agentv1.ReportJobRunStatusRequest)
+		foreignAgent.AgentId = "another-agent"
+		if err := call(foreignAgent); status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("legacy receipt replay bypassed authenticated agent ownership: %v", err)
+		}
+		after, err := jobs.GetByJobRunID(ctx, id)
+		if err != nil || !reflect.DeepEqual(before, after) {
+			t.Fatalf("replay changed original terminal record: before=%+v after=%+v error=%v", before, after, err)
+		}
+		var registeredAfter model.ProjectArtifact
+		if err := db.WithContext(ctx).Where("job_run_id = ?", id).First(&registeredAfter).Error; err != nil || !reflect.DeepEqual(registeredBefore, registeredAfter) {
+			t.Fatalf("replay changed registered artifact: before=%+v after=%+v error=%v", registeredBefore, registeredAfter, err)
+		}
+		req.Artifacts[0].Size++
+		if err := call(req); status.Code(err) != codes.FailedPrecondition {
+			t.Fatalf("changed original receipt accepted: %v", err)
+		}
+		after, err = jobs.GetByJobRunID(ctx, id)
+		if err != nil || !reflect.DeepEqual(before, after) {
+			t.Fatalf("rejected replay changed original terminal: %+v %v", after, err)
+		}
+	})
+	t.Run("explicit_empty_size_is_registered", func(t *testing.T) {
+		id := "registered-empty"
+		createJob(id)
+		if err := call(claim(id)); err != nil {
+			t.Fatal(err)
+		}
+		req := report(id)
+		file := req.Artifacts[0]
+		file.Size, file.Sha256 = 0, fmt.Sprintf("%x", sha256.Sum256(nil))
+		file.StorageKey = fmt.Sprintf("artifacts/security-run/%s/%s-step/%s/output.txt", id, id, file.Sha256)
+		req.ArtifactUris[file.Name] = file.StorageKey
+		if err := call(req); err != nil {
+			t.Fatal(err)
+		}
+		stored, err := jobs.GetByJobRunID(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var references map[string]taskpayload.ArtifactReference
+		if err := sonic.UnmarshalString(stored.ArtifactReferences, &references); err != nil {
+			t.Fatal(err)
+		}
+		reference := references[file.Name]
+		if reference.ValidateIntegrity() != nil || *reference.Size != 0 || reference.SHA256 != file.Sha256 {
+			t.Fatalf("explicit empty file became missing metadata: %s", stored.ArtifactReferences)
 		}
 	})
 	t.Run("legacy_report_is_not_registered", func(t *testing.T) {

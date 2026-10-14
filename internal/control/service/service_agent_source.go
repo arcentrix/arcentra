@@ -11,6 +11,9 @@ import (
 )
 
 func prepareJobSource(job *model.JobRun, req *agentv1.ReportJobRunStatusRequest, claim string) (map[string]any, error) {
+	if err := validatePinnedInputReport(job, req); err != nil {
+		return nil, err
+	}
 	evidence := req.SourceCheckout
 	if evidence == nil {
 		if model.IsJobRunTerminal(int(req.Status)) {

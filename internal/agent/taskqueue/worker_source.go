@@ -64,6 +64,14 @@ func validateJobSourceBinding(payload *taskqueue.JobRunTaskPayload) error {
 
 // handleSourceClone 在最终 checkout 后立即固定初始提交，后续制品、步骤和整作业重试不能重新取证
 func handleSourceClone(ctx context.Context, src *taskqueue.SourcePayload, workspace string) (*agentv1.SourceCheckout, error) {
+	return handleSourceCloneAtCommit(ctx, src, workspace, "")
+}
+
+// handleSourceCloneAtCommit 仅接受已验证控制面清单的提交，不改变原始源请求
+func handleSourceCloneAtCommit(ctx context.Context, src *taskqueue.SourcePayload, workspace, pinnedCommit string) (*agentv1.SourceCheckout, error) {
+	if pinnedCommit != "" && !sourceprovenance.ValidCommit(pinnedCommit) {
+		return nil, fmt.Errorf("pinned source commit is invalid")
+	}
 	if src == nil || src.Type == "" {
 		return nil, nil
 	}
@@ -127,22 +135,36 @@ func handleSourceClone(ctx context.Context, src *taskqueue.SourcePayload, worksp
 		}
 		return nil
 	}
-	args := []string{"clone", "--depth", "1"}
-	if src.Branch != "" {
-		args = append(args, "--branch", src.Branch)
-	}
-	args = append(args, "--", src.Repo, ".")
-	if err := run(args...); err != nil {
-		return nil, err
-	}
-	if src.Commit != "" {
-		if err := run("fetch", "--depth", "1", "origin", src.Commit); err != nil {
+	if pinnedCommit != "" {
+		// 不解析可变分支，即使分支移动或被删除也只获取原提交
+		initArgs := []string{"init", "--object-format=sha1", "."}
+		if len(pinnedCommit) == 64 {
+			initArgs = []string{"init", "--object-format=sha256", "."}
+		}
+		for _, args := range [][]string{initArgs, {"remote", "add", "--", "origin", src.Repo}, {"fetch", "--depth", "1", "origin", pinnedCommit}, {"checkout", "--detach", pinnedCommit}} {
+			if err := run(args...); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		args := []string{"clone", "--depth", "1"}
+		if src.Branch != "" {
+			args = append(args, "--branch", src.Branch)
+		}
+		args = append(args, "--", src.Repo, ".")
+		if err := run(args...); err != nil {
 			return nil, err
 		}
-		if err := run("checkout", "--detach", src.Commit); err != nil {
-			return nil, err
+		if src.Commit != "" {
+			if err := run("fetch", "--depth", "1", "origin", src.Commit); err != nil {
+				return nil, err
+			}
+			if err := run("checkout", "--detach", src.Commit); err != nil {
+				return nil, err
+			}
 		}
 	}
+
 	// 旧任务没有控制面绑定，不能凭本地观察合成新的证明
 	if src.BindingDigest == "" {
 		return nil, nil
@@ -150,6 +172,9 @@ func handleSourceClone(ctx context.Context, src *taskqueue.SourcePayload, worksp
 	commit, err := resolveInitialSourceCommit(ctx, workspace, env)
 	if err != nil {
 		return nil, err
+	}
+	if pinnedCommit != "" && commit != pinnedCommit {
+		return nil, fmt.Errorf("resolved source commit differs from immutable pin")
 	}
 	return &agentv1.SourceCheckout{BindingDigest: src.BindingDigest, ResolvedCommit: commit}, nil
 }

@@ -36,6 +36,18 @@ Both local and remote jobs are limited to 1,000 registered files across all uplo
 
 Local inter-job downloads also validate the current registry entry, expiry, size and digest before using the staging copy. Once registration is pruned, a leftover staging/source copy does not authorize a download. Reclaiming those source bytes is a separate, explicitly reviewed workspace-retention policy.
 
+### Agent download integrity and upgrade compatibility
+
+Agent-to-Agent output references carry `sha256` (exact lowercase SHA-256) and an explicit non-negative `size` as well as the original storage ID, location fingerprint and expiry. A JSON `size: 0` is a registered empty file; an omitted or null `size` is unknown. The authenticated terminal report validates the content metadata and execution ownership, then atomically commits the job receipt, enriched output references and `project_artifact` records. Downloads of outputs uploaded earlier in the same job use the exact upload result metadata.
+
+Both automatic `.artifacts` prefetch and explicit Agent artifact downloads require this metadata in baremetal and container modes. They stream into a temporary file, checking the byte count and SHA-256 before an atomic replacement. Overlong objects stop after the declared length plus one probe byte; short content, a digest mismatch, interrupted reads, cancellation and close failures leave the existing destination untouched and remove the temporary file. Path traversal, symlink and special-file rejection still applies. Failure is per file; previously verified files in a multi-file request are not rolled back.
+
+Downloads use a private mode-0700 staging directory and mode-0600 file. The Agent holds their original file descriptors, rechecks the staged bytes after the input stream closes, and verifies the directory/file identities immediately before rename. Detected replacement or modification fails without replacing the destination. This is not isolation from a malicious process running under the same host UID: portable rename has no inode-conditional compare-and-swap, so a continuously racing same-UID writer remains outside this guarantee. Container inputs are staged before their session starts; baremetal work must remain trusted. If a same-UID attacker moves the staging directory to an unknown name, cleanup removes its held contents but may leave the renamed empty directory; it never recursively deletes an unknown replacement.
+
+This is deliberately a fail-closed upgrade for artifact consumption. Historical records and previously accepted terminal receipts remain readable and replayable. A lost-ACK replay of the identical authenticated terminal report confirms its existing receipt without rewriting terminal status, timestamps, references or registry rows. Old cached references lacking the content fields are not silently enriched during replay, and URI-only records do not acquire fabricated checksums. Consequently, previously queued baremetal consumers of such references must fail explicitly rather than execute with unverified bytes. Baremetal runs without artifact inputs are unchanged. Historical missing metadata is also ineligible for immutable container input capture or any future immutable retry path; container retry remains unsupported.
+
+Upgrade the control plane and Agents together before starting new artifact-producing runs. To consume an old output, rerun its authorized producer on the upgraded system so the new run registers full content metadata, then dispatch a new consumer using that run's references. There is no automatic historical backfill or operator bypass. Do not set a missing size to zero, infer a digest solely from an object key, rewrite an accepted terminal receipt, or read a mutable bucket object to invent its original identity. A future explicit registry-based migration would need to verify the original project/run/job/step and object identity transactionally; this release does not perform one.
+
 Expiry blocks new downloads; it does not trigger automatic object deletion. There is no background cleanup timer, startup sweep or deletion side effect in the list/download APIs.
 
 Authenticated APIs are:
@@ -124,5 +136,4 @@ background-process sealing and special-file/FIFO upload rejection in [runtime ru
 `StartWorker` constructors at PR head `69baaebef85e1f161d4ea2298e6e180e1c56aa8c` (tested
 merge `1d2e29030741963897b7056c7d15249f2637d757`), with no reported cleanup leaks. These
 hosted test-binary results do not certify production storage, packaged-service or
-OCI-image startup, or upstream artifact-input DAG support. See [the bounded
-acceptance record](offline-runtime-acceptance.md).
+OCI-image startup. Subsequent [main run 38522727881](https://github.com/arcentrix/arcentra/actions/runs/38522727881) at `4acc47fbdeb23efeabf0bc80939ff0c276a0b574` verified the bounded linear A→S3→B chain with distinct sessions/workspaces and clean teardown. That historical run used trusted object storage; the new per-download digest and immutable input-manifest changes require their own exact-commit acceptance evidence. See [the bounded acceptance record](offline-runtime-acceptance.md).

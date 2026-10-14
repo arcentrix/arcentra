@@ -146,3 +146,14 @@ func (s *JobRunStore) CaptureRuntimeExpectation(ctx context.Context, pipelineID,
 	}
 	return writer.CaptureRuntimeExpectation(ctx, pipelineID, runID, jobID, agentID, binding, runtime)
 }
+
+// CaptureRuntimeInputExpectation 原子保存控制面选定的输入与源及运行时身份
+func (s *JobRunStore) CaptureRuntimeInputExpectation(ctx context.Context, pipelineID, runID, jobID, agentID string, binding *sourceprovenance.Binding, runtime *taskqueue.RuntimeRequest, uris map[string]string, refs map[string]taskqueue.ArtifactReference) error {
+	writer, ok := s.jobRunRepo.(interface {
+		CaptureRuntimeInputExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest, map[string]string, map[string]taskqueue.ArtifactReference) error
+	})
+	if !ok {
+		return fmt.Errorf("atomic job input capture unavailable")
+	}
+	return writer.CaptureRuntimeInputExpectation(ctx, pipelineID, runID, jobID, agentID, binding, runtime, uris, refs)
+}

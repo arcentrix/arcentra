@@ -508,6 +508,9 @@ func containerAcceptanceBoundJob(t *testing.T, f *controllerWorkerFixture, job *
 	if err != nil || digest != job.RuntimeBindingDigest || payload.Runtime.BindingDigest != digest {
 		t.Fatalf("Process/Kafka/MySQL runtime binding changed: %v", err)
 	}
+	if want == model.JobRunStatusSuccess {
+		assertImmutableJobInputRecord(t, job, &payload)
+	}
 	return job
 }
 

@@ -507,12 +507,12 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 		}
 	}
 	if jobErr == nil {
-		initialCheckout, jobErr = handleSourceClone(jobCtx, payload.Source, workspace)
+		initialCheckout, jobErr = checkoutJobInputs(jobCtx, grpcClient, agentConf, payload, workspace)
 	}
 	if jobErr == nil {
 		jobErr = validateArtifactReferences(payload.ArtifactURIs, payload.ArtifactReferences, reference, time.Now())
 		if jobErr == nil {
-			jobErr = handleArtifactDownload(jobCtx, payload.ArtifactURIs, workspace, st)
+			jobErr = handleArtifactDownload(jobCtx, payload.ArtifactURIs, payload.ArtifactReferences, workspace, st)
 		}
 	}
 	jobErr = executeJobAttempts(ctx, jobCtx, agentConf, grpcClient, execManager, payload, artifacts, workspace, jobErr, start, session)

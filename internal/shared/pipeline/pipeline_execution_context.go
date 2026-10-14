@@ -398,7 +398,7 @@ func (c *ExecutionContext) RecordArtifact(key, uri string, reference ...taskqueu
 		if c.ArtifactReferences == nil {
 			c.ArtifactReferences = make(map[string]taskqueue.ArtifactReference)
 		}
-		c.ArtifactReferences[key] = reference[0]
+		c.ArtifactReferences[key] = cloneArtifactReference(reference[0])
 	}
 }
 
@@ -409,7 +409,14 @@ func (c *ExecutionContext) GetPipelineRunID() string { return c.PipelineRunID }
 func (c *ExecutionContext) ArtifactReferenceSnapshot() map[string]taskqueue.ArtifactReference {
 	c.artifactMu.RLock()
 	defer c.artifactMu.RUnlock()
-	return maps.Clone(c.ArtifactReferences)
+	if c.ArtifactReferences == nil {
+		return nil
+	}
+	snapshot := make(map[string]taskqueue.ArtifactReference, len(c.ArtifactReferences))
+	for key, ref := range c.ArtifactReferences {
+		snapshot[key] = cloneArtifactReference(ref)
+	}
+	return snapshot
 }
 
 // ValidateLocalArtifactRead 检查本地制品下载的登记及有效期
@@ -418,4 +425,27 @@ func (c *ExecutionContext) ValidateLocalArtifactRead(ctx context.Context, job st
 		return nil
 	}
 	return c.CheckLocalArtifacts(ctx, job, names)
+}
+
+func cloneArtifactReference(ref taskqueue.ArtifactReference) taskqueue.ArtifactReference {
+	if ref.Size != nil {
+		size := *ref.Size
+		ref.Size = &size
+	}
+	return ref
+}
+
+// ArtifactInputSnapshot 在同一锁内返回位置与完整性元数据的独立快照
+func (c *ExecutionContext) ArtifactInputSnapshot() (map[string]string, map[string]taskqueue.ArtifactReference) {
+	c.artifactMu.RLock()
+	defer c.artifactMu.RUnlock()
+	uris := maps.Clone(c.ArtifactURIs)
+	var refs map[string]taskqueue.ArtifactReference
+	if c.ArtifactReferences != nil {
+		refs = make(map[string]taskqueue.ArtifactReference, len(c.ArtifactReferences))
+		for key, ref := range c.ArtifactReferences {
+			refs[key] = cloneArtifactReference(ref)
+		}
+	}
+	return uris, refs
 }

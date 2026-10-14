@@ -36,12 +36,13 @@ var excludedAuthMethods = map[string]bool{
 
 // Agent 凭证仅允许执行工作协议；管理 API 通过 HTTP 用户权限校验
 var agentUnaryMethods = map[string]bool{
-	"/agent.v1.AgentService/Heartbeat":           true,
-	"/agent.v1.AgentService/Unregister":          true,
-	"/agent.v1.AgentService/FetchStepRun":        true,
-	"/agent.v1.AgentService/ReportStepRunStatus": true,
-	"/agent.v1.AgentService/ReportJobRunStatus":  true,
-	"/agent.v1.AgentService/InspectJobExecution": true,
+	"/agent.v1.AgentService/Heartbeat":            true,
+	"/agent.v1.AgentService/Unregister":           true,
+	"/agent.v1.AgentService/FetchStepRun":         true,
+	"/agent.v1.AgentService/ReportStepRunStatus":  true,
+	"/agent.v1.AgentService/ReportJobRunStatus":   true,
+	"/agent.v1.AgentService/InspectJobExecution":  true,
+	"/agent.v1.AgentService/GetOrRecordJobInputs": true,
 }
 var agentStreamMethods = map[string]bool{
 	"/gateway.v1.GatewayService/PushLogs":   true,

@@ -179,6 +179,41 @@ workspace and staging semantics require a separate implementation; existing
 trusted-baremetal retry modes are unchanged. Branches, joins and disconnected
 roots are intentionally outside this linear-chain extension.
 
+## Immutable source and artifact inputs
+
+Container dispatch now records the controller-selected artifact input set in the
+same transaction as the original source/runtime/Agent binding. Before checkout,
+the authenticated Agent reads the original execution's manifest. An initial
+checkout pins its full Git SHA-1 or SHA-256 commit and the complete artifact input
+manifest before any artifact staging or user step. Later uses fetch only that
+exact commit, even if the branch moves or disappears, and verify identical input
+paths, object keys, storage identity, expiry, SHA256 and explicit byte length.
+The original v1 source/runtime bindings and task payload are not rewritten.
+Source-free jobs pin an explicit versioned empty-source manifest, including an
+empty artifact list when appropriate.
+
+Only controller-selected, nonexpired registered outputs from a successful
+producer job and successful producing step in the same project/pipeline/run are
+eligible. Scoped logical paths remain `producerJobName/artifactName`; stored
+object keys retain the exact producing job/step/content identity. Legacy
+artifacts with unknown digest or length cannot become immutable inputs. The
+manifest records authenticated Agent observations and registered metadata; it
+is not an attestation of source origin, subsequent workspace contents, or build
+reproducibility.
+
+GET and first-record/replay checks require the same enabled authenticated Agent,
+original claim, exact source/runtime bindings, and running job/pipeline. The first
+record is transactional; identical replay does not rewrite it, and changed inputs
+fail closed. Terminal source evidence cannot contradict an existing pin. An
+unsupported controller RPC blocks container staging. Baremetal source behavior
+and historical terminal receipt replay remain unchanged.
+
+Apply the [explicit immutable-input migration](migrations/005_immutable_job_inputs.md)
+before upgrading container Agents. Existing records remain `unknown`; terminal
+source observations are never backfilled as first-checkout pins. This prerequisite
+does not enable `failed_step` or `whole_job` container retry, automatic generation
+dispatch, or command re-execution after restart.
+
 ## Review-only configuration template
 
 These are complete **runtime-specific** blocks to merge into existing reviewed
@@ -287,6 +322,7 @@ build-tool compatibility.
 1. Preserve existing journals, identity, outbox and audit evidence. Reconcile
    unresolved execution effects; do not automatically rerun interrupted commands.
 2. Rehearse backup/restore and the [runtime schema migration](migrations/004_offline_runtime_contract.md)
+   plus the [immutable-input migration](migrations/005_immutable_job_inputs.md)
    on a representative staging database. Run `arcentra-cli migrate --conf
    /absolute/path/to/reviewed-config.toml` explicitly on the approved destination.
    Startup never migrates automatically. Do not backfill fabricated runtime bindings.

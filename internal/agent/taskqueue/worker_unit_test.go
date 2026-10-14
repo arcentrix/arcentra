@@ -37,7 +37,7 @@ func TestWorkspacePreparationAndArtifactFailure(t *testing.T) {
 	if !filepath.IsAbs(workspace) {
 		t.Fatal("workspace must be absolute")
 	}
-	if err := handleArtifactDownload(context.Background(), map[string]string{"build/output": "object"}, workspace, nil); err == nil {
+	if err := handleArtifactDownload(context.Background(), map[string]string{"build/output": "object"}, nil, workspace, nil); err == nil {
 		t.Fatal("missing artifact storage ignored")
 	}
 }
