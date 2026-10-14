@@ -10,6 +10,50 @@ from unittest import mock
 SPEC = importlib.util.spec_from_file_location("containerd_guard", Path(__file__).with_name("containerd_runtime_guard.py"))
 GUARD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GUARD)
+LOG_SPEC = importlib.util.spec_from_file_location("containerd_test_log", Path(__file__).with_name("verify_containerd_test_log.py"))
+TEST_LOG = importlib.util.module_from_spec(LOG_SPEC)
+LOG_SPEC.loader.exec_module(TEST_LOG)
+
+
+class RuntimeTestLogTests(unittest.TestCase):
+    expected = ["TestSession", "TestDurable", "TestDurable/cancel", "TestDurable/timeout", "TestRecovery"]
+    round = "\n".join([
+        "=== RUN   TestSession", "--- PASS: TestSession (1.00s)",
+        "=== RUN   TestDurable", "=== RUN   TestDurable/cancel",
+        "=== RUN   TestDurable/timeout", "--- PASS: TestDurable (2.00s)",
+        "    --- PASS: TestDurable/cancel (0.50s)",
+        "    --- PASS: TestDurable/timeout (1.00s)",
+        "=== RUN   TestRecovery", "--- PASS: TestRecovery (1.00s)", "",
+    ])
+
+    def test_accepts_three_complete_repetitions(self):
+        TEST_LOG.verify(self.round * 3 + "PASS\n", 3, self.expected)
+
+    def test_rejects_missing_repetition_or_deadline_subtest(self):
+        for text in (self.round * 2 + "PASS\n", (self.round * 3 + "PASS\n").replace("    --- PASS: TestDurable/timeout (1.00s)\n", "", 1)):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                TEST_LOG.verify(text, 3, self.expected)
+
+    def test_rejects_indented_skip_failure_or_no_tests(self):
+        for failure in ("    --- SKIP: TestDurable/timeout (0.00s)", "--- FAIL: TestRecovery (1.00s)", "FAIL", "testing: warning: no tests to run"):
+            with self.subTest(failure=failure), self.assertRaises(ValueError):
+                TEST_LOG.verify(self.round * 3 + failure + "\nPASS\n", 3, self.expected)
+
+    def test_rejects_duplicate_pass_missing_start_and_extra_round(self):
+        complete = self.round * 3 + "PASS\n"
+        for text in (complete + "--- PASS: TestRecovery (1.00s)\n", complete.replace("=== RUN   TestRecovery\n", "", 1), self.round * 4 + "PASS\n", complete.replace("=== RUN   TestSession\n", "=== RUN   TestSession\n=== RUN   TestSession\n", 1)):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                TEST_LOG.verify(text, 3, self.expected)
+
+    def test_rejects_missing_or_duplicate_success_summary(self):
+        for suffix in ("", "PASS\nPASS\n"):
+            with self.subTest(suffix=suffix), self.assertRaises(ValueError):
+                TEST_LOG.verify(self.round * 3 + suffix, 3, self.expected)
+
+    def test_rejects_invalid_expectations(self):
+        for repetitions, expected in ((0, self.expected), (1, []), (1, ["TestSession", "TestSession"])):
+            with self.subTest(repetitions=repetitions, expected=expected), self.assertRaises(ValueError):
+                TEST_LOG.verify(self.round + "PASS\n", repetitions, expected)
 
 
 class RuntimeGuardTests(unittest.TestCase):
@@ -168,6 +212,15 @@ class RuntimeGuardTests(unittest.TestCase):
         self.assertIn('ARCENTRA_CONTAINERD_FIFO_DIR=$BASE/work/fifo', script)
         self.assertIn('sha256sum --check --strict', script)
         self.assertIn('Missing mandatory runtime cleanup receipt', script)
+
+    def test_shell_repeats_sessions_inside_existing_deadline(self):
+        script = Path(__file__).with_name("run_containerd_runtime.sh").read_text()
+        self.assertIn('"-test.count=$repetitions"', script)
+        self.assertIn(' 5m sessions 3 ', script)
+        self.assertIn(' 3m sandbox 1 TestContainerdAcceptance', script)
+        self.assertIn(' 8m full-job 1 TestRealContainerJobAcceptance', script)
+        self.assertIn('TestDurableControllerContainerdAcceptance/cancel TestDurableControllerContainerdAcceptance/timeout', script)
+        self.assertIn('verify_containerd_test_log.py "$EVIDENCE/$name.log" "$repetitions" "$@"', script)
 
 
 if __name__ == "__main__":

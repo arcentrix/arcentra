@@ -93,16 +93,17 @@ TEST_ENV=(env -i
   ARCENTRA_TEST_S3_ENDPOINT=http://127.0.0.1:19000 ARCENTRA_TEST_S3_ACCESS_KEY=ci-only-s3-user ARCENTRA_TEST_S3_SECRET_KEY=ci-only-s3-password
 )
 run_test() {
-  local binary=$1 expression=$2 duration=$3 name=$4
-  "${TEST_ENV[@]}" "$PWD/.acceptance/containerd-bin/$binary.test" -test.v -test.count=1 \
+  local binary=$1 expression=$2 duration=$3 name=$4 repetitions=$5
+  shift 5
+  "${TEST_ENV[@]}" "$PWD/.acceptance/containerd-bin/$binary.test" -test.v "-test.count=$repetitions" \
     "-test.run=$expression" "-test.timeout=$duration" 2>&1 | tee "$EVIDENCE/$name.log"
-  # A regex typo or accidental Skip must never turn into a green acceptance job.
-  grep -Eq -- '^--- PASS: ' "$EVIDENCE/$name.log"
-  if grep -Eq -- '^--- SKIP: |testing: warning: no tests to run' "$EVIDENCE/$name.log"; then return 1; fi
+  # Check every repetition, including cancellation/deadline subtests; never accept Skip.
+  python3 scripts/acceptance/verify_containerd_test_log.py "$EVIDENCE/$name.log" "$repetitions" "$@"
 }
-run_test sandbox '^TestContainerdAcceptance$' 3m sandbox
-run_test sandboxexec '^Test(SessionContainerdAcceptance|DurableControllerContainerdAcceptance|DurableControllerActiveRecoveryContainerdAcceptance)$' 5m sessions
-for expected in TestSessionContainerdAcceptance TestDurableControllerContainerdAcceptance TestDurableControllerActiveRecoveryContainerdAcceptance; do
-  grep -Fq -- "--- PASS: $expected (" "$EVIDENCE/sessions.log"
-done
-run_test taskqueue '^TestRealContainerJobAcceptance$' 8m full-job
+run_test sandbox '^TestContainerdAcceptance$' 3m sandbox 1 TestContainerdAcceptance
+# Three repetitions share the original five-minute budget, with fresh scenario roots.
+run_test sandboxexec '^Test(SessionContainerdAcceptance|DurableControllerContainerdAcceptance|DurableControllerActiveRecoveryContainerdAcceptance)$' 5m sessions 3 \
+  TestSessionContainerdAcceptance TestDurableControllerContainerdAcceptance \
+  TestDurableControllerContainerdAcceptance/cancel TestDurableControllerContainerdAcceptance/timeout \
+  TestDurableControllerActiveRecoveryContainerdAcceptance
+run_test taskqueue '^TestRealContainerJobAcceptance$' 8m full-job 1 TestRealContainerJobAcceptance

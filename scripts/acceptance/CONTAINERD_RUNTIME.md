@@ -12,6 +12,12 @@ Operator policies remain disabled by default. This job alone does
 not opt in deployments or establish production readiness. See [the exact acceptance
 record and configuration](../../docs/offline-runtime-acceptance.md).
 
+The subsequent main-branch run `38514828128` exposed a deadline-propagation
+failure despite clean resource teardown. It is not a passing final-main result.
+The correction and repeated-runtime harness are described below. Verify the
+exact candidate and post-merge checks rather than treating earlier PR passes
+as sufficient evidence for a newer revision.
+
 ## Scope and execution
 
 The authorized entry point is `scripts/acceptance/run_containerd_runtime.sh` in
@@ -84,6 +90,16 @@ opt-in or required data fails instead of skipping. The harness runs:
 3. `TestRealContainerJobAcceptance` in `./internal/agent/taskqueue`: actual
    Process submission through Kafka, authenticated Agent status/log delivery,
    container execution, MySQL run state and S3 artifact content.
+
+The backend and whole-job tests run once, within their unchanged three- and
+eight-minute budgets. The session/durable/active-recovery suite uses
+`-test.count=3` under its original shared `-test.timeout=5m`, with fresh scenario
+subdirectories on each repetition. This repeats both durable `cancel` and
+`timeout` checks without extending any CI or supervisor deadline. The offline
+log verifier requires a matching `RUN` and `PASS` for every expected occurrence,
+including all three cancel/timeout subtests, plus the successful binary summary.
+Any failure, skip, missing repetition, unmatched duplicate or no-tests warning
+fails acceptance. No assertion or cleanup requirement is relaxed.
 
 The shell sets the three existing sandbox/session/durable opt-ins, the new
 `ARCENTRA_CONTAINERD_ACCEPTANCE` and `ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE`
@@ -194,3 +210,29 @@ independent download verification confirmed `passed: true`, empty
 successful dependency teardown. This second result establishes the ordinary-entry
 path at that revision; packaged-service, release-OCI and destination-specific
 validation remain separate.
+
+### Main regression found: deadline propagation, clean teardown
+
+[Main run 38514828128](https://github.com/arcentrix/arcentra/actions/runs/38514828128)
+tested exact checkout `ec63a8f511be0deb968f781a1d2e6ae971913cf8` and failed
+`TestDurableControllerContainerdAcceptance/timeout` with:
+
+```text
+deadline was not propagated: wait exec exit: rpc error: code = DeadlineExceeded desc = stream terminated by RST_STREAM with error code: CANCEL
+```
+
+Backend, standalone session and active-process recovery passed. The whole-job
+suite was not executed after the failed session suite. This failure must not be
+hidden by the earlier PR passes or by successful cleanup.
+
+[Artifact 11871591261](https://github.com/arcentrix/arcentra/actions/runs/38514828128/artifacts/11871591261)
+was independently downloaded (843 bytes) and matched SHA-256
+`757e6ea17f101b028806c5d8c7e7505d940bb6821bd73fc48e59000309489d1d`.
+Its cleanup receipt reports `passed: true`, `leaksBeforeFallback: []`, and
+`cleanupErrors: []`; runtime/image pins match and dependency teardown passed.
+These cleanup facts do not turn the failed functional assertion into a pass.
+The error-propagation fix normalizes only genuine context or gRPC cancellation
+and deadline errors, preserving the original error and cleanup failures. The
+three-repetition harness remains a merge gate: verify the exact candidate and
+post-merge runs, including whole-job execution and cleanup, rather than treating
+this historical failed run or earlier PR passes as evidence for a newer revision.
