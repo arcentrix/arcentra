@@ -1,6 +1,6 @@
 # Offline containerd acceptance and operator opt-in
 
-## Verified result and the next gate
+## Verified implementation and ordinary production-entry results
 
 The first hosted implementation-level runtime acceptance passed on **2026-10-14**:
 
@@ -35,14 +35,30 @@ Agent worker components without opening the production startup gate. Those real
 runtime results therefore establish the implemented code paths, not normal
 production startup admission.
 
-The next candidate changes the compiled `OfflineRuntimeAccepted` constant to
-`true` and must rerun this hosted suite through the ordinary production Control
-configuration/provider and Agent `StartWorker` entry points, with no test-only
-policy/worker assembly. **Gate-enabled production-entry result: pending.** Record
-its exact revision, successful run and clean receipt here only after verification.
-A constant change, local unit test, or the earlier gate-off run is insufficient.
-This remains distinct from launching packaged service binaries or release OCI
-images in an intended deployment.
+The independent **gate-enabled ordinary production-entry acceptance also passed
+on 2026-10-14**:
+
+- [Run 38512588313](https://github.com/arcentrix/arcentra/actions/runs/38512588313),
+  [job 115684232550](https://github.com/arcentrix/arcentra/actions/runs/38512588313/job/115684232550)
+- PR head `69baaebef85e1f161d4ea2298e6e180e1c56aa8c`; GitHub tested merge commit
+  `1d2e29030741963897b7056c7d15249f2637d757` over the same main
+  `e9dca0a9fef3e788842534811f2c015e17a005e8`
+- All five named runtime tests and every workflow step passed. The whole-job log
+  explicitly confirms: `production gate is open; actual NewProcess and StartWorker
+  constructors are in use`. The configured production Control provider and Agent
+  worker startup were exercised without the gate-off test-only assembly.
+- [Artifact 11870328620](https://github.com/arcentrix/arcentra/actions/runs/38512588313/artifacts/11870328620),
+  843 bytes, independently downloaded and verified against SHA-256
+  `feb0707c16e9f0e0bf57ee7cd752dd0c8216937c98116252eacfc4965cde395f`
+- `cleanup.json`: `passed: true`, `leaksBeforeFallback: []`, `cleanupErrors: []`;
+  the private FIFO check and dependency teardown passed. Runtime versions, binary
+  checksums and the verified immutable image match the earlier approved pins.
+
+This second result verifies the compiled `OfflineRuntimeAccepted = true` path at
+its exact tested revision, rather than inferring it from the earlier gate-off run.
+Both results use race-enabled test binaries and disposable real dependencies.
+They do not establish startup of packaged service binaries or release OCI images
+in an intended deployment. Changed runtime code requires fresh final-code checks.
 
 Operator policies remain **disabled by default**, including in a gate-enabled
 build. No existing Agent, pipeline, label, configuration file or database row is
@@ -187,9 +203,10 @@ build-tool compatibility.
    on a representative staging database. Run `arcentra-cli migrate --conf
    /absolute/path/to/reviewed-config.toml` explicitly on the approved destination.
    Startup never migrates automatically. Do not backfill fabricated runtime bindings.
-3. Verify the exact gate-enabled build's still-pending production-entry acceptance,
-   then complete destination-specific release-image, storage, transport and durable-
-   volume checks. The earlier implementation-level result is not a substitute.
+3. Verify the reviewed gate-enabled build against the ordinary production-entry
+   evidence above; changed runtime code requires its own final-code acceptance.
+   Complete destination-specific release-image, storage, transport and durable-
+   volume checks. Hosted test binaries do not certify the deployment artifact.
 4. With explicit operator intent, set Control `pipeline.offlineRuntime.enabled`,
    Agent `agent.sandbox.enable`, and Agent `agent.sandbox.containerd.policy.enabled`
    to `true`, preserving the reviewed matching allowlist/maxima and all private

@@ -119,7 +119,10 @@ The offline single-job implementation additionally passed byte-verified S3 outpu
 background-process sealing and special-file/FIFO upload rejection in [runtime run
 38508866022](https://github.com/arcentrix/arcentra/actions/runs/38508866022), PR head
 `e7132be275c144a2eadc03b61e3c4f16dd302c4e` (tested merge
-`12e6cd81e2ca6f79bb5967f457aa6b3f377b1a9d`). This gate-off implementation fixture
-does not establish ordinary gate-enabled startup, production storage, OCI-image
-startup or upstream artifact-input DAG support. See [the bounded acceptance
-record](offline-runtime-acceptance.md).
+`12e6cd81e2ca6f79bb5967f457aa6b3f377b1a9d`). Independent gate-enabled
+[run 38512588313](https://github.com/arcentrix/arcentra/actions/runs/38512588313) repeated those checks through actual production `NewProcess` and
+`StartWorker` constructors at PR head `69baaebef85e1f161d4ea2298e6e180e1c56aa8c` (tested
+merge `1d2e29030741963897b7056c7d15249f2637d757`), with no reported cleanup leaks. These
+hosted test-binary results do not certify production storage, packaged-service or
+OCI-image startup, or upstream artifact-input DAG support. See [the bounded
+acceptance record](offline-runtime-acceptance.md).

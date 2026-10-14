@@ -5,9 +5,10 @@ fresh GitHub-hosted `ubuntu-24.04` VM, with a 25-minute job limit. It runs for P
 and pushes to `main`; it does not use `pull_request_target`, self-hosted runners,
 repository secrets, OIDC, write permissions, or retained checkout credentials.
 The first implementation-level run passed with
-`pkg/taskqueue.OfflineRuntimeAccepted = false`. The separate gate-on candidate
-must verify normal production configuration/worker entry points; that result is
-still pending. Operator policies remain disabled by default. This job alone does
+`pkg/taskqueue.OfflineRuntimeAccepted = false`. The independent gate-on run also
+passed normal production configuration and actual `NewProcess`/`StartWorker` entry
+points. Both use hosted test binaries, not packaged services or release OCI images.
+Operator policies remain disabled by default. This job alone does
 not opt in deployments or establish production readiness. See [the exact acceptance
 record and configuration](../../docs/offline-runtime-acceptance.md).
 
@@ -182,5 +183,14 @@ now provides the gate-off implementation result at PR head
 `12e6cd81e2ca6f79bb5967f457aa6b3f377b1a9d`). Its artifact
 `11868404908` SHA-256 is
 `2c391b491628347a0ca3b2f2a497f781e211f943af7659cc9f247bc4a5efa4b3`;
-cleanup reported no leaks or errors. The gate-on ordinary-entry result remains
-pending and must not be inferred from this earlier pass.
+cleanup reported no leaks or errors. Independent gate-enabled [run 38512588313](https://github.com/arcentrix/arcentra/actions/runs/38512588313) also passed
+all five tests, with the whole-job path using actual `NewProcess` and `StartWorker`
+constructors, at
+PR head `69baaebef85e1f161d4ea2298e6e180e1c56aa8c` (tested merge
+`1d2e29030741963897b7056c7d15249f2637d757`). Its artifact `11870328620` SHA-256 is
+`feb0707c16e9f0e0bf57ee7cd752dd0c8216937c98116252eacfc4965cde395f`;
+independent download verification confirmed `passed: true`, empty
+`leaksBeforeFallback` and empty `cleanupErrors`, matching runtime/image pins and
+successful dependency teardown. This second result establishes the ordinary-entry
+path at that revision; packaged-service, release-OCI and destination-specific
+validation remain separate.

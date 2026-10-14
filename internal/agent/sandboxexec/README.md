@@ -94,9 +94,9 @@ The ordinary tests use an injected runtime; they cover phase-boundary recovery,
 exclusive ownership, tombstones, exact cleanup, no rerun, sealing/cancellation,
 quotas, corrupt and linked files, workspace replacement, and journal write/sync/
 rename failures. They do not constitute real-containerd acceptance. The separately authorized hosted runtime stage passed; it is distinct from these
-injected tests and from the still-pending gate-enabled production-entry candidate.
+injected tests. The independent gate-enabled production-entry stage also passed in hosted test binaries.
 
-### Durable runtime acceptance harness (hosted implementation pass)
+### Durable runtime acceptance harness (hosted implementation and ordinary-entry passes)
 
 [Run 38508866022](https://github.com/arcentrix/arcentra/actions/runs/38508866022)
 passed both durable tests, including `TestDurableControllerActiveRecoveryContainerdAcceptance`:
@@ -107,9 +107,14 @@ Process/Kafka/Agent/MySQL/S3 job and clean FIFO/runtime cleanup. Exact PR head:
 `e7132be275c144a2eadc03b61e3c4f16dd302c4e`; tested merge:
 `12e6cd81e2ca6f79bb5967f457aa6b3f377b1a9d`.
 
-The compiled production gate was false in that run. The gate-on candidate's normal
-production configuration and `StartWorker` acceptance is **pending**. Operator
-policies remain disabled by default. See [the evidence and operator guide](../../../docs/offline-runtime-acceptance.md)
+The compiled production gate was false in that run. Independent gate-enabled
+[run 38512588313](https://github.com/arcentrix/arcentra/actions/runs/38512588313) passed the same five runtime tests; its integrated whole-job path used normal
+production configuration and actual `NewProcess`/`StartWorker` constructors, with
+a clean cleanup receipt.
+Exact PR head: `69baaebef85e1f161d4ea2298e6e180e1c56aa8c`; tested merge:
+`1d2e29030741963897b7056c7d15249f2637d757`. These are hosted test-binary results, not
+packaged-service or release-OCI startup certification. Operator policies remain
+disabled by default. See [the evidence and operator guide](../../../docs/offline-runtime-acceptance.md)
 for the exact verified scope and the independent release/deployment limitations.
 
 `TestDurableControllerContainerdAcceptance` is separately build-tagged and requires
@@ -146,5 +151,5 @@ go test -tags sandbox_acceptance -run '^$' ./internal/agent/sandboxexec
 Do not run the tagged test, provision its daemon, change host permissions, use sudo,
 or install runtime software merely because the test compiles. Those remain a
 separate authorized acceptance stage. Follow the existing hosted harness; a passing
-implementation test does not automatically opt in a deployment or certify the
-gate-enabled production-entry candidate.
+implementation or ordinary-entry test does not automatically opt in a deployment
+or certify its packaged services, release OCI images or destination infrastructure.

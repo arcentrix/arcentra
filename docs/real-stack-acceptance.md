@@ -57,7 +57,10 @@ passed implementation-level container execution and cleanup at PR head
 `e7132be275c144a2eadc03b61e3c4f16dd302c4e` (tested merge
 `12e6cd81e2ca6f79bb5967f457aa6b3f377b1a9d`). It reuses these synthetic dependencies
 in another fresh schema, while its jobs run with a non-root Agent and private
-rootful containerd. Its compiled production gate was false; the gate-on ordinary
-configuration/worker-entry candidate remains pending. See [exact evidence and
+rootful containerd. Its compiled production gate was false. Independent gate-enabled
+[run 38512588313](https://github.com/arcentrix/arcentra/actions/runs/38512588313) also passed actual `NewProcess` and `StartWorker` constructors at PR head
+`69baaebef85e1f161d4ea2298e6e180e1c56aa8c` (tested merge
+`1d2e29030741963897b7056c7d15249f2637d757`), with a clean cleanup receipt. Both stages
+use hosted test binaries rather than packaged services. See [exact evidence and
 unchanged offline profile limits](offline-runtime-acceptance.md). Production OCI
 image startup and destination-specific acceptance remain separate.
