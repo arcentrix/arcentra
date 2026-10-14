@@ -5,6 +5,7 @@ package service_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
@@ -40,7 +41,7 @@ func mysqlAuthGeneration(t *testing.T, db *gorm.DB, prefix, pipeline string) (ta
 	if err := db.WithContext(ctx).AutoMigrate(&model.Agent{}, &model.JobRunGeneration{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range []any{&model.Agent{AgentID: prefix + "agent", IsEnabled: 1}, &model.PipelineRun{RunID: prefix + "run", PipelineID: pipeline, Status: model.PipelineStatusRunning}, &model.JobRun{JobRunID: prefix + "job", PipelineID: pipeline, PipelineRunID: prefix + "run", Status: 1}} {
+	for _, v := range []any{&model.Agent{AgentID: prefix + "agent", IsEnabled: 1}, &model.PipelineRun{Env: "{}", RunID: prefix + "run", PipelineID: pipeline, Status: model.PipelineStatusRunning}, &model.JobRun{Env: "{}", ArtifactReferences: "{}", ArtifactURIs: "{}", JobRunID: prefix + "job", PipelineID: pipeline, PipelineRunID: prefix + "run", Status: 1}} {
 		if err := db.WithContext(ctx).Create(v).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -52,7 +53,7 @@ func mysqlAuthGeneration(t *testing.T, db *gorm.DB, prefix, pipeline string) (ta
 		if index > 0 {
 			previous = prefix + "step-1"
 		}
-		if err := db.WithContext(ctx).Create(&model.StepRun{StepRunID: id, Name: "shell", JobRunID: prefix + "job", PipelineID: pipeline, PipelineRunID: prefix + "run", Attempt: index + 1, RetryMode: "whole_job", RetryPolicy: policyJSON, PreviousStepRunID: previous, Uses: "shell", Status: 1}).Error; err != nil {
+		if err := db.WithContext(ctx).Create(&model.StepRun{Args: "{}", Env: "{}", Secrets: "{}", LabelSelector: "{}", StepRunID: id, Name: "shell", JobRunID: prefix + "job", PipelineID: pipeline, PipelineRunID: prefix + "run", Attempt: index + 1, RetryMode: "whole_job", RetryPolicy: policyJSON, PreviousStepRunID: previous, Uses: "shell", Status: 1}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -86,7 +87,7 @@ func mysqlAuthSeed(t *testing.T, db *gorm.DB, prefix, project, pipeline, actor, 
 		t.Fatal(err)
 	}
 	for _, value := range []any{
-		&model.Pipeline{PipelineID: pipeline, ProjectID: project, IsEnabled: 1}, &model.Project{ProjectID: project, IsEnabled: 1, Status: model.ProjectStatusActive},
+		&model.Pipeline{Metadata: "{}", PipelineID: pipeline, ProjectID: project, IsEnabled: 1}, &model.Project{ProjectID: project, IsEnabled: 1, Status: model.ProjectStatusActive},
 		&model.User{UserID: actor, IsEnabled: 1}, &model.User{UserID: voter, IsEnabled: 1}, &model.Role{RoleID: prefix + "review-role", Name: "review", IsEnabled: 1},
 		&model.Team{TeamID: prefix + "team", IsEnabled: 1}, &model.TeamMember{TeamID: prefix + "team", UserID: voter},
 		&model.RoleGrant{GrantID: prefix + "requester-grant", SubjectType: "user", SubjectID: actor, RoleID: prefix + "review-role", ScopeType: "project", ScopeID: project, IsEnabled: 1},
@@ -292,7 +293,7 @@ func mysqlAuthArtifact(t *testing.T, db *gorm.DB, prefix, project, pipeline stri
 	hash := strings.Repeat("e", 64)
 	size := int64(42)
 	key := "artifacts/" + prefix + "run/" + prefix + "producer/" + prefix + "producer-step/" + hash + "/result.txt"
-	for _, row := range []any{&model.JobRun{JobRunID: prefix + "producer", JobName: "producer", PipelineID: pipeline, PipelineRunID: prefix + "run", Status: model.JobRunStatusSuccess}, &model.StepRun{StepRunID: prefix + "producer-step", JobRunID: prefix + "producer", PipelineID: pipeline, PipelineRunID: prefix + "run", Status: model.JobRunStatusSuccess}, &model.ProjectArtifact{ArtifactID: prefix + "artifact", ProjectID: project, PipelineID: pipeline, PipelineRunID: prefix + "run", JobRunID: prefix + "producer", StepRunID: prefix + "producer-step", Name: "result.txt", StorageID: "store", StorageFingerprint: strings.Repeat("b", 64), StoragePath: key, SHA256: hash, Size: size, ExpiresAt: &expiry}} {
+	for _, row := range []any{&model.JobRun{Env: "{}", ArtifactReferences: "{}", ArtifactURIs: "{}", JobRunID: prefix + "producer", JobName: "producer", PipelineID: pipeline, PipelineRunID: prefix + "run", Status: model.JobRunStatusSuccess}, &model.StepRun{Args: "{}", Env: "{}", Secrets: "{}", LabelSelector: "{}", RetryPolicy: "null", StepRunID: prefix + "producer-step", JobRunID: prefix + "producer", PipelineID: pipeline, PipelineRunID: prefix + "run", Status: model.JobRunStatusSuccess}, &model.ProjectArtifact{ArtifactID: prefix + "artifact", ProjectID: project, PipelineID: pipeline, PipelineRunID: prefix + "run", JobRunID: prefix + "producer", StepRunID: prefix + "producer-step", Name: "result.txt", StorageID: "store", StorageFingerprint: strings.Repeat("b", 64), StoragePath: key, SHA256: hash, Size: size, ExpiresAt: &expiry}} {
 		if err := db.Create(row).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -663,10 +664,50 @@ func TestRetryApprovalAuthorizationGraphFixtureSmoke(t *testing.T) {
 			f := mysqlAuthSeed(t, db, "smoke-", "smoke-project", "smoke-pipeline", "smoke-alice", "smoke-bob", 60, expiry)
 			t.Cleanup(func() { _ = repo.SetRetryApprovalAuthorizer(f.repos, nil) })
 			mysqlAuthApprove(t, f)
+			mysqlAuthAssertJSONRows(t, db)
 			response, err := f.admit(context.Background())
 			if err != nil || response == nil || !response.ExecutionAllowed || response.Admission == nil {
 				t.Fatal("canonical real-authorizer fixture invalid", response, err)
 			}
 		})
+	}
+}
+
+// Validate every JSON column in the real-authorizer fixture under SQLite too,
+// so permissive SQLite storage cannot hide another MySQL Error 3140.
+func mysqlAuthAssertJSONRows(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, entity := range []any{&model.Agent{}, &model.PipelineRun{}, &model.Pipeline{}, &model.Project{}, &model.JobRun{}, &model.StepRun{}, &model.ProjectArtifact{}, &model.ApprovalRequest{}, &model.ApprovalDecision{}, &model.JobRunGeneration{}, &model.User{}, &model.TeamMember{}, &model.Team{}, &model.Permission{}, &model.RolePermissionBinding{}, &model.Role{}, &model.RoleGrant{}} {
+		stmt := &gorm.Statement{DB: db}
+		if err := stmt.Parse(entity); err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range stmt.Schema.Fields {
+			if field.TagSettings["TYPE"] != "json" {
+				continue
+			}
+			rows, err := db.Model(entity).Select(field.DBName).Rows()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rows.Next() {
+				var value *string
+				if err := rows.Scan(&value); err != nil {
+					_ = rows.Close()
+					t.Fatal(err)
+				}
+				if value != nil && !json.Valid([]byte(*value)) {
+					_ = rows.Close()
+					t.Fatalf("invalid fixture JSON %s.%s: %q", stmt.Table, field.DBName, *value)
+				}
+			}
+			if err := rows.Err(); err != nil {
+				_ = rows.Close()
+				t.Fatal(err)
+			}
+			if err := rows.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 }

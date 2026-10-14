@@ -463,6 +463,9 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 			t.Fatalf("workspace cleanup left %s", entry.Name())
 		}
 	}
+	if t.Failed() {
+		return
+	}
 	t.Log("real linear-chain failure, control-queue cancellation, timeout, registered artifact transfer, subsequent healthy execution and exact owned cleanup verified; bounded whole-job retry verified; branching, parallel jobs and failed-step continuation remain unsupported")
 }
 

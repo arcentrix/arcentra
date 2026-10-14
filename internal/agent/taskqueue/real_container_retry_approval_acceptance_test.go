@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"gorm.io/gorm"
 )
 
 func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, retained map[string]string, services *controlservice.Services, policy *retryapproval.Policy, lifecycle *containerApprovalLifecycle) {
@@ -212,6 +213,9 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 			}
 		})
 	}
+	if t.Failed() {
+		return
+	}
 	t.Log("durable retry approval actual Process/Kafka/TLS Agent/MySQL/containerd/S3 verified: pending task-free pinned SHA and input evidence, two-voter finite plan, duplicate vote and admission ACK replay, cancellation and revoked-successor denial, exact cleanup")
 }
 
@@ -279,9 +283,12 @@ func containerApprovalPending(t *testing.T, f *controllerWorkerFixture, jobID st
 	if err != nil || state != (sandbox.ResourceState{}) {
 		t.Fatalf("pending approval already created runtime: %+v %v", state, err)
 	}
-	steps, _, err := f.repos.StepRun.List(f.ctx, repo.StepRunFilter{JobID: jobID, PageSize: 100})
+	steps, err := containerApprovalPersistedSteps(f.ctx, f.db, jobID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(steps) == 0 {
+		t.Fatal("pending approval has no persisted steps")
 	}
 	for _, step := range steps {
 		if int(step.Status) != 1 && int(step.Status) != 2 {
@@ -424,7 +431,8 @@ func verifyContainerApprovalEvidence(t *testing.T, f *controllerWorkerFixture, e
 	if err != nil || planJSON != job.RetryPlan || e.RetryPlanDigest != job.RetryPlanDigest || e.InputManifestDigest != job.InputManifestDigest {
 		t.Fatal("review differs from complete captured plan/input manifest")
 	}
-	steps, count, err := f.repos.StepRun.List(f.ctx, repo.StepRunFilter{JobID: job.JobRunID, PageSize: 100})
+	steps, err := containerApprovalPersistedSteps(f.ctx, f.db, job.JobRunID)
+	count := int64(len(steps))
 	if err != nil || count != int64(len(e.RetryPlan.Steps)*int(e.RetryPlan.Policy.MaxAttempts)) {
 		t.Fatalf("complete preallocated review step count %d: %v", count, err)
 	}
@@ -461,4 +469,11 @@ func verifyContainerApprovalEvidence(t *testing.T, f *controllerWorkerFixture, e
 			t.Fatal("review input differs from actual registered producer bytes/storage")
 		}
 	}
+}
+
+// Query the runtime identity, never the definition-level job_id or a paginated subset.
+func containerApprovalPersistedSteps(ctx context.Context, db *gorm.DB, jobRunID string) ([]model.StepRun, error) {
+	var steps []model.StepRun
+	err := db.WithContext(ctx).Where("job_run_id = ?", jobRunID).Find(&steps).Error
+	return steps, err
 }

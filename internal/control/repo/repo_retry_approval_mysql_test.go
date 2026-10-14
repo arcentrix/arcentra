@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -119,6 +120,13 @@ func mysqlRetryApprovalFixture(t *testing.T) (*generationFixture, *gorm.DB) {
 		rows := reflect.New(reflect.SliceOf(reflect.TypeOf(entity).Elem())).Interface()
 		if err := source.db.WithContext(source.ctx).Select(retryApprovalTestColumns(source.db, entity)).Find(rows).Error; err != nil {
 			t.Fatal(err)
+		}
+		for i := 0; i < reflect.ValueOf(rows).Elem().Len(); i++ {
+			row := reflect.ValueOf(rows).Elem().Index(i).Addr().Interface()
+			retryApprovalMySQLJSONDefaults(row)
+			if err := retryApprovalMySQLValidateJSON(db, row); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if reflect.ValueOf(rows).Elem().Len() != 0 {
 			if err := db.WithContext(source.ctx).Create(rows).Error; err != nil {
@@ -501,6 +509,10 @@ func mysqlRetryApprovalArtifact(t *testing.T, f *generationFixture, expiry time.
 	key := "artifacts/run/producer/producer-step/" + hash + "/result.txt"
 	size := int64(42)
 	for _, entity := range []any{&model.JobRun{JobRunID: "producer", JobName: "producer", PipelineID: "pipeline", PipelineRunID: "run", Status: model.JobRunStatusSuccess}, &model.StepRun{StepRunID: "producer-step", JobRunID: "producer", PipelineID: "pipeline", PipelineRunID: "run", Status: model.JobRunStatusSuccess}, &model.ProjectArtifact{ArtifactID: "artifact", ProjectID: "project", PipelineID: "pipeline", PipelineRunID: "run", JobRunID: "producer", StepRunID: "producer-step", Name: "result.txt", StorageID: "store", StorageFingerprint: strings.Repeat("b", 64), StoragePath: key, SHA256: hash, Size: size, ExpiresAt: &expiry}} {
+		retryApprovalMySQLJSONDefaults(entity)
+		if err := retryApprovalMySQLValidateJSON(f.db, entity); err != nil {
+			t.Fatal(err)
+		}
 		if err := f.db.WithContext(f.ctx).Create(entity).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -611,4 +623,128 @@ func TestRetryApprovalMySQLArtifactExpiresWhilePermissionLockWaits(t *testing.T)
 			}
 		})
 	}
+}
+
+// SQLite accepts empty strings in JSON columns; MySQL does not. Normalize only
+// empty fixture values at the import boundary, preserving every captured policy,
+// artifact reference, and other nonempty JSON byte for byte.
+func retryApprovalMySQLJSONDefaults(entity any) {
+	object := func(fields ...*string) {
+		for _, field := range fields {
+			if *field == "" {
+				*field = "{}"
+			}
+		}
+	}
+	switch v := entity.(type) {
+	case *model.Pipeline:
+		object(&v.Metadata)
+	case *model.PipelineRun:
+		object(&v.Env)
+	case *model.JobRun:
+		object(&v.Env, &v.ArtifactReferences, &v.ArtifactURIs)
+	case *model.StepRun:
+		object(&v.Args, &v.Env, &v.Secrets, &v.LabelSelector)
+		if v.RetryPolicy == "" {
+			v.RetryPolicy = "null"
+		} // no retry policy for producer-only steps
+	case *model.ApprovalRequest:
+		if v.CandidateApprovers == "" {
+			v.CandidateApprovers = "[]"
+		}
+	}
+	// datatypes.JSON nil values already serialize as SQL NULL and remain unchanged.
+}
+
+func TestRetryApprovalFixtureMySQLJSONDefaults(t *testing.T) {
+	source := gatedPinFixture(t)
+	entities := []any{&model.Agent{}, &model.PipelineRun{}, &model.Pipeline{}, &model.Project{}, &model.JobRun{}, &model.StepRun{}, &model.ProjectArtifact{}, &model.ApprovalRequest{}, &model.ApprovalDecision{}, &model.JobRunGeneration{}, &model.User{}, &model.TeamMember{}, &model.Team{}, &model.Permission{}, &model.RolePermissionBinding{}, &model.Role{}, &model.RoleGrant{}}
+	check := func(entity any) {
+		t.Helper()
+		if err := retryApprovalMySQLValidateJSON(source.db, entity); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, entity := range entities {
+		// Validate defaults even for model kinds absent from the source fixture.
+		retryApprovalMySQLJSONDefaults(entity)
+		check(entity)
+		if !source.db.Migrator().HasTable(entity) {
+			continue
+		}
+		rows := reflect.New(reflect.SliceOf(reflect.TypeOf(entity).Elem())).Interface()
+		if err := source.db.Select(retryApprovalTestColumns(source.db, entity)).Find(rows).Error; err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < reflect.ValueOf(rows).Elem().Len(); i++ {
+			row := reflect.ValueOf(rows).Elem().Index(i).Addr().Interface()
+			retryApprovalMySQLJSONDefaults(row)
+			check(row)
+			if err := source.db.Save(row).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// Re-read the normalized fixture through canonical generation and input binding checks.
+	source.admission(t)
+	source.pin(t)
+	step := &model.StepRun{RetryPolicy: `{"mode":"whole_job","maxAttempts":2}`, Args: `{"run":"exit 9"}`}
+	retryApprovalMySQLJSONDefaults(step)
+	if step.RetryPolicy != `{"mode":"whole_job","maxAttempts":2}` || step.Args != `{"run":"exit 9"}` {
+		t.Fatal("normalization rewrote captured JSON")
+	}
+	producer := &model.StepRun{}
+	retryApprovalMySQLJSONDefaults(producer)
+	if producer.RetryPolicy != "null" || producer.Args != "{}" || producer.Env != "{}" || producer.Secrets != "{}" || producer.LabelSelector != "{}" {
+		t.Fatal("producer JSON defaults have incorrect shapes")
+	}
+	invalid := &model.Pipeline{Metadata: "broken-json"}
+	retryApprovalMySQLJSONDefaults(invalid)
+	if invalid.Metadata != "broken-json" || retryApprovalMySQLValidateJSON(source.db, invalid) == nil {
+		t.Fatal("invalid nonempty JSON was silently repaired or accepted")
+	}
+	unknown := &struct {
+		Unknown string `gorm:"column:unknown;type:json"`
+	}{}
+	retryApprovalMySQLJSONDefaults(unknown)
+	if retryApprovalMySQLValidateJSON(source.db, unknown) == nil {
+		t.Fatal("unknown JSON column silently defaulted or accepted")
+	}
+	approval := &model.ApprovalRequest{}
+	retryApprovalMySQLJSONDefaults(approval)
+	if approval.CandidateApprovers != "[]" {
+		t.Fatal("candidate list must be an array")
+	}
+}
+
+func retryApprovalMySQLValidateJSON(db *gorm.DB, entity any) error {
+	stmt := &gorm.Statement{DB: db}
+	if err := stmt.Parse(entity); err != nil {
+		return err
+	}
+	value := reflect.ValueOf(entity).Elem()
+	for _, field := range stmt.Schema.Fields {
+		if field.TagSettings["TYPE"] != "json" {
+			continue
+		}
+		raw, _ := field.ValueOf(context.Background(), value)
+		v := reflect.ValueOf(raw)
+		var body []byte
+		switch v.Kind() {
+		case reflect.String:
+			body = []byte(v.String())
+		case reflect.Slice:
+			if v.IsNil() {
+				continue
+			}
+			body = v.Bytes()
+		default:
+			return fmt.Errorf("unhandled fixture JSON type %T", raw)
+		}
+		if !json.Valid(body) {
+			return fmt.Errorf("invalid fixture JSON %s.%s: %q", stmt.Table, field.DBName, body)
+		}
+	}
+	return nil
 }
