@@ -13,6 +13,7 @@ import (
 
 	steprunv1 "github.com/arcentrix/arcentra/api/steprun/v1"
 	"github.com/arcentrix/arcentra/internal/agent/config"
+	"github.com/arcentrix/arcentra/internal/agent/sandboxexec"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	agentgrpc "github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/internal/shared/retry"
@@ -75,9 +76,15 @@ func executeJobAttempts(ctx, jobCtx context.Context, conf *config.AgentConfig, c
 			return retry.Block(err)
 		}
 		if pending, ok := pendingStepReports.Load(receiptKey(ctx, "step", stepID)); ok {
+			if len(sessions) > 0 && sessions[0] != nil {
+				return retry.Block(errors.Join(err, pending.(*executionReceipt).executionErr, fmt.Errorf("offline step terminal receipt remains pending")))
+			}
 			return retry.Block(pending.(*executionReceipt).executionErr)
 		}
 		if executor.ExecutionContextCause(err) != nil || errors.Is(err, executor.ErrBuildLogPersistence) {
+			return retry.Block(err)
+		}
+		if err != nil && len(sessions) > 0 && sessions[0] != nil && !sandboxexec.IsCommandExit(err) {
 			return retry.Block(err)
 		}
 		return err
@@ -127,9 +134,9 @@ func executeJobAttempts(ctx, jobCtx context.Context, conf *config.AgentConfig, c
 			if session != nil {
 				if err = session.beforeStep(jobCtx, step); err != nil {
 					failedAt := time.Now().Unix()
-					return normalize(stepID, retainStepReport(ctx, stepID, err, func(reportCtx context.Context) error {
+					return retry.Block(normalize(stepID, retainStepReport(ctx, stepID, err, func(reportCtx context.Context) error {
 						return reportStepRunStatus(reportCtx, client, conf, stepID, steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, 1, "sandbox staging failed", start, failedAt, nil)
-					}))
+					})))
 				}
 			}
 			if strings.EqualFold(strings.TrimSpace(step.Uses), "builtin:artifacts") {

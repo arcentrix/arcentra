@@ -101,9 +101,12 @@ func NewApp(
 		}
 	}
 
-	// Wire the process into Services so PipelineServiceImpl can use it.
+	// 服务可能早于执行器构造；启动时仅绑定一次，已有 gRPC 服务通过同步 getter 读取
 	if pipelineEngine != nil {
-		rt.Services.PipelineEngine = pipelineEngine
+		if err := rt.Services.BindPipelineEngine(pipelineEngine); err != nil {
+			pipelineEngine.Stop()
+			return nil, nil, err
+		}
 	}
 
 	app := &App{

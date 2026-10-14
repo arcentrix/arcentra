@@ -21,6 +21,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/database"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/sso/util"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -56,8 +57,10 @@ type Services struct {
 	PipelineTemplate  *PipelineTemplateService
 	RegistrationToken *RegistrationTokenService
 	Authorizer        authz.IAuthorizer
-	PipelineEngine    IPipelineEngine // set after process initialization
 	repos             *repo.Repositories
+
+	offlineRuntimePolicy taskqueue.OfflineRuntimePolicy // 仅由启动 provider 注入，零值禁用
+	pipelineEngine       pipelineEngineBinding
 }
 
 // Repos 返回 repositories 聚合（仅供 router 偶尔直接访问通用仓储使用）

@@ -18,6 +18,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/google/wire"
 )
 
@@ -31,6 +32,13 @@ func ProvideServices(
 	db database.IDatabase,
 	cacheStore cache.ICache,
 	repos *repo.Repositories,
-) *Services {
-	return NewServices(db, cacheStore, repos)
+	runtimePolicy taskqueue.OfflineRuntimePolicy,
+) (*Services, error) {
+	if err := runtimePolicy.ValidateProduction(); err != nil {
+		return nil, err
+	}
+	services := NewServices(db, cacheStore, repos)
+	// 只信任配置 provider 的启动快照，不读取请求中的策略或设置
+	services.offlineRuntimePolicy = runtimePolicy.Clone()
+	return services, nil
 }

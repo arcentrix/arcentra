@@ -23,10 +23,10 @@ import (
 // ExecutionModeBaremetal 标识兼容的宿主执行模式
 const ExecutionModeBaremetal = "baremetal"
 
-// RuntimeContainerdOfflineV1 标识仅支持可信代码、离线单作业的版本化执行契约
+// RuntimeContainerdOfflineV1 标识可信代码离线执行的逐作业版本化契约
 const RuntimeContainerdOfflineV1 = "containerd-offline-v1"
 
-// OfflineRuntimeAccepted 表示限定离线单作业 profile 已通过专用主机验收
+// OfflineRuntimeAccepted 表示限定离线作业运行时已通过专用主机验收
 // 操作者策略仍默认关闭，启用必须通过配置、身份和生命周期校验
 const OfflineRuntimeAccepted = true
 
@@ -287,6 +287,9 @@ func ValidateRuntimeSteps(steps []StepPayload) error {
 				}
 			}
 		case "builtin:artifacts":
+			if step.ContinueOnError {
+				return fmt.Errorf("offline artifact staging cannot continue on error")
+			}
 			if err := validateRuntimeArtifactArgs(step); err != nil {
 				return err
 			}
