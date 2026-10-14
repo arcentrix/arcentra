@@ -95,6 +95,8 @@ class RuntimeGuardTests(unittest.TestCase):
             root = Path(directory)
             marker = root / "journal"
             marker.write_text("evidence")
+            (root / "work").mkdir(mode=0o700)
+            (root / "work/fifo").mkdir(mode=0o700)
             runtime = GUARD.Runtime(root)
             calls = {"tasks": 0, "containers": 0}
 
@@ -113,12 +115,57 @@ class RuntimeGuardTests(unittest.TestCase):
             self.assertTrue(report["leaksBeforeFallback"])
             self.assertEqual(marker.read_text(), "evidence")
 
+    def test_fifo_directory_requires_private_runner_ownership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "work").mkdir(mode=0o700)
+            fifo = root / "work/fifo"
+            fifo.mkdir(mode=0o700)
+            self.assertEqual(GUARD.inspect_fifo_directory(root, os.getuid(), os.getgid()), 0)
+            with self.assertRaisesRegex(RuntimeError, "runner-owned mode 0700"):
+                GUARD.inspect_fifo_directory(root, os.getuid() + 1, os.getgid())
+            with self.assertRaisesRegex(RuntimeError, "runner-owned mode 0700"):
+                GUARD.inspect_fifo_directory(root, os.getuid(), os.getgid() + 1)
+            fifo.chmod(0o755)
+            with self.assertRaisesRegex(RuntimeError, "runner-owned mode 0700"):
+                GUARD.inspect_fifo_directory(root, os.getuid(), os.getgid())
+
+    def test_fifo_directory_rejects_symlinks_and_missing_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "work").mkdir(mode=0o700)
+            with self.assertRaises(FileNotFoundError):
+                GUARD.inspect_fifo_directory(root, os.getuid(), os.getgid())
+            outside = root / "outside"
+            outside.mkdir(mode=0o700)
+            (root / "work/fifo").symlink_to(outside)
+            with self.assertRaisesRegex(RuntimeError, "symlinks"):
+                GUARD.inspect_fifo_directory(root, os.getuid(), os.getgid())
+
+    def test_fifo_leak_fails_cleanup_and_retains_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "work").mkdir(mode=0o700)
+            fifo = root / "work/fifo"
+            fifo.mkdir(mode=0o700)
+            marker = fifo / "unexpected-entry"
+            marker.write_text("residual client state")
+            runtime = GUARD.Runtime(root)
+            with mock.patch.object(runtime, "discover", return_value=[]), mock.patch.object(GUARD, "owned_mounts", return_value=[]), mock.patch.object(GUARD, "pid_identity", return_value=None):
+                report = runtime.cleanup()
+            self.assertFalse(report["passed"])
+            self.assertEqual(report["cleanupErrors"], [])
+            self.assertEqual(report["leaksBeforeFallback"], [{"clientFIFOEntries": 1}])
+            self.assertTrue(marker.is_file())
+
     def test_shell_keeps_test_execution_unprivileged(self):
         script = Path(__file__).with_name("run_containerd_runtime.sh").read_text()
         self.assertEqual(script.count("sudo -n"), 1)
         self.assertNotIn("sudo -E", script)
         self.assertIn('env -i', script)
         self.assertIn('ARCENTRA_CONTAINERD_RUNC_ROOT=$BASE/runc', script)
+        self.assertIn('"$BASE/work/fifo"', script)
+        self.assertIn('ARCENTRA_CONTAINERD_FIFO_DIR=$BASE/work/fifo', script)
         self.assertIn('sha256sum --check --strict', script)
         self.assertIn('Missing mandatory runtime cleanup receipt', script)
 

@@ -252,7 +252,7 @@ func createActiveAcceptanceFixture(t *testing.T, input string) {
 	if err != nil || sonic.Unmarshal(data, &fixture) != nil {
 		t.Fatalf("invalid private crash-fixture input: %v", err)
 	}
-	if fixture.Config.UnixSocket != os.Getenv("ARCENTRA_CONTAINERD_SOCKET") || fixture.Config.Namespace != os.Getenv("ARCENTRA_DURABLE_SESSION_NAMESPACE") || fixture.Config.RuntimeRoot != os.Getenv("ARCENTRA_CONTAINERD_RUNC_ROOT") || fixture.Session.Image != os.Getenv("ARCENTRA_SANDBOX_TEST_IMAGE") || filepath.Dir(fixture.Controller.JournalRoot) != os.Getenv("ARCENTRA_DURABLE_SESSION_JOURNAL_ROOT") || filepath.Dir(fixture.Controller.WorkspaceRoot) != os.Getenv("ARCENTRA_DURABLE_SESSION_WORKSPACE_ROOT") {
+	if fixture.Config.UnixSocket != os.Getenv("ARCENTRA_CONTAINERD_SOCKET") || fixture.Config.Namespace != os.Getenv("ARCENTRA_DURABLE_SESSION_NAMESPACE") || fixture.Config.RuntimeRoot != os.Getenv("ARCENTRA_CONTAINERD_RUNC_ROOT") || fixture.Config.FIFODir != os.Getenv("ARCENTRA_CONTAINERD_FIFO_DIR") || fixture.Session.Image != os.Getenv("ARCENTRA_SANDBOX_TEST_IMAGE") || filepath.Dir(fixture.Controller.JournalRoot) != os.Getenv("ARCENTRA_DURABLE_SESSION_JOURNAL_ROOT") || filepath.Dir(fixture.Controller.WorkspaceRoot) != os.Getenv("ARCENTRA_DURABLE_SESSION_WORKSPACE_ROOT") {
 		t.Fatal("crash fixture escaped the approved acceptance environment")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

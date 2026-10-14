@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -41,8 +42,11 @@ func newOfflineRuntime(ctx context.Context, conf *config.AgentConfig, client *ag
 	if err := cfg.Policy.ValidateProduction(); err != nil {
 		return nil, err
 	}
-	if cfg.Namespace == "" || cfg.JournalDir == "" || cfg.User == "" {
-		return nil, fmt.Errorf("offline runtime requires explicit namespace, private journal directory, and numeric user")
+	if cfg.Namespace == "" || cfg.JournalDir == "" || cfg.User == "" || cfg.FIFODir == "" {
+		return nil, fmt.Errorf("offline runtime requires explicit namespace, private journal and FIFO directories, and numeric user")
+	}
+	if err := validateOfflineIORoot(cfg.FIFODir, conf.Agent.WorkspaceDir, cfg.JournalDir); err != nil {
+		return nil, err
 	}
 	if cfg.Network != "none" {
 		return nil, fmt.Errorf("offline runtime network must explicitly be none")
@@ -59,7 +63,7 @@ func newOfflineRuntime(ctx context.Context, conf *config.AgentConfig, client *ag
 	if e1 != nil || e2 != nil || uid == 0 || gid == 0 || int(uid) != os.Geteuid() || int(gid) != os.Getegid() {
 		return nil, fmt.Errorf("offline runtime UID:GID must match the non-root Agent; directory ownership is never changed automatically")
 	}
-	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: cfg.UnixSocket, Namespace: cfg.Namespace, RuntimeRoot: cfg.RuntimeRoot, NetworkMode: "none"}, log.Logger{})
+	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: cfg.UnixSocket, Namespace: cfg.Namespace, RuntimeRoot: cfg.RuntimeRoot, FIFODir: cfg.FIFODir, NetworkMode: "none"}, log.Logger{})
 	if err != nil {
 		return nil, fmt.Errorf("offline runtime connection failed")
 	}
@@ -138,4 +142,22 @@ func (r *durableOfflineRuntime) Close(ctx context.Context) error {
 // OfflineRuntimeReady 返回已验证初始化、恢复和清理状态，不把配置启用当作运行能力
 func (q *workerQueues) OfflineRuntimeReady() bool {
 	return q != nil && q.offline != nil && q.offline.Ready()
+}
+
+// validateOfflineIORoot 保证客户端管道不暴露在工作空间或持久日志目录内
+func validateOfflineIORoot(fifo, workspace, journal string) error {
+	for _, dir := range []string{fifo, workspace, journal} {
+		if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir || dir == "/" {
+			return fmt.Errorf("offline IO, workspace and journal roots must be explicit clean absolute private directories")
+		}
+	}
+	for _, other := range []string{workspace, journal} {
+		for _, pair := range [][2]string{{fifo, other}, {other, fifo}} {
+			rel, err := filepath.Rel(pair[0], pair[1])
+			if err != nil || rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+				return fmt.Errorf("offline FIFO root must not overlap workspace or journal roots")
+			}
+		}
+	}
+	return nil
 }

@@ -70,8 +70,12 @@ func TestSessionContainerdAcceptance(t *testing.T) {
 	if !filepath.IsAbs(runtimeRoot) || filepath.Clean(runtimeRoot) != runtimeRoot || runtimeRoot == "/run/containerd/runc" || runtimeRoot == "/" {
 		t.Fatal("ARCENTRA_CONTAINERD_RUNC_ROOT must name the dedicated daemon's absolute private runc state directory")
 	}
+	fifoDir := os.Getenv("ARCENTRA_CONTAINERD_FIFO_DIR")
+	if !filepath.IsAbs(fifoDir) || filepath.Clean(fifoDir) != fifoDir || fifoDir == "/run/containerd/fifo" || fifoDir == "/var/run/containerd/fifo" || fifoDir == "/" {
+		t.Fatal("ARCENTRA_CONTAINERD_FIFO_DIR must name a pre-created private Agent-owned directory, never the host default")
+	}
 	namespace := "arcentra-session-acceptance-" + uuid.NewString()
-	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: socket, Namespace: namespace, RuntimeRoot: runtimeRoot, NetworkMode: "none"}, log.Logger{})
+	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: socket, Namespace: namespace, RuntimeRoot: runtimeRoot, FIFODir: fifoDir, NetworkMode: "none"}, log.Logger{})
 	if err != nil {
 		_ = os.Remove(root)
 		t.Fatal(err)

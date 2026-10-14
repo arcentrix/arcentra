@@ -48,7 +48,7 @@ PY
 trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-mkdir -p "$BASE/bin" "$BASE/control" "$BASE/work/tmp" "$BASE/work/home" "$BASE/work/journal" "$BASE/work/workspaces" "$BASE/work/job"
+mkdir -p "$BASE/bin" "$BASE/control" "$BASE/work/tmp" "$BASE/work/home" "$BASE/work/journal" "$BASE/work/workspaces" "$BASE/work/job" "$BASE/work/fifo"
 python3 scripts/acceptance/verify_containerd_image.py "$ARCENTRA_SANDBOX_TEST_IMAGE" > "$EVIDENCE/image.json"
 curl -q --fail --silent --show-error --location --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 120 --retry 2 \
   "https://github.com/containerd/containerd/releases/download/v${CONTAINERD_VERSION}/containerd-${CONTAINERD_VERSION}-linux-amd64.tar.gz" -o "$BASE/containerd.tar.gz"
@@ -82,7 +82,7 @@ TEST_ENV=(env -i
   ARCENTRA_SANDBOX_ACCEPTANCE=1 ARCENTRA_SANDBOX_SESSION_ACCEPTANCE=1 ARCENTRA_DURABLE_SESSION_ACCEPTANCE=1
   ARCENTRA_CONTAINERD_ACCEPTANCE=1 ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE=1
   "ARCENTRA_CONTAINERD_SOCKET=$BASE/run/containerd.sock" "ARCENTRA_SANDBOX_TEST_IMAGE=$ARCENTRA_SANDBOX_TEST_IMAGE"
-  "ARCENTRA_CONTAINERD_RUNC_ROOT=$BASE/runc"
+  "ARCENTRA_CONTAINERD_RUNC_ROOT=$BASE/runc" "ARCENTRA_CONTAINERD_FIFO_DIR=$BASE/work/fifo"
   "ARCENTRA_DURABLE_SESSION_NAMESPACE=arcentra-durable-acceptance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
   "ARCENTRA_DURABLE_SESSION_JOURNAL_ROOT=$BASE/work/journal" "ARCENTRA_DURABLE_SESSION_WORKSPACE_ROOT=$BASE/work/workspaces"
   "ARCENTRA_TEST_CONTAINERD_NAMESPACE=arcentra-containerjob-acceptance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"

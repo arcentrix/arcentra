@@ -40,8 +40,8 @@ import (
 )
 
 type realContainerSettings struct {
-	stack                                       *realStackSettings
-	socket, image, namespace, root, runtimeRoot string
+	stack                                                *realStackSettings
+	socket, image, namespace, root, runtimeRoot, fifoDir string
 }
 
 func realContainerEnvironment(getenv func(string) string) (*realContainerSettings, error) {
@@ -60,7 +60,7 @@ func realContainerEnvironment(getenv func(string) string) (*realContainerSetting
 		return nil, fmt.Errorf("container acceptance requires the mandatory real stack; mocks are forbidden")
 	}
 	cfg := &realContainerSettings{stack: stack}
-	for name, field := range map[string]*string{"ARCENTRA_CONTAINERD_SOCKET": &cfg.socket, "ARCENTRA_SANDBOX_TEST_IMAGE": &cfg.image, "ARCENTRA_TEST_CONTAINERD_NAMESPACE": &cfg.namespace, "ARCENTRA_TEST_CONTAINERD_ROOT": &cfg.root, "ARCENTRA_CONTAINERD_RUNC_ROOT": &cfg.runtimeRoot} {
+	for name, field := range map[string]*string{"ARCENTRA_CONTAINERD_SOCKET": &cfg.socket, "ARCENTRA_SANDBOX_TEST_IMAGE": &cfg.image, "ARCENTRA_TEST_CONTAINERD_NAMESPACE": &cfg.namespace, "ARCENTRA_TEST_CONTAINERD_ROOT": &cfg.root, "ARCENTRA_CONTAINERD_RUNC_ROOT": &cfg.runtimeRoot, "ARCENTRA_CONTAINERD_FIFO_DIR": &cfg.fifoDir} {
 		*field = strings.TrimSpace(getenv(name))
 		if *field == "" {
 			return nil, fmt.Errorf("explicit %s is required", name)
@@ -69,13 +69,13 @@ func realContainerEnvironment(getenv func(string) string) (*realContainerSetting
 	if !strings.HasPrefix(cfg.namespace, "arcentra-containerjob-acceptance-") || strings.ContainsAny(cfg.namespace, "/\\\r\n") {
 		return nil, fmt.Errorf("dedicated arcentra-containerjob-acceptance-* namespace required")
 	}
-	for _, path := range []string{cfg.root, cfg.socket, cfg.runtimeRoot} {
+	for _, path := range []string{cfg.root, cfg.socket, cfg.runtimeRoot, cfg.fifoDir} {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path || path == "/" {
 			return nil, fmt.Errorf("clean absolute dedicated paths required")
 		}
 	}
-	if cfg.socket == "/run/containerd/containerd.sock" || cfg.socket == "/var/run/containerd/containerd.sock" || cfg.runtimeRoot == "/run/containerd/runc" || cfg.runtimeRoot == "/var/run/containerd/runc" {
-		return nil, fmt.Errorf("host default containerd or runc paths are forbidden in acceptance")
+	if cfg.socket == "/run/containerd/containerd.sock" || cfg.socket == "/var/run/containerd/containerd.sock" || cfg.runtimeRoot == "/run/containerd/runc" || cfg.runtimeRoot == "/var/run/containerd/runc" || cfg.fifoDir == "/run/containerd/fifo" || cfg.fifoDir == "/var/run/containerd/fifo" {
+		return nil, fmt.Errorf("host default containerd, runc or FIFO paths are forbidden in acceptance")
 	}
 	policy := taskpayload.OfflineRuntimePolicy{Enabled: true, AllowedImages: []string{cfg.image}, MaxCPU: "500m", MaxMemory: "64Mi"}
 	if err := policy.Validate(); err != nil {
@@ -94,6 +94,9 @@ func startContainerAcceptanceWorker(ctx context.Context, conf *config.AgentConfi
 		return nil, fmt.Errorf("explicit container acceptance flags required")
 	}
 	cfg := conf.Agent.Sandbox.Containerd
+	if err := validateOfflineIORoot(cfg.FIFODir, conf.Agent.WorkspaceDir, cfg.JournalDir); err != nil {
+		return nil, err
+	}
 	if runtime.GOOS != "linux" || os.Geteuid() == 0 || os.Getegid() == 0 || cfg.User != fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid()) {
 		return nil, fmt.Errorf("unprivileged matching Linux UID:GID required")
 	}
@@ -134,7 +137,7 @@ func startContainerAcceptanceWorker(ctx context.Context, conf *config.AgentConfi
 	if err := reports.replayBound(ctx, client, conf); err != nil {
 		return nil, err
 	}
-	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: cfg.UnixSocket, Namespace: cfg.Namespace, NetworkMode: "none", RuntimeRoot: cfg.RuntimeRoot}, log.Logger{})
+	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: cfg.UnixSocket, Namespace: cfg.Namespace, NetworkMode: "none", RuntimeRoot: cfg.RuntimeRoot, FIFODir: cfg.FIFODir}, log.Logger{})
 	if err != nil {
 		return nil, err
 	}

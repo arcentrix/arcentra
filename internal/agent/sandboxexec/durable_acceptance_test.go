@@ -304,7 +304,11 @@ func durableAcceptanceConfig(t *testing.T, scenario string) (*sandbox.Containerd
 	if !filepath.IsAbs(runtimeRoot) || filepath.Clean(runtimeRoot) != runtimeRoot || runtimeRoot == "/run/containerd/runc" || runtimeRoot == "/" {
 		t.Fatal("ARCENTRA_CONTAINERD_RUNC_ROOT must name the dedicated daemon's absolute private runc state directory")
 	}
-	return &sandbox.ContainerdConfig{UnixSocket: socket, Namespace: namespace, NetworkMode: "none", RuntimeRoot: runtimeRoot}, opts, image
+	fifoDir := required("ARCENTRA_CONTAINERD_FIFO_DIR")
+	if !filepath.IsAbs(fifoDir) || filepath.Clean(fifoDir) != fifoDir || fifoDir == "/run/containerd/fifo" || fifoDir == "/var/run/containerd/fifo" || fifoDir == "/" {
+		t.Fatal("ARCENTRA_CONTAINERD_FIFO_DIR must name a pre-created private Agent-owned directory, never the host default")
+	}
+	return &sandbox.ContainerdConfig{UnixSocket: socket, Namespace: namespace, NetworkMode: "none", RuntimeRoot: runtimeRoot, FIFODir: fifoDir}, opts, image
 }
 
 func acceptanceSessionOptions(t *testing.T, image, user string) Options {

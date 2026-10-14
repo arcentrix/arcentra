@@ -30,6 +30,21 @@ def validate_base(value):
     return base
 
 
+def inspect_fifo_directory(base, uid, gid):
+    """Inspect the exact runner-owned FIFO root without following symlinks."""
+    fifo = base / "work/fifo"
+    if fifo.resolve() != fifo:
+        raise RuntimeError("client FIFO directory must not contain symlinks")
+    descriptor = os.open(fifo, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(descriptor)
+        if info.st_uid != uid or info.st_gid != gid or stat.S_IMODE(info.st_mode) != 0o700:
+            raise RuntimeError("client FIFO directory must be runner-owned mode 0700")
+        return len(os.listdir(descriptor))
+    finally:
+        os.close(descriptor)
+
+
 def daemon_config(base, uid, gid):
     """Return a config with no system sockets, CRI, NRI or metrics listener."""
     return f'''version = 4
@@ -141,8 +156,10 @@ def stop_pid(pid, identity):
 
 
 class Runtime:
-    def __init__(self, base):
+    def __init__(self, base, uid=None, gid=None):
         self.base = base
+        self.uid = os.getuid() if uid is None else uid
+        self.gid = os.getgid() if gid is None else gid
         self.daemon = None
         self.identity = None
         self.namespaces = set()
@@ -166,6 +183,12 @@ class Runtime:
 
     def cleanup(self):
         leaks, errors = [], []
+        try:
+            fifo_entries = inspect_fifo_directory(self.base, self.uid, self.gid)
+            if fifo_entries:
+                leaks.append({"clientFIFOEntries": fifo_entries})
+        except (OSError, RuntimeError) as exc:
+            errors.append(f"cannot verify private client FIFO cleanup: {exc}")
         try:
             namespaces = self.discover()
             for ns in namespaces:
@@ -276,6 +299,8 @@ def serve(base, uid, gid):
         path = base / name
         if path.is_symlink() or not path.is_dir() or path.stat().st_uid != uid:
             raise RuntimeError("runtime inputs must be real directories owned by the test user")
+    if inspect_fifo_directory(base, uid, gid):
+        raise RuntimeError("fresh client FIFO directory must be empty")
     control_fd = os.open(base / "control", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     os.chown(base, 0, gid)
     base.chmod(0o750)
@@ -293,7 +318,7 @@ def serve(base, uid, gid):
     config = base / "config.toml"
     config.write_text(daemon_config(base, uid, gid))
     config.chmod(0o600)
-    runtime = Runtime(base)
+    runtime = Runtime(base, uid, gid)
     stop = False
 
     def request_stop(_signum, _frame):

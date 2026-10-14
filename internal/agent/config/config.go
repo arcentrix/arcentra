@@ -117,6 +117,7 @@ type SandboxConfig struct {
 
 // ContainerdConfig containerd configuration
 type ContainerdConfig struct {
+	FIFODir     string                         `mapstructure:"fifoDir"`     // Pre-existing Agent-owned private IO directory
 	RuntimeRoot string                         `mapstructure:"runtimeRoot"` // Optional isolated runc state root
 	Policy      taskqueue.OfflineRuntimePolicy `mapstructure:"policy"`
 	Namespace   string                         `mapstructure:"namespace"`

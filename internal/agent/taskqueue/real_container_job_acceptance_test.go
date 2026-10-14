@@ -43,14 +43,14 @@ import (
 
 func TestRealContainerAcceptanceGate(t *testing.T) {
 	image := "docker.io/library/alpine@sha256:" + strings.Repeat("a", 64)
-	complete := map[string]string{"ARCENTRA_CONTAINERD_ACCEPTANCE": "1", "ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE": "1", "ARCENTRA_REAL_STACK": "1", "ARCENTRA_REQUIRE_REAL_STACK": "1", "ARCENTRA_TEST_MYSQL_DSN": "synthetic", "ARCENTRA_TEST_KAFKA_BROKERS": "127.0.0.1:19092", "ARCENTRA_TEST_S3_ENDPOINT": "http://127.0.0.1:19000", "ARCENTRA_TEST_S3_ACCESS_KEY": "synthetic", "ARCENTRA_TEST_S3_SECRET_KEY": "synthetic", "ARCENTRA_CONTAINERD_SOCKET": "/tmp/acceptance/containerd.sock", "ARCENTRA_SANDBOX_TEST_IMAGE": image, "ARCENTRA_TEST_CONTAINERD_NAMESPACE": "arcentra-containerjob-acceptance-synthetic", "ARCENTRA_TEST_CONTAINERD_ROOT": "/tmp/acceptance/job", "ARCENTRA_CONTAINERD_RUNC_ROOT": "/tmp/acceptance/runc"}
+	complete := map[string]string{"ARCENTRA_CONTAINERD_ACCEPTANCE": "1", "ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE": "1", "ARCENTRA_REAL_STACK": "1", "ARCENTRA_REQUIRE_REAL_STACK": "1", "ARCENTRA_TEST_MYSQL_DSN": "synthetic", "ARCENTRA_TEST_KAFKA_BROKERS": "127.0.0.1:19092", "ARCENTRA_TEST_S3_ENDPOINT": "http://127.0.0.1:19000", "ARCENTRA_TEST_S3_ACCESS_KEY": "synthetic", "ARCENTRA_TEST_S3_SECRET_KEY": "synthetic", "ARCENTRA_CONTAINERD_SOCKET": "/tmp/acceptance/containerd.sock", "ARCENTRA_SANDBOX_TEST_IMAGE": image, "ARCENTRA_TEST_CONTAINERD_NAMESPACE": "arcentra-containerjob-acceptance-synthetic", "ARCENTRA_TEST_CONTAINERD_ROOT": "/tmp/acceptance/job", "ARCENTRA_CONTAINERD_RUNC_ROOT": "/tmp/acceptance/runc", "ARCENTRA_CONTAINERD_FIFO_DIR": "/tmp/acceptance/fifo"}
 	if cfg, err := realContainerEnvironment(func(string) string { return "" }); cfg != nil || err != nil {
 		t.Fatalf("ordinary test run must remain disabled: %v %v", cfg, err)
 	}
 	if cfg, err := realContainerEnvironment(func(key string) string { return complete[key] }); cfg == nil || err != nil {
 		t.Fatalf("complete opt-in rejected: %v", err)
 	}
-	for _, key := range []string{"ARCENTRA_CONTAINERD_ACCEPTANCE", "ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE", "ARCENTRA_REAL_STACK", "ARCENTRA_REQUIRE_REAL_STACK", "ARCENTRA_CONTAINERD_SOCKET", "ARCENTRA_SANDBOX_TEST_IMAGE", "ARCENTRA_TEST_CONTAINERD_NAMESPACE", "ARCENTRA_TEST_CONTAINERD_ROOT", "ARCENTRA_CONTAINERD_RUNC_ROOT"} {
+	for _, key := range []string{"ARCENTRA_CONTAINERD_ACCEPTANCE", "ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE", "ARCENTRA_REAL_STACK", "ARCENTRA_REQUIRE_REAL_STACK", "ARCENTRA_CONTAINERD_SOCKET", "ARCENTRA_SANDBOX_TEST_IMAGE", "ARCENTRA_TEST_CONTAINERD_NAMESPACE", "ARCENTRA_TEST_CONTAINERD_ROOT", "ARCENTRA_CONTAINERD_RUNC_ROOT", "ARCENTRA_CONTAINERD_FIFO_DIR"} {
 		t.Run("missing_"+key, func(t *testing.T) {
 			if _, err := realContainerEnvironment(func(name string) string {
 				if name == key {
@@ -68,6 +68,10 @@ func TestRealContainerAcceptanceGate(t *testing.T) {
 		{"ARCENTRA_TEST_CONTAINERD_NAMESPACE", "arcentra"},
 		{"ARCENTRA_CONTAINERD_SOCKET", "/run/containerd/containerd.sock"},
 		{"ARCENTRA_CONTAINERD_RUNC_ROOT", "/run/containerd/runc"},
+		{"ARCENTRA_CONTAINERD_FIFO_DIR", "/run/containerd/fifo"},
+		{"ARCENTRA_CONTAINERD_FIFO_DIR", "/var/run/containerd/fifo"},
+		{"ARCENTRA_CONTAINERD_FIFO_DIR", "relative/fifo"},
+		{"ARCENTRA_CONTAINERD_FIFO_DIR", "/tmp/../tmp/fifo"},
 		{"ARCENTRA_TEST_CONTAINERD_ROOT", "/tmp/../tmp/acceptance"},
 	} {
 		if _, err := realContainerEnvironment(func(key string) string {
@@ -100,7 +104,7 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	if _, err := os.Stat("/sys/fs/cgroup/cgroup.controllers"); err != nil {
 		t.Fatalf("cgroup v2 is required: %v", err)
 	}
-	for _, path := range []string{settings.socket, settings.root, settings.runtimeRoot} {
+	for _, path := range []string{settings.socket, settings.root, settings.runtimeRoot, settings.fifoDir} {
 		canonical, err := filepath.EvalSymlinks(path)
 		if err != nil || canonical != path {
 			t.Fatalf("acceptance path must exist and contain no symbolic links: %s (%v)", path, err)
@@ -151,7 +155,7 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	options.configureAgent = func(conf *config.AgentConfig) {
 		conf.Agent.Mode = "sandbox"
 		conf.Agent.WorkspaceDir = workspace
-		conf.Agent.Sandbox = config.SandboxConfig{Enable: true, Runtime: "containerd", Containerd: config.ContainerdConfig{Policy: policy, Namespace: settings.namespace, JournalDir: journal, User: fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid()), Network: "none", UnixSocket: settings.socket, RuntimeRoot: settings.runtimeRoot}}
+		conf.Agent.Sandbox = config.SandboxConfig{Enable: true, Runtime: "containerd", Containerd: config.ContainerdConfig{Policy: policy, Namespace: settings.namespace, JournalDir: journal, User: fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid()), Network: "none", UnixSocket: settings.socket, RuntimeRoot: settings.runtimeRoot, FIFODir: settings.fifoDir}}
 	}
 	options.startWorker = startContainerAcceptanceWorker
 	if taskpayload.OfflineRuntimeAccepted {

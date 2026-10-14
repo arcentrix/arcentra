@@ -92,7 +92,9 @@ type ContainerdConfig struct {
 	UnixSocket string
 	Namespace  string
 	// RuntimeRoot 可选的专用 runc 状态目录，由操作者预先配置
-	RuntimeRoot  string
+	RuntimeRoot string
+	// FIFODir 是 Agent 所有的预置私有 IO 目录，不修改系统默认目录
+	FIFODir      string
 	DefaultImage string
 	// NetworkMode 仅支持 none，空值也表示 none
 	NetworkMode string
@@ -104,6 +106,11 @@ func normalizeConfig(config *ContainerdConfig) (ContainerdConfig, error) {
 		return ContainerdConfig{}, fmt.Errorf("config is required")
 	}
 	cfg := *config
+	if cfg.FIFODir != "" {
+		if err := validateFIFODir(cfg.FIFODir); err != nil {
+			return cfg, err
+		}
+	}
 	if cfg.RuntimeRoot != "" && (!filepath.IsAbs(cfg.RuntimeRoot) || filepath.Clean(cfg.RuntimeRoot) != cfg.RuntimeRoot || cfg.RuntimeRoot == "/" || strings.ContainsAny(cfg.RuntimeRoot, "\x00\r\n")) {
 		return cfg, fmt.Errorf("runtime root must be a clean absolute non-root path")
 	}
@@ -152,7 +159,7 @@ func NewContainerdSandbox(config *ContainerdConfig, _ log.Logger) (*Containerd, 
 		}
 		return nil, fmt.Errorf("check containerd: %w", err)
 	}
-	return newSandbox(cfg, &containerdBackend{client: client, runtimeRoot: cfg.RuntimeRoot}), nil
+	return newSandbox(cfg, &containerdBackend{client: client, runtimeRoot: cfg.RuntimeRoot, fifoDir: cfg.FIFODir}), nil
 }
 
 func newSandbox(config ContainerdConfig, backend runtimeBackend) *Containerd {
@@ -582,6 +589,13 @@ func (s *Containerd) removeState(ctx context.Context, id string, state *containe
 	}
 	state.container = container
 	if !resources.ContainerExists && !resources.SnapshotExists && !resources.TaskExists {
+		// Runtime metadata can be gone while a crashed client's owned FIFOs
+		// remain. Preserve retry state until exact-owned filesystem cleanup succeeds.
+		if state.container != nil {
+			if err := state.container.remove(cleanup); err != nil {
+				return fmt.Errorf("remove remaining container resources: %w", err)
+			}
+		}
 		s.forgetRemoved(id, state)
 		return nil
 	}

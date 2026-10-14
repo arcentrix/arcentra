@@ -30,7 +30,9 @@ one rootful containerd with its own root, state, temporary files, gRPC socket,
 TTRPC socket, shim socket directory, and runc state root. The daemon's API socket
 is accessible to this VM's runner only. The Go tests run with nonzero UID/GID and
 a clean environment, private HOME/TMPDIR, and explicit synthetic fixture values.
-They never run through sudo.
+They never run through sudo. The client-side FIFO root is a precreated,
+runner-owned mode-0700 `work/fifo` directory inside this same private run root;
+it is separate from the daemon's privileged state.
 
 Version-4 containerd configuration explicitly names both server sockets and the
 shim socket directory; overriding just `state` is insufficient. CRI, NRI, the
@@ -47,6 +49,16 @@ inside this one runtime's private root and rejects symlink/host default paths.
 The Agent's optional operator configuration `containerd.runtimeRoot` is distinct
 from pipeline input; pipelines cannot choose it. An empty production setting
 retains the existing daemon behavior. This fixture always supplies it.
+
+`ARCENTRA_CONTAINERD_FIFO_DIR` supplies every fixture's `ContainerdConfig.FIFODir`
+and the Agent's operator-only `containerd.fifoDir` setting. Containerd's Go client
+creates task/exec stdio FIFOs on the client host, so daemon `state` and `TMPDIR`
+alone do not move its default `/run/containerd/fifo` path. This fixture explicitly
+uses the private runner-owned directory. It never changes ownership or mode on
+the system FIFO directory, and never grants the Go tests root privileges. The
+supervisor validates exact ownership, mode 0700, no symlink components and an empty
+FIFO root before starting. It verifies that the root is still valid and empty
+before final cleanup; any remaining FIFO entry is a failed acceptance receipt.
 
 ## Exact tests and environment contract
 
@@ -67,8 +79,9 @@ opt-in or required data fails instead of skipping. The harness runs:
 
 The shell sets the three existing sandbox/session/durable opt-ins, the new
 `ARCENTRA_CONTAINERD_ACCEPTANCE` and `ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE`
-flags, `ARCENTRA_CONTAINERD_SOCKET`, `ARCENTRA_SANDBOX_TEST_IMAGE`, and
-`ARCENTRA_CONTAINERD_RUNC_ROOT`. It supplies a dedicated
+flags, `ARCENTRA_CONTAINERD_SOCKET`, `ARCENTRA_SANDBOX_TEST_IMAGE`,
+`ARCENTRA_CONTAINERD_RUNC_ROOT`, and `ARCENTRA_CONTAINERD_FIFO_DIR`. It supplies a
+dedicated
 `arcentra-durable-acceptance-<run>-<attempt>` namespace plus separate private
 journal/workspace roots, and an
 `arcentra-containerjob-acceptance-<run>-<attempt>` namespace/private root for the
@@ -79,8 +92,8 @@ services. Raw environment data is never uploaded.
 
 The supervisor tracks namespace names from its isolated daemon. On normal exit,
 error, or signal, it inventories tasks, container records, writable snapshots,
-mounts, and namespace-scoped cgroups before fallback cleanup. Expected immutable
-image cache snapshots and journal tombstones are not leaks. A leaked resource
+mounts, namespace-scoped cgroups, and client FIFO entries before fallback cleanup.
+Expected immutable image cache snapshots and journal tombstones are not leaks. A leaked resource
 fails the receipt even when fallback successfully removes it.
 
 Fallback signals only exact task IDs on the owned socket, exact namespace cgroup

@@ -55,6 +55,7 @@ func NewContainerdSandboxFromConfig(cfg *config.ContainerdConfig, logger log.Log
 	sandboxConfig := &ContainerdConfig{
 		UnixSocket:   cfg.UnixSocket,
 		RuntimeRoot:  cfg.RuntimeRoot,
+		FIFODir:      cfg.FIFODir,
 		Namespace:    "arcentra",
 		DefaultImage: cfg.Image,
 		NetworkMode:  cfg.Network,
