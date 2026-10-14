@@ -65,6 +65,7 @@ type containerState struct {
 	activeCancel context.CancelFunc
 	stopping     bool
 	task         runtimeTask
+	quiescence   *taskQuiescence
 	processes    map[string]runtimeProcess
 	stopped      bool
 	removed      bool
@@ -170,13 +171,20 @@ func newSandbox(config ContainerdConfig, backend runtimeBackend) *Containerd {
 
 // Create 创建容器元数据和 snapshot，必须显式提供 init 命令
 func (s *Containerd) Create(ctx context.Context, opts *CreateOptions) (string, error) {
+	id, _, err := s.create(ctx, opts)
+	return id, err
+}
+
+// Return the allocated generation directly for private callers. Looking it up
+// by ID after Create returns could adopt a concurrent same-ID replacement.
+func (s *Containerd) create(ctx context.Context, opts *CreateOptions) (string, *containerState, error) {
 	if opts == nil {
-		return "", fmt.Errorf("options are required")
+		return "", nil, fmt.Errorf("options are required")
 	}
 	s.mu.Lock()
 	if s.closing {
 		s.mu.Unlock()
-		return "", fmt.Errorf("sandbox is closing")
+		return "", nil, fmt.Errorf("sandbox is closing")
 	}
 	s.creating.Add(1)
 	s.mu.Unlock()
@@ -186,14 +194,14 @@ func (s *Containerd) Create(ctx context.Context, opts *CreateOptions) (string, e
 		image = strings.TrimSpace(s.config.DefaultImage)
 	}
 	if image == "" {
-		return "", fmt.Errorf("image is required")
+		return "", nil, fmt.Errorf("image is required")
 	}
 	network := opts.NetworkMode
 	if network == "" {
 		network = s.config.NetworkMode
 	}
 	if err := validateNetwork(network); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	resources := opts.Resources
 	if resources == nil {
@@ -201,18 +209,18 @@ func (s *Containerd) Create(ctx context.Context, opts *CreateOptions) (string, e
 	}
 	options, err := createSpecOptions(opts, resources)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	ref := ResourceRef{}
 	if opts.Resource != nil {
 		ref = *opts.Resource
 		if err = s.validateRef(ref); err != nil {
-			return "", err
+			return "", nil, err
 		}
 	} else {
 		ref, err = s.PrepareResource(ctx, "arcentra-"+uuid.NewString(), uuid.NewString())
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 	}
 	labels := maps.Clone(opts.Labels)
@@ -224,13 +232,13 @@ func (s *Containerd) Create(ctx context.Context, opts *CreateOptions) (string, e
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
 	state := newContainerState(nil, ref)
 	if err = state.acquire(ctx); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	s.mu.Lock()
 	if _, exists := s.containers[id]; exists {
 		s.mu.Unlock()
 		state.release()
-		return "", fmt.Errorf("resource ID already tracked: %w", errdefs.ErrAlreadyExists)
+		return "", nil, fmt.Errorf("resource ID already tracked: %w", errdefs.ErrAlreadyExists)
 	}
 	s.containers[id] = state
 	delete(s.removedIDs, id)
@@ -251,16 +259,16 @@ func (s *Containerd) Create(ctx context.Context, opts *CreateOptions) (string, e
 		if createErr == nil {
 			createErr = fmt.Errorf("runtime returned no container")
 		}
-		return "", createErr
+		return "", nil, createErr
 	}
 	state.release()
 	if createErr != nil {
-		if cleanupErr := s.Remove(ctx, id); cleanupErr != nil {
-			return id, errors.Join(createErr, cleanupErr)
+		if cleanupErr := s.removeState(ctx, id, state); cleanupErr != nil {
+			return id, state, errors.Join(createErr, cleanupErr)
 		}
-		return "", createErr
+		return "", nil, createErr
 	}
-	return id, nil
+	return id, state, nil
 }
 
 // Start 启动容器 init 进程，已停止的容器不能复用
@@ -269,8 +277,12 @@ func (s *Containerd) Start(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	return s.startState(ctx, state)
+}
+
+func (s *Containerd) startState(ctx context.Context, state *containerState) error {
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
-	if err = state.acquire(ctx); err != nil {
+	if err := state.acquire(ctx); err != nil {
 		return err
 	}
 	defer state.release()
@@ -314,7 +326,11 @@ func (s *Containerd) Start(ctx context.Context, id string) error {
 
 // Execute 在已启动容器中执行命令并捕获有界输出
 // 取消、超时或执行状态不确定时终止容器内全部进程，调用方随后必须 Remove
-func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts *ExecuteOptions) (result *ExecuteResult, resultErr error) {
+func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts *ExecuteOptions) (*ExecuteResult, error) {
+	return s.execute(ctx, id, cmd, opts, nil)
+}
+
+func (s *Containerd) execute(ctx context.Context, id string, cmd []string, opts *ExecuteOptions, proof *taskQuiescence) (result *ExecuteResult, resultErr error) {
 	result = &ExecuteResult{StartTime: time.Now(), ExitCode: -1}
 	stdout, stderr := &boundedBuffer{}, &boundedBuffer{}
 	stdoutStream, stderrStream := &outputStream{capture: stdout}, &outputStream{capture: stderr}
@@ -345,6 +361,9 @@ func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts 
 	if len(state.processes) != 0 {
 		return result, fmt.Errorf("container has an unreaped process; Remove is required")
 	}
+	if state.quiescence != proof {
+		return result, fmt.Errorf("quiescence probe requires its private lifecycle admission")
+	}
 	runCtx, cancel := context.WithCancel(ctx)
 	state.mu.Lock()
 	if state.stopping {
@@ -355,6 +374,15 @@ func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts 
 	state.activeCancel = cancel
 	state.mu.Unlock()
 	defer func() { state.mu.Lock(); state.activeCancel = nil; state.mu.Unlock(); cancel() }()
+	var exitObserved, execDeleted bool
+	if proof != nil {
+		defer func() {
+			resultErr = proof.afterExecute(runCtx, result, errors.Join(resultErr, stdoutStream.Error(), stderrStream.Error()), exitObserved, execDeleted)
+		}()
+		if err := proof.beforeExecute(runCtx); err != nil {
+			return result, err
+		}
+	}
 	base, err := state.container.spec(runCtx)
 	if err != nil {
 		return result, fmt.Errorf("read container spec: %w", normalizeExecutionContextError(err))
@@ -375,24 +403,38 @@ func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts 
 		}
 	}
 	execID := "exec-" + uuid.NewString()
+	if proof != nil {
+		if err = proof.admit(runCtx); err != nil {
+			return result, err
+		}
+	}
 	process, err := state.task.exec(runCtx, execID, processSpec, stdin, stdoutStream, stderrStream)
 	if err != nil {
 		cleanup, cleanupCancel := cleanupContext(ctx)
 		defer cleanupCancel()
 		state.stopped = true
-		return result, errors.Join(fmt.Errorf("create exec process: %w", normalizeExecutionContextError(err)), stopTask(cleanup, state.task, 0))
+		cause := fmt.Errorf("create exec process: %w", normalizeExecutionContextError(err))
+		if proof != nil {
+			return result, cause
+		}
+		return result, errors.Join(cause, stopStateTask(cleanup, state, 0))
 	}
 	state.processes[execID] = process
 	defer func() {
 		cleanup, cleanupCancel := cleanupContext(ctx)
 		defer cleanupCancel()
+		if proof != nil && resultErr != nil {
+			// Private probe cleanup must begin once with its still-live identity.
+			return
+		}
 		if resultErr != nil {
 			// 杀掉整个容器，避免 shell 子进程在步骤取消后继续运行
-			stopErr := stopTask(cleanup, state.task, 0)
+			stopErr := stopStateTask(cleanup, state, 0)
 			state.stopped = true
 			resultErr = errors.Join(resultErr, stopErr)
 		}
 		_, deleteErr := process.Delete(cleanup)
+		execDeleted = deleteErr == nil
 		if deleteErr == nil || errdefs.IsNotFound(deleteErr) {
 			delete(state.processes, execID)
 		} else {
@@ -403,6 +445,11 @@ func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts 
 	wait, err := process.Wait(runCtx)
 	if err != nil {
 		return result, fmt.Errorf("wait exec process: %w", normalizeExecutionContextError(err))
+	}
+	if proof != nil {
+		if err = proof.admit(runCtx); err != nil {
+			return result, err
+		}
 	}
 	if err = process.Start(runCtx); err != nil {
 		return result, fmt.Errorf("start exec process: %w", normalizeExecutionContextError(err))
@@ -421,6 +468,7 @@ func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts 
 		if waitErr != nil {
 			return result, fmt.Errorf("wait exec exit: %w", normalizeExecutionContextError(waitErr))
 		}
+		exitObserved = true
 		result.ExitCode = int32(code)
 		return result, nil
 	}
@@ -464,6 +512,9 @@ func (s *Containerd) Stop(ctx context.Context, id string, timeout time.Duration)
 	if state.removed {
 		return nil
 	}
+	if state.quiescence != nil {
+		return s.removeStateLocked(cleanup, id, state)
+	}
 	container, _, inspectErr := s.backend.inspectOwned(cleanup, state.ref)
 	if inspectErr != nil {
 		return inspectErr
@@ -475,7 +526,7 @@ func (s *Containerd) Stop(ctx context.Context, id string, timeout time.Duration)
 	if state.task == nil {
 		return nil
 	}
-	if err = stopTask(cleanup, state.task, timeout); err != nil {
+	if err = stopStateTask(cleanup, state, timeout); err != nil {
 		return err
 	}
 	state.stopped = true
@@ -598,6 +649,10 @@ func (s *Containerd) removeState(ctx context.Context, id string, state *containe
 		return err
 	}
 	defer state.release()
+	return s.removeStateLocked(cleanup, id, state)
+}
+
+func (s *Containerd) removeStateLocked(cleanup context.Context, id string, state *containerState) error {
 	// 查找与获得 gate 之间可能已完成删除，旧句柄不得触碰复用该 ID 的新资源
 	if state.removed {
 		return nil
@@ -606,6 +661,11 @@ func (s *Containerd) removeState(ctx context.Context, id string, state *containe
 	container, resources, err := s.backend.inspectOwned(cleanup, state.ref)
 	if err != nil {
 		return err
+	}
+	if state.quiescence != nil {
+		if err := state.quiescence.verifyCleanupTask(cleanup, container, resources); err != nil {
+			return err
+		}
 	}
 	state.container = container
 	if !resources.ContainerExists && !resources.SnapshotExists && !resources.TaskExists {
@@ -623,7 +683,7 @@ func (s *Containerd) removeState(ctx context.Context, id string, state *containe
 		return err
 	}
 	if state.task != nil {
-		if err := stopTask(cleanup, state.task, 0); err != nil {
+		if err := stopStateTask(cleanup, state, 0); err != nil {
 			return err
 		}
 		state.stopped = true
@@ -638,8 +698,13 @@ func (s *Containerd) removeState(ctx context.Context, id string, state *containe
 		if cleanupErr != nil {
 			return fmt.Errorf("remove exec processes: %w", cleanupErr)
 		}
-		if _, err := state.task.Delete(cleanup); err != nil && !errdefs.IsNotFound(err) {
-			return fmt.Errorf("delete task: %w", err)
+		if _, err := state.task.Delete(cleanup); err != nil {
+			if state.quiescence != nil || !errdefs.IsNotFound(err) {
+				return fmt.Errorf("delete task: %w", err)
+			}
+		}
+		if state.quiescence != nil {
+			state.quiescence.taskDeleted = true
 		}
 		state.task = nil
 	}
@@ -660,6 +725,9 @@ func (s *Containerd) removeState(ctx context.Context, id string, state *containe
 
 func (s *Containerd) forgetRemoved(id string, state *containerState) {
 	state.removed = true
+	if state.quiescence != nil {
+		_ = state.quiescence.pin.close()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// 只有当前 map 中的同一代句柄才可删除记录或写入幂等缓存

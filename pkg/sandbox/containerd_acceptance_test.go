@@ -170,6 +170,10 @@ func TestContainerdAcceptance(t *testing.T) {
 	if _, err := client.SnapshotService(state.container.(*containerdContainer).snapshotter).Stat(verifyCtx, id+"-snapshot"); !errdefs.IsNotFound(err) {
 		t.Fatalf("snapshot remains after removal: %v", err)
 	}
+	t.Run("owned-task-quiescence", func(t *testing.T) {
+		verifyOwnedTaskQuiescence(t, ctx, sb, user)
+	})
+
 	t.Log("Real containerd acceptance passed: explicit nonroot init/exec, empty capability sets, no-new-privileges, execution, output, workspace, private PID/network namespaces, loopback-only network, cgroup-v2 limits, timeout and exact snapshot cleanup")
 }
 
