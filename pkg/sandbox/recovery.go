@@ -167,6 +167,9 @@ func (s *Containerd) sealState(ctx context.Context, state *containerState) error
 	if state.removed {
 		return fmt.Errorf("cannot seal removed container: %w", errdefs.ErrNotFound)
 	}
+	if state.quiescence != nil {
+		return s.removeStateLocked(ctx, state.ref.ID, state)
+	}
 	container, resources, err := s.backend.inspectOwned(ctx, state.ref)
 	if err != nil {
 		return err
@@ -179,7 +182,7 @@ func (s *Containerd) sealState(ctx context.Context, state *containerState) error
 		return err
 	}
 	if state.task != nil {
-		if err = stopTask(ctx, state.task, 0); err != nil {
+		if err = stopStateTask(ctx, state, 0); err != nil {
 			return err
 		}
 	}

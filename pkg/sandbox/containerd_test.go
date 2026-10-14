@@ -36,12 +36,13 @@ import (
 )
 
 type fakeBackend struct {
-	mu         sync.Mutex
-	containers map[string]*fakeContainer
-	closed     int
-	createHook func()
-	createErr  error
-	cleanupErr error
+	mu            sync.Mutex
+	containers    map[string]*fakeContainer
+	closed        int
+	createHook    func()
+	createErr     error
+	cleanupErr    error
+	taskStartHook func()
 }
 
 func (b *fakeBackend) create(ctx context.Context, id, _ string, options []oci.SpecOpts, labels map[string]string, _ bool) (runtimeContainer, error) {
@@ -59,6 +60,7 @@ func (b *fakeBackend) create(ctx context.Context, id, _ string, options []oci.Sp
 		return nil, fmt.Errorf("missing ownership label")
 	}
 	container := &fakeContainer{labels: maps.Clone(labels), base: spec, removeErr: b.cleanupErr, task: &fakeTask{fakeProcess: newFakeProcess(false), pid: 1234}}
+	container.task.startHook = b.taskStartHook
 	b.mu.Lock()
 	b.containers[id] = container
 	b.mu.Unlock()
@@ -137,12 +139,22 @@ type fakeProcess struct {
 	output, errorOutput string
 	deleteOutput        string
 	started             chan struct{}
+	startHook           func()
+	startContextHook    func(context.Context) error
 }
 
 func newFakeProcess(complete bool) *fakeProcess {
 	return &fakeProcess{status: containerd.Created, completeOnStart: complete, started: make(chan struct{})}
 }
 func (p *fakeProcess) Start(ctx context.Context) error {
+	if p.startContextHook != nil {
+		if err := p.startContextHook(ctx); err != nil {
+			return err
+		}
+	}
+	if p.startHook != nil {
+		p.startHook()
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if ctx.Err() != nil {
@@ -232,7 +244,11 @@ func (p *fakeProcess) Status(ctx context.Context) (containerd.Status, error) {
 	if ctx.Err() != nil {
 		return containerd.Status{}, ctx.Err()
 	}
-	return containerd.Status{Status: p.status}, nil
+	status := containerd.Status{Status: p.status}
+	if p.exit != nil {
+		status.ExitStatus, status.ExitTime, _ = p.exit.Result()
+	}
+	return status, nil
 }
 
 type fakeTask struct {
@@ -248,6 +264,37 @@ type fakeTask struct {
 	keepChildrenOnTerm bool
 	stubbornChildren   bool
 	pidsErr            error
+	pauseHook          func(context.Context) error
+	resumeHook         func(context.Context) error
+	pauses, resumes    int
+	execHook           func(context.Context) error
+}
+
+func (t *fakeTask) Pause(ctx context.Context) error {
+	t.pauses++
+	if t.pauseHook != nil {
+		return t.pauseHook(ctx)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	t.status = containerd.Paused
+	return nil
+}
+func (t *fakeTask) Resume(ctx context.Context) error {
+	t.resumes++
+	if t.resumeHook != nil {
+		return t.resumeHook(ctx)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	t.status = containerd.Running
+	return nil
 }
 
 func (t *fakeTask) Pids(ctx context.Context) ([]containerd.ProcessInfo, error) {
@@ -279,7 +326,12 @@ func (t *fakeTask) Delete(ctx context.Context, opts ...containerd.ProcessDeleteO
 	return t.fakeProcess.Delete(ctx, opts...)
 }
 
-func (t *fakeTask) exec(_ context.Context, _ string, spec *specs.Process, _ io.Reader, stdout, stderr io.Writer) (runtimeProcess, error) {
+func (t *fakeTask) exec(ctx context.Context, _ string, spec *specs.Process, _ io.Reader, stdout, stderr io.Writer) (runtimeProcess, error) {
+	if t.execHook != nil {
+		if err := t.execHook(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if t.execErr != nil {
 		return nil, t.execErr
 	}

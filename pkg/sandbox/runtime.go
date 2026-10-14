@@ -64,6 +64,8 @@ type runtimeTask interface {
 	runtimeProcess
 	Pid() uint32
 	Pids(context.Context) ([]containerd.ProcessInfo, error)
+	Pause(context.Context) error
+	Resume(context.Context) error
 	exec(context.Context, string, *specs.Process, io.Reader, io.Writer, io.Writer) (runtimeProcess, error)
 }
 
