@@ -34,6 +34,8 @@ import (
 	"github.com/containerd/containerd/namespaces"
 	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const cleanupTimeout = 20 * time.Second
@@ -355,7 +357,7 @@ func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts 
 	defer func() { state.mu.Lock(); state.activeCancel = nil; state.mu.Unlock(); cancel() }()
 	base, err := state.container.spec(runCtx)
 	if err != nil {
-		return result, fmt.Errorf("read container spec: %w", err)
+		return result, fmt.Errorf("read container spec: %w", normalizeExecutionContextError(err))
 	}
 	processSpec, err := executionSpec(base, cmd, opts)
 	if err != nil {
@@ -378,7 +380,7 @@ func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts 
 		cleanup, cleanupCancel := cleanupContext(ctx)
 		defer cleanupCancel()
 		state.stopped = true
-		return result, errors.Join(fmt.Errorf("create exec process: %w", err), stopTask(cleanup, state.task, 0))
+		return result, errors.Join(fmt.Errorf("create exec process: %w", normalizeExecutionContextError(err)), stopTask(cleanup, state.task, 0))
 	}
 	state.processes[execID] = process
 	defer func() {
@@ -400,10 +402,10 @@ func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts 
 	// 必须先订阅退出状态再启动，确保快速退出也可观察
 	wait, err := process.Wait(runCtx)
 	if err != nil {
-		return result, fmt.Errorf("wait exec process: %w", err)
+		return result, fmt.Errorf("wait exec process: %w", normalizeExecutionContextError(err))
 	}
 	if err = process.Start(runCtx); err != nil {
-		return result, fmt.Errorf("start exec process: %w", err)
+		return result, fmt.Errorf("start exec process: %w", normalizeExecutionContextError(err))
 	}
 	select {
 	case <-runCtx.Done():
@@ -417,10 +419,28 @@ func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts 
 		}
 		code, _, waitErr := status.Result()
 		if waitErr != nil {
-			return result, fmt.Errorf("wait exec exit: %w", waitErr)
+			return result, fmt.Errorf("wait exec exit: %w", normalizeExecutionContextError(waitErr))
 		}
 		result.ExitCode = int32(code)
 		return result, nil
+	}
+}
+
+// containerd Wait can report a gRPC cancellation before the local context is
+// done. Preserve the RPC error while exposing its standard context sentinel.
+// Normalize only execution operations, never successful results or later
+// cleanup errors, and do not infer cancellation from an unrelated RPC failure.
+func normalizeExecutionContextError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return err
+	}
+	switch status.Code(err) {
+	case codes.DeadlineExceeded:
+		return errors.Join(err, context.DeadlineExceeded)
+	case codes.Canceled:
+		return errors.Join(err, context.Canceled)
+	default:
+		return err
 	}
 }
 
