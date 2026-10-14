@@ -118,6 +118,9 @@ func (s *Session) Execute(ctx context.Context, req *executor.ExecutionRequest) (
 	if err == nil && out == nil {
 		err = fmt.Errorf("sandbox backend returned no execution result")
 	}
+	if err == nil && (out.ExitCode < 0 || out.ExitCode > 255) {
+		err = fmt.Errorf("sandbox returned invalid command exit code %d", out.ExitCode)
+	}
 	if err != nil {
 		if s.controller != nil {
 			err = s.stopOwnedOnFailure(ctx, err)
@@ -131,7 +134,7 @@ func (s *Session) Execute(ctx context.Context, req *executor.ExecutionRequest) (
 		result.WithMetadata("outputTruncated", out.OutputTruncated)
 		result.Complete(err == nil && out.ExitCode == 0, out.ExitCode, err)
 		if err == nil && out.ExitCode != 0 {
-			err = fmt.Errorf("sandbox command exited with code %d", out.ExitCode)
+			err = &CommandExitError{Code: out.ExitCode}
 			result.Error = err.Error()
 		}
 	} else {

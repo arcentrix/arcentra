@@ -34,6 +34,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/scm"
 	_ "github.com/arcentrix/arcentra/pkg/scm/builtin" // register builtin SCM providers via side effects.
 	"github.com/arcentrix/arcentra/pkg/serde"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	timepkg "github.com/arcentrix/arcentra/pkg/time"
 )
 
@@ -56,8 +57,11 @@ type PipelineServiceImpl struct {
 	stepRunRepo      repo.IStepRunRepository
 	logAggregator    *LogAggregator
 	engine           IPipelineEngine
+	engineProvider   func() IPipelineEngine
 	deployment       *DeploymentService
 	templateResolver *PipelineTemplateService
+
+	offlineRuntimePolicy taskqueue.OfflineRuntimePolicy
 }
 
 // NewPipelineServiceImpl creates pipeline grpc service.
@@ -67,10 +71,11 @@ func NewPipelineServiceImpl(services *Services) *PipelineServiceImpl {
 		projectRepo:      services.ProjectRepo,
 		stepRunRepo:      services.StepRunRepo,
 		logAggregator:    services.LogAggregator,
-		engine:           services.PipelineEngine,
+		engineProvider:   services.pipelineEngine.load,
 		deployment:       services.Deployment,
 		templateResolver: services.PipelineTemplate,
 	}
+	implementation.offlineRuntimePolicy = services.offlineRuntimePolicy.Clone()
 	if repos := services.Repos(); repos != nil {
 		implementation.jobRunRepo = repos.JobRun
 	}
@@ -336,7 +341,8 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 	if pipeline.IsEnabled != 1 {
 		return &pipelinev1.TriggerPipelineResponse{Success: false, Message: "pipeline is disabled", Error: s.error(409, "pipeline is disabled", "conflict", nil)}, nil
 	}
-	if s.engine == nil {
+	engine := s.currentEngine()
+	if engine == nil {
 		return &pipelinev1.TriggerPipelineResponse{Success: false, Message: "pipeline engine unavailable", Error: s.error(503, "pipeline engine unavailable", "unavailable", nil)}, nil
 	}
 	requestID := strings.TrimSpace(req.GetRequestId())
@@ -394,7 +400,7 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 			Error:   s.error(400, err.Error(), "validation", nil),
 		}, nil
 	}
-	if err := validation.NewSchemaValidator().Validate(parsedSpec); err != nil {
+	if err := validation.NewSchemaValidatorWithRuntimePolicy(s.offlineRuntimePolicy).Validate(parsedSpec); err != nil {
 		return &pipelinev1.TriggerPipelineResponse{
 			Success: false,
 			Message: "spec validation failed",
@@ -467,7 +473,7 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 			log.Warnw("increment pipeline runs failed", "error", err)
 		}
 	}
-	if err := s.engine.Submit(run, parsedSpec); err != nil {
+	if err := engine.Submit(run, parsedSpec); err != nil {
 		now := time.Now()
 		_ = s.pipelineRepo.UpdateRun(ctx, run.RunID, map[string]any{"status": model.PipelineStatusFailed, "end_time": now})
 		_ = s.pipelineRepo.Update(ctx, run.PipelineID, map[string]any{"status": model.PipelineStatusFailed})
@@ -509,10 +515,11 @@ func (s *PipelineServiceImpl) StopPipeline(
 	if run.Status == model.PipelineStatusSuccess || run.Status == model.PipelineStatusFailed {
 		return &pipelinev1.StopPipelineResponse{Success: false, Message: "run is already finished", Error: s.error(409, "run is already finished", "conflict", nil)}, nil
 	}
-	if s.engine == nil {
+	engine := s.currentEngine()
+	if engine == nil {
 		return &pipelinev1.StopPipelineResponse{Success: false, Message: "pipeline engine unavailable", Error: s.error(503, "pipeline engine unavailable", "unavailable", nil)}, nil
 	}
-	if err := s.engine.CancelRun(run.RunID); err != nil {
+	if err := engine.CancelRun(run.RunID); err != nil {
 		return &pipelinev1.StopPipelineResponse{Success: false, Message: "run is not active on this control process", Error: s.error(409, err.Error(), "conflict", nil)}, nil
 	}
 	if err := s.pipelineRepo.Update(ctx, run.PipelineID, map[string]any{"last_sync_message": strings.TrimSpace(req.GetReason())}); err != nil {
@@ -591,7 +598,8 @@ func (s *PipelineServiceImpl) changePipelinePauseState(
 		return invalidStateMessage, s.error(409, invalidStateDetail, "conflict", nil)
 	}
 
-	if s.engine == nil {
+	engine := s.currentEngine()
+	if engine == nil {
 		return failedMessage, s.error(503, "pipeline engine unavailable", "unavailable", nil)
 	}
 	updater, supported := s.pipelineRepo.(interface {
@@ -602,9 +610,9 @@ func (s *PipelineServiceImpl) changePipelinePauseState(
 	}
 	var transitionErr error
 	if nextStatus == model.PipelineStatusPaused {
-		transitionErr = s.engine.PauseRun(runID)
+		transitionErr = engine.PauseRun(runID)
 	} else {
-		transitionErr = s.engine.ResumeRun(runID)
+		transitionErr = engine.ResumeRun(runID)
 	}
 	if transitionErr != nil {
 		return failedMessage, s.error(409, transitionErr.Error(), "conflict", nil)
@@ -612,9 +620,9 @@ func (s *PipelineServiceImpl) changePipelinePauseState(
 	now := time.Now()
 	if err := updater.UpdateRunIfStatus(ctx, run.RunID, expectedStatus, map[string]any{"status": nextStatus}); err != nil {
 		if nextStatus == model.PipelineStatusPaused {
-			_ = s.engine.ResumeRun(runID)
+			_ = engine.ResumeRun(runID)
 		} else {
-			_ = s.engine.PauseRun(runID)
+			_ = engine.PauseRun(runID)
 		}
 		return failedMessage, s.error(409, "run state changed; refresh before retrying", "conflict", nil)
 	}
@@ -707,7 +715,7 @@ func (s *PipelineServiceImpl) GetPipelineSpec(
 			Error:   s.error(500, err.Error(), "internal", nil),
 		}, nil
 	}
-	if err := validation.NewSchemaValidator().Validate(def); err != nil {
+	if err := validation.NewSchemaValidatorWithRuntimePolicy(s.offlineRuntimePolicy).Validate(def); err != nil {
 		return &pipelinev1.GetPipelineSpecResponse{
 			Success: false,
 			Message: "validate spec failed",
@@ -756,7 +764,7 @@ func (s *PipelineServiceImpl) ValidatePipelineSpec(
 				Error:   s.error(400, err.Error(), "validation", nil),
 			}, nil
 		}
-		if validateErr := validation.NewSchemaValidator().Validate(def); validateErr != nil {
+		if validateErr := validation.NewSchemaValidatorWithRuntimePolicy(s.offlineRuntimePolicy).Validate(def); validateErr != nil {
 			return &pipelinev1.ValidatePipelineSpecResponse{
 				Success: false,
 				Message: "validation failed",
@@ -772,7 +780,7 @@ func (s *PipelineServiceImpl) ValidatePipelineSpec(
 			}, nil
 		}
 		def = req.GetSpec()
-		err = validation.NewSchemaValidator().Validate(def)
+		err = validation.NewSchemaValidatorWithRuntimePolicy(s.offlineRuntimePolicy).Validate(def)
 		if err != nil {
 			return &pipelinev1.ValidatePipelineSpecResponse{
 				Success: false,
@@ -819,7 +827,7 @@ func (s *PipelineServiceImpl) SavePipelineSpec(
 		}, nil
 	}
 
-	if validateErr := validation.NewSchemaValidator().Validate(req.GetSpec()); validateErr != nil {
+	if validateErr := validation.NewSchemaValidatorWithRuntimePolicy(s.offlineRuntimePolicy).Validate(req.GetSpec()); validateErr != nil {
 		return &pipelinev1.SavePipelineSpecResponse{
 			Success: false,
 			Message: "validation failed",

@@ -67,10 +67,12 @@ retry behavior are unchanged. The authorized CI privilege boundary is unchanged:
 one disposable VM, one isolated rootful daemon, non-root Go tests, no host-security
 changes or production secrets, a 25-minute limit, and mandatory cleanup evidence.
 
-## Accepted first-profile limits
+## Current offline profile and sequential-chain limits
 
-- Trusted code, exactly one Agent job, sequential shell steps and one job at a time
-  per Agent. This is not a hostile-code or multi-tenant isolation guarantee.
+- Trusted code, either one Agent job or one explicit linear chain of Agent jobs.
+  Each job runs sequential shell steps in its own session/workspace; an Agent
+  still executes one job at a time. This is not a hostile-code or multi-tenant
+  isolation guarantee.
 - Runtime type `containerd-offline-v1`; immutable, explicitly allowlisted
   `image@sha256:...`; positive CPU/memory limits within both operator policies.
 - Explicit nonzero numeric UID:GID matching the Agent; private PID/network
@@ -81,9 +83,15 @@ changes or production secrets, a 25-minute limit, and mandatory cleanup evidence
 - No automatic retries, execution resumption or takeover after a crash. Recovery
   removes only exact journaled resources and reconciles the original authenticated
   terminal outcome. A retry requires an explicitly requested fresh run.
-- The one-job validator means upstream artifact-input DAG jobs remain unsupported.
-  An artifact-download staging hook is not evidence that sequential container DAGs
-  are supported. The hosted test does not claim that capability.
+- Multiple jobs must form one explicit dependency chain: one root, at most one
+  predecessor and successor per job, and all jobs reachable from that root.
+  Disconnected roots, branches, joins, cycles and mixed host/deployment execution
+  are rejected. Declaration order does not replace `dependsOn`.
+- Upstream inputs travel only through registered artifact storage. Host staging
+  precedes each new container; an upstream workspace, root filesystem or claim is
+  never reused. See the chain contract below. Historical single-job acceptance
+  does not establish this extension; check the exact new revision's hosted chain
+  scenario and post-merge checks before relying on it.
 - Images must already contain required tools/dependencies; no online package
   installation, bridge/CNI/host networking, HTTP/native/deployment steps,
   Kubernetes execution, standalone StepRun runtime tasks, or custom mounts.
@@ -91,6 +99,85 @@ changes or production secrets, a 25-minute limit, and mandatory cleanup evidence
   seccomp/AppArmor claim, VM isolation, HA fencing, private-provider acceptance,
   production deployment, load guarantee, or protection from the trusted host
   administrator/same-UID processes.
+
+## Sequential-chain contract
+
+A container pipeline can use one job or a single explicit dependency chain. Every
+job is validated before dispatch; a bad later job must not allow the root to run.
+The pipeline-level runtime, image and limits apply to every job. Operator policy
+comes from the immutable Control startup configuration for API load, validation,
+save and trigger, as well as Process submission. Pipeline JSON cannot enable or
+replace that policy. Editing policy files requires a restart; project permissions
+and approval checks continue to use their existing live authorization rules.
+
+Each job gets its own Agent selection, JobRunID, claim, runtime binding digest,
+container session and workspace. The next job is scheduled after successful
+upstream completion and registered artifact backflow. The Agent seals all upstream
+container processes before upload and completes exact cleanup before its terminal
+report. Cleanup failure remains job failure and does not unlock the next job.
+Lost terminal acknowledgments replay the original receipt rather than repeating
+commands or uploads. A fresh downstream session never mounts the upstream
+workspace or receives its unregistered files.
+
+The existing condition semantics remain: a skipped predecessor can unlock its
+successor, but missing required artifact input fails closed before container
+startup. Explicit shell `continueOnError` applies only to a verified command nonzero exit.
+Artifact steps cannot set it. Runtime/staging, log-persistence, report and cleanup
+errors cannot be ignored to continue commands; only the existing receipt replay
+and exact cleanup retries remain. A command-exit error joined with any additional
+failure is also blocking.
+No automatic command resumption or takeover is introduced by adding a chain.
+
+The following definition uses only tools present in the pinned image and uses
+registered storage to pass `dist/result.txt`. It requires reviewed, explicitly
+enabled matching Control/Agent policies and an already configured artifact store.
+It grants no credentials or network access to the containers.
+
+```yaml
+namespace: offline-chain
+version: 1.0.0
+runtime:
+  type: containerd-offline-v1
+  image: docker.io/library/alpine@sha256:1f3591b8a02ea153f41c5bba878ad477f63ab3d19349762cb77504db02a23e15
+  resources:
+    cpuLimit: 500m
+    memoryLimit: 64Mi
+jobs:
+  - name: produce
+    steps:
+      - name: build
+        uses: shell
+        runOnAgent: true
+        args:
+          script: mkdir -p dist; printf 'offline artifact' > dist/result.txt
+      - name: publish
+        uses: builtin:artifacts
+        action: upload
+        runOnAgent: true
+        args:
+          paths: [dist/result.txt]
+  - name: consume
+    dependsOn: [produce]
+    steps:
+      - name: fetch
+        uses: builtin:artifacts
+        action: download
+        runOnAgent: true
+        args:
+          job: produce
+          paths: [dist/result.txt]
+      - name: verify
+        uses: shell
+        runOnAgent: true
+        args:
+          script: test "$(cat dist/result.txt)" = "offline artifact"
+```
+
+Container `failed_step` and `whole_job` retry policies are still rejected when
+saving or triggering a definition, before work is dispatched. Their session,
+workspace and staging semantics require a separate implementation; existing
+trusted-baremetal retry modes are unchanged. Branches, joins and disconnected
+roots are intentionally outside this linear-chain extension.
 
 ## Review-only configuration template
 

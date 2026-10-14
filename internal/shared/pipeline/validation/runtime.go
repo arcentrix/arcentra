@@ -47,37 +47,99 @@ func ResolveRuntime(pipeline *spec.Pipeline, policy taskqueue.OfflineRuntimePoli
 	if err := taskqueue.ValidateRuntimeRequest(request, policy); err != nil {
 		return nil, err
 	}
-	if len(pipeline.Jobs) != 1 {
-		return nil, fmt.Errorf("offline runtime currently requires exactly one job")
+	if err := validateOfflineRuntimeChain(pipeline.Jobs); err != nil {
+		return nil, err
 	}
-	job := pipeline.Jobs[0]
-	if job == nil {
-		return nil, fmt.Errorf("runtime job is nil")
+	for _, job := range pipeline.Jobs {
+		if err := validateOfflineRuntimeJob(job); err != nil {
+			return nil, fmt.Errorf("offline runtime job %q: %w", job.Name, err)
+		}
 	}
+	return request, nil
+}
+
+// validateOfflineRuntimeChain 仅接受一个根和显式的线性依赖，不依赖 jobs 的声明顺序
+func validateOfflineRuntimeChain(jobs []*spec.Job) error {
+	if len(jobs) == 0 {
+		return fmt.Errorf("offline runtime requires at least one job")
+	}
+	byName := make(map[string]struct{}, len(jobs))
+	for i, job := range jobs {
+		if job == nil {
+			return fmt.Errorf("offline runtime job[%d] is nil", i)
+		}
+		if strings.TrimSpace(job.Name) == "" {
+			return fmt.Errorf("offline runtime job[%d] requires a name", i)
+		}
+		if _, exists := byName[job.Name]; exists {
+			return fmt.Errorf("offline runtime has duplicate job name %q", job.Name)
+		}
+		byName[job.Name] = struct{}{}
+	}
+
+	successor := make(map[string]string, len(jobs))
+	root, roots := "", 0
+	for _, job := range jobs {
+		switch len(job.DependsOn) {
+		case 0:
+			root = job.Name
+			roots++
+		case 1:
+			dependency := job.DependsOn[0]
+			if _, exists := byName[dependency]; !exists {
+				return fmt.Errorf("offline runtime job %q depends on unknown job %q", job.Name, dependency)
+			}
+			if _, exists := successor[dependency]; exists {
+				return fmt.Errorf("offline runtime requires a linear dependency chain; job %q has multiple dependents", dependency)
+			}
+			successor[dependency] = job.Name
+		default:
+			return fmt.Errorf("offline runtime job %q must have exactly one explicit predecessor", job.Name)
+		}
+	}
+	if roots != 1 {
+		return fmt.Errorf("offline runtime requires exactly one root job; every later job must explicitly depend on its predecessor")
+	}
+
+	// 单入单出仍可能包含与根隔离的环；从唯一根遍历必须覆盖所有节点
+	visited := 0
+	for name := root; name != ""; name = successor[name] {
+		visited++
+		if visited > len(jobs) {
+			return fmt.Errorf("offline runtime dependency chain contains a cycle")
+		}
+	}
+	if visited != len(jobs) {
+		return fmt.Errorf("offline runtime requires every job in one acyclic dependency chain")
+	}
+	return nil
+}
+
+func validateOfflineRuntimeJob(job *spec.Job) error {
 	if job.Target != nil {
-		return nil, fmt.Errorf("offline runtime does not support deployment targets")
+		return fmt.Errorf("offline runtime does not support deployment targets")
 	}
 	if job.Retry != nil {
-		return nil, fmt.Errorf("offline runtime retries are unsupported; start a fresh run")
+		return fmt.Errorf("offline runtime retries are unsupported; start a fresh run")
 	}
 	if job.Source != nil {
 		parsed, err := url.Parse(job.Source.Repo)
 		if job.Source.Type != "git" || err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "ssh") || parsed.Host == "" {
-			return nil, fmt.Errorf("offline source requires a remote Git URL; host paths are unsupported")
+			return fmt.Errorf("offline source requires a remote Git URL; host paths are unsupported")
 		}
 	}
 	steps := make([]taskqueue.StepPayload, 0, len(job.Steps))
 	for _, step := range job.Steps {
 		if step == nil {
-			return nil, fmt.Errorf("runtime step is nil")
+			return fmt.Errorf("runtime step is nil")
 		}
 		if !step.RunOnAgent {
-			return nil, fmt.Errorf("offline runtime requires every step to run on the selected Agent")
+			return fmt.Errorf("offline runtime requires every step to run on the selected Agent")
 		}
-		steps = append(steps, taskqueue.StepPayload{Uses: step.Uses, Action: step.Action, Args: spec.StructAsMap(step.Args)})
+		steps = append(steps, taskqueue.StepPayload{Uses: step.Uses, Action: step.Action, Args: spec.StructAsMap(step.Args), ContinueOnError: step.ContinueOnError})
 	}
 	if err := taskqueue.ValidateRuntimeSteps(steps); err != nil {
-		return nil, err
+		return err
 	}
-	return request, nil
+	return nil
 }

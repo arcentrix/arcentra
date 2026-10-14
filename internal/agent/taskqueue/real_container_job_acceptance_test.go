@@ -87,7 +87,7 @@ func TestRealContainerAcceptanceGate(t *testing.T) {
 }
 
 // TestRealContainerJobAcceptance 验证真实控制面提交到离线容器执行、认证终态和制品发布闭环
-// 关闭门禁时只替换测试构造；不代表已验证生产启动或支持跨作业输入制品
+// 关闭门禁时只替换测试构造；真实顺序链仍须经过已登记对象存储制品传递
 func TestRealContainerJobAcceptance(t *testing.T) {
 	settings, err := realContainerEnvironment(os.Getenv)
 	if err != nil {
@@ -334,9 +334,10 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	if _, err := f.producer.Enqueue(&duplicate, nova.Queue(taskpayload.AgentQueue(f.conf.Agent.ID))); err != nil {
 		t.Fatal(err)
 	}
-	fifo := containerAcceptanceSubmit(t, f, settings, &spec.Job{Name: "fifo-rejected", Steps: []*spec.Step{controllerWorkerShell("create-fifo", "mkdir dist; mkfifo dist/pipe"), {Name: "reject-special-file", Uses: "builtin:artifacts", Action: "upload", RunOnAgent: true, Args: spec.MapAsStruct(map[string]any{"paths": []any{"dist"}})}}})
+	fifo := containerAcceptanceSubmit(t, f, settings, &spec.Job{Name: "fifo-rejected", Steps: []*spec.Step{controllerWorkerShell("create-fifo", "mkdir dist; mkfifo dist/pipe"), {Name: "reject-special-file", Uses: "builtin:artifacts", Action: "upload", RunOnAgent: true, Args: spec.MapAsStruct(map[string]any{"paths": []any{"dist"}})}}}, containerAcceptanceDependent("fifo-rejected"))
 	f.waitRun(fifo.RunID, model.PipelineStatusFailed)
 	fifoJob := containerAcceptanceJob(t, f, fifo.RunID, model.JobRunStatusFailed)
+	containerAcceptanceBlockedDownstream(t, f, fifoJob)
 	if !strings.Contains(strings.ToLower(fifoJob.ErrorMessage), "regular") && !strings.Contains(strings.ToLower(fifoJob.ErrorMessage), "unsupported") {
 		t.Fatalf("FIFO was not rejected as a special file: %s", fifoJob.ErrorMessage)
 	}
@@ -348,7 +349,7 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	containerAcceptanceArtifacts(t, f, observedStore, job)
 	t.Log("Process -> real Kafka -> container shell -> authenticated TLS gRPC -> MySQL/S3: success, source staging, sequential shell, background seal, FIFO rejection, ACK loss and same-journal restart verified")
 
-	cancelRun := containerAcceptanceSubmit(t, f, settings, &spec.Job{Name: "cancel", Steps: []*spec.Step{controllerWorkerShell("wait", "printf started > started; sleep 60; printf forbidden > after-cancel"), controllerWorkerShell("never", "printf forbidden > later")}})
+	cancelRun := containerAcceptanceSubmit(t, f, settings, &spec.Job{Name: "cancel", Steps: []*spec.Step{controllerWorkerShell("wait", "printf started > started; sleep 60; printf forbidden > after-cancel"), controllerWorkerShell("never", "printf forbidden > later")}}, containerAcceptanceDependent("cancel"))
 	var cancelRecord containerAcceptanceJournal
 	f.wait("real container command starts before Kafka cancellation", func() bool {
 		records, err := containerAcceptanceRecords(journal)
@@ -374,6 +375,7 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	f.waitRun(cancelRun.RunID, model.PipelineStatusCancelled)
 	controllerWorkerWaitReceipts(t, f, controllerReceiptExpectation{jobID: cancelRecord.Record.JobRunID, runID: cancelRun.RunID, claim: cancelRecord.Record.Claim, runtimeBinding: cancelRecord.Record.Binding, status: model.JobRunStatusCancelled, steps: map[string]int{"wait": 6, "never": 6}})
 	cancelJob := containerAcceptanceJob(t, f, cancelRun.RunID, model.JobRunStatusCancelled)
+	containerAcceptanceBlockedDownstream(t, f, cancelJob)
 	if cancelJob.CancellationClaimID != cancelRecord.Record.Claim {
 		t.Fatal("cancellation changed the original execution claim")
 	}
@@ -381,7 +383,7 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	containerAcceptanceRemoved(t, f, cancelRecord)
 	timeoutStep := controllerWorkerShell("wait", "printf started > started; sleep 60; printf forbidden > after-timeout")
 	timeoutStep.Timeout = "2s"
-	timeoutRun := containerAcceptanceSubmit(t, f, settings, &spec.Job{Name: "agent-step-timeout", Timeout: "20s", Steps: []*spec.Step{timeoutStep, controllerWorkerShell("never", "printf forbidden > later")}})
+	timeoutRun := containerAcceptanceSubmit(t, f, settings, &spec.Job{Name: "agent-step-timeout", Timeout: "20s", Steps: []*spec.Step{timeoutStep, controllerWorkerShell("never", "printf forbidden > later")}}, containerAcceptanceDependent("agent-step-timeout"))
 	var timeoutRecord containerAcceptanceJournal
 	f.wait("real container command starts before its deadline", func() bool {
 		records, err := containerAcceptanceRecords(journal)
@@ -404,6 +406,7 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	f.waitRun(timeoutRun.RunID, model.PipelineStatusFailed)
 	controllerWorkerWaitReceipts(t, f, controllerReceiptExpectation{jobID: timeoutRecord.Record.JobRunID, runID: timeoutRun.RunID, claim: timeoutRecord.Record.Claim, runtimeBinding: timeoutRecord.Record.Binding, status: model.JobRunStatusTimeout, steps: map[string]int{"wait": 7, "never": 8}})
 	timeoutJob := containerAcceptanceJob(t, f, timeoutRun.RunID, model.JobRunStatusTimeout)
+	containerAcceptanceBlockedDownstream(t, f, timeoutJob)
 	if !strings.Contains(timeoutJob.ErrorMessage, "timeout") && !strings.Contains(timeoutJob.ErrorMessage, "deadline") {
 		t.Fatalf("timeout result lost cause: %s", timeoutJob.ErrorMessage)
 	}
@@ -414,6 +417,7 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	containerAcceptanceDrain(t, f)
 	assertControllerQueueCommitted(t, f, 6)
 	containerAcceptanceControllerTimeout(t, f, settings, publisher)
+	containerAcceptanceArtifactChain(t, f, settings, observedStore)
 	for _, ref := range observedStore.refs {
 		state, err := f.worker.offline.backend.InspectOwned(f.ctx, ref)
 		if err != nil || state != (sandbox.ResourceState{}) {
@@ -433,7 +437,7 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 			t.Fatalf("workspace cleanup left %s", entry.Name())
 		}
 	}
-	t.Log("real control-queue cancellation, timeout, subsequent healthy execution and exact owned cleanup verified; offline artifact-input DAG remains unsupported and is not claimed")
+	t.Log("real linear-chain failure, control-queue cancellation, timeout, registered artifact transfer, subsequent healthy execution and exact owned cleanup verified; branching, parallel jobs and retries remain unsupported")
 }
 
 func containerAcceptanceStoppedSteps(t *testing.T, f *controllerWorkerFixture, job *model.JobRun, expected map[string]int) {
@@ -460,7 +464,7 @@ func containerAcceptanceStoppedSteps(t *testing.T, f *controllerWorkerFixture, j
 	f.assertReceipt("job", job.JobRunID, job.ClaimID, job.TerminalReportDigest, job.PipelineRunID, job.JobRunID)
 }
 
-func containerAcceptanceSubmit(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, job *spec.Job) *model.PipelineRun {
+func containerAcceptanceSubmit(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, jobs ...*spec.Job) *model.PipelineRun {
 	t.Helper()
 	ctx, cancel := f.client.WithTimeoutAndAuth(f.ctx)
 	response, err := f.client.AgentClient.Heartbeat(ctx, &agentv1.HeartbeatRequest{AgentId: f.conf.Agent.ID, Status: agentv1.AgentStatus_AGENT_STATUS_IDLE, Timestamp: time.Now().Unix(), RuntimeCapabilities: &agentv1.RuntimeCapabilities{ContainerdOfflineV1: f.worker.OfflineRuntimeReady(), ExecutionMode: taskpayload.RuntimeContainerdOfflineV1}})
@@ -468,11 +472,11 @@ func containerAcceptanceSubmit(t *testing.T, f *controllerWorkerFixture, cfg *re
 	if err != nil || response == nil || !response.Success {
 		t.Fatalf("authenticated runtime readiness report: %v", err)
 	}
-	run := &model.PipelineRun{RunID: id.GetUild(), PipelineID: f.pipelineID, Status: model.PipelineStatusPending, Env: `{"ROUNDTRIP_VALUE":"controller-agent-artifact"}`, TotalJobs: 1}
+	run := &model.PipelineRun{RunID: id.GetUild(), PipelineID: f.pipelineID, Status: model.PipelineStatusPending, Env: `{"ROUNDTRIP_VALUE":"controller-agent-artifact"}`, TotalJobs: len(jobs)}
 	if err := f.repos.Pipeline.CreateRun(f.ctx, run); err != nil {
 		t.Fatal(err)
 	}
-	pipeline := &spec.Pipeline{Namespace: "container-acceptance", Runtime: &spec.Runtime{Type: taskpayload.RuntimeContainerdOfflineV1, Image: cfg.image, Resources: &spec.Resources{CpuLimit: "500m", MemoryLimit: "64Mi"}}, Jobs: []*spec.Job{job}}
+	pipeline := &spec.Pipeline{Namespace: "container-acceptance", Runtime: &spec.Runtime{Type: taskpayload.RuntimeContainerdOfflineV1, Image: cfg.image, Resources: &spec.Resources{CpuLimit: "500m", MemoryLimit: "64Mi"}}, Jobs: jobs}
 	if err := f.engine.Submit(run, pipeline); err != nil {
 		t.Fatalf("actual Process.Submit rejected acceptance job: %v", err)
 	}
@@ -485,7 +489,11 @@ func containerAcceptanceJob(t *testing.T, f *controllerWorkerFixture, runID stri
 	if err != nil || len(jobs) != 1 {
 		t.Fatalf("expected one Process-created job: %d %v", len(jobs), err)
 	}
-	job := jobs[0]
+	return containerAcceptanceBoundJob(t, f, jobs[0], want)
+}
+
+func containerAcceptanceBoundJob(t *testing.T, f *controllerWorkerFixture, job *model.JobRun, want int) *model.JobRun {
+	t.Helper()
 	if job.Status != want || job.AgentID != f.conf.Agent.ID || job.ClaimID == "" || job.RuntimeBindingDigest == "" || job.TerminalReportDigest == "" {
 		t.Fatalf("job result lost original runtime/claim binding: %+v", job)
 	}
@@ -496,7 +504,7 @@ func containerAcceptanceJob(t *testing.T, f *controllerWorkerFixture, runID stri
 	if err := sonic.Unmarshal(task.Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	digest, err := taskpayload.RuntimeBindingDigest(f.pipelineID, runID, job.JobRunID, f.conf.Agent.ID, payload.Runtime)
+	digest, err := taskpayload.RuntimeBindingDigest(f.pipelineID, job.PipelineRunID, job.JobRunID, f.conf.Agent.ID, payload.Runtime)
 	if err != nil || digest != job.RuntimeBindingDigest || payload.Runtime.BindingDigest != digest {
 		t.Fatalf("Process/Kafka/MySQL runtime binding changed: %v", err)
 	}

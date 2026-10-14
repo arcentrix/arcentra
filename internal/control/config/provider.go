@@ -23,6 +23,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/metrics"
 	"github.com/arcentrix/arcentra/pkg/pprof"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/google/wire"
 )
 
@@ -37,6 +38,7 @@ var ProviderSet = wire.NewSet(
 	ProvideMetricsConfig,
 	ProvidePprofConfig,
 	ProvideKafkaSettings,
+	ProvideOfflineRuntimePolicy,
 )
 
 // ProvideConf 提供应用配置
@@ -105,4 +107,16 @@ func ProvideKafkaSettings(appConf *AppConfig) service.KafkaSettings {
 			Password: appConf.MessageQueue.Kafka.Ssl.Password,
 		},
 	}
+}
+
+// ProvideOfflineRuntimePolicy 从可信启动配置构造独立的运行时策略，缺省保持关闭
+func ProvideOfflineRuntimePolicy(appConf *AppConfig) (taskqueue.OfflineRuntimePolicy, error) {
+	if appConf == nil {
+		return taskqueue.OfflineRuntimePolicy{}, nil
+	}
+	policy := appConf.Pipeline.OfflineRuntime.Clone()
+	if err := policy.ValidateProduction(); err != nil {
+		return taskqueue.OfflineRuntimePolicy{}, err
+	}
+	return policy, nil
 }

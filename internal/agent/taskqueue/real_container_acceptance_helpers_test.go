@@ -228,6 +228,7 @@ func startContainerAcceptanceWorker(ctx context.Context, conf *config.AgentConfi
 
 type containerAcceptanceJournal struct {
 	Record *struct {
+		SessionID string              `json:"id"`
 		RunID     string              `json:"pipelineRunID"`
 		JobRunID  string              `json:"jobRunID"`
 		Claim     string              `json:"executionClaimID"`
@@ -249,6 +250,11 @@ func containerAcceptanceRecords(root string) ([]containerAcceptanceJournal, erro
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(root, entry.Name()))
+		if errors.Is(err, os.ErrNotExist) {
+			// ACK replay can remove another completed job's tombstone during a
+			// chain's next allocation. Callers still require the exact live owner.
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -273,6 +279,8 @@ type containerAcceptanceStorage struct {
 	sealedUploads                         int
 	background                            []byte
 	refs                                  []sandbox.ResourceRef
+	afterUpload                           func(context.Context, string, containerAcceptanceJournal) error
+	beforeDownload                        func(context.Context, string) error
 }
 
 func (s *containerAcceptanceStorage) UploadStream(ctx context.Context, key string, input io.ReadSeeker, size int64, contentType string) error {
@@ -280,10 +288,20 @@ func (s *containerAcceptanceStorage) UploadStream(ctx context.Context, key strin
 	if err != nil {
 		return err
 	}
-	if len(records) != 1 || records[0].Record.Phase != "sealed" {
-		return fmt.Errorf("artifact read occurred before exact whole-job sealing")
+	var owner *containerAcceptanceJournal
+	for i := range records {
+		record := records[i].Record
+		if strings.HasPrefix(key, "artifacts/"+record.RunID+"/"+record.JobRunID+"/") {
+			if owner != nil || record.Phase != "sealed" {
+				return fmt.Errorf("artifact read occurred before exact whole-job sealing")
+			}
+			owner = &records[i]
+		}
 	}
-	record := records[0].Record
+	if owner == nil {
+		return fmt.Errorf("artifact upload lacks its exact sealed journal owner")
+	}
+	record := owner.Record
 	client, err := containerd.New(s.socket)
 	if err != nil {
 		return err
@@ -334,13 +352,29 @@ func (s *containerAcceptanceStorage) UploadStream(ctx context.Context, key strin
 		return err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.sealedUploads++
 	s.refs = append(s.refs, record.Resource)
 	if readErr == nil {
 		s.background = bytes.Clone(before)
 	}
+	observe := s.afterUpload
+	s.mu.Unlock()
+	if observe != nil {
+		return observe(ctx, key, *owner)
+	}
 	return nil
+}
+
+func (s *containerAcceptanceStorage) DownloadStream(ctx context.Context, key string) (io.ReadCloser, error) {
+	s.mu.Lock()
+	observe := s.beforeDownload
+	s.mu.Unlock()
+	if observe != nil {
+		if err := observe(ctx, key); err != nil {
+			return nil, err
+		}
+	}
+	return s.S3Storage.DownloadStream(ctx, key)
 }
 
 func containerAcceptanceSource(t *testing.T, ctx context.Context, beforeFetch ...func() error) (string, string) {
