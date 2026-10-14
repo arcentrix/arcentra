@@ -59,7 +59,7 @@ func newOfflineRuntime(ctx context.Context, conf *config.AgentConfig, client *ag
 	if e1 != nil || e2 != nil || uid == 0 || gid == 0 || int(uid) != os.Geteuid() || int(gid) != os.Getegid() {
 		return nil, fmt.Errorf("offline runtime UID:GID must match the non-root Agent; directory ownership is never changed automatically")
 	}
-	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: cfg.UnixSocket, Namespace: cfg.Namespace, NetworkMode: "none"}, log.Logger{})
+	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: cfg.UnixSocket, Namespace: cfg.Namespace, RuntimeRoot: cfg.RuntimeRoot, NetworkMode: "none"}, log.Logger{})
 	if err != nil {
 		return nil, fmt.Errorf("offline runtime connection failed")
 	}

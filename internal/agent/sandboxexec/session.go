@@ -134,6 +134,7 @@ func NewSession(ctx context.Context, backend Backend, opts Options) (*Session, e
 	resources := *opts.Resources
 	s.containerID, err = backend.Create(ctx, &sandbox.CreateOptions{
 		Image:      opts.Image,
+		User:       user,
 		Command:    []string{"sh", "-ec", "trap 'exit 0' TERM INT; while :; do sleep 1; done"},
 		WorkingDir: "/", NetworkMode: "none", Resources: &resources,
 		Mounts: []sandbox.Mount{{Source: s.workspace, Target: containerWorkspace, Type: "bind"}},

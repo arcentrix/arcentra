@@ -104,6 +104,11 @@ type controllerWorkerFixtureOptions struct {
 	serverTLS *tls.Config
 	clientTLS agentgrpc.ClientTLSConfig
 	backend   *controllerWorkerBackend
+	// 仅供显式验收测试配置真实运行时，不改变普通集成测试的启动路径
+	configureAgent func(*config.AgentConfig)
+	startWorker    func(context.Context, *config.AgentConfig, *agentgrpc.ClientWrapper, *executor.Manager) (nova.TaskQueue, error)
+	processConfig  *controlconfig.AppConfig
+	timeout        time.Duration
 }
 
 // controllerWorkerBackend 让 opt-in 验收复用同一执行路径，外部依赖必须完整提供
@@ -130,6 +135,7 @@ type controllerWorkerFixture struct {
 	tasks               map[string]nova.Task
 	beforeTerminal      func(context.Context, proto.Message) error
 	observeTerminal     func(context.Context, proto.Message, any, error)
+	observeRequest      func(context.Context, any)
 	repos               *repo.Repositories
 	engine              *process.Process
 	worker              *workerQueues
@@ -169,6 +175,9 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 			t.Fatal("real-stack fixture requires every real dependency and authenticated TLS; no mock fallback")
 		}
 		timeout, waitTimeout = 3*time.Minute, 60*time.Second
+	}
+	if fixtureOptions.timeout > 0 {
+		timeout = fixtureOptions.timeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	t.Cleanup(cancel)
@@ -269,6 +278,12 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 			ctx = agentidentity.WithIdentity(ctx, agentidentity.Identity{ID: agentID})
 		}
 		var terminalMessage proto.Message
+		f.mu.Lock()
+		observeRequest := f.observeRequest
+		f.mu.Unlock()
+		if observeRequest != nil {
+			observeRequest(ctx, request)
+		}
 		switch req := request.(type) {
 		case *agentv1.ReportJobRunStatusRequest:
 			if req.Status >= 4 {
@@ -376,6 +391,9 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 		MessageQueue: config.MqConfig{Kafka: kafkaconfig.Config{BootstrapServers: brokers, SecurityProtocol: "PLAINTEXT"}},
 		TaskQueue:    nova.TaskQueueConfig{MessageFormat: "json", MessageCodec: "json", DelaySlotCount: 1, DelaySlotDuration: 3600, SessionTimeout: 6000, MaxPollInterval: 120000},
 	}
+	if fixtureOptions.configureAgent != nil {
+		fixtureOptions.configureAgent(f.conf)
+	}
 	SetStorage(objectStore, reference)
 	t.Cleanup(func() { SetStorage(nil) })
 	manager := executor.NewExecutorManager()
@@ -385,7 +403,11 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 	} else {
 		manager.SetLogPublisher(&capturedLogs{})
 	}
-	queue, err := StartWorker(ctx, f.conf, client, manager)
+	startWorker := StartWorker
+	if fixtureOptions.startWorker != nil {
+		startWorker = fixtureOptions.startWorker
+	}
+	queue, err := startWorker(ctx, f.conf, client, manager)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -404,7 +426,7 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 	}
 	t.Cleanup(func() { _ = producer.Stop() })
 	f.producer = producer
-	f.engine = process.NewProcess(repos, nil, &controllerWorkerRecordingQueue{TaskQueue: producer, fixture: f}, nil, &log.Logger{SugaredLogger: zap.NewNop().Sugar()}, nil, nil)
+	f.engine = process.NewProcess(repos, nil, &controllerWorkerRecordingQueue{TaskQueue: producer, fixture: f}, nil, &log.Logger{SugaredLogger: zap.NewNop().Sugar()}, fixtureOptions.processConfig, nil)
 	t.Cleanup(f.engine.Stop)
 	return f
 }

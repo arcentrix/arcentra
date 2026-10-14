@@ -8,6 +8,7 @@ package sandboxexec
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,10 +21,10 @@ import (
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/sandbox"
 	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/defaults"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/google/uuid"
+	"github.com/opencontainers/go-digest"
 )
 
 // TestSessionContainerdAcceptance 在明确授权的专用主机验证适配器而非生产 Agent 接线
@@ -31,17 +32,17 @@ func TestSessionContainerdAcceptance(t *testing.T) {
 	if os.Getenv("ARCENTRA_SANDBOX_SESSION_ACCEPTANCE") != "1" {
 		t.Fatal("set ARCENTRA_SANDBOX_SESSION_ACCEPTANCE=1 only on an authorized dedicated containerd host; runtime acceptance was not run")
 	}
-	if runtime.GOOS != "linux" {
-		t.Fatal("acceptance requires Linux")
+	if runtime.GOOS != "linux" || os.Geteuid() == 0 || os.Getegid() == 0 {
+		t.Fatal("acceptance requires an unprivileged nonzero Linux UID:GID; run only the dedicated daemon as root")
 	}
 	socket, image := os.Getenv("ARCENTRA_CONTAINERD_SOCKET"), os.Getenv("ARCENTRA_SANDBOX_TEST_IMAGE")
-	if socket == "" {
-		socket = "/run/containerd/containerd.sock"
+	if !filepath.IsAbs(socket) {
+		t.Fatal("set ARCENTRA_CONTAINERD_SOCKET to the explicitly authorized absolute dedicated daemon socket")
 	}
 	if image == "" {
-		t.Fatal("set ARCENTRA_SANDBOX_TEST_IMAGE to an approved Alpine-compatible image, preferably pinned by digest")
+		t.Fatal("set ARCENTRA_SANDBOX_TEST_IMAGE to an approved Alpine-compatible image pinned by sha256 digest")
 	}
-	if info, err := os.Stat(socket); err != nil || info.Mode()&os.ModeSocket == 0 {
+	if info, err := os.Lstat(socket); err != nil || info.Mode()&os.ModeSocket == 0 {
 		t.Fatalf("containerd socket unavailable: %v", err)
 	}
 	if _, err := exec.LookPath("runc"); err != nil {
@@ -58,8 +59,19 @@ func TestSessionContainerdAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, imageDigest, pinned := strings.Cut(image, "@")
+	if !pinned || !strings.HasPrefix(imageDigest, "sha256:") || digest.Digest(imageDigest).Validate() != nil {
+		t.Fatal("ARCENTRA_SANDBOX_TEST_IMAGE must be immutable image@sha256:<64 hex characters>")
+	}
+	if filepath.Clean(socket) == "/run/containerd/containerd.sock" || filepath.Clean(socket) == "/var/run/containerd/containerd.sock" {
+		t.Fatal("acceptance must use a dedicated daemon socket, never the host default")
+	}
+	runtimeRoot := os.Getenv("ARCENTRA_CONTAINERD_RUNC_ROOT")
+	if !filepath.IsAbs(runtimeRoot) || filepath.Clean(runtimeRoot) != runtimeRoot || runtimeRoot == "/run/containerd/runc" || runtimeRoot == "/" {
+		t.Fatal("ARCENTRA_CONTAINERD_RUNC_ROOT must name the dedicated daemon's absolute private runc state directory")
+	}
 	namespace := "arcentra-session-acceptance-" + uuid.NewString()
-	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: socket, Namespace: namespace, NetworkMode: "none"}, log.Logger{})
+	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: socket, Namespace: namespace, RuntimeRoot: runtimeRoot, NetworkMode: "none"}, log.Logger{})
 	if err != nil {
 		_ = os.Remove(root)
 		t.Fatal(err)
@@ -81,9 +93,23 @@ func TestSessionContainerdAcceptance(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	session, err = NewSession(ctx, backend, Options{WorkspaceRoot: root, JobRunID: "acceptance", Image: image, Resources: &sandbox.Resources{CPU: "500m", Memory: "64Mi"}})
+	session, err = NewSession(ctx, backend, Options{WorkspaceRoot: root, JobRunID: "acceptance", User: fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid()), Image: image, Resources: &sandbox.Resources{CPU: "500m", Memory: "64Mi"}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	client, err := containerd.New(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	inspect := namespaces.WithNamespace(ctx, namespace)
+	container, err := client.LoadContainer(inspect, session.containerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := container.Info(inspect)
+	if err != nil || metadata.Snapshotter == "" || metadata.SnapshotKey != session.containerID+"-snapshot" {
+		t.Fatalf("exact runtime snapshot identity unavailable: %+v %v", metadata, err)
 	}
 	t.Logf("session namespace=%s container=%s workspace=%s", namespace, session.containerID, session.Workspace())
 	manager := executor.NewExecutorManager()
@@ -130,23 +156,10 @@ func TestSessionContainerdAcceptance(t *testing.T) {
 	if _, err := os.Stat(session.Workspace()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("workspace leaked: %v", err)
 	}
-	client, err := containerd.New(socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Close()
-	inspect := namespaces.WithNamespace(ctx, namespace)
 	if _, err := client.LoadContainer(inspect, session.containerID); !errdefs.IsNotFound(err) {
 		t.Fatalf("container leaked or inspection failed: %v", err)
 	}
-	snapshotter, err := client.GetLabel(inspect, defaults.DefaultSnapshotterNSLabel)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshotter == "" {
-		snapshotter = containerd.DefaultSnapshotter
-	}
-	if _, err := client.SnapshotService(snapshotter).Stat(inspect, session.containerID+"-snapshot"); !errdefs.IsNotFound(err) {
+	if _, err := client.SnapshotService(metadata.Snapshotter).Stat(inspect, metadata.SnapshotKey); !errdefs.IsNotFound(err) {
 		t.Fatalf("snapshot leaked or inspection failed: %v", err)
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -88,8 +89,10 @@ func (s *containerState) cancelActive() {
 
 // ContainerdConfig 定义 containerd 连接与默认执行配置
 type ContainerdConfig struct {
-	UnixSocket   string
-	Namespace    string
+	UnixSocket string
+	Namespace  string
+	// RuntimeRoot 可选的专用 runc 状态目录，由操作者预先配置
+	RuntimeRoot  string
 	DefaultImage string
 	// NetworkMode 仅支持 none，空值也表示 none
 	NetworkMode string
@@ -101,6 +104,9 @@ func normalizeConfig(config *ContainerdConfig) (ContainerdConfig, error) {
 		return ContainerdConfig{}, fmt.Errorf("config is required")
 	}
 	cfg := *config
+	if cfg.RuntimeRoot != "" && (!filepath.IsAbs(cfg.RuntimeRoot) || filepath.Clean(cfg.RuntimeRoot) != cfg.RuntimeRoot || cfg.RuntimeRoot == "/" || strings.ContainsAny(cfg.RuntimeRoot, "\x00\r\n")) {
+		return cfg, fmt.Errorf("runtime root must be a clean absolute non-root path")
+	}
 	if cfg.UnixSocket == "" {
 		cfg.UnixSocket = "/run/containerd/containerd.sock"
 	}
@@ -146,7 +152,7 @@ func NewContainerdSandbox(config *ContainerdConfig, _ log.Logger) (*Containerd, 
 		}
 		return nil, fmt.Errorf("check containerd: %w", err)
 	}
-	return newSandbox(cfg, &containerdBackend{client: client}), nil
+	return newSandbox(cfg, &containerdBackend{client: client, runtimeRoot: cfg.RuntimeRoot}), nil
 }
 
 func newSandbox(config ContainerdConfig, backend runtimeBackend) *Containerd {

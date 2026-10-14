@@ -24,7 +24,9 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/containerd/containerd"
 	tasks "github.com/containerd/containerd/api/services/tasks/v1"
+	runcoptions "github.com/containerd/containerd/api/types/runc/options"
 	"github.com/containerd/containerd/cio"
+	"github.com/containerd/containerd/containers"
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/defaults"
 	"github.com/containerd/containerd/errdefs"
@@ -66,7 +68,17 @@ type runtimeTask interface {
 	exec(context.Context, string, *specs.Process, io.Reader, io.Writer, io.Writer) (runtimeProcess, error)
 }
 
-type containerdBackend struct{ client *containerd.Client }
+type containerdBackend struct {
+	client      *containerd.Client
+	runtimeRoot string
+}
+
+func (b *containerdBackend) runtimeOption() containerd.NewContainerOpts {
+	if b.runtimeRoot == "" {
+		return func(context.Context, *containerd.Client, *containers.Container) error { return nil }
+	}
+	return containerd.WithRuntime("io.containerd.runc.v2", &runcoptions.Options{Root: b.runtimeRoot})
+}
 
 func (b *containerdBackend) create(ctx context.Context, id, image string, options []oci.SpecOpts, labels map[string]string, explicitUser bool) (runtimeContainer, error) {
 	ref := ResourceRef{ID: id, Owner: labels[ownerLabel], Namespace: labels[namespaceLabel], Snapshotter: labels[snapshotterLabel]}
@@ -109,7 +121,7 @@ func (b *containerdBackend) create(ctx context.Context, id, image string, option
 	options = append(imageOptions, options...)
 	container, err := b.client.NewContainer(ctx, id,
 		containerd.WithImage(img), containerd.WithSnapshotter(snapshotter), containerd.WithNewSnapshot(id+"-snapshot", img, snapshots.WithLabels(ownershipLabels(ref))),
-		containerd.WithNewSpec(options...), containerd.WithContainerLabels(labels))
+		containerd.WithNewSpec(options...), containerd.WithContainerLabels(labels), b.runtimeOption())
 	if err != nil {
 		// RPC 失败可能发生在 daemon 已创建资源之后，保留按 ID 恢复的句柄
 		return &containerdContainer{client: b.client, id: id, snapshotter: snapshotter, ref: ref}, fmt.Errorf("create container %s: %w", id, err)

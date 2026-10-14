@@ -94,7 +94,7 @@ func TestSessionOwnsMinimalWorkspaceAndExplicitOptions(t *testing.T) {
 	if err != nil || filepath.Dir(rel) != "." || rel == "." {
 		t.Fatalf("workspace escaped root: %q %v", rel, err)
 	}
-	if create.Image != opts.Image || create.NetworkMode != "none" || create.Privileged || len(create.Mounts) != 1 || create.Mounts[0].Source != s.Workspace() || create.Mounts[0].Target != "/workspace" || create.Mounts[0].ReadOnly || create.Mounts[0].Type != "bind" {
+	if create.User != opts.User || create.Image != opts.Image || create.NetworkMode != "none" || create.Privileged || len(create.Mounts) != 1 || create.Mounts[0].Source != s.Workspace() || create.Mounts[0].Target != "/workspace" || create.Mounts[0].ReadOnly || create.Mounts[0].Type != "bind" {
 		t.Fatalf("unexpected create options: %+v", create)
 	}
 	if len(create.Env) != 0 || !reflect.DeepEqual(create.Resources, opts.Resources) || create.Resources == opts.Resources {
