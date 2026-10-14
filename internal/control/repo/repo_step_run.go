@@ -212,11 +212,11 @@ func (r *StepRunRepo) DeleteByStepRunID(ctx context.Context, stepRunID string) e
 		}
 		if step.JobRunID != "" {
 			var parent model.JobRun
-			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id", "retry_plan", "retry_plan_digest").Where("job_run_id = ?", step.JobRunID).First(&parent).Error
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id", "retry_plan", "retry_plan_digest", "retry_approval_required", "retry_approval_id", "retry_approval_evidence_hash").Where("job_run_id = ?", step.JobRunID).First(&parent).Error
 			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
-			if err == nil && (parent.JobRunID != step.JobRunID || parent.RetryPlan != "" || parent.RetryPlanDigest != "") {
+			if err == nil && (parent.JobRunID != step.JobRunID || parent.RetryPlan != "" || parent.RetryPlanDigest != "" || !emptyRetryApproval(&parent)) {
 				return fmt.Errorf("captured retry attempts and receipts cannot be deleted")
 			}
 		}

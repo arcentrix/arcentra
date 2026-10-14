@@ -128,7 +128,7 @@ func validateOfflineRuntimeJob(job *spec.Job, policy taskqueue.OfflineRuntimePol
 	if err := taskqueue.ValidateRuntimeRetry(job.Retry, policy); err != nil {
 		return err
 	}
-	if job.Retry != nil && job.Approval != nil {
+	if job.Retry != nil && job.Approval != nil && !IsDurableRetryApproval(job, policy) {
 		return fmt.Errorf("offline retry with approval is unsupported until durable approval binds the complete retry plan")
 	}
 	if _, exists := job.Env[taskqueue.RuntimeGenerationEnv]; exists {

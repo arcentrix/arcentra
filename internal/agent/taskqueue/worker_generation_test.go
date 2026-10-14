@@ -142,6 +142,7 @@ type fakeGenerationSession struct {
 	workspace               string
 	started, sealed, closed bool
 	executions              int
+	starts                  int
 	requests                []*executor.ExecutionRequest
 }
 
@@ -149,6 +150,7 @@ func (s *fakeGenerationSession) Name() string                               { re
 func (s *fakeGenerationSession) CanExecute(*executor.ExecutionRequest) bool { return true }
 func (s *fakeGenerationSession) Workspace() string                          { return s.workspace }
 func (s *fakeGenerationSession) Start(context.Context) error {
+	s.starts++
 	s.started = true
 	return s.runtime.sessionStartErr
 }

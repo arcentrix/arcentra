@@ -165,6 +165,12 @@ func (s *ScmService) tryTriggerPipeline(ctx context.Context, p *model.Pipeline, 
 		return
 	}
 
+	for _, job := range parsedSpec.Jobs {
+		if job != nil && job.Approval != nil && job.Approval.Plugin == "builtin:retry-approval" {
+			log.Warnw("webhook trigger refused: retry approval requires verified manual requester", "pipelineId", p.PipelineID)
+			return
+		}
+	}
 	if plan, err := deployment.DecodePipelinePlan(parsedSpec); err != nil || plan != nil {
 		log.Warnw("webhook trigger refused: deployment-bearing pipelines require verified manual consent", "pipelineId", p.PipelineID)
 		return

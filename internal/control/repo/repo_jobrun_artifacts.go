@@ -80,7 +80,8 @@ func (r *JobRunRepo) PatchReportedStatusAndArtifacts(ctx context.Context, expect
 		if result.RowsAffected != 1 {
 			return fmt.Errorf("execution state changed")
 		}
-		return nil
+		next, _ := updates["status"].(int)
+		return validateRetryApprovalCommit(ctx, tx, expected, next)
 	})
 }
 

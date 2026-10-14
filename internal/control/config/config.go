@@ -23,6 +23,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/nova"
+	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/spf13/viper"
 
@@ -84,6 +85,7 @@ type AppConfig struct {
 
 // PipelineConfig holds pipeline process settings.
 type PipelineConfig struct {
+	RetryApproval  *retryapproval.Policy          `mapstructure:"retryApproval" json:"retryApproval"`
 	OfflineRuntime taskqueue.OfflineRuntimePolicy `mapstructure:"offlineRuntime" json:"offlineRuntime"`
 	KeepWorkspace  bool                           `mapstructure:"keepWorkspace" json:"keepWorkspace"`
 }

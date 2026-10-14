@@ -33,9 +33,12 @@ const (
 
 // ApprovalRequest 保存审批门禁及不可变候选人快照
 type ApprovalRequest struct {
+	RetryJobRunID *string `gorm:"column:retry_job_run_id;type:varchar(64);uniqueIndex:uk_approval_retry_job_run;check:ck_approval_exclusive_binding,retry_job_run_id IS NULL OR deployment_release_id IS NULL" json:"retryJobRunId,omitempty"`
+	BindingKind   string  `gorm:"column:binding_kind;type:varchar(32);not null;default:''" json:"bindingKind"`
+	EvidenceJSON  string  `gorm:"column:evidence_json;type:mediumtext" json:"-"`
 	BaseModel
 	DeploymentReleaseID   *string    `gorm:"column:deployment_release_id;type:varchar(64);uniqueIndex:uk_approval_deployment_release" json:"deploymentReleaseId,omitempty"`
-	EvidenceHash          string     `gorm:"column:evidence_hash;type:varchar(64)" json:"evidenceHash,omitempty"`
+	EvidenceHash          string     `gorm:"column:evidence_hash;type:varchar(67)" json:"evidenceHash,omitempty"`
 	Version               int64      `gorm:"column:version;not null;default:1" json:"version"`
 	ApprovalID            string     `gorm:"column:approval_id;type:varchar(64);uniqueIndex" json:"approvalId"`
 	PipelineRunID         string     `gorm:"column:pipeline_run_id;type:varchar(64);index" json:"pipelineRunId"`

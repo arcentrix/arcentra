@@ -52,6 +52,9 @@ func (r *JobRunRepo) FinalizeRetryJobIfCurrent(ctx context.Context, expected *mo
 		if err := lockReportedJob(ctx, tx, expected); err != nil {
 			return err
 		}
+		if err := cancelPendingRetryApproval(ctx, tx, expected, "job execution ended"); err != nil {
+			return err
+		}
 		if expected.CurrentGenerationID != "" {
 			record, g, err := loadGeneration(ctx, tx, expected.CurrentGenerationID)
 			if err != nil {

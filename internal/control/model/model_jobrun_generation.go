@@ -6,6 +6,8 @@ package model
 // JobRunGeneration 固定每个控制面授权的整作业代次及原子转换回执
 // GenerationJSON 永不改写，ClosureRequest 只在准确后继准入事务写入一次
 type JobRunGeneration struct {
+	RetryApprovalAdmission       string `gorm:"column:retry_approval_admission;type:mediumtext" json:"-"`
+	RetryApprovalAdmissionDigest string `gorm:"column:retry_approval_admission_digest;type:varchar(67);not null;default:''" json:"-"`
 	BaseModel
 	GenerationID     string `gorm:"column:generation_id;type:varchar(64);uniqueIndex:uk_job_generation_id" json:"generationId"`
 	JobRunID         string `gorm:"column:job_run_id;type:varchar(64);not null;uniqueIndex:uk_job_generation_number,priority:1" json:"jobRunId"`

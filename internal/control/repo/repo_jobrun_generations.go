@@ -20,7 +20,7 @@ import (
 )
 
 var jobGenerationColumns = []string{"retry_plan", "retry_plan_digest", "current_generation_id", "current_generation"}
-var generationColumns = []string{"generation_id", "job_run_id", "number", "state", "generation_json", "admission_request", "admission_digest", "closure_request", "closure_digest", "next_generation_id"}
+var generationColumns = []string{"generation_id", "job_run_id", "number", "state", "generation_json", "admission_request", "admission_digest", "closure_request", "closure_digest", "next_generation_id", "retry_approval_admission", "retry_approval_admission_digest"}
 
 func generationField(key string) bool {
 	key = strings.ReplaceAll(strings.ToLower(key), "_", "")
@@ -186,8 +186,50 @@ func (r *JobRunRepo) ReconcileJobGeneration(ctx context.Context, request taskque
 			response = g
 			return nil
 		}
+		required, err := retryApprovalRequired(ctx, tx, &job)
+		if err != nil {
+			return err
+		}
+		// 已提交的清理/后继转换 ACK 可在失效后重放，但不能恢复执行权限
+		if required && request.Operation == "advance" {
+			prior, old, err := loadGeneration(ctx, tx, request.PreviousGenerationID)
+			if err != nil {
+				return err
+			}
+			if !generationMatchesJob(old, &job) || prior.JobRunID != job.JobRunID {
+				return fmt.Errorf("foreign generation predecessor")
+			}
+			if prior.ClosureDigest != "" {
+				if prior.ClosureDigest != request.RequestDigest || prior.ClosureRequest != encoded || prior.NextGenerationID == "" {
+					return fmt.Errorf("generation transition payload changed")
+				}
+				next, g, err := loadGeneration(ctx, tx, prior.NextGenerationID)
+				if err != nil {
+					return err
+				}
+				if next.AdmissionRequest != encoded || next.AdmissionDigest != request.RequestDigest || !generationMatchesJob(g, &job) || g.PreviousGenerationID != prior.GenerationID || g.Number != prior.Number+1 {
+					return fmt.Errorf("generation transition receipt changed")
+				}
+				g.ExecutionAllowed = false
+				g.PreparationOnly = next.State == "preparing"
+				if job.CurrentGenerationID == g.GenerationID && validateRetryApprovalExecution(ctx, tx, &job, false) == nil {
+					g.ExecutionAllowed = true
+				}
+				response = g
+				return nil
+			}
+		}
 		if err := validateGenerationLive(ctx, tx, &job, request.Identity); err != nil {
 			return err
+		}
+		required, err = retryApprovalRequired(ctx, tx, &job)
+		if err != nil {
+			return err
+		}
+		if request.Operation == "advance" {
+			if err := validateRetryApprovalExecution(ctx, tx, &job, false); err != nil {
+				return err
+			}
 		}
 		// 首次 ACK 丢失时固定请求仍可重放，不能把已固定 manifest 加入旧请求而改变转换身份
 		if request.Operation == "admit" && job.CurrentGenerationID != "" {
@@ -213,7 +255,12 @@ func (r *JobRunRepo) ReconcileJobGeneration(ctx context.Context, request taskque
 				return err
 			}
 			g.ExecutionAllowed = job.CurrentGenerationID == g.GenerationID
-			g.PreparationOnly = first.State == "preparing"
+			g.PreparationOnly = first.State == "preparing" || required
+			if required && first.RetryApprovalAdmission != "" {
+				if err := validateRetryApprovalExecution(ctx, tx, &job, true); err != nil {
+					return err
+				}
+			}
 			response = g
 			return nil
 		}
@@ -260,7 +307,7 @@ func (r *JobRunRepo) ReconcileJobGeneration(ctx context.Context, request taskque
 		} else if job.CurrentGenerationID != "" || job.CurrentGeneration != 0 {
 			return fmt.Errorf("first generation already admitted")
 		}
-		g := &taskqueue.JobGeneration{Version: 1, PipelineID: job.PipelineID, PipelineRunID: job.PipelineRunID, JobRunID: job.JobRunID, AgentID: job.AgentID, OriginalClaimID: job.ClaimID, RuntimeBindingDigest: job.RuntimeBindingDigest, SourceBindingDigest: job.SourceBindingDigest, InputManifestDigest: request.InputManifestDigest, RetryPlanDigest: job.RetryPlanDigest, GenerationID: uuid.NewString(), Number: number, RuntimeClaimID: uuid.NewString(), PreviousGenerationID: previous, ExecutionAllowed: true, PreparationOnly: request.InputManifestDigest == ""}
+		g := &taskqueue.JobGeneration{Version: 1, PipelineID: job.PipelineID, PipelineRunID: job.PipelineRunID, JobRunID: job.JobRunID, AgentID: job.AgentID, OriginalClaimID: job.ClaimID, RuntimeBindingDigest: job.RuntimeBindingDigest, SourceBindingDigest: job.SourceBindingDigest, InputManifestDigest: request.InputManifestDigest, RetryPlanDigest: job.RetryPlanDigest, GenerationID: uuid.NewString(), Number: number, RuntimeClaimID: uuid.NewString(), PreviousGenerationID: previous, ExecutionAllowed: true, PreparationOnly: request.InputManifestDigest == "" || (required && number == 1)}
 		if number > 1 {
 			delay, _ := time.ParseDuration(plan.Policy.Delay)
 			g.NotBeforeUnixMilli = time.Now().Add(delay).UnixMilli()
@@ -287,6 +334,14 @@ func (r *JobRunRepo) ReconcileJobGeneration(ctx context.Context, request taskque
 			return err
 		}
 		if err := reportedStatusResult(reportedJobQuery(tx.Model(&model.JobRun{}), &job).Updates(map[string]any{"current_generation_id": g.GenerationID, "current_generation": number, "updated_at": time.Now()})); err != nil {
+			return err
+		}
+		if request.Operation == "advance" {
+			if err := validateRetryApprovalCommit(ctx, tx, &job, model.JobRunStatusRunning); err != nil {
+				return err
+			}
+		}
+		if err := validateGenerationLive(ctx, tx, &job, request.Identity); err != nil {
 			return err
 		}
 		response = g

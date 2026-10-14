@@ -78,6 +78,14 @@ func NewApp(
 	shutdownMgr *shutdown.Manager,
 	pipelineEngine *process.Process,
 ) (*App, func(), error) {
+	if appConf != nil && rt.Services != nil {
+		if err := rt.Services.ConfigureRetryApprovalPolicy(appConf.Pipeline.RetryApproval); err != nil {
+			return nil, nil, err
+		}
+		if err := rt.Services.ConfigureRetryApprovalAuthorization(); err != nil {
+			return nil, nil, err
+		}
+	}
 	if appConf != nil && rt.Services != nil && rt.Services.Deployment != nil {
 		if err := service.ConfigureDeployment(context.Background(), rt.Services.Deployment, appConf.Deployment); err != nil {
 			if pipelineEngine != nil {

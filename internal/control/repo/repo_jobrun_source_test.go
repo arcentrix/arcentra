@@ -22,7 +22,7 @@ func sourceTestRepository(t *testing.T) (context.Context, *gorm.DB, *JobRunRepo,
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.WithContext(ctx).AutoMigrate(&model.JobRun{}, &model.StepRun{}, &model.ProjectArtifact{}); err != nil {
+	if err := db.WithContext(ctx).AutoMigrate(&model.JobRun{}, &model.StepRun{}, &model.ProjectArtifact{}, &model.PipelineRun{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.WithContext(ctx).Create(&model.JobRun{JobRunID: "job", PipelineID: "pipeline", PipelineRunID: "run", Status: 1}).Error; err != nil {
@@ -243,7 +243,7 @@ func TestSourceReportByteExactFenceWithCaseInsensitiveDatabase(t *testing.T) {
 			sqlDB, _ := db.DB()
 			sqlDB.SetMaxOpenConns(1)
 			defer sqlDB.Close()
-			if err := db.WithContext(ctx).AutoMigrate(&caseInsensitiveSourceJob{}, &model.StepRun{}); err != nil {
+			if err := db.WithContext(ctx).AutoMigrate(&caseInsensitiveSourceJob{}, &model.StepRun{}, &model.PipelineRun{}); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.WithContext(ctx).Create(&model.JobRun{JobRunID: "job", PipelineID: "pipeline", PipelineRunID: "run", Status: 1}).Error; err != nil {

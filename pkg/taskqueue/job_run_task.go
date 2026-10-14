@@ -31,23 +31,26 @@ const (
 // JobRunTaskPayload is the Kafka payload for dispatching a complete job to an Agent.
 // The Agent receives the entire job definition and executes all steps sequentially.
 type JobRunTaskPayload struct {
-	RetryPlan          *JobRetryPlan                `json:"retryPlan,omitempty"`
-	RetryPlanDigest    string                       `json:"retryPlanDigest,omitempty"`
-	Runtime            *RuntimeRequest              `json:"runtime,omitempty"`
-	Retry              *pipelinev1.Retry            `json:"retry,omitempty"`
-	PipelineID         string                       `json:"pipelineId"`
-	PipelineRunID      string                       `json:"pipelineRunId"`
-	JobRunID           string                       `json:"jobRunId"`
-	JobName            string                       `json:"jobName"`
-	AgentID            string                       `json:"agentId,omitempty"`
-	Steps              []StepPayload                `json:"steps"`
-	Env                map[string]string            `json:"env,omitempty"`
-	Variables          map[string]string            `json:"variables,omitempty"`
-	Workspace          string                       `json:"workspace,omitempty"`
-	Timeout            string                       `json:"timeout,omitempty"`
-	ArtifactURIs       map[string]string            `json:"artifactUris,omitempty"`
-	ArtifactReferences map[string]ArtifactReference `json:"artifactReferences,omitempty"`
-	Source             *SourcePayload               `json:"source,omitempty"`
+	// RetryApprovalTimeoutSeconds 固定可信策略等待上界并参与完整派发摘要
+	RetryApprovalTimeoutSeconds int64                        `json:"retryApprovalTimeoutSeconds,omitempty"`
+	RetryApprovalRequired       bool                         `json:"retryApprovalRequired,omitempty"`
+	RetryPlan                   *JobRetryPlan                `json:"retryPlan,omitempty"`
+	RetryPlanDigest             string                       `json:"retryPlanDigest,omitempty"`
+	Runtime                     *RuntimeRequest              `json:"runtime,omitempty"`
+	Retry                       *pipelinev1.Retry            `json:"retry,omitempty"`
+	PipelineID                  string                       `json:"pipelineId"`
+	PipelineRunID               string                       `json:"pipelineRunId"`
+	JobRunID                    string                       `json:"jobRunId"`
+	JobName                     string                       `json:"jobName"`
+	AgentID                     string                       `json:"agentId,omitempty"`
+	Steps                       []StepPayload                `json:"steps"`
+	Env                         map[string]string            `json:"env,omitempty"`
+	Variables                   map[string]string            `json:"variables,omitempty"`
+	Workspace                   string                       `json:"workspace,omitempty"`
+	Timeout                     string                       `json:"timeout,omitempty"`
+	ArtifactURIs                map[string]string            `json:"artifactUris,omitempty"`
+	ArtifactReferences          map[string]ArtifactReference `json:"artifactReferences,omitempty"`
+	Source                      *SourcePayload               `json:"source,omitempty"`
 }
 
 // StepPayload describes a single step inside a JobRunTaskPayload.

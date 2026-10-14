@@ -111,6 +111,15 @@ func (e *Process) SetAuditWriter(aw *AuditWriter) {
 // Submit asynchronously starts a pipeline run. It returns immediately;
 // the actual execution happens in a background goroutine.
 func (e *Process) Submit(run *model.PipelineRun, parsedSpec *spec.Pipeline) error {
+	return e.submit(context.Background(), run, parsedSpec)
+}
+
+// SubmitVerified 使用认证入口上下文提交人工审批运行，普通 Submit 不可替代
+func (e *Process) SubmitVerified(ctx context.Context, run *model.PipelineRun, parsedSpec *spec.Pipeline) error {
+	return e.submit(ctx, run, parsedSpec)
+}
+
+func (e *Process) submit(triggerCtx context.Context, run *model.PipelineRun, parsedSpec *spec.Pipeline) error {
 	if run == nil || parsedSpec == nil {
 		return fmt.Errorf("run and spec must not be nil")
 	}
@@ -121,6 +130,13 @@ func (e *Process) Submit(run *model.PipelineRun, parsedSpec *spec.Pipeline) erro
 	isDeployment, err := e.validateDeploymentRun(run, parsedSpec)
 	if err != nil {
 		return err
+	}
+	isRetryApproval, err := e.validateRetryApprovalRun(run, parsedSpec)
+	if err != nil {
+		return err
+	}
+	if isRetryApproval && (service.VerifiedPipelineActor(triggerCtx) == "" || service.VerifiedPipelineActor(triggerCtx) != run.TriggeredBy) {
+		return fmt.Errorf("retry approval requires verified manual submission context")
 	}
 	runCopy := *run
 	run = &runCopy
@@ -139,12 +155,12 @@ func (e *Process) Submit(run *model.PipelineRun, parsedSpec *spec.Pipeline) erro
 	if _, exists := e.runs.Load(run.RunID); exists {
 		return fmt.Errorf("run %s is already submitted", run.RunID)
 	}
-	if isDeployment {
+	if isDeployment || isRetryApproval {
 		starter, ok := e.repos.Pipeline.(interface {
 			StartRunIfPending(context.Context, string) error
 		})
 		if !ok {
-			return fmt.Errorf("durable deployment scheduling is unavailable")
+			return fmt.Errorf("durable gated scheduling is unavailable")
 		}
 		checkCtx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
 		defer cancel()
@@ -152,15 +168,15 @@ func (e *Process) Submit(run *model.PipelineRun, parsedSpec *spec.Pipeline) erro
 		if err != nil {
 			return err
 		}
-		if stored == nil || stored.Status != model.PipelineStatusPending || stored.PipelineID != run.PipelineID || !stored.AllowDeployments || stored.DeploymentActorID != run.DeploymentActorID || stored.DeploymentPlan != run.DeploymentPlan || stored.DeploymentPlanHash != run.DeploymentPlanHash || stored.DefinitionCommitSha != run.DefinitionCommitSha || stored.DeploymentTargetFingerprint != run.DeploymentTargetFingerprint {
-			return fmt.Errorf("deployment run cannot be replayed or changed")
+		if stored == nil || stored.Status != model.PipelineStatusPending || stored.PipelineID != run.PipelineID || stored.DefinitionCommitSha != run.DefinitionCommitSha || stored.RetryApprovalContext != run.RetryApprovalContext || stored.RetryApprovalContextDigest != run.RetryApprovalContextDigest || isRetryApproval && (stored.Env != run.Env || stored.TriggeredBy != run.TriggeredBy || stored.TriggerType != run.TriggerType || stored.DefinitionPath != run.DefinitionPath) || isDeployment && (!stored.AllowDeployments || stored.DeploymentActorID != run.DeploymentActorID || stored.DeploymentPlan != run.DeploymentPlan || stored.DeploymentPlanHash != run.DeploymentPlanHash || stored.DeploymentTargetFingerprint != run.DeploymentTargetFingerprint) {
+			return fmt.Errorf("gated run cannot be replayed or changed")
 		}
 		jobs, err := e.repos.JobRun.ListByPipelineRunID(checkCtx, run.RunID)
 		if err != nil {
 			return err
 		}
 		if len(jobs) != 0 {
-			return fmt.Errorf("deployment run already has execution records; automatic resume is prohibited")
+			return fmt.Errorf("gated run already has execution records; automatic resume is prohibited")
 		}
 		if err := starter.StartRunIfPending(checkCtx, run.RunID); err != nil {
 			return err

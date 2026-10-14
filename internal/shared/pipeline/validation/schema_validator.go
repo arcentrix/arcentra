@@ -44,6 +44,9 @@ func (v *SchemaValidator) Validate(pipeline *spec.Pipeline) error {
 	if err := v.validateVersion(pipeline.Version); err != nil {
 		return fmt.Errorf("version: %w", err)
 	}
+	if _, err := RetryApprovalJobNames(pipeline, v.runtimePolicy); err != nil {
+		return err
+	}
 	if _, err := ResolveRuntime(pipeline, v.runtimePolicy); err != nil {
 		return err
 	}

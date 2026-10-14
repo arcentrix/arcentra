@@ -111,7 +111,7 @@ func UpsertArtifact(ctx context.Context, tx *gorm.DB, value *model.ProjectArtifa
 	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ? AND pipeline_run_id = ? AND pipeline_id = ?", value.JobRunID, value.PipelineRunID, value.PipelineID).First(&job).Error; err != nil {
 		return err
 	}
-	if job.RetryPlan != "" && !generationArtifactPublication(ctx) {
+	if (job.RetryPlan != "" || !emptyRetryApproval(&job)) && !generationArtifactPublication(ctx) {
 		return fmt.Errorf("generation artifacts require the atomic final job report")
 	}
 	if err := validateGenerationArtifact(ctx, tx, &job, value.StepRunID); err != nil {

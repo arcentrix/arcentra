@@ -105,10 +105,11 @@ type controllerWorkerFixtureOptions struct {
 	clientTLS agentgrpc.ClientTLSConfig
 	backend   *controllerWorkerBackend
 	// 仅供显式验收测试配置真实运行时，不改变普通集成测试的启动路径
-	configureAgent func(*config.AgentConfig)
-	startWorker    func(context.Context, *config.AgentConfig, *agentgrpc.ClientWrapper, *executor.Manager) (nova.TaskQueue, error)
-	processConfig  *controlconfig.AppConfig
-	timeout        time.Duration
+	configureAgent        func(*config.AgentConfig)
+	startWorker           func(context.Context, *config.AgentConfig, *agentgrpc.ClientWrapper, *executor.Manager) (nova.TaskQueue, error)
+	processConfig         *controlconfig.AppConfig
+	configureRepositories func(*repo.Repositories)
+	timeout               time.Duration
 }
 
 // controllerWorkerBackend 让 opt-in 验收复用同一执行路径，外部依赖必须完整提供
@@ -137,6 +138,7 @@ type controllerWorkerFixture struct {
 	observeTerminal     func(context.Context, proto.Message, any, error)
 	observeRequest      func(context.Context, any)
 	afterGeneration     func(context.Context, *agentv1.ReconcileJobGenerationRequest, *agentv1.ReconcileJobGenerationResponse, error) error
+	afterRetryApproval  func(context.Context, *agentv1.ReconcileJobRetryApprovalRequest, *agentv1.ReconcileJobRetryApprovalResponse, error) error
 	repos               *repo.Repositories
 	engine              *process.Process
 	worker              *workerQueues
@@ -208,6 +210,10 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 	repos := &repo.Repositories{
 		Pipeline: repo.NewPipelineRepo(adapter), JobRun: repo.NewJobRunRepo(adapter), StepRun: repo.NewStepRunRepo(adapter),
 		Log: repo.NewLogRepository(db), Artifact: repo.NewArtifactRepo(adapter), Agent: repo.NewAgentRepo(adapter, nil), Storage: repo.NewStorageRepo(adapter, nil),
+	}
+	if fixtureOptions.configureRepositories != nil {
+		repos = repo.NewRepositories(adapter, nil)
+		fixtureOptions.configureRepositories(repos)
 	}
 	f := &controllerWorkerFixture{t: t, ctx: ctx, waitTimeout: waitTimeout, db: db, tasks: make(map[string]nova.Task), repos: repos, projectID: id.GetUild(), pipelineID: id.GetUild(), receipts: make(map[string][]controllerWorkerReceipt), loseProducerACK: loseProducerACK}
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(os.TempDir(), "pipelines", f.pipelineID)) })
@@ -322,6 +328,17 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 			if hook != nil {
 				generationResponse, _ := response.(*agentv1.ReconcileJobGenerationResponse)
 				if hookErr := hook(ctx, generationRequest, generationResponse, err); hookErr != nil {
+					return nil, hookErr
+				}
+			}
+		}
+		if approvalRequest, ok := request.(*agentv1.ReconcileJobRetryApprovalRequest); ok {
+			f.mu.Lock()
+			hook := f.afterRetryApproval
+			f.mu.Unlock()
+			if hook != nil {
+				approvalResponse, _ := response.(*agentv1.ReconcileJobRetryApprovalResponse)
+				if hookErr := hook(ctx, approvalRequest, approvalResponse, err); hookErr != nil {
 					return nil, hookErr
 				}
 			}

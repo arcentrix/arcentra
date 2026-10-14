@@ -132,7 +132,11 @@ func executeJobAttempts(ctx, jobCtx context.Context, conf *config.AgentConfig, c
 			}
 			var err error
 			if session != nil {
-				if err = session.beforeStep(jobCtx, step); err != nil {
+				err = admitRetryApproval(jobCtx, client)
+				if err == nil {
+					err = session.beforeStep(jobCtx, step)
+				}
+				if err != nil {
 					failedAt := time.Now().Unix()
 					return retry.Block(normalize(stepID, retainStepReport(ctx, stepID, err, func(reportCtx context.Context) error {
 						return reportStepRunStatus(reportCtx, client, conf, stepID, steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED, 1, "sandbox staging failed", start, failedAt, nil)

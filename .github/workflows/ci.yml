@@ -147,12 +147,26 @@ jobs:
           done
           go test -race -count=1 -timeout=2m -run '^TestRegisterLoginWithRealRedis$' ./internal/control/service
 
+      - name: Verify durable approval with actual MySQL authorization contention
+        timeout-minutes: 5
+        run: |
+          set -o pipefail
+          for suite in repo service; do
+            schema="arcentra_retry_approval_test_$suite"
+            docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create "$schema"
+            ARCENTRA_REQUIRE_RETRY_APPROVAL_MYSQL=1 \
+            ARCENTRA_RETRY_APPROVAL_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
+              go test -race -v -count=1 -timeout=2m -run '^TestRetryApprovalMySQL' "./internal/control/$suite" | tee ".acceptance/evidence/retry-approval-mysql-$suite.log"
+            grep -q '^--- PASS: TestRetryApprovalMySQL' ".acceptance/evidence/retry-approval-mysql-$suite.log"
+            if grep -q '^--- SKIP: TestRetryApprovalMySQL' ".acceptance/evidence/retry-approval-mysql-$suite.log"; then exit 1; fi
+          done
+
       - name: Check out pinned frontend acceptance client
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: d82bda74cffd8fd3c303ade6522e999cf28b3649
+          ref: 7dabadec866ddd9b4016097a632a3840a495d2c0
           path: .acceptance/frontend
           persist-credentials: false
 

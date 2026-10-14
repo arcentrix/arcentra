@@ -16,6 +16,7 @@ import (
 )
 
 type runtimeDispatchStore struct {
+	retryApproval bool
 	jobRunStoreIface
 	captured  *taskqueue.RuntimeRequest
 	retryPlan *taskqueue.JobRetryPlan
@@ -148,5 +149,42 @@ func TestRuntimeRetryDispatchCapturesCompletePlanBeforeQueue(t *testing.T) {
 	payload.Steps[0].Args["run"] = "changed"
 	if err := taskqueue.ValidateJobRetryPlan(&payload); err == nil {
 		t.Fatal("changed executable escaped plan binding")
+	}
+}
+
+func (s *runtimeDispatchStore) CaptureRuntimeRetryApprovalExpectation(ctx context.Context, pipelineID, runID, jobID, agentID string, binding *sourceprovenance.Binding, runtime *taskqueue.RuntimeRequest, uris map[string]string, refs map[string]taskqueue.ArtifactReference, plan *taskqueue.JobRetryPlan) error {
+	s.retryApproval = true
+	return s.CaptureRuntimeRetryExpectation(ctx, pipelineID, runID, jobID, agentID, binding, runtime, uris, refs, plan)
+}
+
+func TestRuntimeRetryApprovalDispatchFreezesRequiredMarkerBeforePlan(t *testing.T) {
+	framework, task, store, queue := runtimeDispatchFixture(t)
+	framework.execCtx.RuntimePolicy.AllowWholeJobRetry = true
+	framework.execCtx.RuntimePolicy.AllowWholeJobRetryApproval = true
+	framework.execCtx.RetryApprovalTimeoutSeconds = 60
+	task.Job.Retry = &spec.Retry{Mode: "whole_job", MaxAttempts: 2, Idempotent: true, AllowedExitCodes: []int32{9}}
+	task.Job.Approval = &spec.Approval{Required: true, Type: "manual", Plugin: "builtin:retry-approval"}
+	framework.execCtx.StepAttemptIDs = map[string][]string{"shell": {"step-first", "step-second"}}
+	framework.execCtx.StepRunIDs = map[string]string{"shell": "step-first"}
+	// 精确门禁不得触发旧进程内 ApprovalManager 的等待
+	if err := framework.create(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	if err := framework.queue(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+	var payload taskqueue.JobRunTaskPayload
+	if err := sonic.Unmarshal(queue.data, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !store.retryApproval || !payload.RetryApprovalRequired || payload.RetryPlan == nil {
+		t.Fatal("required marker missing at capture")
+	}
+	if err := taskqueue.ValidateJobRetryPlan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	payload.RetryApprovalRequired = false
+	if err := taskqueue.ValidateJobRetryPlan(&payload); err == nil {
+		t.Fatal("required marker downgrade escaped immutable plan")
 	}
 }

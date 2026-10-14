@@ -20,6 +20,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/database"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	"github.com/arcentrix/arcentra/pkg/sso/util"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"golang.org/x/crypto/bcrypt"
@@ -59,6 +60,7 @@ type Services struct {
 	Authorizer        authz.IAuthorizer
 	repos             *repo.Repositories
 
+	retryApprovalPolicy  *retryapproval.Policy
 	offlineRuntimePolicy taskqueue.OfflineRuntimePolicy // 仅由启动 provider 注入，零值禁用
 	pipelineEngine       pipelineEngineBinding
 }

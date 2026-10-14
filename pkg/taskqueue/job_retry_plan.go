@@ -35,10 +35,12 @@ type RetryStepPlan struct {
 // JobRetryPlan 保存控制面在派发时授权的完整有限重试计划
 // Policy 包括允许退出码、幂等声明、次数和等待时间，Agent 不得扩张
 type JobRetryPlan struct {
-	Version          int               `json:"version"`
-	Policy           *pipelinev1.Retry `json:"policy"`
-	DefinitionDigest string            `json:"definitionDigest"`
-	Steps            []RetryStepPlan   `json:"steps"`
+	RetryApprovalRequired       bool              `json:"retryApprovalRequired,omitempty"`
+	RetryApprovalTimeoutSeconds int64             `json:"retryApprovalTimeoutSeconds,omitempty"`
+	Version                     int               `json:"version"`
+	Policy                      *pipelinev1.Retry `json:"policy"`
+	DefinitionDigest            string            `json:"definitionDigest"`
+	Steps                       []RetryStepPlan   `json:"steps"`
 }
 
 func retryCanonical(value any) (string, error) {
@@ -79,6 +81,13 @@ func NewJobRetryPlan(payload *JobRunTaskPayload) (*JobRetryPlan, error) {
 	if payload == nil || payload.Runtime == nil {
 		return nil, fmt.Errorf("runtime retry payload is required")
 	}
+	if payload.RetryApprovalRequired {
+		if payload.RetryApprovalTimeoutSeconds < 1 || payload.RetryApprovalTimeoutSeconds > 3600 {
+			return nil, fmt.Errorf("retry approval requires a bounded trusted timeout")
+		}
+	} else if payload.RetryApprovalTimeoutSeconds != 0 {
+		return nil, fmt.Errorf("ungated retry cannot carry approval timeout")
+	}
 	if err := ValidateWholeJobRetryPolicy(payload.Retry); err != nil {
 		return nil, err
 	}
@@ -95,7 +104,7 @@ func NewJobRetryPlan(payload *JobRunTaskPayload) (*JobRetryPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	plan := &JobRetryPlan{Version: 1, Policy: proto.Clone(payload.Retry).(*pipelinev1.Retry), DefinitionDigest: retryDigest("arcentra-job-retry-definition-v1", encoded), Steps: make([]RetryStepPlan, 0, len(payload.Steps))}
+	plan := &JobRetryPlan{RetryApprovalRequired: payload.RetryApprovalRequired, RetryApprovalTimeoutSeconds: payload.RetryApprovalTimeoutSeconds, Version: 1, Policy: proto.Clone(payload.Retry).(*pipelinev1.Retry), DefinitionDigest: retryDigest("arcentra-job-retry-definition-v1", encoded), Steps: make([]RetryStepPlan, 0, len(payload.Steps))}
 	if _, exists := payload.Env[JobGenerationEnvironment]; exists {
 		return nil, fmt.Errorf("reserved generation environment cannot be overridden")
 	}
@@ -125,6 +134,13 @@ func NewJobRetryPlan(payload *JobRunTaskPayload) (*JobRetryPlan, error) {
 func (p *JobRetryPlan) Canonical() (string, error) {
 	if p == nil || p.Version != 1 || !sourceprovenance.ValidBindingDigest(p.DefinitionDigest) || len(p.Steps) == 0 || len(p.Steps) > 1000 {
 		return "", fmt.Errorf("invalid retry plan")
+	}
+	if p.RetryApprovalRequired {
+		if p.RetryApprovalTimeoutSeconds < 1 || p.RetryApprovalTimeoutSeconds > 3600 {
+			return "", fmt.Errorf("retry approval plan requires bounded timeout")
+		}
+	} else if p.RetryApprovalTimeoutSeconds != 0 {
+		return "", fmt.Errorf("ungated plan has approval timeout")
 	}
 	if err := ValidateWholeJobRetryPolicy(p.Policy); err != nil {
 		return "", err
@@ -190,7 +206,7 @@ func ValidateJobRetryPlan(payload *JobRunTaskPayload) error {
 		return fmt.Errorf("job payload is required")
 	}
 	if payload.Retry == nil {
-		if payload.RetryPlan != nil || payload.RetryPlanDigest != "" {
+		if payload.RetryPlan != nil || payload.RetryPlanDigest != "" || payload.RetryApprovalRequired || payload.RetryApprovalTimeoutSeconds != 0 {
 			return fmt.Errorf("unexpected retry plan")
 		}
 		return nil

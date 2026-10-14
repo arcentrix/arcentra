@@ -12,6 +12,7 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	"github.com/google/uuid"
 )
 
@@ -85,7 +86,22 @@ func (s *ApprovalService) Decide(ctx context.Context, id, actor, decision, reaso
 }
 
 func (s *ApprovalService) validateDeploymentDecision(ctx context.Context, value *model.ApprovalRequest, actor, decision string) error {
+	if value == nil {
+		return repo.ErrApprovalInvalid
+	}
+	if value.BindingKind == retryapproval.Kind || value.RetryJobRunID != nil || value.Plugin == retryapproval.Plugin {
+		if value.BindingKind != retryapproval.Kind || value.RetryJobRunID == nil || value.DeploymentReleaseID != nil || value.Plugin != retryapproval.Plugin {
+			return repo.ErrApprovalInvalid
+		}
+		return s.validateRetryDecision(ctx, value, actor, decision)
+	}
+	if value.BindingKind != "" {
+		return repo.ErrApprovalInvalid
+	}
 	if value.DeploymentReleaseID == nil {
+		if value.Plugin == "builtin:deployment" {
+			return repo.ErrApprovalInvalid
+		}
 		return nil
 	}
 	if s.decisionValidator == nil {

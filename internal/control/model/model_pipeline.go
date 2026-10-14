@@ -52,6 +52,8 @@ func (Pipeline) TableName() string {
 
 // PipelineRun 流水线执行记录表
 type PipelineRun struct {
+	RetryApprovalContext       string `gorm:"column:retry_approval_context;type:mediumtext" json:"-"`
+	RetryApprovalContextDigest string `gorm:"column:retry_approval_context_digest;type:varchar(67);not null;default:''" json:"-"`
 	BaseModel
 	RunID                       string     `gorm:"column:run_id;type:varchar(64);uniqueIndex:uk_pipeline_run_business_id" json:"runId"`
 	PipelineID                  string     `gorm:"column:pipeline_id;type:varchar(64);uniqueIndex:uk_pipeline_run_request,priority:1;index" json:"pipelineId"`

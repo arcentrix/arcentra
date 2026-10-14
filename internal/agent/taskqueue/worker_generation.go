@@ -31,10 +31,11 @@ type generationReceipt struct {
 	digest  string
 }
 type generationExecution struct {
-	generation taskpayload.JobGeneration
-	payload    *taskpayload.JobRunTaskPayload
-	mu         sync.Mutex
-	receipts   map[string]generationReceipt
+	approvalWait *retryApprovalWait
+	generation   taskpayload.JobGeneration
+	payload      *taskpayload.JobRunTaskPayload
+	mu           sync.Mutex
+	receipts     map[string]generationReceipt
 }
 
 func generationFromContext(ctx context.Context) *generationExecution {
@@ -234,6 +235,21 @@ func finishUnusedGenerationAttempts(ctx, jobCtx context.Context, conf *config.Ag
 func executeContainerGenerations(ctx, jobCtx context.Context, conf *config.AgentConfig, client *agentgrpc.ClientWrapper, manager *executor.Manager, payload *taskpayload.JobRunTaskPayload, store storage.IStorage, reference taskpayload.ArtifactReference, start time.Time) (result generationJobResult) {
 	result = generationJobResult{ctx: ctx, artifacts: &artifactExecutor{job: payload, storage: store, reference: reference, uploaded: map[string]string{}}}
 	last := 0
+	approvalWait := newRetryApprovalWait(jobCtx)
+	if payload.RetryApprovalRequired {
+		if payload.RetryApprovalTimeoutSeconds < 1 || payload.RetryApprovalTimeoutSeconds > 3600 {
+			result.err = fmt.Errorf("fixed operator retry approval budget required")
+			return result
+		}
+		operatorDeadline := time.Now().Add(time.Duration(payload.RetryApprovalTimeoutSeconds) * time.Second)
+		if operatorDeadline.Before(approvalWait.deadline) {
+			approvalWait.deadline = operatorDeadline
+		}
+	}
+	if payload.RetryApprovalRequired && (client == nil || !client.ControllerAuthenticated()) {
+		result.err = fmt.Errorf("retry approval requires server-authenticated TLS")
+		return result
+	}
 	defer func() {
 		if result.uncertain {
 			return
@@ -294,7 +310,7 @@ func executeContainerGenerations(ctx, jobCtx context.Context, conf *config.Agent
 			result.uncertain = true
 			return result
 		}
-		generationCtx := &generationExecution{generation: generation, payload: payload, receipts: map[string]generationReceipt{}}
+		generationCtx := &generationExecution{approvalWait: approvalWait, generation: generation, payload: payload, receipts: map[string]generationReceipt{}}
 		result.ctx = context.WithValue(ctx, generationContextKey{}, generationCtx)
 		delay := time.Until(time.UnixMilli(generation.NotBeforeUnixMilli))
 		if delay > 0 {
@@ -346,6 +362,9 @@ func executeContainerGenerations(ctx, jobCtx context.Context, conf *config.Agent
 		}
 		if preparationErr == nil {
 			preparationErr = handleArtifactDownload(roundCtx, payload.ArtifactURIs, payload.ArtifactReferences, allocated.Workspace(), store)
+		}
+		if preparationErr == nil && payload.RetryApprovalRequired {
+			preparationErr = waitRetryApproval(roundCtx, client, generationCtx, runtime.AdmissionDone())
 		}
 		roundErr := executeJobAttempts(result.ctx, roundCtx, conf, client, manager, round, result.artifacts, allocated.Workspace(), preparationErr, start, result.session)
 		cleanupErr := result.session.finish(result.ctx)

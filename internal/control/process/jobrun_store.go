@@ -184,3 +184,14 @@ func (s *JobRunStore) CaptureRuntimeRetryExpectation(ctx context.Context, pipeli
 	}
 	return writer.CaptureRuntimeRetryExpectation(ctx, pipelineID, runID, jobID, agentID, binding, runtime, uris, refs, plan)
 }
+
+// CaptureRuntimeRetryApprovalExpectation 保存需人工审批的不可扩大重试计划及可信运行上下文
+func (s *JobRunStore) CaptureRuntimeRetryApprovalExpectation(ctx context.Context, pipelineID, runID, jobID, agentID string, binding *sourceprovenance.Binding, runtime *taskqueue.RuntimeRequest, uris map[string]string, refs map[string]taskqueue.ArtifactReference, plan *taskqueue.JobRetryPlan) error {
+	writer, ok := s.jobRunRepo.(interface {
+		CaptureRuntimeRetryApprovalExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest, map[string]string, map[string]taskqueue.ArtifactReference, *taskqueue.JobRetryPlan) error
+	})
+	if !ok {
+		return fmt.Errorf("atomic retry plan capture unavailable")
+	}
+	return writer.CaptureRuntimeRetryApprovalExpectation(ctx, pipelineID, runID, jobID, agentID, binding, runtime, uris, refs, plan)
+}
