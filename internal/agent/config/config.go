@@ -117,14 +117,16 @@ type SandboxConfig struct {
 
 // ContainerdConfig containerd configuration
 type ContainerdConfig struct {
-	Policy     taskqueue.OfflineRuntimePolicy `mapstructure:"policy"`
-	Namespace  string                         `mapstructure:"namespace"`
-	JournalDir string                         `mapstructure:"journalDir"`
-	User       string                         `mapstructure:"user"`
-	Network    string                         `mapstructure:"network"`    // Containerd network mode: bridge, host, none
-	UnixSocket string                         `mapstructure:"unixSocket"` // Containerd unix socket
-	Image      string                         `mapstructure:"image"`      // Containerd image
-	Resources  ResourceConfig                 `mapstructure:"resources"`  // Containerd resources
+	FIFODir     string                         `mapstructure:"fifoDir"`     // Pre-existing Agent-owned private IO directory
+	RuntimeRoot string                         `mapstructure:"runtimeRoot"` // Optional isolated runc state root
+	Policy      taskqueue.OfflineRuntimePolicy `mapstructure:"policy"`
+	Namespace   string                         `mapstructure:"namespace"`
+	JournalDir  string                         `mapstructure:"journalDir"`
+	User        string                         `mapstructure:"user"`
+	Network     string                         `mapstructure:"network"`    // Containerd network mode: bridge, host, none
+	UnixSocket  string                         `mapstructure:"unixSocket"` // Containerd unix socket
+	Image       string                         `mapstructure:"image"`      // Containerd image
+	Resources   ResourceConfig                 `mapstructure:"resources"`  // Containerd resources
 }
 
 // ResourceConfig resource configuration

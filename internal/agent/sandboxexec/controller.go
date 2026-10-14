@@ -64,6 +64,7 @@ type Controller struct {
 	workspaceRoot         *os.Root
 	workspaceDir          *os.File
 	workspaceInfo         os.FileInfo
+	runtimeIOIdentity     string
 	records               map[string]journalRecord
 	sessions              map[string]*Session
 	runtimeBlocked        map[string]error
@@ -109,6 +110,10 @@ func openController(ctx context.Context, backend DurableBackend, opts Controller
 		}
 	}()
 	var err error
+	c.runtimeIOIdentity, err = backendRuntimeIOIdentity(backend)
+	if err != nil {
+		return nil, err
+	}
 	c.journal, err = openJournalDirectory(ctx, opts.JournalRoot)
 	if err != nil {
 		return nil, err
@@ -594,4 +599,18 @@ func validateDurableUser(user string) error {
 		}
 	}
 	return nil
+}
+
+func backendRuntimeIOIdentity(backend DurableBackend) (string, error) {
+	if provider, ok := backend.(interface{ RuntimeIOIdentity() (string, error) }); ok {
+		identity, err := provider.RuntimeIOIdentity()
+		if err != nil {
+			return "", err
+		}
+		if identity != "" && (len(identity) != 64 || strings.Trim(identity, "0123456789abcdef") != "") {
+			return "", fmt.Errorf("invalid runtime IO identity")
+		}
+		return identity, nil
+	}
+	return "", nil
 }

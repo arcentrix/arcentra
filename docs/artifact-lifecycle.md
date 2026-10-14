@@ -113,3 +113,16 @@ Production credentials, deletion permissions, mount health and provider recovery
 ## Local upload platform boundary
 
 Artifact uploads now open every path component through directory descriptors with no-follow semantics and use nonblocking file opening before verifying the original regular-file inode. This prevents a replaced FIFO from blocking before file-type validation. The implementation supports Linux, macOS, FreeBSD, OpenBSD, NetBSD, DragonFly and Solaris. Other platforms (including Windows) fail artifact upload explicitly rather than falling back to a weaker open path; this also applies to baremetal Agents. Actual platform coverage remains Linux, not a certification of every compiled Unix target. Offline containerd jobs additionally seal all container processes before artifact publication.
+
+
+The offline single-job implementation additionally passed byte-verified S3 output,
+background-process sealing and special-file/FIFO upload rejection in [runtime run
+38508866022](https://github.com/arcentrix/arcentra/actions/runs/38508866022), PR head
+`e7132be275c144a2eadc03b61e3c4f16dd302c4e` (tested merge
+`12e6cd81e2ca6f79bb5967f457aa6b3f377b1a9d`). Independent gate-enabled
+[run 38512588313](https://github.com/arcentrix/arcentra/actions/runs/38512588313) repeated those checks through actual production `NewProcess` and
+`StartWorker` constructors at PR head `69baaebef85e1f161d4ea2298e6e180e1c56aa8c` (tested
+merge `1d2e29030741963897b7056c7d15249f2637d757`), with no reported cleanup leaks. These
+hosted test-binary results do not certify production storage, packaged-service or
+OCI-image startup, or upstream artifact-input DAG support. See [the bounded
+acceptance record](offline-runtime-acceptance.md).

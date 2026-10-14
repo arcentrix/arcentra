@@ -24,7 +24,8 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/containerd/containerd"
 	tasks "github.com/containerd/containerd/api/services/tasks/v1"
-	"github.com/containerd/containerd/cio"
+	runcoptions "github.com/containerd/containerd/api/types/runc/options"
+	"github.com/containerd/containerd/containers"
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/defaults"
 	"github.com/containerd/containerd/errdefs"
@@ -66,7 +67,18 @@ type runtimeTask interface {
 	exec(context.Context, string, *specs.Process, io.Reader, io.Writer, io.Writer) (runtimeProcess, error)
 }
 
-type containerdBackend struct{ client *containerd.Client }
+type containerdBackend struct {
+	client      *containerd.Client
+	runtimeRoot string
+	fifoDir     string
+}
+
+func (b *containerdBackend) runtimeOption() containerd.NewContainerOpts {
+	if b.runtimeRoot == "" {
+		return func(context.Context, *containerd.Client, *containers.Container) error { return nil }
+	}
+	return containerd.WithRuntime("io.containerd.runc.v2", &runcoptions.Options{Root: b.runtimeRoot})
+}
 
 func (b *containerdBackend) create(ctx context.Context, id, image string, options []oci.SpecOpts, labels map[string]string, explicitUser bool) (runtimeContainer, error) {
 	ref := ResourceRef{ID: id, Owner: labels[ownerLabel], Namespace: labels[namespaceLabel], Snapshotter: labels[snapshotterLabel]}
@@ -109,12 +121,12 @@ func (b *containerdBackend) create(ctx context.Context, id, image string, option
 	options = append(imageOptions, options...)
 	container, err := b.client.NewContainer(ctx, id,
 		containerd.WithImage(img), containerd.WithSnapshotter(snapshotter), containerd.WithNewSnapshot(id+"-snapshot", img, snapshots.WithLabels(ownershipLabels(ref))),
-		containerd.WithNewSpec(options...), containerd.WithContainerLabels(labels))
+		containerd.WithNewSpec(options...), containerd.WithContainerLabels(labels), b.runtimeOption())
 	if err != nil {
 		// RPC 失败可能发生在 daemon 已创建资源之后，保留按 ID 恢复的句柄
-		return &containerdContainer{client: b.client, id: id, snapshotter: snapshotter, ref: ref}, fmt.Errorf("create container %s: %w", id, err)
+		return &containerdContainer{client: b.client, id: id, snapshotter: snapshotter, ref: ref, fifoDir: b.fifoDir}, fmt.Errorf("create container %s: %w", id, err)
 	}
-	return &containerdContainer{container: container, client: b.client, id: id, snapshotter: snapshotter, ref: ref}, nil
+	return &containerdContainer{container: container, client: b.client, id: id, snapshotter: snapshotter, ref: ref, fifoDir: b.fifoDir}, nil
 }
 
 // 仅读取镜像配置内容；不继承用户、附加组、entrypoint 或命令
@@ -174,6 +186,7 @@ type containerdContainer struct {
 	id          string
 	snapshotter string
 	ref         ResourceRef
+	fifoDir     string
 }
 
 func (c *containerdContainer) resolve(ctx context.Context) (containerd.Container, error) {
@@ -198,11 +211,11 @@ func (c *containerdContainer) newTask(ctx context.Context, stdout, stderr io.Wri
 	if err != nil {
 		return nil, err
 	}
-	task, err := container.NewTask(ctx, cio.NewCreator(cio.WithStreams(nil, stdout, stderr)))
+	task, err := container.NewTask(ctx, newRuntimeIO(ctx, c.fifoDir, c.ref, nil, stdout, stderr))
 	if err != nil {
 		return nil, err
 	}
-	return &containerdTask{task}, nil
+	return &containerdTask{Task: task, fifoDir: c.fifoDir, ref: c.ref}, nil
 }
 func (c *containerdContainer) loadTask(ctx context.Context) (runtimeTask, error) {
 	container, err := c.resolve(ctx)
@@ -213,7 +226,7 @@ func (c *containerdContainer) loadTask(ctx context.Context) (runtimeTask, error)
 	if err != nil {
 		return nil, err
 	}
-	return &containerdTask{task}, nil
+	return &containerdTask{Task: task, fifoDir: c.fifoDir, ref: c.ref}, nil
 }
 func (c *containerdContainer) remove(ctx context.Context) error {
 	_, state, err := (&containerdBackend{client: c.client}).inspectOwned(ctx, c.ref)
@@ -234,7 +247,7 @@ func (c *containerdContainer) remove(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	return removeRuntimeIO(ctx, c.fifoDir, c.ref)
 }
 
 func (b *containerdBackend) snapshotter(ctx context.Context) (string, error) {
@@ -250,7 +263,7 @@ func (b *containerdBackend) snapshotter(ctx context.Context) (string, error) {
 
 func (b *containerdBackend) inspectOwned(ctx context.Context, ref ResourceRef) (runtimeContainer, ResourceState, error) {
 	state := ResourceState{}
-	handle := &containerdContainer{client: b.client, id: ref.ID, snapshotter: ref.Snapshotter, ref: ref}
+	handle := &containerdContainer{client: b.client, id: ref.ID, snapshotter: ref.Snapshotter, ref: ref, fifoDir: b.fifoDir}
 	record, err := b.client.ContainerService().Get(ctx, ref.ID)
 	if err != nil && !errdefs.IsNotFound(err) {
 		return nil, state, fmt.Errorf("inspect container ownership: %w", err)
@@ -291,8 +304,12 @@ func (b *containerdBackend) inspectOwned(ctx context.Context, ref ResourceRef) (
 	return handle, state, nil
 }
 
-type containerdTask struct{ containerd.Task }
+type containerdTask struct {
+	containerd.Task
+	fifoDir string
+	ref     ResourceRef
+}
 
 func (t *containerdTask) exec(ctx context.Context, id string, process *specs.Process, stdin io.Reader, stdout, stderr io.Writer) (runtimeProcess, error) {
-	return t.Task.Exec(ctx, id, process, cio.NewCreator(cio.WithStreams(stdin, stdout, stderr)))
+	return t.Task.Exec(ctx, id, process, newRuntimeIO(ctx, t.fifoDir, t.ref, stdin, stdout, stderr))
 }

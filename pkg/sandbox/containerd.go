@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -39,7 +40,7 @@ const cleanupTimeout = 20 * time.Second
 const maxCapturedBytes = 4 * 1024 * 1024
 
 // Containerd 提供显式生命周期的离线 containerd 执行后端
-// Agent 接线仍受关闭的真实验收门禁保护，不能作为不可信多租户代码的安全保证
+// Agent 仅支持经专用主机验收的显式离线策略，不能作为不可信多租户代码的安全保证
 type Containerd struct {
 	backend      runtimeBackend
 	namespace    string
@@ -88,8 +89,12 @@ func (s *containerState) cancelActive() {
 
 // ContainerdConfig 定义 containerd 连接与默认执行配置
 type ContainerdConfig struct {
-	UnixSocket   string
-	Namespace    string
+	UnixSocket string
+	Namespace  string
+	// RuntimeRoot 可选的专用 runc 状态目录，由操作者预先配置
+	RuntimeRoot string
+	// FIFODir 是 Agent 所有的预置私有 IO 目录，不修改系统默认目录
+	FIFODir      string
 	DefaultImage string
 	// NetworkMode 仅支持 none，空值也表示 none
 	NetworkMode string
@@ -101,6 +106,14 @@ func normalizeConfig(config *ContainerdConfig) (ContainerdConfig, error) {
 		return ContainerdConfig{}, fmt.Errorf("config is required")
 	}
 	cfg := *config
+	if cfg.FIFODir != "" {
+		if err := validateFIFODir(cfg.FIFODir); err != nil {
+			return cfg, err
+		}
+	}
+	if cfg.RuntimeRoot != "" && (!filepath.IsAbs(cfg.RuntimeRoot) || filepath.Clean(cfg.RuntimeRoot) != cfg.RuntimeRoot || cfg.RuntimeRoot == "/" || strings.ContainsAny(cfg.RuntimeRoot, "\x00\r\n")) {
+		return cfg, fmt.Errorf("runtime root must be a clean absolute non-root path")
+	}
 	if cfg.UnixSocket == "" {
 		cfg.UnixSocket = "/run/containerd/containerd.sock"
 	}
@@ -146,7 +159,7 @@ func NewContainerdSandbox(config *ContainerdConfig, _ log.Logger) (*Containerd, 
 		}
 		return nil, fmt.Errorf("check containerd: %w", err)
 	}
-	return newSandbox(cfg, &containerdBackend{client: client}), nil
+	return newSandbox(cfg, &containerdBackend{client: client, runtimeRoot: cfg.RuntimeRoot, fifoDir: cfg.FIFODir}), nil
 }
 
 func newSandbox(config ContainerdConfig, backend runtimeBackend) *Containerd {
@@ -576,6 +589,13 @@ func (s *Containerd) removeState(ctx context.Context, id string, state *containe
 	}
 	state.container = container
 	if !resources.ContainerExists && !resources.SnapshotExists && !resources.TaskExists {
+		// Runtime metadata can be gone while a crashed client's owned FIFOs
+		// remain. Preserve retry state until exact-owned filesystem cleanup succeeds.
+		if state.container != nil {
+			if err := state.container.remove(cleanup); err != nil {
+				return fmt.Errorf("remove remaining container resources: %w", err)
+			}
+		}
 		s.forgetRemoved(id, state)
 		return nil
 	}

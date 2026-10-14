@@ -55,19 +55,20 @@ type journalRecord struct {
 }
 
 type journalDocument struct {
-	Version       int            `json:"version"`
-	ControllerID  string         `json:"controllerID"`
-	AgentID       string         `json:"agentID"`
-	WorkspaceRoot string         `json:"workspaceRoot"`
-	Namespace     string         `json:"namespace"`
-	Record        *journalRecord `json:"record,omitempty"`
-	Checksum      string         `json:"checksum"`
+	Version           int            `json:"version"`
+	ControllerID      string         `json:"controllerID"`
+	AgentID           string         `json:"agentID"`
+	WorkspaceRoot     string         `json:"workspaceRoot"`
+	Namespace         string         `json:"namespace"`
+	RuntimeIOIdentity string         `json:"runtimeIOIdentity,omitempty"`
+	Record            *journalRecord `json:"record,omitempty"`
+	Checksum          string         `json:"checksum"`
 }
 
 func (c *Controller) document(record *journalRecord) journalDocument {
 	return journalDocument{
 		Version: journalVersion, ControllerID: c.opts.ControllerID, AgentID: c.opts.AgentID,
-		WorkspaceRoot: c.opts.WorkspaceRoot, Namespace: c.backend.Namespace(), Record: record,
+		WorkspaceRoot: c.opts.WorkspaceRoot, Namespace: c.backend.Namespace(), RuntimeIOIdentity: c.runtimeIOIdentity, Record: record,
 	}
 }
 
@@ -96,7 +97,7 @@ func (c *Controller) decodeJournal(data []byte) (*journalRecord, error) {
 		document.ControllerID != expected.ControllerID ||
 		document.AgentID != expected.AgentID ||
 		document.WorkspaceRoot != expected.WorkspaceRoot ||
-		document.Namespace != expected.Namespace {
+		document.Namespace != expected.Namespace || document.RuntimeIOIdentity != expected.RuntimeIOIdentity {
 		return nil, fmt.Errorf("sandbox journal belongs to a different controller, Agent, runtime, or workspace")
 	}
 	return document.Record, nil
@@ -150,6 +151,10 @@ func openJournalDirectory(ctx context.Context, path string) (*os.Root, error) {
 }
 
 func (c *Controller) verifyRoots(ctx context.Context) error {
+	currentIO, err := backendRuntimeIOIdentity(c.backend)
+	if err != nil || currentIO != c.runtimeIOIdentity {
+		return fmt.Errorf("sandbox runtime IO root identity changed")
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

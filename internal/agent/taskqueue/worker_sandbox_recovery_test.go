@@ -99,3 +99,13 @@ func TestOfflineRuntimeAllocationErrorDoesNotReturnTypedNil(t *testing.T) {
 		t.Fatalf("controller rejection must remain a nil interface, got %T / %v", session, err)
 	}
 }
+
+func TestOfflineAcceptedProfileStillRequiresAuthenticatedController(t *testing.T) {
+	conf, _, _ := offlineWorkerFixture(t)
+	for _, client := range []*agentgrpc.ClientWrapper{nil, {}} {
+		runtime, err := newOfflineRuntime(context.Background(), conf, client)
+		if err == nil || runtime != nil {
+			t.Fatal("accepted profile started without authenticated controller transport")
+		}
+	}
+}

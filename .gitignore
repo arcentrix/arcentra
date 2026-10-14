@@ -36,3 +36,6 @@ docs/*.md
 
 # Pipeline-linked release engine and recovery guide
 !docs/pipeline-release-engine.md
+
+# Operator guide for the accepted offline container runtime
+!docs/offline-runtime-acceptance.md

@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/google/uuid"
+	"github.com/opencontainers/go-digest"
 )
 
 // TestContainerdAcceptance 仅在显式选择的具备真实运行时的专用 Linux 主机上执行
@@ -40,14 +42,14 @@ func TestContainerdAcceptance(t *testing.T) {
 	if os.Getenv("ARCENTRA_SANDBOX_ACCEPTANCE") != "1" {
 		t.Fatal("set ARCENTRA_SANDBOX_ACCEPTANCE=1 on a dedicated Linux containerd/runc/cgroup-v2 host; acceptance was not run")
 	}
-	if runtime.GOOS != "linux" {
-		t.Fatal("acceptance requires Linux")
+	if runtime.GOOS != "linux" || os.Geteuid() == 0 || os.Getegid() == 0 {
+		t.Fatal("acceptance requires an unprivileged nonzero Linux UID:GID; run only the dedicated daemon as root")
 	}
 	socket := os.Getenv("ARCENTRA_CONTAINERD_SOCKET")
-	if socket == "" {
-		socket = "/run/containerd/containerd.sock"
+	if !filepath.IsAbs(socket) {
+		t.Fatal("set ARCENTRA_CONTAINERD_SOCKET to the explicitly authorized absolute dedicated daemon socket")
 	}
-	info, err := os.Stat(socket)
+	info, err := os.Lstat(socket)
 	if err != nil || info.Mode()&os.ModeSocket == 0 {
 		t.Fatalf("containerd Unix socket is unavailable: %s (%v)", socket, err)
 	}
@@ -59,10 +61,25 @@ func TestContainerdAcceptance(t *testing.T) {
 	}
 	image := os.Getenv("ARCENTRA_SANDBOX_TEST_IMAGE")
 	if image == "" {
-		t.Fatal("set ARCENTRA_SANDBOX_TEST_IMAGE to an operator-approved Alpine-compatible image, preferably pinned by digest")
+		t.Fatal("set ARCENTRA_SANDBOX_TEST_IMAGE to an operator-approved Alpine-compatible image pinned by sha256 digest")
+	}
+	_, imageDigest, pinned := strings.Cut(image, "@")
+	if !pinned || !strings.HasPrefix(imageDigest, "sha256:") || digest.Digest(imageDigest).Validate() != nil {
+		t.Fatal("ARCENTRA_SANDBOX_TEST_IMAGE must be immutable image@sha256:<64 hex characters>")
+	}
+	if filepath.Clean(socket) == "/run/containerd/containerd.sock" || filepath.Clean(socket) == "/var/run/containerd/containerd.sock" {
+		t.Fatal("acceptance must use a dedicated daemon socket, never the host default")
+	}
+	runtimeRoot := os.Getenv("ARCENTRA_CONTAINERD_RUNC_ROOT")
+	if !filepath.IsAbs(runtimeRoot) || filepath.Clean(runtimeRoot) != runtimeRoot || runtimeRoot == "/run/containerd/runc" || runtimeRoot == "/" {
+		t.Fatal("ARCENTRA_CONTAINERD_RUNC_ROOT must name the dedicated daemon's absolute private runc state directory")
+	}
+	fifoDir := os.Getenv("ARCENTRA_CONTAINERD_FIFO_DIR")
+	if !filepath.IsAbs(fifoDir) || filepath.Clean(fifoDir) != fifoDir || fifoDir == "/run/containerd/fifo" || fifoDir == "/var/run/containerd/fifo" || fifoDir == "/" {
+		t.Fatal("ARCENTRA_CONTAINERD_FIFO_DIR must name a pre-created private Agent-owned directory, never the host default")
 	}
 	namespace := "arcentra-acceptance-" + uuid.NewString()
-	sb, err := NewContainerdSandbox(&ContainerdConfig{UnixSocket: socket, Namespace: namespace, DefaultImage: image, NetworkMode: "none"}, log.Logger{})
+	sb, err := NewContainerdSandbox(&ContainerdConfig{UnixSocket: socket, Namespace: namespace, RuntimeRoot: runtimeRoot, FIFODir: fifoDir, DefaultImage: image, NetworkMode: "none"}, log.Logger{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +90,7 @@ func TestContainerdAcceptance(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
+	user := fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid())
 	workspace := t.TempDir()
 	if err := os.Chmod(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -81,7 +99,7 @@ func TestContainerdAcceptance(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("host-only"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	id, err := sb.Create(ctx, &CreateOptions{Command: []string{"sh", "-c", "trap 'exit 0' TERM INT; while :; do sleep 1; done"}, Env: map[string]string{"BASE": "base", "OVERRIDE": "old"}, WorkingDir: "/workspace", Resources: &Resources{CPU: "500m", Memory: "64Mi"}, Mounts: []Mount{{Source: workspace, Target: "/workspace"}}})
+	id, err := sb.Create(ctx, &CreateOptions{User: user, NetworkMode: "none", Command: []string{"sh", "-c", "trap 'exit 0' TERM INT; while :; do sleep 1; done"}, Env: map[string]string{"BASE": "base", "OVERRIDE": "old"}, WorkingDir: "/workspace", Resources: &Resources{CPU: "500m", Memory: "64Mi"}, Mounts: []Mount{{Source: workspace, Target: "/workspace"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +109,13 @@ func TestContainerdAcceptance(t *testing.T) {
 	state, _ := sb.getContainer(id)
 	task := state.task.(*containerdTask).Task
 	verifyCgroupV2Limits(t, task.Pid())
+	for _, path := range []string{"/proc/1/status", "/proc/self/status"} {
+		security, err := sb.Execute(ctx, id, []string{"cat", path}, nil)
+		if err != nil || security == nil || security.ExitCode != 0 {
+			t.Fatalf("read effective process security %s: %+v %v", path, security, err)
+		}
+		verifyEffectiveProcessSecurity(t, security.Stdout, os.Geteuid(), os.Getegid())
+	}
 	result, err := sb.Execute(ctx, id, []string{"sh", "-c", `printf '%s|%s|%s|%s:%s' "$BASE" "$OVERRIDE" "$(pwd)" "$(id -u)" "$(id -g)"; printf 'stderr-marker' >&2`}, &ExecuteOptions{Env: map[string]string{"OVERRIDE": "new"}, WorkingDir: "/tmp", User: "1000:1001"})
 	if err != nil || result.ExitCode != 0 || result.Stdout != "base|new|/tmp|1000:1001" || result.Stderr != "stderr-marker" {
 		t.Fatalf("command/env/cwd/user/stream acceptance failed: %+v %v", result, err)
@@ -117,9 +142,9 @@ func TestContainerdAcceptance(t *testing.T) {
 			t.Fatalf("%s namespace is not distinct: %+v %v", kind, result, err)
 		}
 	}
-	result, err = sb.Execute(ctx, id, []string{"sh", "-c", "ip route show default > /tmp/arcentra-routes && test ! -s /tmp/arcentra-routes"}, nil)
+	result, err = sb.Execute(ctx, id, []string{"sh", "-ec", `for interface in /sys/class/net/*; do test "${interface##*/}" = lo; done; routes="$(ip route show)"; test -z "$routes"; routes="$(ip -6 route show default)"; test -z "$routes"`}, nil)
 	if err != nil || result.ExitCode != 0 {
-		t.Fatalf("offline network has a default route: %+v %v", result, err)
+		t.Fatalf("offline network has a non-loopback interface or route: %+v %v", result, err)
 	}
 	result, err = sb.Execute(ctx, id, []string{"sh", "-c", "exit 23"}, nil)
 	if err != nil || result.ExitCode != 23 {
@@ -145,7 +170,7 @@ func TestContainerdAcceptance(t *testing.T) {
 	if _, err := client.SnapshotService(state.container.(*containerdContainer).snapshotter).Stat(verifyCtx, id+"-snapshot"); !errdefs.IsNotFound(err) {
 		t.Fatalf("snapshot remains after removal: %v", err)
 	}
-	t.Log("Real containerd acceptance passed: execution, output, UID/GID, workspace, private PID/network namespaces, cgroup-v2 limits, timeout and cleanup")
+	t.Log("Real containerd acceptance passed: explicit nonroot init/exec, empty capability sets, no-new-privileges, execution, output, workspace, private PID/network namespaces, loopback-only network, cgroup-v2 limits, timeout and exact snapshot cleanup")
 }
 
 func verifyCgroupV2Limits(t *testing.T, pid uint32) {
@@ -170,5 +195,44 @@ func verifyCgroupV2Limits(t *testing.T, pid uint32) {
 		if err != nil || strings.Join(strings.Fields(string(value)), " ") != want {
 			t.Fatalf("effective %s: got %q, want %q (%v)", name, value, want, err)
 		}
+	}
+}
+
+// Inspect kernel-enforced values from inside both init and exec, not only the OCI spec.
+func verifyEffectiveProcessSecurity(t *testing.T, status string, uid, gid int) {
+	t.Helper()
+	fields := make(map[string][]string)
+	for _, line := range strings.Split(status, "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if ok {
+			fields[key] = strings.Fields(value)
+		}
+	}
+	for key, want := range map[string]int{"Uid": uid, "Gid": gid} {
+		got := fields[key]
+		if len(got) != 4 {
+			t.Fatalf("missing effective %s identities: %q", key, status)
+		}
+		for _, value := range got {
+			if value != strconv.Itoa(want) {
+				t.Fatalf("effective %s contains %s, want only %d", key, value, want)
+			}
+		}
+	}
+	if groups, ok := fields["Groups"]; !ok || len(groups) != 0 {
+		t.Fatalf("unexpected supplementary groups: %v (present=%v)", groups, ok)
+	}
+	for _, key := range []string{"CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"} {
+		values := fields[key]
+		if len(values) != 1 {
+			t.Fatalf("missing capability status %s", key)
+		}
+		value, err := strconv.ParseUint(values[0], 16, 64)
+		if err != nil || value != 0 {
+			t.Fatalf("capability set %s was not cleared: %v (%v)", key, values, err)
+		}
+	}
+	if got := fields["NoNewPrivs"]; len(got) != 1 || got[0] != "1" {
+		t.Fatalf("no-new-privileges is not enforced: %v", got)
 	}
 }

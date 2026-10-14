@@ -1,8 +1,8 @@
 # Containerd sandbox backend
 
-This package provides the containerd backend contract for a bounded offline-job integration. It does **not enable deployment or establish an untrusted multi-tenant security boundary**. Keep deployment guards in place until the integration and actual runtime acceptance are approved.
+This package provides the containerd backend contract for a bounded offline-job integration. It does **not enable deployment or establish an untrusted multi-tenant security boundary**. Deployment remains an explicit operator opt-in; see the separate production-entry acceptance status.
 
-Current verification: fake-backed lifecycle tests, real OCI spec tests and an SDK adapter fixture can run without a daemon. Actual containerd acceptance requires a separate capable Linux host and has **not been completed in the restricted implementation environment**.
+Actual backend, session, durable/crash recovery and integrated single-job acceptance passed on an authorized GitHub-hosted VM in [run 38508866022](https://github.com/arcentrix/arcentra/actions/runs/38508866022), with clean FIFO/runtime cleanup. PR head `e7132be275c144a2eadc03b61e3c4f16dd302c4e` was tested as merge `12e6cd81e2ca6f79bb5967f457aa6b3f377b1a9d`. That run kept the compiled production gate false. Independent gate-enabled [run 38512588313](https://github.com/arcentrix/arcentra/actions/runs/38512588313) also passed actual production `NewProcess`/`StartWorker` constructors at PR head `69baaebef85e1f161d4ea2298e6e180e1c56aa8c` (tested merge `1d2e29030741963897b7056c7d15249f2637d757`), with a clean cleanup receipt. These hosted test binaries do not certify packaged-service or release-OCI startup. [Exact evidence and opt-in configuration](../../docs/offline-runtime-acceptance.md) distinguish these stages. Unit/spec tests remain useful runtime-independent checks.
 
 ## Supported boundary
 
@@ -25,8 +25,10 @@ Use the actual module path:
 import "github.com/arcentrix/arcentra/pkg/sandbox"
 
 backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{
-    UnixSocket: "/run/containerd/containerd.sock",
-    Namespace: "arcentra",
+    UnixSocket: "/run/arcentra-runtime/containerd.sock",
+    Namespace: "arcentra-offline-node-a",
+    RuntimeRoot: "/var/lib/arcentra-runtime/runc",
+    FIFODir: "/var/lib/arcentra-agent/offline-fifo",
     DefaultImage: "your-approved-image@sha256:...",
     NetworkMode: "none",
 }, logger)
@@ -34,17 +36,18 @@ backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{
 
 id, err := backend.Create(ctx, &sandbox.CreateOptions{
     Command: []string{"sh", "-c", "trap 'exit 0' TERM INT; while :; do sleep 1; done"},
-    Resources: &sandbox.Resources{CPU: "500m", Memory: "512Mi"},
+    User: "1001:1001", // Must match the actual non-root Agent UID:GID.
+    Resources: &sandbox.Resources{CPU: "500m", Memory: "64Mi"},
 })
 // Check err. If an ID accompanies an error, cleanup remains pending for that ID.
 // After successful creation, arrange Remove with a cleanup context.
 err = backend.Start(ctx, id)
 result, err := backend.Execute(ctx, id, []string{"sh", "-ec", "printf hello"},
-    &sandbox.ExecuteOptions{WorkingDir: "/tmp", User: "1000:1000"})
+    &sandbox.ExecuteOptions{WorkingDir: "/tmp", User: "1001:1001"})
 // Check err AND result.ExitCode; a nonzero exit is distinct from a transport error.
 ```
 
-Only use an image approved for this host. It needs the commands used by the caller; the package does not install shell tools into images. Pulling/unpacking images is performed by the trusted host, independently of the container's offline network.
+The paths above must already be provisioned by the operator; the FIFO directory is private, Agent-owned and mode 0700, distinct from job workspaces and journals. This example does not install a daemon or change host permissions. Access to the rootful daemon socket is effectively root-equivalent for the trusted caller, even when its process UID is non-root; this backend does not isolate the host from that caller. Jobs must not receive the socket or Agent configuration/state roots. Only use an image approved for this host. It needs the commands used by the caller; the package does not install shell tools into images. Pulling/unpacking images is performed by the trusted host, independently of the container's offline network.
 
 ## Lifecycle and failure semantics
 
@@ -79,4 +82,4 @@ There is no Kubernetes backend, bridge networking, arbitrary plugin sandboxing, 
 
 See [the acceptance guide](../../docs/sandbox-containerd.md) for prerequisites, exact commands and the distinction between unit/spec tests and real runtime acceptance.
 
-Agent runtime capability scheduling and immutable DSL runtime propagation now have gated integration plumbing; the production acceptance gate remains false. See [the Agent integration boundary](../../docs/sandbox-agent-integration.md). Neither this backend nor the new wiring has completed real containerd acceptance in this delivery.
+Agent runtime capability scheduling and immutable DSL runtime propagation have hosted implementation-level evidence. The independent gate-enabled ordinary production entries also passed in hosted test binaries; both operator policies default off. See [the Agent integration boundary](../../docs/sandbox-agent-integration.md). Single-job/offline/no-automatic-retry limits remain; no upstream artifact-input DAG, online package installation, release OCI image startup or multi-tenant security guarantee is implied.

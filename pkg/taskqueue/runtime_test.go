@@ -55,8 +55,8 @@ func TestOfflineRuntimeContractRejectsUnsafeProfiles(t *testing.T) {
 	if err := ValidateJobRuntime(payload, OfflineRuntimePolicy{}); err == nil {
 		t.Fatal("default enabled runtime")
 	}
-	if err := runtimeTestPolicy().ValidateProduction(); err == nil {
-		t.Fatal("unaccepted runtime enabled in production")
+	if err := runtimeTestPolicy().ValidateProduction(); err != nil {
+		t.Fatalf("accepted explicit bounded policy rejected: %v", err)
 	}
 	if err := ValidateStandaloneRuntime(&StepRunTaskPayload{Runtime: payload.Runtime}); err == nil {
 		t.Fatal("standalone runtime accepted")

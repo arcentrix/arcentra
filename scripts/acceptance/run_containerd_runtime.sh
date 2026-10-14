@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Authorized only on an ephemeral GitHub-hosted Ubuntu 24.04 VM.
+set -Eeuo pipefail
+umask 077
+cd "$(dirname "$0")/../.."
+if [[ ${GITHUB_ACTIONS:-} != true || ${RUNNER_ENVIRONMENT:-} != github-hosted || ${RUNNER_OS:-} != Linux || $(uname -m) != x86_64 || $(id -u) == 0 || $(id -g) == 0 ]]; then
+  echo 'This harness requires an unprivileged GitHub-hosted Linux x86_64 runner.' >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+source /etc/os-release
+[[ $ID == ubuntu && $VERSION_ID == 24.04 ]] || { echo 'Ubuntu 24.04 is required.' >&2; exit 1; }
+[[ ${GITHUB_RUN_ID:-} =~ ^[0-9]+$ && ${GITHUB_RUN_ATTEMPT:-} =~ ^[0-9]+$ ]] || exit 1
+[[ -f /sys/fs/cgroup/cgroup.controllers ]] || { echo 'cgroup v2 is required; host settings will not be changed.' >&2; exit 1; }
+# shellcheck source=containerd-pins.env
+source scripts/acceptance/containerd-pins.env
+EVIDENCE="$PWD/.acceptance/containerd-evidence"
+mkdir -p "$EVIDENCE"
+BASE=$(mktemp -d "/tmp/arc-cd.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.XXXXXX")
+SUPERVISOR=''
+finish() {
+  local status=$? clean=0
+  trap - EXIT INT TERM
+  if [[ -n $SUPERVISOR ]]; then
+    touch "$BASE/control/stop"
+    # Root supervisor has its own bounded lifetime and signal handler as well.
+    if ! wait "$SUPERVISOR"; then status=1; fi
+    if [[ -f $BASE/control/cleanup.json ]]; then
+      cp "$BASE/control/cleanup.json" "$EVIDENCE/cleanup.json"
+      if python3 - "$EVIDENCE/cleanup.json" <<'PY'
+import json, sys
+if json.load(open(sys.argv[1])).get("passed") is not True:
+    raise SystemExit("Runtime cleanup was not clean; acceptance failed.")
+PY
+      then clean=1; else status=1; fi
+    else
+      echo 'Missing mandatory runtime cleanup receipt.' >&2
+      status=1
+    fi
+  fi
+  # Root-owned data is removed by the supervisor only after mount checks.
+  # Never sudo rm a caller-supplied path or remove another run's directory.
+  if [[ ( -z $SUPERVISOR || $clean == 1 ) && -d $BASE && $(stat -c %u "$BASE") == "$(id -u)" ]]; then
+    rm -rf -- "$BASE" || status=1
+  fi
+  exit "$status"
+}
+trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+mkdir -p "$BASE/bin" "$BASE/control" "$BASE/work/tmp" "$BASE/work/home" "$BASE/work/journal" "$BASE/work/workspaces" "$BASE/work/job" "$BASE/work/fifo"
+python3 scripts/acceptance/verify_containerd_image.py "$ARCENTRA_SANDBOX_TEST_IMAGE" > "$EVIDENCE/image.json"
+curl -q --fail --silent --show-error --location --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 120 --retry 2 \
+  "https://github.com/containerd/containerd/releases/download/v${CONTAINERD_VERSION}/containerd-${CONTAINERD_VERSION}-linux-amd64.tar.gz" -o "$BASE/containerd.tar.gz"
+printf '%s  %s\n' "$CONTAINERD_SHA256" "$BASE/containerd.tar.gz" | sha256sum --check --strict
+# Extract only the three verified regular upstream executable entries.
+tar --extract --gzip --no-same-owner --file "$BASE/containerd.tar.gz" --directory "$BASE" \
+  bin/containerd bin/ctr bin/containerd-shim-runc-v2
+curl -q --fail --silent --show-error --location --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 120 --retry 2 \
+  "https://github.com/opencontainers/runc/releases/download/v${RUNC_VERSION}/runc.amd64" -o "$BASE/bin/runc"
+printf '%s  %s\n' "$RUNC_SHA256" "$BASE/bin/runc" | sha256sum --check --strict
+chmod 0755 "$BASE/bin/"*
+{
+  "$BASE/bin/containerd" --version
+  "$BASE/bin/runc" --version
+  printf 'containerdArchiveSHA256=%s\nruncSHA256=%s\n' "$CONTAINERD_SHA256" "$RUNC_SHA256"
+} > "$EVIDENCE/versions.txt"
+# No inherited GitHub/cloud tokens, proxy variables, SSH agent or user HOME.
+sudo -n env -i GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PATH=/usr/bin:/bin \
+  /usr/bin/python3 "$PWD/scripts/acceptance/containerd_runtime_guard.py" \
+  --base "$BASE" --uid "$(id -u)" --gid "$(id -g)" > "$EVIDENCE/guard.log" 2>&1 &
+SUPERVISOR=$!
+for attempt in $(seq 1 45); do
+  if [[ -f $BASE/control/ready ]]; then break; fi
+  kill -0 "$SUPERVISOR" 2>/dev/null || { cat "$EVIDENCE/guard.log"; exit 1; }
+  [[ $attempt != 45 ]] || { echo 'Isolated runtime readiness timed out.' >&2; exit 1; }
+  sleep 1
+done
+TEST_ENV=(env -i
+  "PATH=$BASE/bin:/usr/bin:/bin" "HOME=$BASE/work/home" "TMPDIR=$BASE/work/tmp"
+  "USER=$(id -un)" GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted
+  ARCENTRA_SANDBOX_ACCEPTANCE=1 ARCENTRA_SANDBOX_SESSION_ACCEPTANCE=1 ARCENTRA_DURABLE_SESSION_ACCEPTANCE=1
+  ARCENTRA_CONTAINERD_ACCEPTANCE=1 ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE=1
+  "ARCENTRA_CONTAINERD_SOCKET=$BASE/run/containerd.sock" "ARCENTRA_SANDBOX_TEST_IMAGE=$ARCENTRA_SANDBOX_TEST_IMAGE"
+  "ARCENTRA_CONTAINERD_RUNC_ROOT=$BASE/runc" "ARCENTRA_CONTAINERD_FIFO_DIR=$BASE/work/fifo"
+  "ARCENTRA_DURABLE_SESSION_NAMESPACE=arcentra-durable-acceptance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+  "ARCENTRA_DURABLE_SESSION_JOURNAL_ROOT=$BASE/work/journal" "ARCENTRA_DURABLE_SESSION_WORKSPACE_ROOT=$BASE/work/workspaces"
+  "ARCENTRA_TEST_CONTAINERD_NAMESPACE=arcentra-containerjob-acceptance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+  "ARCENTRA_TEST_CONTAINERD_ROOT=$BASE/work/job"
+  ARCENTRA_REAL_STACK=1 ARCENTRA_REQUIRE_REAL_STACK=1
+  'ARCENTRA_TEST_MYSQL_DSN=root:ci-only-mysql-password@tcp(127.0.0.1:13306)/arcentra_acceptance_containerd?charset=utf8mb4&parseTime=True&loc=UTC'
+  ARCENTRA_TEST_KAFKA_BROKERS=127.0.0.1:19092 ARCENTRA_TEST_REDIS_ADDRESS=127.0.0.1:16379
+  ARCENTRA_TEST_S3_ENDPOINT=http://127.0.0.1:19000 ARCENTRA_TEST_S3_ACCESS_KEY=ci-only-s3-user ARCENTRA_TEST_S3_SECRET_KEY=ci-only-s3-password
+)
+run_test() {
+  local binary=$1 expression=$2 duration=$3 name=$4
+  "${TEST_ENV[@]}" "$PWD/.acceptance/containerd-bin/$binary.test" -test.v -test.count=1 \
+    "-test.run=$expression" "-test.timeout=$duration" 2>&1 | tee "$EVIDENCE/$name.log"
+  # A regex typo or accidental Skip must never turn into a green acceptance job.
+  grep -Eq -- '^--- PASS: ' "$EVIDENCE/$name.log"
+  if grep -Eq -- '^--- SKIP: |testing: warning: no tests to run' "$EVIDENCE/$name.log"; then return 1; fi
+}
+run_test sandbox '^TestContainerdAcceptance$' 3m sandbox
+run_test sandboxexec '^Test(SessionContainerdAcceptance|DurableControllerContainerdAcceptance|DurableControllerActiveRecoveryContainerdAcceptance)$' 5m sessions
+for expected in TestSessionContainerdAcceptance TestDurableControllerContainerdAcceptance TestDurableControllerActiveRecoveryContainerdAcceptance; do
+  grep -Fq -- "--- PASS: $expected (" "$EVIDENCE/sessions.log"
+done
+run_test taskqueue '^TestRealContainerJobAcceptance$' 8m full-job
