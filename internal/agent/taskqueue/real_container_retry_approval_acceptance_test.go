@@ -5,7 +5,6 @@
 package taskqueue
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -20,6 +19,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	controlservice "github.com/arcentrix/arcentra/internal/control/service"
+	"github.com/arcentrix/arcentra/internal/shared/agentidentity"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/validation"
 	"github.com/arcentrix/arcentra/pkg/id"
@@ -63,6 +63,15 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 				command = `set -eu; test "$(cat source.txt)" = 'initial checkout'; test "$(cat seed/input.txt)" = 'approval-input'; printf 'step-retry-enter\n'; printf approved > approval-command-marker; if [ ! -e failed-once ]; then touch failed-once; printf 'step-failed-first\n'; exit 23; fi; printf 'step-failed-second\n'; mkdir -p proof; printf approved-result > proof/result.txt`
 				jobs[1].Steps[1] = controllerWorkerShell("approval-command", command)
 				jobs[1].Steps = append(jobs[1].Steps[:1], append([]*spec.Step{controllerWorkerShell("earlier", "printf 'step-earlier-once\\n'")}, jobs[1].Steps[1:]...)...)
+			}
+			if failedStep && scenario == "revoke-before-successor" {
+				delivery := stepEvents[0].approvalDelivery
+				if delivery == nil {
+					t.Fatal("missing transparent denial observer")
+				}
+				delivery.mu.Lock()
+				delivery.targetName = "approval-b"
+				delivery.mu.Unlock()
 			}
 			run := submitContainerApproval(t, f, cfg, actor, policy, jobs)
 			var approval *model.ApprovalRequest
@@ -121,6 +130,9 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 			store.mu.Lock()
 			uploadsBefore := store.sealedUploads
 			store.mu.Unlock()
+			f.mu.Lock()
+			initialLostACKs := f.lostACKs
+			f.mu.Unlock()
 			var mu sync.Mutex
 			var admissionBodies []string
 			lost := false
@@ -319,7 +331,7 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 				}
 				mu.Lock()
 				if (scenario == "approved-finite-plan" || scenario == "lost-CAS-ACK-then-revoke") && (len(stepBodies) != 2 || stepBodies[0] != stepBodies[1] || stepRequests[0] != stepRequests[1]) {
-					t.Error("step admission ACK replay changed immutable bytes")
+					t.Errorf("step admission synchronous ACK replay changed: responses=%d requests=%d; one injected committed ACK loss requires exactly two same-request calls", len(stepBodies), len(stepRequests))
 				}
 				if scenario == "revoke-before-successor" && len(stepBodies) != 0 {
 					t.Error("revoked failure created successor CAS")
@@ -344,11 +356,30 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 				for _, step := range steps {
 					ids = append(ids, step.StepRunID)
 					if scenario == "revoke-before-successor" && step.Name == "approval-command" && step.Attempt == 1 {
+						f.wait("original revoked handler completion", func() bool {
+							snapshot := stepEvents[0].approvalDelivery.snapshot()
+							return len(snapshot.invocations) == 1 && snapshot.invocations[0].end != 0
+						})
+						snapshot := stepEvents[0].approvalDelivery.snapshot()
 						f.mu.Lock()
 						receipts := append([]controllerWorkerReceipt(nil), f.receipts["step/"+step.StepRunID]...)
+						lostACKs := f.lostACKs - initialLostACKs
 						f.mu.Unlock()
-						if len(receipts) != 2 || !bytes.Equal(receipts[0].payload, receipts[1].payload) || receipts[0].claim != receipts[1].claim {
-							t.Fatal("revoked failed terminal ACK did not replay exact original bytes")
+						admission, err := taskpayload.ParseStepAttemptAdmission(step.AttemptAdmission)
+						t.Logf("revoked failed terminal delivery: %s committed=%d injectedLosses=%d persistedDigest=%s", snapshot.summary(), len(receipts), lostACKs, step.TerminalReportDigest)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if step.Status != model.JobRunStatusFailed || !step.RetryableShellExit || step.ExitCode == nil || *step.ExitCode != 23 || step.GenerationID != admission.Scope.GenerationID || step.GenerationBindingDigest != admission.Scope.GenerationBindingDigest || step.ClaimID != admission.Scope.StepClaimID {
+							t.Fatal("persisted failure/status/exit/claim/generation differs from immutable admission")
+						}
+						for index, call := range snapshot.stepCalls {
+							computed, computeErr := agentidentity.TerminalReceiptDigest(call.message, call.claim, admission.Scope.Identity.PipelineID, admission.Scope.Identity.PipelineRunID, admission.Scope.Identity.JobRunID)
+							payloadSHA := sha256.Sum256(call.payload)
+							t.Logf("revoked failed terminal RPC%d source=%s callback=%d result=%s accepted=%t payloadSHA256=%x claimMatches=%t digest=%s digestMatches=%t digestError=%v", index+1, call.origin, call.invocation, call.code, call.success, payloadSHA, call.claim == step.ClaimID, computed, computed == step.TerminalReportDigest, computeErr)
+						}
+						if err := snapshot.validateDeniedStep(receipts, *admission, step.TerminalReportDigest, lostACKs); err != nil {
+							t.Fatalf("revoked failed terminal receipt proof: %v", err)
 						}
 					}
 				}

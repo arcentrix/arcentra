@@ -163,10 +163,11 @@ func containerAcceptanceStepDocumentFor(root string, request taskpayload.StepAtt
 }
 
 type containerAcceptanceStepRuntimeEvents struct {
-	mu         sync.Mutex
-	events     []sandbox.ContainerAcceptanceEvent
-	loseResume string
-	lostResume bool
+	mu               sync.Mutex
+	events           []sandbox.ContainerAcceptanceEvent
+	loseResume       string
+	lostResume       bool
+	approvalDelivery *workerDeliveryObserver
 }
 
 func (o *containerAcceptanceStepRuntimeEvents) observer() *sandbox.ContainerAcceptanceObserver {
@@ -1898,23 +1899,25 @@ func containerAcceptanceFailedStepApproval(t *testing.T, f *controllerWorkerFixt
 			t.Error(err)
 		}
 	}()
+	delivery := &workerDeliveryObserver{targetName: "approval-denial-not-yet-submitted", failureIndex: 2}
+	f.client.AgentClient = &workerDeliveryClient{AgentServiceClient: f.client.AgentClient, observer: delivery}
 	recording := &controllerWorkerRecordingQueue{TaskQueue: f.producer, fixture: f}
 	processConfig := &controlconfig.AppConfig{Pipeline: controlconfig.PipelineConfig{RetryApproval: approvalPolicy}}
 	if taskpayload.FailedStepRetryApprovalAccepted {
 		processConfig.Pipeline.OfflineRuntime = policy
 	}
-	f.engine = process.NewProcess(f.repos, nil, recording, nil, &log.Logger{SugaredLogger: zap.NewNop().Sugar()}, processConfig, nil)
+	f.engine = process.NewProcess(f.repos, nil, &workerDeliveryQueue{TaskQueue: recording, observer: delivery}, nil, &log.Logger{SugaredLogger: zap.NewNop().Sugar()}, processConfig, nil)
 	t.Cleanup(f.engine.Stop)
 	if !taskpayload.FailedStepRetryApprovalAccepted {
 		if err := f.engine.ConfigureContainerAcceptancePolicy(policy); err != nil {
 			t.Fatal(err)
 		}
 	}
-	events := &containerAcceptanceStepRuntimeEvents{}
+	events := &containerAcceptanceStepRuntimeEvents{approvalDelivery: delivery}
 	manager := executor.NewExecutorManager()
 	manager.Register(executor.NewShellExecutor())
 	manager.SetLogPublisher(publisher)
-	queue, err := startContainerAcceptanceWorkerObserved(f.ctx, f.conf, f.client, manager, events.observer())
+	queue, err := startContainerAcceptanceWorkerObserved(f.ctx, f.conf, f.client, manager, events.observer(), delivery)
 	if err != nil {
 		t.Fatal(err)
 	}

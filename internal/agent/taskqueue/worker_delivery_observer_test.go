@@ -17,6 +17,7 @@ import (
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/pkg/nova"
+	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
 	"google.golang.org/grpc"
@@ -48,12 +49,15 @@ type workerDeliveryRPC struct {
 	success    bool
 }
 type workerDeliverySnapshot struct {
-	original          []nova.Task
-	invocations       []workerDeliveryInvocation
-	calls             []workerDeliveryRPC
-	stepCalls         []workerDeliveryRPC
-	advanceBoundary   int
-	advanceInvocation int
+	original                                    []nova.Task
+	invocations                                 []workerDeliveryInvocation
+	calls                                       []workerDeliveryRPC
+	stepCalls                                   []workerDeliveryRPC
+	advanceBoundary                             int
+	advanceInvocation                           int
+	denialBoundary, denialEnd, denialInvocation int
+	denialCode                                  codes.Code
+	denialRequest                               retryapproval.Request
 }
 type workerDeliveryObserver struct {
 	mu                   sync.Mutex
@@ -122,7 +126,7 @@ func (o *workerDeliveryObserver) backgroundContext(ctx context.Context) context.
 func (o *workerDeliveryObserver) snapshot() workerDeliverySnapshot {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	return workerDeliverySnapshot{original: append([]nova.Task(nil), o.state.original...), invocations: append([]workerDeliveryInvocation(nil), o.state.invocations...), calls: append([]workerDeliveryRPC(nil), o.state.calls...), stepCalls: append([]workerDeliveryRPC(nil), o.state.stepCalls...), advanceBoundary: o.state.advanceBoundary, advanceInvocation: o.state.advanceInvocation}
+	return workerDeliverySnapshot{original: append([]nova.Task(nil), o.state.original...), invocations: append([]workerDeliveryInvocation(nil), o.state.invocations...), calls: append([]workerDeliveryRPC(nil), o.state.calls...), stepCalls: append([]workerDeliveryRPC(nil), o.state.stepCalls...), advanceBoundary: o.state.advanceBoundary, advanceInvocation: o.state.advanceInvocation, denialBoundary: o.state.denialBoundary, denialEnd: o.state.denialEnd, denialInvocation: o.state.denialInvocation, denialCode: o.state.denialCode, denialRequest: o.state.denialRequest}
 }
 func (o *workerDeliveryObserver) markManual() { o.mu.Lock(); o.manual = true; o.mu.Unlock() }
 
@@ -237,13 +241,68 @@ func (c *workerDeliveryClient) ReconcileStepAttempt(ctx context.Context, request
 	return c.AgentServiceClient.ReconcileStepAttempt(ctx, request, opts...)
 }
 
-func (s workerDeliverySnapshot) validateStep(receipts []controllerWorkerReceipt, transition taskpayload.StepAttemptTransition) error {
-	calls := s.stepCalls
-	if len(calls) < 2 || len(calls) != len(receipts) || s.advanceBoundary == 0 || s.advanceInvocation != 1 || len(s.invocations) == 0 {
-		return fmt.Errorf("failed-step RPC/commit/advance boundary missing")
+func (c *workerDeliveryClient) ReconcileJobRetryApproval(ctx context.Context, request *agentv1.ReconcileJobRetryApprovalRequest, opts ...grpc.CallOption) (*agentv1.ReconcileJobRetryApprovalResponse, error) {
+	parsed, parseErr := retryapproval.ParseRequest(request.RequestJson)
+	o := c.observer
+	o.mu.Lock()
+	target := o.targetID
+	o.mu.Unlock()
+	if parseErr != nil || parsed.Operation != "admit" || parsed.Identity.JobRunID != target {
+		return c.AgentServiceClient.ReconcileJobRetryApproval(ctx, request, opts...)
 	}
-	if s.invocations[0].end != 0 && s.advanceBoundary >= s.invocations[0].end {
-		return fmt.Errorf("advance escaped the original handler lifetime")
+	o.mu.Lock()
+	o.clock++
+	begin := o.clock
+	o.mu.Unlock()
+	response, err := c.AgentServiceClient.ReconcileJobRetryApproval(ctx, request, opts...)
+	if status.Code(err) == codes.FailedPrecondition {
+		o.mu.Lock()
+		o.clock++
+		if o.state.denialBoundary == 0 {
+			o.state.denialBoundary = begin
+			o.state.denialEnd = o.clock
+			o.state.denialInvocation, _ = ctx.Value(workerDeliveryContextKey{}).(int)
+			o.state.denialCode = status.Code(err)
+			o.state.denialRequest = *parsed
+		}
+		o.mu.Unlock()
+	}
+	return response, err
+}
+
+func (s workerDeliverySnapshot) validateStep(receipts []controllerWorkerReceipt, transition taskpayload.StepAttemptTransition) error {
+	return s.validateStepBeforeBoundary(receipts, transition, s.advanceBoundary, s.advanceInvocation)
+}
+
+// validateDeniedStep 仅验证已持久失败与随后拒绝边界，不合成新的步骤准入权限
+func (s workerDeliverySnapshot) validateDeniedStep(receipts []controllerWorkerReceipt, admission taskpayload.StepAttemptAdmission, digest string, injectedLosses int) error {
+	if injectedLosses != 1 || s.advanceBoundary != 0 || s.denialCode != codes.FailedPrecondition || s.denialEnd <= s.denialBoundary || len(s.original) != 1 || len(s.invocations) != 1 || s.invocations[0].manual || s.invocations[0].end <= s.denialEnd {
+		return fmt.Errorf("denied step lacks one exact loss, original handler or completed denial boundary")
+	}
+	request := s.denialRequest
+	if request.Operation != "admit" || request.Identity != admission.Scope.Identity || request.GenerationID != admission.Scope.GenerationID || request.GenerationBindingDigest != admission.Scope.GenerationBindingDigest || request.InputManifestDigest != admission.Scope.InputManifestDigest || request.RetryPlanDigest != admission.Scope.RetryPlanDigest {
+		return fmt.Errorf("denial changed original generation/input authority request")
+	}
+	if !bytes.Equal(s.original[0].Payload, s.invocations[0].task.Payload) || s.original[0].Type != s.invocations[0].task.Type {
+		return fmt.Errorf("denied replay changed queued task")
+	}
+	for _, call := range s.stepCalls {
+		message, ok := call.message.(*agentv1.ReportStepRunStatusRequest)
+		if !ok || int32(message.Status) != 5 || message.AgentId != admission.Scope.Identity.AgentID || message.GenerationId != admission.Scope.GenerationID || message.GenerationBindingDigest != admission.Scope.GenerationBindingDigest {
+			return fmt.Errorf("denied receipt changed failed status/generation/agent")
+		}
+	}
+	binding := taskpayload.StepAttemptTransition{Scope: admission.Scope, PreviousStepRunID: admission.Scope.StepRunID, PreviousStepClaimID: admission.Scope.StepClaimID, PreviousAdmissionBindingDigest: admission.BindingDigest, FailedStepReceiptDigest: digest}
+	return s.validateStepBeforeBoundary(receipts, binding, s.denialBoundary, s.denialInvocation)
+}
+
+func (s workerDeliverySnapshot) validateStepBeforeBoundary(receipts []controllerWorkerReceipt, transition taskpayload.StepAttemptTransition, boundary, invocation int) error {
+	calls := s.stepCalls
+	if len(calls) < 2 || len(calls) != len(receipts) || boundary == 0 || invocation != 1 || len(s.invocations) == 0 {
+		return fmt.Errorf("failed-step RPC/commit/execution boundary missing")
+	}
+	if s.invocations[0].end != 0 && boundary >= s.invocations[0].end {
+		return fmt.Errorf("execution boundary escaped the original handler lifetime")
 	}
 	first := calls[0]
 	maxTail := 2
@@ -261,8 +320,8 @@ func (s workerDeliverySnapshot) validateStep(receipts []controllerWorkerReceipt,
 		if !ok || message.StepRunId != transition.PreviousStepRunID || message.StepAttemptAdmissionDigest != transition.PreviousAdmissionBindingDigest || !message.RetryableShellExit || call.claim != transition.PreviousStepClaimID || receipt.claim != call.claim || !bytes.Equal(call.payload, receipt.payload) || !proto.Equal(call.message, receipt.message) || !bytes.Equal(call.payload, first.payload) {
 			return fmt.Errorf("failed-step replay changed frozen identity/admission/bytes")
 		}
-		if call.begin <= s.invocations[0].begin || call.end <= call.begin || call.end >= s.advanceBoundary || i > 0 && call.begin <= calls[i-1].end {
-			return fmt.Errorf("failed-step ACK did not complete before the first advance RPC")
+		if call.begin <= s.invocations[0].begin || call.end <= call.begin || call.end >= boundary || i > 0 && call.begin <= calls[i-1].end {
+			return fmt.Errorf("failed-step ACK did not complete before the fresh execution-authority RPC")
 		}
 		if call.origin == "background" {
 			if call.invocation != 0 {
@@ -296,7 +355,7 @@ func (s workerDeliverySnapshot) validateStep(receipts []controllerWorkerReceipt,
 func (s workerDeliverySnapshot) summary() string {
 	var out strings.Builder
 	fmt.Fprintf(&out, "enqueues=%d callbacks=%d RPCs=%d", len(s.original), len(s.invocations), len(s.calls))
-	fmt.Fprintf(&out, " failedStepRPCs=%d advanceBoundary=%d", len(s.stepCalls), s.advanceBoundary)
+	fmt.Fprintf(&out, " failedStepRPCs=%d advanceBoundary=%d denialBoundary=%d denialEnd=%d denialCode=%s", len(s.stepCalls), s.advanceBoundary, s.denialBoundary, s.denialEnd, s.denialCode)
 	for i, invocation := range s.invocations {
 		if i >= 4 {
 			break
@@ -623,5 +682,92 @@ func TestFailedStepDeliveryObserverAcknowledgedBeforeAdvance(t *testing.T) {
 		if err := s.validateStep(receipts, tr); err == nil {
 			t.Fatal("extra or out-of-order failed-step sends accepted")
 		}
+	}
+}
+
+// TestFailedStepApprovalDeliveryBeforeDenial 验证拒绝前每个历史回执的有限来源与持久摘要
+func TestFailedStepApprovalDeliveryBeforeDenial(t *testing.T) {
+	build := func(first string, tail []string) (workerDeliverySnapshot, []controllerWorkerReceipt, taskpayload.StepAttemptAdmission, string) {
+		admission := taskpayload.StepAttemptAdmission{Scope: taskpayload.StepAttemptIdentity{Identity: taskpayload.JobInputIdentity{PipelineID: "pipeline", PipelineRunID: "run", JobRunID: "job", AgentID: "agent"}, StepRunID: "failed", StepClaimID: "claim", GenerationID: "generation", GenerationBindingDigest: "generation-binding", InputManifestDigest: "inputs", RetryPlanDigest: "plan"}, BindingDigest: "admission"}
+		message := &agentv1.ReportStepRunStatusRequest{AgentId: "agent", StepRunId: "failed", Status: 5, ExitCode: 23, RetryableShellExit: true, StepAttemptAdmissionDigest: "admission", GenerationId: "generation", GenerationBindingDigest: "generation-binding"}
+		payload, _ := proto.MarshalOptions{Deterministic: true}.Marshal(message)
+		digest := sha256.New()
+		for _, value := range []string{"arcentra-terminal-report-v1", string(message.ProtoReflect().Descriptor().FullName()), "claim", "pipeline", "run", "job"} {
+			digest.Write(binary.BigEndian.AppendUint64(nil, uint64(len(value))))
+			digest.Write([]byte(value))
+		}
+		digest.Write(payload)
+		task := nova.Task{Type: taskpayload.TaskTypeJobRun, Payload: []byte("frozen-dispatch")}
+		s := workerDeliverySnapshot{original: []nova.Task{task}, invocations: []workerDeliveryInvocation{{task: task, begin: 1, end: 100}}, denialBoundary: 90, denialEnd: 91, denialInvocation: 1, denialCode: codes.FailedPrecondition, denialRequest: retryapproval.Request{Operation: "admit", Identity: admission.Scope.Identity, GenerationID: "generation", GenerationBindingDigest: "generation-binding", InputManifestDigest: "inputs", RetryPlanDigest: "plan"}}
+		var receipts []controllerWorkerReceipt
+		for i, origin := range append([]string{first}, tail...) {
+			invocation := 1
+			if origin == "background" {
+				invocation = 0
+			}
+			call := workerDeliveryRPC{origin: origin, invocation: invocation, begin: 2 + i*2, end: 3 + i*2, claim: "claim", payload: append([]byte(nil), payload...), message: proto.Clone(message), success: i > 0}
+			if i == 0 {
+				call.code = codes.Unavailable
+			}
+			s.stepCalls = append(s.stepCalls, call)
+			receipts = append(receipts, controllerWorkerReceipt{claim: call.claim, payload: append([]byte(nil), payload...), message: proto.Clone(message)})
+		}
+		return s, receipts, admission, hex.EncodeToString(digest.Sum(nil))
+	}
+	for _, history := range [][]string{{"step-completion", "step-completion"}, {"step-completion", "background", "step-completion"}, {"step-completion", "background", "background", "step-completion"}, {"background", "background", "step-completion"}} {
+		t.Run(strings.Join(history, "-"), func(t *testing.T) {
+			s, r, a, d := build(history[0], history[1:])
+			if err := s.validateDeniedStep(r, a, d, 1); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for name, mutate := range map[string]func(*workerDeliverySnapshot, *[]controllerWorkerReceipt, *taskpayload.StepAttemptAdmission, *string, *int){
+		"bytes": func(s *workerDeliverySnapshot, _ *[]controllerWorkerReceipt, _ *taskpayload.StepAttemptAdmission, _ *string, _ *int) {
+			s.stepCalls[1].payload = []byte("changed")
+		},
+		"claim": func(s *workerDeliverySnapshot, _ *[]controllerWorkerReceipt, _ *taskpayload.StepAttemptAdmission, _ *string, _ *int) {
+			s.stepCalls[1].claim = "other"
+		},
+		"digest": func(_ *workerDeliverySnapshot, _ *[]controllerWorkerReceipt, _ *taskpayload.StepAttemptAdmission, d *string, _ *int) {
+			*d = "other"
+		},
+		"receipt": func(_ *workerDeliverySnapshot, r *[]controllerWorkerReceipt, _ *taskpayload.StepAttemptAdmission, _ *string, _ *int) {
+			(*r)[1].payload = []byte("changed")
+		},
+		"unknown-origin": func(s *workerDeliverySnapshot, _ *[]controllerWorkerReceipt, _ *taskpayload.StepAttemptAdmission, _ *string, _ *int) {
+			s.stepCalls[1].origin = "unattributed"
+		},
+		"second-loss": func(s *workerDeliverySnapshot, _ *[]controllerWorkerReceipt, _ *taskpayload.StepAttemptAdmission, _ *string, _ *int) {
+			s.stepCalls[1].code = codes.Unavailable
+		},
+		"extra-injection": func(_ *workerDeliverySnapshot, _ *[]controllerWorkerReceipt, _ *taskpayload.StepAttemptAdmission, _ *string, n *int) {
+			*n = 2
+		},
+		"wrong-denial": func(s *workerDeliverySnapshot, _ *[]controllerWorkerReceipt, _ *taskpayload.StepAttemptAdmission, _ *string, _ *int) {
+			s.denialRequest.InputManifestDigest = "other"
+		},
+		"after-denial": func(s *workerDeliverySnapshot, _ *[]controllerWorkerReceipt, _ *taskpayload.StepAttemptAdmission, _ *string, _ *int) {
+			s.stepCalls[1].end = s.denialBoundary
+		},
+		"successor": func(s *workerDeliverySnapshot, _ *[]controllerWorkerReceipt, _ *taskpayload.StepAttemptAdmission, _ *string, _ *int) {
+			s.advanceBoundary = 80
+		},
+		"second-handler": func(s *workerDeliverySnapshot, _ *[]controllerWorkerReceipt, _ *taskpayload.StepAttemptAdmission, _ *string, _ *int) {
+			s.invocations = append(s.invocations, s.invocations[0])
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, r, a, d := build("step-completion", []string{"step-completion"})
+			losses := 1
+			mutate(&s, &r, &a, &d, &losses)
+			if s.validateDeniedStep(r, a, d, losses) == nil {
+				t.Fatal("unproven revoked receipt accepted")
+			}
+		})
+	}
+	s, r, a, d := build("step-completion", []string{"background", "background", "background", "step-completion"})
+	if s.validateDeniedStep(r, a, d, 1) == nil {
+		t.Fatal("unexplained extra RPC accepted")
 	}
 }
