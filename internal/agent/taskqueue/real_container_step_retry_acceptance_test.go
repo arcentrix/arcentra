@@ -38,6 +38,7 @@ import (
 	"github.com/bytedance/sonic"
 	ckafka "github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/containerd/containerd"
+	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -653,6 +654,7 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 	sourceURL, initialCommit, changedCommit, advanceBranch := containerAcceptanceMutableRetrySource(t, f.ctx)
 	store.mu.Lock()
 	initialUploads := store.sealedUploads
+	initialStorageFailures := store.uploadFailureCount
 	store.afterUpload = func(_ context.Context, key string, owner containerAcceptanceJournal) (resultErr error) {
 		defer func() { o.fail(resultErr) }()
 		o.mu.Lock()
@@ -923,7 +925,13 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 			containerAcceptanceArtifactStep("fetch", "download", map[string]any{"job": "step-seed", "paths": []any{"seed/*"}}), controllerWorkerShell("earlier", first), controllerWorkerShell("retry-command", retry), containerAcceptanceArtifactStep("publish", "upload", map[string]any{"paths": []any{"proof/result.txt"}})}},
 		&spec.Job{Name: "step-downstream", DependsOn: []string{"step-consumer"}, Steps: []*spec.Step{containerAcceptanceArtifactStep("fetch-proof", "download", map[string]any{"job": "step-consumer", "paths": []any{"proof/*"}}), controllerWorkerShell("verify-proof", "test \"$(cat proof/result.txt)\" = '"+want+"'; cmp proof/result.txt .artifacts/step-consumer/proof/result.txt; printf 'step-downstream-proof\\n'")}},
 	)
-	containerAcceptanceStepWaitRun(t, f, run.RunID, model.PipelineStatusSuccess, o.failure, func() { containerAcceptanceStepRuntimeDiagnostic(t, events, o) })
+	containerAcceptanceStepWaitRun(t, f, run.RunID, model.PipelineStatusSuccess, o.failure, func() {
+		containerAcceptanceStepRuntimeDiagnostic(t, events, o)
+		store.mu.Lock()
+		failures, diagnostic := store.uploadFailureCount-initialStorageFailures, store.lastUploadFailure
+		store.mu.Unlock()
+		t.Logf("failed-step storage uploadFailures=%d last=%s", failures, diagnostic)
+	})
 	containerAcceptanceDrainWithAudit(t, f, retained)
 	o.mu.Lock()
 	observedErr := o.err
@@ -1395,6 +1403,56 @@ func TestRealContainerStepRetryAcceptanceGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	admission := client.admitted[request.RequestDigest]
+	t.Run("sealed-runtime-native-and-grpc-absence", func(t *testing.T) {
+		native := fmt.Errorf("synthetic absent container: %w", errdefs.ErrNotFound)
+		grpc := status.Error(codes.NotFound, "synthetic absent task")
+		for _, tc := range []struct {
+			name   string
+			err    error
+			absent bool
+		}{
+			{"native", errdefs.ErrNotFound, true},
+			{"native-wrapped", native, true},
+			{"sdk-converted-once", errdefs.FromGRPC(grpc), true},
+			{"grpc", grpc, true},
+			{"grpc-wrapped", fmt.Errorf("synthetic lookup: %w", grpc), true},
+			{"exists", nil, false},
+			{"unknown", errors.New("synthetic unknown"), false},
+			{"not-found-text-only", errors.New("synthetic not found"), false},
+			{"permission", status.Error(codes.PermissionDenied, "synthetic denial"), false},
+			{"permission-wrapped", fmt.Errorf("synthetic lookup: %w", status.Error(codes.PermissionDenied, "synthetic denial")), false},
+			{"unavailable", status.Error(codes.Unavailable, "synthetic unavailable"), false},
+			{"native-unavailable", errdefs.ErrUnavailable, false},
+			{"deadline", context.DeadlineExceeded, false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := containerAcceptanceNotFound(tc.err); got != tc.absent {
+					t.Fatalf("exact absence=%t want=%t", got, tc.absent)
+				}
+			})
+		}
+	})
+	t.Run("storage-errors-retain-stage-without-provider-data", func(t *testing.T) {
+		const private = "synthetic-storage-secret"
+		for _, stage := range []string{"live-container-absence", "live-snapshot-absence", "live-task-absence", "s3-put-object", "after-upload-hook"} {
+			detail := containerAcceptanceStorageUploadFailure(stage, status.Error(codes.PermissionDenied, "https://user:"+private+"@127.0.0.1/object?token="+private))
+			if !strings.Contains(detail, "stage="+stage) || !strings.Contains(detail, "grpc=PermissionDenied") || !strings.Contains(detail, "sha256=") || strings.Contains(detail, private) || strings.Contains(detail, "https://") || len(detail) > 512 {
+				t.Fatalf("storage diagnostic lost stage/class or exposed provider data: %s", detail)
+			}
+		}
+		// This rejected journal never reaches a daemon or S3. Verify the wrapper
+		// records its stage before the production artifact layer sanitizes it.
+		store := &containerAcceptanceStorage{journal: filepath.Join(t.TempDir(), "absent")}
+		if err := store.UploadStream(context.Background(), "synthetic", strings.NewReader("x"), 1, "text/plain"); err == nil {
+			t.Fatal("missing journal accepted")
+		}
+		store.mu.Lock()
+		failures, diagnostic := store.uploadFailureCount, store.lastUploadFailure
+		store.mu.Unlock()
+		if failures != 1 || !strings.Contains(diagnostic, "stage=journal-read") {
+			t.Fatal("storage wrapper lost pre-transport failure evidence")
+		}
+	})
 	t.Run("synthetic-marker-chunks-preserve-exact-counts", func(t *testing.T) {
 		row := func(id, stream, content string, line int32) *model.StepRunLog {
 			return &model.StepRunLog{LogID: fmt.Sprintf("%s-%d", id, line), AgentID: "agent", StepRunID: id, Stream: stream, LineNumber: line, Content: content}

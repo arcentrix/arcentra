@@ -38,6 +38,7 @@ import (
 	tasksapi "github.com/containerd/containerd/api/services/tasks/v1"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/namespaces"
+	"google.golang.org/grpc/status"
 )
 
 type realContainerSettings struct {
@@ -321,17 +322,40 @@ type containerAcceptanceStorage struct {
 	socket, namespace, journal, workspace string
 	mu                                    sync.Mutex
 	sealedUploads                         int
+	uploadFailureCount                    uint64
+	lastUploadFailure                     string
 	background                            []byte
 	refs                                  []sandbox.ResourceRef
 	afterUpload                           func(context.Context, string, containerAcceptanceJournal) error
 	beforeDownload                        func(context.Context, string) error
 }
 
-func (s *containerAcceptanceStorage) UploadStream(ctx context.Context, key string, input io.ReadSeeker, size int64, contentType string) error {
+// SDK convenience methods already return native errors; direct service calls return
+// gRPC errors. Converting a native NotFound again destroys its class as Unknown.
+func containerAcceptanceNotFound(err error) bool {
+	return errdefs.IsNotFound(err) || errdefs.IsNotFound(errdefs.FromGRPC(err))
+}
+
+func containerAcceptanceStorageUploadFailure(stage string, err error) string {
+	return fmt.Sprintf("stage=%s grpc=%s error=%s", stage, status.Code(err), containerAcceptanceStepErrorSummary(err.Error()))
+}
+
+func (s *containerAcceptanceStorage) UploadStream(ctx context.Context, key string, input io.ReadSeeker, size int64, contentType string) (resultErr error) {
+	stage := "journal-read"
+	defer func() {
+		if resultErr != nil {
+			diagnostic := containerAcceptanceStorageUploadFailure(stage, resultErr)
+			s.mu.Lock()
+			s.uploadFailureCount++
+			s.lastUploadFailure = diagnostic
+			s.mu.Unlock()
+		}
+	}()
 	records, err := containerAcceptanceRecords(s.journal)
 	if err != nil {
 		return err
 	}
+	stage = "sealed-owner"
 	var owner *containerAcceptanceJournal
 	for i := range records {
 		record := records[i].Record
@@ -352,6 +376,7 @@ func (s *containerAcceptanceStorage) UploadStream(ctx context.Context, key strin
 		return fmt.Errorf("artifact upload lacks its exact sealed journal owner")
 	}
 	record := owner.Record
+	stage = "runtime-client"
 	client, err := containerd.New(s.socket)
 	if err != nil {
 		return err
@@ -362,24 +387,30 @@ func (s *containerAcceptanceStorage) UploadStream(ctx context.Context, key strin
 		// Live-session sealing removes its exact task/container/snapshot to
 		// avoid later cleanup relying on a dead pidfd. Only its workspace is
 		// retained for immutable final publication. Prove all three absences.
-		if _, err := client.LoadContainer(runtimeCtx, record.Resource.ID); !errdefs.IsNotFound(errdefs.FromGRPC(err)) {
+		stage = "live-container-absence"
+		if _, err := client.LoadContainer(runtimeCtx, record.Resource.ID); !containerAcceptanceNotFound(err) {
 			return fmt.Errorf("live sealed upload retained container metadata: %v", err)
 		}
-		if _, err := client.SnapshotService(record.Resource.Snapshotter).Stat(runtimeCtx, record.Resource.ID+"-snapshot"); !errdefs.IsNotFound(errdefs.FromGRPC(err)) {
+		stage = "live-snapshot-absence"
+		if _, err := client.SnapshotService(record.Resource.Snapshotter).Stat(runtimeCtx, record.Resource.ID+"-snapshot"); !containerAcceptanceNotFound(err) {
 			return fmt.Errorf("live sealed upload retained snapshot: %v", err)
 		}
-		if _, err := client.TaskService().Get(runtimeCtx, &tasksapi.GetRequest{ContainerID: record.Resource.ID}); !errdefs.IsNotFound(errdefs.FromGRPC(err)) {
+		stage = "live-task-absence"
+		if _, err := client.TaskService().Get(runtimeCtx, &tasksapi.GetRequest{ContainerID: record.Resource.ID}); !containerAcceptanceNotFound(err) {
 			return fmt.Errorf("live sealed upload retained task: %v", err)
 		}
 	} else {
+		stage = "legacy-container-load"
 		container, err := client.LoadContainer(runtimeCtx, record.Resource.ID)
 		if err != nil {
 			return err
 		}
+		stage = "legacy-task-load"
 		task, err := container.Task(runtimeCtx, nil)
 		if err != nil {
 			return err
 		}
+		stage = "legacy-task-stopped"
 		state, err := task.Status(runtimeCtx)
 		if err != nil {
 			return err
@@ -387,17 +418,20 @@ func (s *containerAcceptanceStorage) UploadStream(ctx context.Context, key strin
 		if state.Status != containerd.Stopped {
 			return fmt.Errorf("artifact upload observed live container task: %s", state.Status)
 		}
+		stage = "legacy-task-processes"
 		pids, err := task.Pids(runtimeCtx)
-		if (err != nil && !errdefs.IsNotFound(errdefs.FromGRPC(err))) || len(pids) != 0 {
+		if (err != nil && !containerAcceptanceNotFound(err)) || len(pids) != 0 {
 			return fmt.Errorf("artifact upload observed remaining container processes: count=%d error=%v", len(pids), err)
 		}
 	}
+	stage = "background-read"
 	writer := filepath.Join(s.workspace, record.Directory, "dist", "background.txt")
 	before, readErr := os.ReadFile(writer)
 	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
 		return readErr
 	}
 	if readErr == nil {
+		stage = "background-stability"
 		timer := time.NewTimer(200 * time.Millisecond)
 		defer timer.Stop()
 		select {
@@ -413,6 +447,7 @@ func (s *containerAcceptanceStorage) UploadStream(ctx context.Context, key strin
 			return fmt.Errorf("background process continued to mutate sealed artifact")
 		}
 	}
+	stage = "s3-put-object"
 	if err := s.S3Storage.UploadStream(ctx, key, input, size, contentType); err != nil {
 		return err
 	}
@@ -425,6 +460,7 @@ func (s *containerAcceptanceStorage) UploadStream(ctx context.Context, key strin
 	observe := s.afterUpload
 	s.mu.Unlock()
 	if observe != nil {
+		stage = "after-upload-hook"
 		return observe(ctx, key, *owner)
 	}
 	return nil
