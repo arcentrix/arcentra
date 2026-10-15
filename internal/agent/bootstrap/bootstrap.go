@@ -345,6 +345,9 @@ func (app *Agent) startWorkers() error {
 	if probe, ok := queue.(interface{ OfflineRuntimeReady() bool }); ok {
 		app.AgentService.SetOfflineRuntimeReadiness(probe.OfflineRuntimeReady)
 	}
+	if probe, ok := queue.(interface{ FailedStepRetryReady() bool }); ok {
+		app.AgentService.SetFailedStepRetryReadiness(probe.FailedStepRetryReady)
+	}
 	app.ready.Store(true)
 	return nil
 }

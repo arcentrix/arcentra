@@ -68,6 +68,7 @@ func (s *Session) blockController(err error) error {
 // 这里只停止进程，绝不删除、确认业务终态或开放产物访问
 func (s *Session) stopOwnedOnFailure(ctx context.Context, cause error) error {
 	s.mu.Lock()
+	s.refused = true
 	s.closing = true
 	if s.activeCancel != nil {
 		s.activeCancel()
@@ -94,10 +95,16 @@ func (s *Session) Start(ctx context.Context) error {
 	defer s.release()
 	s.mu.Lock()
 	unavailable := s.closing || s.ready || s.sealed || s.cleaned
+	var startupCancel context.CancelFunc
+	if !unavailable {
+		ctx, startupCancel = context.WithCancel(ctx)
+		s.activeCancel = startupCancel
+	}
 	s.mu.Unlock()
 	if unavailable {
 		return fmt.Errorf("sandbox session cannot be started")
 	}
+	defer func() { startupCancel(); s.mu.Lock(); s.activeCancel = nil; s.mu.Unlock() }()
 	record, err := s.durableRecord(ctx)
 	if err != nil {
 		return s.stopOwnedOnFailure(ctx, err)
@@ -114,7 +121,7 @@ func (s *Session) Start(ctx context.Context) error {
 	if err := s.advance(ctx, phaseCreating); err != nil {
 		return s.stopOwnedOnFailure(ctx, err)
 	}
-	id, err := s.backend.Create(ctx, s.createOptions)
+	id, err := s.createRuntime(ctx, record)
 	if id != "" && id != record.Resource.ID || err == nil && id != record.Resource.ID {
 		cause := fmt.Errorf("sandbox backend returned an inconsistent container identity; operator review required")
 		evidenceCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
@@ -137,7 +144,7 @@ func (s *Session) Start(ctx context.Context) error {
 	if err := s.advance(ctx, phaseStarting); err != nil {
 		return s.stopOwnedOnFailure(ctx, err)
 	}
-	if err := s.backend.Start(ctx, id); err != nil {
+	if err := s.startRuntime(ctx, id); err != nil {
 		return s.stopOwnedOnFailure(ctx, fmt.Errorf("start durable sandbox: %w", err))
 	}
 	if err := s.advance(ctx, phaseRunning); err != nil {
@@ -206,6 +213,7 @@ func (s *Session) Seal(ctx context.Context) error {
 
 func (s *Session) closeDurable(ctx context.Context) error {
 	s.mu.Lock()
+	s.refused = true
 	s.closing = true
 	if s.activeCancel != nil {
 		s.activeCancel()

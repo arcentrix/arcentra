@@ -12,6 +12,7 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/pkg/sandbox"
+	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 
 var _ executor.Executor = (*Session)(nil)
@@ -38,8 +39,20 @@ func (s *Session) CanExecute(req *executor.ExecutionRequest) bool {
 // Execute 把单步映射到容器 /workspace，复用 Manager 的日志与事件链路
 // 错误或取消后会话关闭执行入口，后续必须 Close；普通非零退出仍可继续
 func (s *Session) Execute(ctx context.Context, req *executor.ExecutionRequest) (*executor.ExecutionResult, error) {
+	return s.execute(ctx, req, nil)
+}
+
+// ExecuteStepAttempt 仅通过已持久准入及唯一消费执行原会话步骤，保留 Manager 输出回调
+func (s *Session) ExecuteStepAttempt(ctx context.Context, req *executor.ExecutionRequest, admission taskpayload.StepAttemptAdmission) (*executor.ExecutionResult, error) {
+	return s.execute(ctx, req, &admission)
+}
+
+func (s *Session) execute(ctx context.Context, req *executor.ExecutionRequest, admission *taskpayload.StepAttemptAdmission) (*executor.ExecutionResult, error) {
 	result := executor.NewExecutionResult(s.Name())
 	fail := func(err error) (*executor.ExecutionResult, error) { result.Complete(false, 1, err); return result, err }
+	if s.stepRetry != (admission != nil) {
+		return fail(fmt.Errorf("live retry session requires an exact bound step admission"))
+	}
 	if !s.CanExecute(req) {
 		return fail(fmt.Errorf("sandbox session accepts explicit shell/run steps only"))
 	}
@@ -111,7 +124,24 @@ func (s *Session) Execute(ctx context.Context, req *executor.ExecutionRequest) (
 		}
 	}
 	opts.Stdout, opts.Stderr = write("stdout"), write("stderr")
-	out, err := s.backend.Execute(runCtx, s.containerID, []string{"sh", "-ec", executor.BuildCommandFromStepArgs(req.Step)}, opts)
+	var out *sandbox.ExecuteResult
+	var err error
+	command := []string{"sh", "-ec", executor.BuildCommandFromStepArgs(req.Step)}
+	if admission != nil {
+		planned, planErr := s.plannedStep(admission.Scope)
+		if planErr != nil || req.Step.Uses != planned.Uses || req.Step.Action != planned.Action {
+			return fail(s.stopOwnedOnFailure(ctx, fmt.Errorf("execution differs from immutable step kind")))
+		}
+		if req.StepRunID != admission.Scope.StepRunID || req.StepIndex != admission.Scope.StepIndex || req.Step.Name != admission.Scope.StepName || req.PipelineRunID != admission.Scope.Identity.PipelineRunID || req.JobRunID != admission.Scope.Identity.JobRunID || req.AgentID != admission.Scope.Identity.AgentID {
+			return fail(s.stopOwnedOnFailure(ctx, fmt.Errorf("execution request changed the admitted step identity")))
+		}
+		if consumeErr := s.consumeStepAttempt(runCtx, *admission, false); consumeErr != nil {
+			return fail(s.stopOwnedOnFailure(ctx, consumeErr))
+		}
+		out, err = s.executeLiveStep(runCtx, *admission, command, opts)
+	} else {
+		out, err = s.backend.Execute(runCtx, s.containerID, command, opts)
+	}
 	if err == nil && runCtx.Err() != nil {
 		err = runCtx.Err()
 	}

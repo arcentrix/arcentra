@@ -87,7 +87,8 @@ func (r *StepRunRepo) PatchReportedStatus(ctx context.Context, expected *model.S
 		result := tx.Model(&model.StepRun{}).
 			Where("step_run_id = ? AND status = ? AND agent_id = ? AND claim_id = ?", expected.StepRunID, expected.Status, expected.AgentID, expected.ClaimID).
 			Where("pipeline_id = ? AND pipeline_run_id = ? AND job_run_id = ?", expected.PipelineID, expected.PipelineRunID, expected.JobRunID).
-			Where("terminal_report_digest = ? AND generation_id = ? AND generation_binding_digest = ?", expected.TerminalReportDigest, expected.GenerationID, expected.GenerationBindingDigest).Updates(updates)
+			Where("terminal_report_digest = ? AND generation_id = ? AND generation_binding_digest = ?", expected.TerminalReportDigest, expected.GenerationID, expected.GenerationBindingDigest).
+			Where("attempt_admission_request = ? AND attempt_admission_request_digest = ? AND attempt_admission = ?", expected.AttemptAdmissionRequest, expected.AttemptAdmissionRequestDigest, expected.AttemptAdmission).Updates(updates)
 		if err := reportedStatusResult(result); err != nil {
 			return err
 		}

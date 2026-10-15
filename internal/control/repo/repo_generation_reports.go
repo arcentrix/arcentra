@@ -23,7 +23,7 @@ func validateGenerationStep(ctx context.Context, tx *gorm.DB, job *model.JobRun,
 		if job.RetryApprovalRequired || job.RetryApprovalID != "" || job.RetryApprovalEvidenceHash != "" {
 			return fmt.Errorf("required approval retry plan is missing")
 		}
-		if proof.ID != "" || proof.BindingDigest != "" {
+		if proof.ID != "" || proof.BindingDigest != "" || agentidentity.StepAttemptReportFromContext(ctx) != "" {
 			return fmt.Errorf("non-generation step cannot acquire generation authority")
 		}
 		return nil
@@ -35,6 +35,12 @@ func validateGenerationStep(ctx context.Context, tx *gorm.DB, job *model.JobRun,
 	plan, err := retryPlanForJob(job)
 	if err != nil {
 		return err
+	}
+	if plan.Policy.Mode == "failed_step" {
+		return validateFailedStepReport(ctx, tx, job, step, plan, next)
+	}
+	if agentidentity.StepAttemptReportFromContext(ctx) != "" {
+		return fmt.Errorf("whole_job reports cannot carry step attempt admission")
 	}
 	var expected *taskqueue.RetryStepPlan
 	for index := range plan.Steps {
@@ -206,6 +212,13 @@ func validateGenerationJobReport(ctx context.Context, tx *gorm.DB, job *model.Jo
 		if err := validateGenerationInputs(job, digest, false); err != nil {
 			return err
 		}
+		plan, err := retryPlanForJob(job)
+		if err != nil {
+			return err
+		}
+		if plan.Policy.Mode == "failed_step" {
+			return validateFailedStepSuccess(ctx, tx, job, g, plan)
+		}
 		if record.State == "preparing" {
 			if err := validateSkippedPreparingGeneration(ctx, tx, job, g); err != nil {
 				return err
@@ -217,7 +230,7 @@ func validateGenerationJobReport(ctx context.Context, tx *gorm.DB, job *model.Jo
 
 func rejectStepGenerationUpdates(updates map[string]any) error {
 	for key := range updates {
-		if generationField(key) || strings.ReplaceAll(strings.ToLower(key), "_", "") == "retryableshellexit" {
+		if stepAttemptField(key) || generationField(key) || strings.ReplaceAll(strings.ToLower(key), "_", "") == "retryableshellexit" {
 			return fmt.Errorf("generation evidence requires atomic authenticated report")
 		}
 	}
@@ -237,6 +250,13 @@ func validateGenerationArtifact(ctx context.Context, tx *gorm.DB, job *model.Job
 	}
 	if err := validateGenerationJobReport(ctx, tx, job, model.JobRunStatusSuccess); err != nil {
 		return err
+	}
+	plan, err := retryPlanForJob(job)
+	if err != nil {
+		return err
+	}
+	if plan.Policy.Mode == "failed_step" {
+		return validateFailedStepArtifact(ctx, tx, job, stepID)
 	}
 	var step model.StepRun
 	if err := tx.WithContext(ctx).Select("step_run_id", "job_run_id", "pipeline_id", "pipeline_run_id", "agent_id", "attempt", "generation_id", "generation_binding_digest", "status", "terminal_report_digest").Where("step_run_id = ?", stepID).First(&step).Error; err != nil {

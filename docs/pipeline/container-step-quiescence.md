@@ -1,9 +1,13 @@
-# Failed-step container continuation: capability proof only
+# Failed-step container continuation: historical capability proof
 
-The production `containerd-offline-v1` profile still rejects `failed_step`.
-This work is a private runtime capability probe, not a new retry mode or an
-execution permission. It does not change the ordinary session init, operator
-policies, network isolation, capacity, or restart behavior.
+At this probe stage, the production `containerd-offline-v1` profile rejected
+`failed_step`. The probe alone was not a new retry mode or execution permission;
+it did not change operator policies, network isolation, capacity or restart
+behavior. The later [durable failed-step implementation](failed-step-retry.md)
+has passed both closed-gate implementation acceptance and independent ordinary
+`NewProcess`/`StartWorker` gate-on candidate acceptance. Backend PR 61 and frontend
+PR 11 were draft when this evidence was recorded on 2026-10-15. This historical document is not opt-in guidance or evidence
+for that later startup path; use the linked current contract and exact results.
 
 ## Proposed narrow boundary
 
@@ -62,15 +66,16 @@ Existing ordinary production cleanup behavior is unchanged by this experiment.
 - Independent review and exact-tree CI evidence. Local injected tests alone do
   not establish real task freezing or isolation.
 
-The probe remains unreachable through production retry selection. Even a
-successful capability test does not authorize a second StepRun: a later change
-must add a separate immutable step-attempt permission and CAS, retain exact
-historical ACK replay, bind the failed and successor attempt to the same live
-session, and prevent cancellation/revocation or restart from granting execution.
+The probe alone was unreachable through production retry selection. Even a
+successful capability test does not authorize a second StepRun. The subsequent
+[failed-step implementation](failed-step-retry.md) adds the separate immutable
+step-attempt permission and CAS. It retains exact historical ACK replay, binds the failed and successor attempt to the same live
+session, and prevents cancellation/revocation or restart from granting execution.
 Whole-job generation numbers must not be reused as step-attempt numbers.
 
 Current whole-job retry and its limitations are documented in [retries.md](retries.md).
-Approval-bearing container retry remains rejected until approval durably binds
-the pinned full source commit, cumulative artifact inputs and entire finite
-retry plan. No production cluster, credential, or model connection is configured
-by this proof.
+V17 now supports [exact-content `whole_job` approval](retry-approval.md), which
+binds the pinned full source commit, cumulative artifact inputs and entire finite
+retry plan. Approval-bearing `failed_step` remains rejected; that combination
+requires a separate implementation. No production cluster, credential, or model
+connection is configured by this proof.

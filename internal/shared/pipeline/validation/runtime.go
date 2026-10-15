@@ -145,6 +145,9 @@ func validateOfflineRuntimeJob(job *spec.Job, policy taskqueue.OfflineRuntimePol
 		if step == nil {
 			return fmt.Errorf("runtime step is nil")
 		}
+		if job.Retry != nil && job.Retry.Mode == "failed_step" && step.ContinueOnError {
+			return fmt.Errorf("offline failed_step retry does not support continueOnError; a failed boundary must end or retry the same step")
+		}
 		if _, exists := step.Env[taskqueue.RuntimeGenerationEnv]; exists {
 			return fmt.Errorf("offline runtime reserves its generation environment variable")
 		}

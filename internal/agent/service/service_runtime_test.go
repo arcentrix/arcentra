@@ -46,3 +46,41 @@ func TestWholeJobRetryCapabilityRequiresReadinessAndOperatorOptIn(t *testing.T) 
 		t.Fatal("failed runtime retained retry capability")
 	}
 }
+
+func TestFailedStepCapabilityRequiresOperatorAndBothReadinessProbes(t *testing.T) {
+	conf := &config.AgentConfig{Agent: config.AgentInfo{Mode: "sandbox"}}
+	service := NewAgentServiceImpl(conf, nil, nil)
+	offlineReady, stepReady := true, true
+	service.SetOfflineRuntimeReadiness(func() bool { return offlineReady })
+	service.SetFailedStepRetryReadiness(func() bool { return stepReady })
+	if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryV1 {
+		t.Fatal("default-off policy advertised failed-step retry")
+	}
+	conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry = true
+	if !service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryV1 {
+		t.Fatal("accepted opt-in ready implementation did not advertise failed-step retry")
+	}
+	stepReady = false
+	if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryV1 {
+		t.Fatal("revoked step readiness remained advertised")
+	}
+	stepReady, offlineReady = true, false
+	if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryV1 {
+		t.Fatal("revoked runtime readiness remained advertised")
+	}
+	offlineReady = true
+	conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry = false
+	if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryV1 {
+		t.Fatal("removed operator opt-in remained advertised")
+	}
+	conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry = true
+	service.SetFailedStepRetryReadiness(nil)
+	if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryV1 {
+		t.Fatal("missing live adapter advertised retry")
+	}
+	service.SetFailedStepRetryReadiness(func() bool { return true })
+	conf.Agent.Mode = "baremetal"
+	if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryV1 {
+		t.Fatal("baremetal mode advertised live container retry")
+	}
+}

@@ -26,6 +26,7 @@ service AgentService {
   rpc ReconcileJobRetryApproval(ReconcileJobRetryApprovalRequest) returns (ReconcileJobRetryApprovalResponse);
   // Bounded authenticated generation admission/advance; inspect never authorizes execution.
   rpc ReconcileJobGeneration(ReconcileJobGenerationRequest) returns (ReconcileJobGenerationResponse) {}
+  rpc ReconcileStepAttempt(ReconcileStepAttemptRequest) returns (ReconcileStepAttemptResponse) {}
   // Get before checkout; record once before staging. Never starts or retries execution.
   rpc GetOrRecordJobInputs(GetOrRecordJobInputsRequest) returns (GetOrRecordJobInputsResponse) {}
   // Read-only confirmation for recovery of the original runtime execution.
@@ -144,6 +145,7 @@ message RuntimeCapabilities {
   bool containerd_offline_v1 = 1;
   string execution_mode = 2; // baremetal or containerd-offline-v1, independent of readiness
   bool containerd_whole_job_retry_v1 = 3; // Explicit operator permission and ready generation controller
+  bool containerd_failed_step_retry_v1 = 20; // Independent default-off live step retry protocol; distinct from approval work
 }
 
 message HeartbeatRequest {
@@ -290,6 +292,7 @@ message ReportStepRunStatusRequest {
   string generation_id = 9;
   string generation_binding_digest = 10;
   bool retryable_shell_exit = 11; // Explicit pure command failure evidence, false for mixed failures
+  string step_attempt_admission_digest = 12; // Exact immutable failed_step admission, including first attempts
 }
 
 // Report step run status response
@@ -464,4 +467,14 @@ message ReconcileJobRetryApprovalRequest {
 }
 message ReconcileJobRetryApprovalResponse {
  string response_json = 1;
+}
+
+// Failed-step admission is immutable; execution permission is a separate fresh observation.
+message ReconcileStepAttemptRequest {
+  string agent_id = 1;
+  string transition_json = 2;
+}
+message ReconcileStepAttemptResponse {
+  string admission_json = 1;
+  bool execution_allowed = 2;
 }

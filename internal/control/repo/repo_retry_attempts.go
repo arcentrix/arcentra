@@ -58,11 +58,18 @@ func validateRetryActivation(ctx context.Context, tx *gorm.DB, expected *model.S
 		return fmt.Errorf("attempt is outside its immutable retry policy")
 	}
 	var parent model.JobRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id", "status", "agent_id", "pipeline_id", "pipeline_run_id").Where("job_run_id = ?", expected.JobRunID).First(&parent).Error; err != nil {
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ?", expected.JobRunID).First(&parent).Error; err != nil {
 		return err
 	}
 	if parent.Status != 3 || parent.AgentID != expected.AgentID || parent.PipelineID != expected.PipelineID || parent.PipelineRunID != expected.PipelineRunID {
 		return fmt.Errorf("retry parent job is not active or its ownership changed")
+	}
+	if parent.RetryPlan != "" && expected.RetryMode == "failed_step" {
+		plan, err := retryPlanForJob(&parent)
+		if err != nil {
+			return err
+		}
+		return validateFailedStepReport(ctx, tx, &parent, expected, plan, model.JobRunStatusRunning)
 	}
 	var current model.StepRun
 	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("step_run_id", "retry_policy").

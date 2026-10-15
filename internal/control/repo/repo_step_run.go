@@ -64,7 +64,7 @@ func NewStepRunRepo(db database.IDatabase) IStepRunRepository {
 
 // Create inserts a new step run.
 func (r *StepRunRepo) Create(ctx context.Context, stepRun *model.StepRun) error {
-	if stepRun == nil || stepRun.GenerationID != "" || stepRun.GenerationBindingDigest != "" || stepRun.RetryableShellExit {
+	if stepRun == nil || !emptyStepAdmission(stepRun) || stepRun.GenerationID != "" || stepRun.GenerationBindingDigest != "" || stepRun.RetryableShellExit {
 		return gorm.ErrInvalidData
 	}
 	if err := normalizeJSONFields(map[string]*string{"retry_policy": &stepRun.RetryPolicy, "args": &stepRun.Args, "env": &stepRun.Env, "secrets": &stepRun.Secrets, "label_selector": &stepRun.LabelSelector}, stepRunJSONDefaults); err != nil {
@@ -198,7 +198,7 @@ func (r *StepRunRepo) PatchByStepRunID(ctx context.Context, stepRunID string, up
 func (r *StepRunRepo) DeleteByStepRunID(ctx context.Context, stepRunID string) error {
 	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var step model.StepRun
-		if err := tx.Select("step_run_id", "job_run_id", "generation_id", "generation_binding_digest").Where("step_run_id = ?", stepRunID).First(&step).Error; err != nil {
+		if err := tx.Select("step_run_id", "job_run_id", "generation_id", "generation_binding_digest", "attempt_admission_request", "attempt_admission_request_digest", "attempt_admission").Where("step_run_id = ?", stepRunID).First(&step).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
@@ -207,7 +207,7 @@ func (r *StepRunRepo) DeleteByStepRunID(ctx context.Context, stepRunID string) e
 		if step.StepRunID != stepRunID {
 			return fmt.Errorf("exact step identity is required")
 		}
-		if step.GenerationID != "" || step.GenerationBindingDigest != "" {
+		if !emptyStepAdmission(&step) || step.GenerationID != "" || step.GenerationBindingDigest != "" {
 			return fmt.Errorf("generation attempt evidence cannot be deleted")
 		}
 		if step.JobRunID != "" {
@@ -220,7 +220,7 @@ func (r *StepRunRepo) DeleteByStepRunID(ctx context.Context, stepRunID string) e
 				return fmt.Errorf("captured retry attempts and receipts cannot be deleted")
 			}
 		}
-		return reportedStatusResult(tx.Where("step_run_id = ? AND job_run_id = ? AND generation_id = ? AND generation_binding_digest = ?", stepRunID, step.JobRunID, "", "").Delete(&model.StepRun{}))
+		return reportedStatusResult(tx.Where("step_run_id = ? AND job_run_id = ? AND generation_id = ? AND generation_binding_digest = ?", stepRunID, step.JobRunID, "", "").Where("attempt_admission_request = ? AND attempt_admission_request_digest = ? AND attempt_admission = ?", "", "", "").Delete(&model.StepRun{}))
 	})
 }
 

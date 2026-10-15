@@ -88,6 +88,9 @@ func observeGenerationStepReceipt(ctx context.Context, record terminalRecord) er
 	if err != nil {
 		return err
 	}
+	if err := observeStepAttemptReceipt(ctx, record, &request, digest); err != nil {
+		return err
+	}
 	generation.mu.Lock()
 	defer generation.mu.Unlock()
 	if previous, ok := generation.receipts[record.RunID]; ok && previous.digest != digest {
@@ -461,10 +464,17 @@ func executeContainerGenerations(ctx, jobCtx context.Context, conf *config.Agent
 
 func freezeGenerationReport(ctx context.Context, report func(context.Context) error) func(context.Context) error {
 	generation := generationFromContext(ctx)
-	if generation == nil {
+	attempt := stepAttemptFromContext(ctx)
+	if generation == nil && attempt == nil {
 		return report
 	}
 	return func(reportCtx context.Context) error {
-		return report(context.WithValue(reportCtx, generationContextKey{}, generation))
+		if generation != nil {
+			reportCtx = context.WithValue(reportCtx, generationContextKey{}, generation)
+		}
+		if attempt != nil {
+			reportCtx = context.WithValue(reportCtx, stepAttemptContextKey{}, attempt)
+		}
+		return report(reportCtx)
 	}
 }

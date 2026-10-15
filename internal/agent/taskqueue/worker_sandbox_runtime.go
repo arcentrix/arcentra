@@ -22,13 +22,14 @@ import (
 )
 
 type durableOfflineRuntime struct {
-	stopping   atomic.Bool
-	drainOnce  sync.Once
-	drainMu    sync.Mutex
-	drainDone  chan struct{}
-	backend    *sandbox.Containerd
-	controller *sandboxexec.Controller
-	user       string
+	stopping             atomic.Bool
+	drainOnce            sync.Once
+	drainMu              sync.Mutex
+	drainDone            chan struct{}
+	backend              *sandbox.Containerd
+	controller           *sandboxexec.Controller
+	user                 string
+	allowFailedStepRetry bool
 }
 
 func newOfflineRuntime(ctx context.Context, conf *config.AgentConfig, client *agentgrpc.ClientWrapper) (*durableOfflineRuntime, error) {
@@ -67,7 +68,7 @@ func newOfflineRuntime(ctx context.Context, conf *config.AgentConfig, client *ag
 	if e1 != nil || e2 != nil || uid == 0 || gid == 0 || int(uid) != os.Geteuid() || int(gid) != os.Getegid() {
 		return nil, fmt.Errorf("offline runtime UID:GID must match the non-root Agent; directory ownership is never changed automatically")
 	}
-	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: cfg.UnixSocket, Namespace: cfg.Namespace, RuntimeRoot: cfg.RuntimeRoot, FIFODir: cfg.FIFODir, NetworkMode: "none"}, log.Logger{})
+	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: cfg.UnixSocket, Namespace: cfg.Namespace, RuntimeRoot: cfg.RuntimeRoot, FIFODir: cfg.FIFODir, NetworkMode: "none", EnableLiveStepRetry: taskpayload.FailedStepRuntimeAccepted && cfg.Policy.AllowFailedStepRetry}, log.Logger{})
 	if err != nil {
 		return nil, fmt.Errorf("offline runtime connection failed")
 	}
@@ -76,7 +77,7 @@ func newOfflineRuntime(ctx context.Context, conf *config.AgentConfig, client *ag
 		_ = backend.Close()
 		return nil, fmt.Errorf("offline runtime ownership recovery failed; preserve journal and resources: %w", err)
 	}
-	result := &durableOfflineRuntime{backend: backend, controller: controller, user: cfg.User, drainDone: make(chan struct{})}
+	result := &durableOfflineRuntime{backend: backend, controller: controller, user: cfg.User, allowFailedStepRetry: cfg.Policy.AllowFailedStepRetry, drainDone: make(chan struct{})}
 	if err := confirmOfflineRecoveries(ctx, controller, conf, client); err != nil {
 		_ = result.Close(ctx)
 		return nil, err
@@ -164,6 +165,27 @@ func (r *durableOfflineRuntime) AllocateGeneration(ctx context.Context, payload 
 	}
 	return session, err
 }
+
+func (r *durableOfflineRuntime) AllocateStepRetryGeneration(ctx context.Context, payload *taskpayload.JobRunTaskPayload, claim string, generation taskpayload.JobGeneration) (offlineSession, error) {
+	if r == nil {
+		return nil, fmt.Errorf("live failed-step runtime is unavailable")
+	}
+	r.drainMu.Lock()
+	defer r.drainMu.Unlock()
+	if !r.Ready() || !r.allowFailedStepRetry || !taskpayload.FailedStepRuntimeAccepted {
+		return nil, fmt.Errorf("live failed-step runtime has not passed acceptance")
+	}
+	if payload == nil || payload.Runtime == nil || payload.Retry == nil || payload.Retry.Mode != "failed_step" || generation.Number != 1 {
+		return nil, fmt.Errorf("live failed-step allocation requires its fixed original generation")
+	}
+	return r.controller.AllocateStepRetryGeneration(ctx, sandboxexec.Options{
+		JobRunID: payload.JobRunID, PipelineRunID: payload.PipelineRunID, ExecutionClaimID: claim,
+		RuntimeBindingDigest: payload.Runtime.BindingDigest, Image: payload.Runtime.Image,
+		Resources: &sandbox.Resources{CPU: payload.Runtime.Resources.CPU, Memory: payload.Runtime.Resources.Memory}, User: r.user,
+		StepAttemptSlots: len(allJobAttemptIDs(payload)),
+		StepRetryPlan:    payload.RetryPlan,
+	}, generation)
+}
 func (r *durableOfflineRuntime) RecordGenerationIntent(ctx context.Context, request taskpayload.JobGenerationTransition) error {
 	if r == nil || r.stopping.Load() {
 		return fmt.Errorf("offline runtime is stopping")
@@ -194,7 +216,7 @@ func (r *durableOfflineRuntime) Acknowledge(ctx context.Context, job, claim stri
 	return fmt.Errorf("offline runtime completion identity or cleanup was not confirmed")
 }
 
-// BeginDrain 阻止新的代次准入并唤醒重试等待，不中断当前代次命令
+// BeginDrain 阻止新的准入并唤醒等待，步骤续试还会取消原活动能力
 func (r *durableOfflineRuntime) BeginDrain() {
 	if r == nil {
 		return
@@ -203,6 +225,9 @@ func (r *durableOfflineRuntime) BeginDrain() {
 		r.drainMu.Lock()
 		defer r.drainMu.Unlock()
 		r.stopping.Store(true)
+		if r.controller != nil {
+			r.controller.BeginStepRetryDrain()
+		}
 		if r.drainDone == nil {
 			r.drainDone = make(chan struct{})
 		}
@@ -230,6 +255,15 @@ func (r *durableOfflineRuntime) Close(ctx context.Context) error {
 // OfflineRuntimeReady 返回已验证初始化、恢复和清理状态，不把配置启用当作运行能力
 func (q *workerQueues) OfflineRuntimeReady() bool {
 	return q != nil && q.offline != nil && q.offline.Ready()
+}
+
+// FailedStepRetryReady 只在独立验收门槛、策略和活动日志后端同时就绪时广告能力
+func (q *workerQueues) FailedStepRetryReady() bool {
+	if !taskpayload.FailedStepRuntimeAccepted || q == nil || q.offline == nil || !q.offline.allowFailedStepRetry || !q.offline.Ready() {
+		return false
+	}
+	_, supported := any(q.offline.backend).(sandbox.LiveSessionBackend)
+	return supported
 }
 
 // validateOfflineIORoot 保证客户端管道不暴露在工作空间或持久日志目录内

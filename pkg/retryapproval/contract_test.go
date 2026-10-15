@@ -99,3 +99,12 @@ func TestRetryMarkerIsPartOfExecutableDigest(t *testing.T) {
 		t.Fatal("marker omitted from exact plan")
 	}
 }
+
+func TestWholeJobApprovalCannotRelabelFailedStepPlan(t *testing.T) {
+	e := fixture(t)
+	e.RetryPlan.Version = 2
+	e.RetryPlan.Policy.Mode = "failed_step"
+	if _, err := e.Canonical(); err == nil {
+		t.Fatal("whole-job evidence accepted failed-step plan")
+	}
+}

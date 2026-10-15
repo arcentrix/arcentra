@@ -193,3 +193,55 @@ crashes before or after the first admission RPC. A pending handoff blocks readin
 
 Injected ordinary tests cover these lifecycle and persistence boundaries. They do
 not establish real-container retry acceptance or enable an operator retry policy.
+
+### Live-only failed-step journal adapter (default off)
+
+`AllocateStepRetryGeneration` accepts only generation 1 and a complete canonical
+failed-step retry plan whose digest matches that generation. It reserves all
+preallocated attempt slots against the shared journal quota before any shell
+runs. Each attempt has its own bounded `step-<UUID>.json` audit document; a
+version-3 session document contains only its fixed resource identity, a fresh
+session-incarnation nonce, reservation count and current audit reference. No
+whole-job ledger is accumulated in a single 16-KiB record. Existing version-1 and
+version-2 encodings and ownership digests remain unchanged.
+
+The initial intent precedes CAS, the exact immutable admission precedes execution,
+and durable one-use consumption precedes every Exec or Resume. Denied responses
+are retained separately as nonexecutable observations. Attempt audits remain until
+exact cleanup and the authoritative final job ACK. Partial writes and failed
+cleanup retain evidence and fail closed. Every startup phase, including admitted
+and consumed attempts, is cleanup-only: no live proof is serialized, reconstructed
+or installed from the journal. Whole-job generation advance and the ordinary
+`Session.Execute` entry point cannot bypass a live step-bound session.
+
+Retries keep the original workspace, writable rootfs, tmpfs, snapshot and running
+init. Earlier successful commands are not replayed, and a failed command's partial
+file changes are retained. This is not rollback or checkpoint restoration. A live
+or zombie descendant makes continuation unavailable; terminal cleanup may stop it,
+but stopping it does not turn the refusal into successful nondestructive retry.
+
+`CreateLiveSession` and `Start` remain separated by the durable creating, created
+and starting phases. Runtime checks bind the one-use failed boundary to the exact
+resource and original init. Workspace device/inode, private root ownership and
+runtime IO identity are rechecked before effects. A Resume error or lost ACK never
+replays Resume. Cancellation and drain cancel the active execution context; fresh
+local gates check those signals and admission validity after durable writes and
+again inside the runtime's Resume/Exec boundaries. The admission expiry is a start
+window, not an extra timeout for an already-running command or artifact transfer.
+The original job deadline is captured once at allocation; a command's shorter
+step timeout does not become the retry boundary's lifetime.
+
+`Seal` remains final-only and destructive. Trusted artifact execution is wrapped
+in the same one-use, cancellation and post-write validity gate. Once sealed, only
+exact attempt-1 upload steps in the original immutable plan may be admitted or
+consumed; shell execution, changed definitions, drain and permanent refusal remain
+blocked. This permits multiple final uploads without reopening the runtime.
+
+The ordinary tests exercise injected journal write/sync/rename failures, all
+startup and step-handoff recovery phases, quota reservations, unchanged failed
+mutations, one-use consumption, lost Resume ACK, delayed/expired or changed
+admissions, root/workspace/runtime-IO changes, denied observations, drain and
+plan-bound sealed uploads. These tests use injected runtime boundaries. They are
+not real containerd, authenticated controller or MySQL acceptance. The feature
+must remain independently default-off until the separately authorized complete
+acceptance suite has passed.

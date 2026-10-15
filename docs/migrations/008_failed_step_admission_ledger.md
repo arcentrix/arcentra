@@ -1,0 +1,34 @@
+# Live failed-step admission ledger (independently default-off)
+
+This additive migration is part of the existing explicit `arcentra-cli migrate --conf <reviewed-config>` workflow. Back up and review the selected database before that separately authorized operation. Controller startup does not migrate. This branch does not run migrations against any production or hosted database.
+
+Apply this additive migration after the existing runtime, immutable-input and
+generation migrations, and upgrade Control and Agent together before creating
+new failed-step runs. Migration alone does not enable the feature. After exact
+gate-on validation, operator opt-in still requires both Control
+`pipeline.offlineRuntime.allowFailedStepRetry` and Agent
+`agent.sandbox.containerd.policy.allowFailedStepRetry` (both default false), a
+ready Agent advertising `containerd_failed_step_retry_v1`, and an explicit bounded
+idempotent policy. Existing rows and older Agents acquire no retry authority.
+
+Add three protected StepRun columns, with empty defaults and no historical backfill:
+
+- `attempt_admission_request`: MEDIUMTEXT, canonical bounded transition JSON, write once
+- `attempt_admission_request_digest`: VARCHAR(67), exact transition digest, write once
+- `attempt_admission`: MEDIUMTEXT, canonical immutable controller-issued admission, write once
+
+Text defaults use the MySQL-compatible empty expression `('')`. Each JSON contract is limited to 16 KiB; only the preallocated two to five attempts of each bounded logical step can acquire entries. The existing unique StepRun ID is the CAS target. No new session table, replacement job claim, startup migration, credentials, permissions, or privileged runtime configuration is introduced. Generic create, patch, status patch, and deletion paths cannot inject, alter, or erase these columns. Cancellation and finalization preserve them.
+
+The protocol reserves Agent capability field 20 for `containerd_failed_step_retry_v1`, independent of `containerd_whole_job_retry_v1` and unrelated to approval work. The new `ReconcileStepAttempt` RPC authenticates the original Agent and original job claim. Status field 12, `step_attempt_admission_digest`, is part of the exact immutable protobuf terminal receipt, including first-attempt reports. Existing whole-job version-one plan bytes and digest domains are unchanged; failed-step plans use version two and separate definition/plan digest domains. No historical whole-job plan can be promoted to failed-step authority. Whole-job generation advancement rejects failed-step plans before replay handling.
+
+Every logical step requires initial admission, including conditions and artifact operations. A single fixed generation 1 and its original continuously live session own all attempts. Under the JobRun lock, the controller locks that generation and the preallocated rows, validates the entire bounded contiguous admission chain, then derives the current member. Status, maximum attempt, claim, timestamps, and unused future SKIPPED rows never act as a cursor. Each retry requires the exact committed non-continued allowlisted pure shell failure and a unique bound paused-boundary audit. The failed-step profile rejects `continueOnError` and approval-bearing `failed_step` jobs. V17 exact-content approval for `whole_job` is a separate supported contract; this migration does not extend it to failed-step retries.
+
+Admissions bind original identities, fixed generation/runtime/source/input/plan/definition, original live session resources, predecessor admission and failure, immutable request, and fixed not-before/expiry. The new-RUNNING/Resume start-authority window is at most 15 minutes after not-before, capped by the original job deadline and (for retries) the paused boundary's expiry. A paused audit lives at most 75 minutes, covering the existing maximum one-hour delay. Replay never extends any lifetime. Admission expiry does not truncate an already-started command or artifact transfer; original job and step deadlines still govern that execution, and an exact current-admission result from RUNNING remains reportable. RUNNING and same-claim RUNNING re-ACK freshly enforce live parent/pipeline/Agent, exact current admission, delay, and expiry. An admitted but unstarted attempt may record a nonretryable failure after expiry; it cannot claim RUNNING or SUCCESS. Exact old terminal ACKs and historical admission replay remain distinct from execution permission. Inspect is read-only and always returns executionAllowed=false.
+
+Only a successful current admitted logical upload attempt can win final atomic artifact publication. Future reserved SKIPPED rows cannot shadow that winner. All attempt closure receipts precede final job success. Final job publication serializes with admission, status, and cancellation on the parent lock.
+
+The durable admission and paused audit do not serialize an opaque runtime capability. Agent restart permanently loses continuation proof. Controller lost-ACK replay only helps the same uninterrupted live Agent, subject to fresh checks. Failed shell commands retain their partial filesystem mutations; retries are not filesystem rollback. A surviving background or zombie descendant prevents continuation and causes a visible refusal and terminal cleanup rather than killing the descendant and pretending continuation succeeded.
+
+Ordinary canonical, SQLite repository, and authenticated service tests are protocol evidence only. They do not prove MySQL row-lock behavior or containerd quiescence. Any opt-in disposable MySQL test requires a separately prepared dedicated database and explicit environment opt-in. Both the earlier closed-gate implementation and the independent ordinary `NewProcess`/`StartWorker` gate-on candidate have passed real hosted acceptance. The accepted backend head is `3f7d81283afcabaf62af0e705a8d0b1252035024`, tree `af529d00f50999cf4f5b9c1f9be9cbca7b6a6841`; [exact runtime, MySQL, browser and cleanup evidence](../pipeline/failed-step-retry.md#acceptance-status) is recorded separately. Backend PR 61 and frontend PR 11 were draft when this evidence was recorded on 2026-10-15. Acceptance does not apply this migration, enable either operator policy or deploy a release.
+
+The optional repository lane is `TestStepAttemptMySQLExplicitOptInCASAndCancellation`. It runs only with `ARCENTRA_STEP_ATTEMPT_MYSQL_TEST=1` and `ARCENTRA_STEP_ATTEMPT_MYSQL_DSN` supplied through a secure environment. The DSN must select an already-created empty database named `arcentra_step_attempt_test_*` with `parseTime=true`. The test refuses any existing tables, creates only its model tables, uses four database connections for competing transactions, and leaves synthetic records for audit. It does not create a database, grant privileges, modify host settings, start a daemon, or invoke a container runtime. Without this opt-in it is explicitly SKIPPED, even when the ordinary test package passes.

@@ -66,6 +66,7 @@ type containerState struct {
 	stopping     bool
 	task         runtimeTask
 	quiescence   *taskQuiescence
+	liveSession  *liveSession
 	processes    map[string]runtimeProcess
 	stopped      bool
 	removed      bool
@@ -92,8 +93,10 @@ func (s *containerState) cancelActive() {
 
 // ContainerdConfig 定义 containerd 连接与默认执行配置
 type ContainerdConfig struct {
-	UnixSocket string
-	Namespace  string
+	// EnableLiveStepRetry 仅供显式注入的本地候选会话使用，默认关闭且不映射生产配置
+	EnableLiveStepRetry bool
+	UnixSocket          string
+	Namespace           string
 	// RuntimeRoot 可选的专用 runc 状态目录，由操作者预先配置
 	RuntimeRoot string
 	// FIFODir 是 Agent 所有的预置私有 IO 目录，不修改系统默认目录
@@ -179,6 +182,10 @@ func (s *Containerd) Create(ctx context.Context, opts *CreateOptions) (string, e
 // Return the allocated generation directly for private callers. Looking it up
 // by ID after Create returns could adopt a concurrent same-ID replacement.
 func (s *Containerd) create(ctx context.Context, opts *CreateOptions) (string, *containerState, error) {
+	return s.createWithLiveSession(ctx, opts, nil)
+}
+
+func (s *Containerd) createWithLiveSession(ctx context.Context, opts *CreateOptions, live *liveSession) (string, *containerState, error) {
 	if opts == nil {
 		return "", nil, fmt.Errorf("options are required")
 	}
@@ -232,6 +239,10 @@ func (s *Containerd) create(ctx context.Context, opts *CreateOptions) (string, *
 	id := ref.ID
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
 	state := newContainerState(nil, ref)
+	state.liveSession = live
+	if live != nil {
+		live.state = state
+	}
 	if err = state.acquire(ctx); err != nil {
 		return "", nil, err
 	}
@@ -282,16 +293,39 @@ func (s *Containerd) Start(ctx context.Context, id string) error {
 }
 
 func (s *Containerd) startState(ctx context.Context, state *containerState) error {
+	return s.startLiveState(ctx, state, nil)
+}
+
+func (s *Containerd) startLiveState(ctx context.Context, state *containerState, live *liveSession) error {
 	ctx = namespaces.WithNamespace(ctx, s.namespace)
 	if err := state.acquire(ctx); err != nil {
 		return err
 	}
 	defer state.release()
+	if state.liveSession != live {
+		return fmt.Errorf("live session requires its exact lifecycle handle")
+	}
 	state.mu.Lock()
 	stopping := state.stopping
 	state.mu.Unlock()
 	if state.removed || state.stopped || stopping {
 		return fmt.Errorf("container is removed or stopped")
+	}
+	if live != nil {
+		if live.started || state.task != nil {
+			return fmt.Errorf("live session startup cannot be repeated")
+		}
+		runCtx, cancel := context.WithCancel(ctx)
+		state.mu.Lock()
+		if state.stopping {
+			state.mu.Unlock()
+			cancel()
+			return fmt.Errorf("live session is stopping")
+		}
+		state.activeCancel = cancel
+		state.mu.Unlock()
+		defer func() { state.mu.Lock(); state.activeCancel = nil; state.mu.Unlock(); cancel() }()
+		ctx = runCtx
 	}
 	if state.task != nil {
 		status, err := state.task.Status(ctx)
@@ -322,16 +356,23 @@ func (s *Containerd) startState(ctx context.Context, state *containerState) erro
 		state.stopped = true
 		return errors.Join(fmt.Errorf("start task: %w", err), killErr, deleteErr)
 	}
+	if live != nil {
+		q, err := initializeQuiescence(ctx, s, state, live.pin)
+		if err != nil {
+			return err
+		}
+		live.proof, live.started = q, true
+	}
 	return nil
 }
 
 // Execute 在已启动容器中执行命令并捕获有界输出
 // 取消、超时或执行状态不确定时终止容器内全部进程，调用方随后必须 Remove
 func (s *Containerd) Execute(ctx context.Context, id string, cmd []string, opts *ExecuteOptions) (*ExecuteResult, error) {
-	return s.execute(ctx, id, cmd, opts, nil)
+	return s.execute(ctx, id, cmd, opts, nil, nil)
 }
 
-func (s *Containerd) execute(ctx context.Context, id string, cmd []string, opts *ExecuteOptions, proof *taskQuiescence) (result *ExecuteResult, resultErr error) {
+func (s *Containerd) execute(ctx context.Context, id string, cmd []string, opts *ExecuteOptions, proof *taskQuiescence, admission *liveExecution) (result *ExecuteResult, resultErr error) {
 	result = &ExecuteResult{StartTime: time.Now(), ExitCode: -1}
 	stdout, stderr := &boundedBuffer{}, &boundedBuffer{}
 	stdoutStream, stderrStream := &outputStream{capture: stdout}, &outputStream{capture: stderr}
@@ -362,7 +403,7 @@ func (s *Containerd) execute(ctx context.Context, id string, cmd []string, opts 
 	if len(state.processes) != 0 {
 		return result, fmt.Errorf("container has an unreaped process; Remove is required")
 	}
-	if state.quiescence != proof {
+	if state.quiescence != proof || state.liveSession != nil && (admission == nil || admission.session != state.liveSession) {
 		return result, fmt.Errorf("quiescence probe requires its private lifecycle admission")
 	}
 	runCtx, cancel := context.WithCancel(ctx)
@@ -379,8 +420,11 @@ func (s *Containerd) execute(ctx context.Context, id string, cmd []string, opts 
 	if proof != nil {
 		defer func() {
 			resultErr = proof.afterExecute(runCtx, result, errors.Join(resultErr, stdoutStream.Error(), stderrStream.Error()), exitObserved, execDeleted)
+			if resultErr == nil && admission != nil {
+				admission.session.finishStep(admission, result)
+			}
 		}()
-		if err := proof.beforeExecute(runCtx); err != nil {
+		if err := proof.beforeExecute(runCtx, admission); err != nil {
 			return result, err
 		}
 	}
@@ -405,7 +449,7 @@ func (s *Containerd) execute(ctx context.Context, id string, cmd []string, opts 
 	}
 	execID := "exec-" + uuid.NewString()
 	if proof != nil {
-		if err = proof.admit(runCtx); err != nil {
+		if err = proof.admitExecution(runCtx, admission); err != nil {
 			return result, err
 		}
 	}
@@ -448,7 +492,7 @@ func (s *Containerd) execute(ctx context.Context, id string, cmd []string, opts 
 		return result, fmt.Errorf("wait exec process: %w", normalizeExecutionContextError(err))
 	}
 	if proof != nil {
-		if err = proof.admit(runCtx); err != nil {
+		if err = proof.admitExecution(runCtx, admission); err != nil {
 			return result, err
 		}
 	}

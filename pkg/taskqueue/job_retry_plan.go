@@ -82,13 +82,16 @@ func NewJobRetryPlan(payload *JobRunTaskPayload) (*JobRetryPlan, error) {
 		return nil, fmt.Errorf("runtime retry payload is required")
 	}
 	if payload.RetryApprovalRequired {
+		if payload.Retry == nil || payload.Retry.Mode != "whole_job" {
+			return nil, fmt.Errorf("durable approval supports only whole_job retry")
+		}
 		if payload.RetryApprovalTimeoutSeconds < 1 || payload.RetryApprovalTimeoutSeconds > 3600 {
 			return nil, fmt.Errorf("retry approval requires a bounded trusted timeout")
 		}
 	} else if payload.RetryApprovalTimeoutSeconds != 0 {
 		return nil, fmt.Errorf("ungated retry cannot carry approval timeout")
 	}
-	if err := ValidateWholeJobRetryPolicy(payload.Retry); err != nil {
+	if err := ValidateContainerRetryPolicy(payload.Retry); err != nil {
 		return nil, err
 	}
 	copy := *payload
@@ -104,7 +107,11 @@ func NewJobRetryPlan(payload *JobRunTaskPayload) (*JobRetryPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	plan := &JobRetryPlan{RetryApprovalRequired: payload.RetryApprovalRequired, RetryApprovalTimeoutSeconds: payload.RetryApprovalTimeoutSeconds, Version: 1, Policy: proto.Clone(payload.Retry).(*pipelinev1.Retry), DefinitionDigest: retryDigest("arcentra-job-retry-definition-v1", encoded), Steps: make([]RetryStepPlan, 0, len(payload.Steps))}
+	version, definitionDomain := 1, "arcentra-job-retry-definition-v1"
+	if payload.Retry.Mode == "failed_step" {
+		version, definitionDomain = 2, "arcentra-failed-step-job-definition-v1"
+	}
+	plan := &JobRetryPlan{RetryApprovalRequired: payload.RetryApprovalRequired, RetryApprovalTimeoutSeconds: payload.RetryApprovalTimeoutSeconds, Version: version, Policy: proto.Clone(payload.Retry).(*pipelinev1.Retry), DefinitionDigest: retryDigest(definitionDomain, encoded), Steps: make([]RetryStepPlan, 0, len(payload.Steps))}
 	if _, exists := payload.Env[JobGenerationEnvironment]; exists {
 		return nil, fmt.Errorf("reserved generation environment cannot be overridden")
 	}
@@ -132,24 +139,33 @@ func NewJobRetryPlan(payload *JobRunTaskPayload) (*JobRetryPlan, error) {
 
 // Canonical 验证完整计划及全部互异尝试身份并返回规范编码
 func (p *JobRetryPlan) Canonical() (string, error) {
-	if p == nil || p.Version != 1 || !sourceprovenance.ValidBindingDigest(p.DefinitionDigest) || len(p.Steps) == 0 || len(p.Steps) > 1000 {
+	if p == nil || (p.Version != 1 && p.Version != 2) || !sourceprovenance.ValidBindingDigest(p.DefinitionDigest) || len(p.Steps) == 0 || len(p.Steps) > 1000 {
 		return "", fmt.Errorf("invalid retry plan")
 	}
 	if p.RetryApprovalRequired {
+		if p.Version != 1 || p.Policy == nil || p.Policy.Mode != "whole_job" {
+			return "", fmt.Errorf("durable approval supports only whole_job v1 plan")
+		}
 		if p.RetryApprovalTimeoutSeconds < 1 || p.RetryApprovalTimeoutSeconds > 3600 {
 			return "", fmt.Errorf("retry approval plan requires bounded timeout")
 		}
 	} else if p.RetryApprovalTimeoutSeconds != 0 {
 		return "", fmt.Errorf("ungated plan has approval timeout")
 	}
-	if err := ValidateWholeJobRetryPolicy(p.Policy); err != nil {
+	if err := ValidateContainerRetryPolicy(p.Policy); err != nil {
 		return "", err
+	}
+	if (p.Version == 1 && p.Policy.Mode != "whole_job") || (p.Version == 2 && p.Policy.Mode != "failed_step") {
+		return "", fmt.Errorf("retry plan version does not match mode")
 	}
 	ids, names := map[string]bool{}, map[string]bool{}
 	previous := int32(-1)
 	for _, s := range p.Steps {
 		if s.Name == "" || strings.TrimSpace(s.Name) != s.Name || names[s.Name] || s.StepIndex <= previous || !sourceprovenance.ValidBindingDigest(s.DefinitionDigest) || len(s.AttemptRunIDs) != int(p.Policy.MaxAttempts) {
 			return "", fmt.Errorf("invalid retry step plan")
+		}
+		if p.Policy.Mode == "failed_step" && s.ContinueOnError {
+			return "", fmt.Errorf("failed_step first profile rejects continueOnError")
 		}
 		names[s.Name] = true
 		previous = s.StepIndex
@@ -197,7 +213,11 @@ func (p *JobRetryPlan) Digest(pipelineID, runID, jobID, agentID, runtimeDigest s
 	if err != nil {
 		return "", err
 	}
-	return retryDigest("arcentra-job-retry-plan-v1", bound), nil
+	domain := "arcentra-job-retry-plan-v1"
+	if p.Version == 2 {
+		domain = "arcentra-failed-step-job-plan-v1"
+	}
+	return retryDigest(domain, bound), nil
 }
 
 // ValidateJobRetryPlan 拒绝与完整派发内容不同的计划或摘要
@@ -225,4 +245,22 @@ func ValidateJobRetryPlan(payload *JobRunTaskPayload) error {
 		return fmt.Errorf("retry plan binding mismatch")
 	}
 	return nil
+}
+
+// ValidateFailedStepRetryPolicy 校验独立失败步骤模式并保留既有有界重试限制
+func ValidateFailedStepRetryPolicy(p *pipelinev1.Retry) error {
+	if p == nil || p.Mode != "failed_step" {
+		return fmt.Errorf("failed_step policy is required")
+	}
+	copy := proto.Clone(p).(*pipelinev1.Retry)
+	copy.Mode = "whole_job"
+	return ValidateWholeJobRetryPolicy(copy)
+}
+
+// ValidateContainerRetryPolicy 按明确模式校验，不改变 whole_job 版本一语义
+func ValidateContainerRetryPolicy(p *pipelinev1.Retry) error {
+	if p != nil && p.Mode == "failed_step" {
+		return ValidateFailedStepRetryPolicy(p)
+	}
+	return ValidateWholeJobRetryPolicy(p)
 }

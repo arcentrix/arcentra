@@ -441,6 +441,11 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	containerAcceptanceWholeJobRetry(t, f, settings, observedStore, retainedAudit)
 	containerAcceptanceRetryApproval(t, f, settings, observedStore, retainedAudit, approvalServices, approvalPolicy, lifecycleAudit)
 	testRealContainerGenerationCancellationFence(t, f)
+	if !t.Run("failed-step", func(t *testing.T) {
+		containerAcceptanceFailedStepRetry(t, f, settings, observedStore, publisher, retainedAudit)
+	}) {
+		return
+	}
 	if !containerAcceptanceAuditMatches(retainedAudit, controllerTerminalRecords(f)) {
 		t.Fatal("completed acceptance changed retained timeout audit or left new terminal receipts")
 	}
@@ -466,7 +471,7 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	if t.Failed() {
 		return
 	}
-	t.Log("real linear-chain failure, control-queue cancellation, timeout, registered artifact transfer, subsequent healthy execution and exact owned cleanup verified; bounded whole-job retry verified; branching, parallel jobs and failed-step continuation remain unsupported")
+	t.Log("real linear-chain failure, control-queue cancellation, timeout, registered artifact transfer, subsequent healthy execution and exact owned cleanup verified; bounded whole-job retry and gated failed-step candidate verified; production failed-step enablement still requires separate review; branching and parallel jobs remain unsupported")
 }
 
 func containerAcceptanceStoppedSteps(t *testing.T, f *controllerWorkerFixture, job *model.JobRun, expected map[string]int) {

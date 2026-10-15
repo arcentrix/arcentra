@@ -101,9 +101,25 @@ run_test() {
   python3 scripts/acceptance/verify_containerd_test_log.py "$EVIDENCE/$name.log" "$repetitions" "$@"
 }
 run_test sandbox '^TestContainerdAcceptance$' 3m sandbox 1 TestContainerdAcceptance
-# Three repetitions share the original five-minute budget, with fresh scenario roots.
+# Three repetitions and live-step restart share the original five-minute budget.
+SESSION_LANE_STARTED=$SECONDS
 run_test sandboxexec '^Test(SessionContainerdAcceptance|DurableControllerContainerdAcceptance|DurableControllerActiveRecoveryContainerdAcceptance)$' 5m sessions 3 \
   TestSessionContainerdAcceptance TestDurableControllerContainerdAcceptance \
   TestDurableControllerContainerdAcceptance/cancel TestDurableControllerContainerdAcceptance/timeout \
   TestDurableControllerActiveRecoveryContainerdAcceptance
-run_test taskqueue '^TestRealContainerJobAcceptance$' 8m full-job 1 TestRealContainerJobAcceptance
+# No additional daemon lifetime: new crash phases consume only the remainder.
+SESSION_LANE_REMAINING=$((300 - (SECONDS - SESSION_LANE_STARTED)))
+(( SESSION_LANE_REMAINING > 0 )) || { echo 'Session acceptance budget exhausted.' >&2; exit 1; }
+(( SESSION_LANE_REMAINING <= 120 )) || SESSION_LANE_REMAINING=120
+run_test sandboxexec '^TestLiveStepJournalRestartContainerdAcceptance$' "${SESSION_LANE_REMAINING}s" step-restart 1 \
+  TestLiveStepJournalRestartContainerdAcceptance \
+  TestLiveStepJournalRestartContainerdAcceptance/intent TestLiveStepJournalRestartContainerdAcceptance/admission \
+  TestLiveStepJournalRestartContainerdAcceptance/consumed TestLiveStepJournalRestartContainerdAcceptance/failed \
+  TestLiveStepJournalRestartContainerdAcceptance/successor-intent TestLiveStepJournalRestartContainerdAcceptance/successor-admission \
+  TestLiveStepJournalRestartContainerdAcceptance/successor-consumed
+run_test taskqueue '^TestRealContainerJobAcceptance$' 8m full-job 1 TestRealContainerJobAcceptance \
+  TestRealContainerJobAcceptance/failed-step/same-live-session-immutable-inputs-ack-loss \
+  TestRealContainerJobAcceptance/failed-step/earlier-background-refused \
+  TestRealContainerJobAcceptance/failed-step/adopted-zombie-refused \
+  TestRealContainerJobAcceptance/failed-step/cancel-before-successor \
+  TestRealContainerJobAcceptance/failed-step/uncertain-resume-cleans

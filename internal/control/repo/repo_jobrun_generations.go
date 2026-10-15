@@ -52,7 +52,7 @@ func (r *JobRunRepo) CaptureRuntimeRetryExpectation(ctx context.Context, pipelin
 
 func validateCapturedRetrySteps(ctx context.Context, tx *gorm.DB, job *model.JobRun, agentID string, plan *taskqueue.JobRetryPlan) error {
 	var rows []model.StepRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("step_run_id", "name", "step_index", "job_run_id", "pipeline_id", "pipeline_run_id", "agent_id", "attempt", "retry_mode", "retry_policy", "previous_step_run_id", "uses", "action", "continue_on_error").Where("job_run_id = ?", job.JobRunID).Find(&rows).Error; err != nil {
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("step_run_id", "name", "step_index", "job_run_id", "pipeline_id", "pipeline_run_id", "agent_id", "attempt", "retry_mode", "retry_policy", "previous_step_run_id", "uses", "action", "continue_on_error", "attempt_admission_request", "attempt_admission_request_digest", "attempt_admission").Where("job_run_id = ?", job.JobRunID).Find(&rows).Error; err != nil {
 		return err
 	}
 	if len(rows) != len(plan.Steps)*int(plan.Policy.MaxAttempts) {
@@ -69,7 +69,7 @@ func validateCapturedRetrySteps(ctx context.Context, tx *gorm.DB, job *model.Job
 	for _, step := range plan.Steps {
 		for index, id := range step.AttemptRunIDs {
 			row, ok := byID[id]
-			if !ok || row.JobRunID != job.JobRunID || row.PipelineID != job.PipelineID || row.PipelineRunID != job.PipelineRunID || (row.AgentID != "" && row.AgentID != agentID) || row.Name != step.Name || row.StepIndex != int(step.StepIndex) || row.Attempt != index+1 || row.RetryMode != "whole_job" || !sameRetryPolicy(row.RetryPolicy, policy) || row.Uses != step.Uses || row.Action != step.Action || (row.ContinueOnError != 0) != step.ContinueOnError {
+			if !ok || !emptyStepAdmission(&row) || row.JobRunID != job.JobRunID || row.PipelineID != job.PipelineID || row.PipelineRunID != job.PipelineRunID || (row.AgentID != "" && row.AgentID != agentID) || row.Name != step.Name || row.StepIndex != int(step.StepIndex) || row.Attempt != index+1 || row.RetryMode != plan.Policy.Mode || !sameRetryPolicy(row.RetryPolicy, policy) || row.Uses != step.Uses || row.Action != step.Action || (row.ContinueOnError != 0) != step.ContinueOnError {
 				return fmt.Errorf("retry plan does not match preallocated step identity")
 			}
 			previous := ""
@@ -88,6 +88,9 @@ func retryPlanForJob(job *model.JobRun) (*taskqueue.JobRetryPlan, error) {
 	plan, err := taskqueue.ParseJobRetryPlan(job.RetryPlan)
 	if err != nil {
 		return nil, err
+	}
+	if plan.Policy.Mode == "failed_step" && !emptyRetryApproval(job) {
+		return nil, fmt.Errorf("approval-bearing failed_step execution is not supported")
 	}
 	digest, err := plan.Digest(job.PipelineID, job.PipelineRunID, job.JobRunID, job.AgentID, job.RuntimeBindingDigest)
 	if err != nil || digest != job.RetryPlanDigest {
@@ -166,6 +169,9 @@ func (r *JobRunRepo) ReconcileJobGeneration(ctx context.Context, request taskque
 		plan, err := retryPlanForJob(&job)
 		if err != nil {
 			return err
+		}
+		if plan.Policy.Mode == "failed_step" && request.Operation == "advance" {
+			return fmt.Errorf("failed_step cannot advance a whole-job generation")
 		}
 		if request.Operation == "inspect" {
 			if request.InputManifestDigest != "" && request.InputManifestDigest != job.InputManifestDigest {

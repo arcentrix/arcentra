@@ -135,7 +135,7 @@ func (c *Controller) recordInitialIntent(ctx context.Context, request taskpayloa
 	if err := c.check(ctx); err != nil {
 		return err
 	}
-	if c.reconciliationPending {
+	if c.draining || c.reconciliationPending {
 		return fmt.Errorf("startup admission cannot resume execution")
 	}
 	a := generationAdmission{Request: *copyGenerationTransition(&request)}
@@ -165,7 +165,7 @@ func (c *Controller) recordInitialIntent(ctx context.Context, request taskpayloa
 			return fmt.Errorf("generation admission cannot replace a recorded execution")
 		}
 	}
-	if len(c.records)+len(c.admissions) >= c.opts.MaxRecords {
+	if c.reservedJournalCount() >= c.opts.MaxRecords {
 		return fmt.Errorf("sandbox journal record quota exceeded")
 	}
 	return c.persistAdmission(ctx, a)

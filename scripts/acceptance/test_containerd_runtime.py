@@ -217,8 +217,15 @@ class RuntimeGuardTests(unittest.TestCase):
         script = Path(__file__).with_name("run_containerd_runtime.sh").read_text()
         self.assertIn('"-test.count=$repetitions"', script)
         self.assertIn(' 5m sessions 3 ', script)
+        self.assertIn('SESSION_LANE_STARTED=$SECONDS', script)
+        self.assertIn('SESSION_LANE_REMAINING=$((300 - (SECONDS - SESSION_LANE_STARTED)))', script)
+        self.assertIn('SESSION_LANE_REMAINING=120', script)
+        self.assertIn('"${SESSION_LANE_REMAINING}s" step-restart 1', script)
+        self.assertIn('TestLiveStepJournalRestartContainerdAcceptance/successor-consumed', script)
         self.assertIn(' 3m sandbox 1 TestContainerdAcceptance', script)
         self.assertIn(' 8m full-job 1 TestRealContainerJobAcceptance', script)
+        for case in ("same-live-session-immutable-inputs-ack-loss", "earlier-background-refused", "adopted-zombie-refused", "cancel-before-successor", "uncertain-resume-cleans"):
+            self.assertIn('TestRealContainerJobAcceptance/failed-step/' + case, script)
         self.assertIn('TestDurableControllerContainerdAcceptance/cancel TestDurableControllerContainerdAcceptance/timeout', script)
         self.assertIn('verify_containerd_test_log.py "$EVIDENCE/$name.log" "$repetitions" "$@"', script)
 

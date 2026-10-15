@@ -103,3 +103,27 @@ func TestWholeJobRetrySelectionRequiresIndependentCapability(t *testing.T) {
 		t.Fatal("operator default-off bypassed")
 	}
 }
+
+func TestFailedStepSelectionRequiresItsOwnTypedCapability(t *testing.T) {
+	image := "registry.example/build@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	now := time.Now()
+	policy := taskqueue.OfflineRuntimePolicy{Enabled: true, AllowFailedStepRetry: true, AllowedImages: []string{image}, MaxCPU: "1", MaxMemory: "128Mi"}
+	job := &spec.Job{Retry: &spec.Retry{Mode: "failed_step", MaxAttempts: 2, Idempotent: true, AllowedExitCodes: []int32{23}}}
+	runtime := &taskqueue.RuntimeRequest{Type: taskqueue.RuntimeContainerdOfflineV1, Image: image, Resources: taskqueue.RuntimeResources{CPU: "1", Memory: "64Mi"}}
+	for _, raw := range []string{`{"executionMode":"containerd-offline-v1","containerdOfflineV1":true,"containerdWholeJobRetryV1":true}`, `{"executionMode":"containerd-offline-v1","containerdOfflineV1":true,"containerdFailedStepRetryV1":false}`, `{"executionMode":"containerd-offline-v1","containerdOfflineV1":true,"containerdFailedStepRetryV1":"true"}`} {
+		agent := model.Agent{AgentID: "agent", OS: "linux", IsEnabled: 1, Status: 1, LastHeartbeat: &now, RuntimeCapabilities: []byte(raw), Labels: []byte(`{"containerdFailedStepRetryV1":"true"}`)}
+		e := &Process{repos: &repo.Repositories{Agent: &runtimeAgentRepository{agents: []model.Agent{agent}}}, offlineRuntimePolicy: policy}
+		if _, err := e.selectAgentForRuntime(context.Background(), job, runtime); err == nil {
+			t.Fatal("missing or forged failed-step capability accepted")
+		}
+	}
+	capable := model.Agent{AgentID: "agent", OS: "linux", IsEnabled: 1, Status: 1, LastHeartbeat: &now, RuntimeCapabilities: []byte(`{"executionMode":"containerd-offline-v1","containerdOfflineV1":true,"containerdFailedStepRetryV1":true}`)}
+	e := &Process{repos: &repo.Repositories{Agent: &runtimeAgentRepository{agents: []model.Agent{capable}}}, offlineRuntimePolicy: policy}
+	if got, err := e.selectAgentForRuntime(context.Background(), job, runtime); err != nil || got != "agent" {
+		t.Fatalf("structurally capable fixture rejected: %s %v", got, err)
+	}
+	e.offlineRuntimePolicy.AllowFailedStepRetry = false
+	if _, err := e.selectAgentForRuntime(context.Background(), job, runtime); err == nil {
+		t.Fatal("independent operator opt-in bypassed")
+	}
+}

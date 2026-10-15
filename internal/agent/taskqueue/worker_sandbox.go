@@ -42,6 +42,26 @@ type offlineGenerationSession interface {
 	CleanupReceipt(context.Context) (taskpayload.JobGenerationCleanupReceipt, error)
 }
 
+// offlineStepRetryRuntime 仅为同一活动代次分配不可恢复的步骤重试会话
+type offlineStepRetryRuntime interface {
+	offlineGenerationRuntime
+	AllocateStepRetryGeneration(context.Context, *taskpayload.JobRunTaskPayload, string, taskpayload.JobGeneration) (offlineSession, error)
+}
+
+// offlineStepRetrySession 把持久步骤准入与当前进程独占的暂停能力分离
+type offlineStepRetrySession interface {
+	offlineSession
+	StepAttemptSession(context.Context) (taskpayload.StepAttemptSession, error)
+	RecordStepAttemptIntent(context.Context, taskpayload.StepAttemptTransition) error
+	RecordStepAttemptAdmission(context.Context, taskpayload.StepAttemptTransition, taskpayload.StepAttemptAdmission) error
+	RecordStepAttemptObservation(context.Context, taskpayload.StepAttemptTransition, taskpayload.StepAttemptAdmission) error
+	RecordStepAttemptConsumed(context.Context, taskpayload.StepAttemptAdmission) error
+	ExecuteStepAttempt(context.Context, *executor.ExecutionRequest, taskpayload.StepAttemptAdmission) (*executor.ExecutionResult, error)
+	ExecuteArtifactStepAttempt(context.Context, *executor.ExecutionRequest, taskpayload.StepAttemptAdmission, executor.Executor) (*executor.ExecutionResult, error)
+	HasPausedStepBoundary(context.Context, taskpayload.StepAttemptAdmission) error
+	PausedStepBoundary(context.Context, taskpayload.StepAttemptAdmission, string) (taskpayload.PausedStepBoundary, error)
+}
+
 type offlineRuntimeContextKey struct{}
 type runtimeBindingContextKey struct{}
 
@@ -77,7 +97,7 @@ func offlineJobValidation(ctx context.Context, conf *config.AgentConfig, payload
 		return nil, nil
 	}
 	request := payload.Runtime
-	structuralPolicy := taskpayload.OfflineRuntimePolicy{Enabled: true, AllowWholeJobRetry: true, AllowWholeJobRetryApproval: true, AllowedImages: []string{request.Image}, MaxCPU: request.Resources.CPU, MaxMemory: request.Resources.Memory}
+	structuralPolicy := taskpayload.OfflineRuntimePolicy{Enabled: true, AllowWholeJobRetry: true, AllowWholeJobRetryApproval: true, AllowFailedStepRetry: true, AllowedImages: []string{request.Image}, MaxCPU: request.Resources.CPU, MaxMemory: request.Resources.Memory}
 	if err := taskpayload.ValidateJobRuntime(payload, structuralPolicy); err != nil {
 		return nil, err
 	}

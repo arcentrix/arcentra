@@ -34,6 +34,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/metrics"
 	"github.com/arcentrix/arcentra/pkg/net"
+	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/arcentrix/arcentra/pkg/version"
 	"google.golang.org/grpc/status"
 )
@@ -54,6 +55,7 @@ type AgentServiceImpl struct {
 	closed                bool
 	authenticated         atomic.Bool
 	offlineRuntimeReady   func() bool
+	failedStepRetryReady  func() bool
 }
 
 // NewAgentServiceImpl creates a new AgentService instance. metricsServer may be nil (used for heartbeat running count).
@@ -79,6 +81,13 @@ func (s *AgentServiceImpl) SetOfflineRuntimeReadiness(probe func() bool) {
 	s.offlineRuntimeReady = probe
 }
 
+// SetFailedStepRetryReadiness 安装独立的存活会话续试能力探针，不以普通离线就绪代替
+func (s *AgentServiceImpl) SetFailedStepRetryReadiness(probe func() bool) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.failedStepRetryReady = probe
+}
+
 func (s *AgentServiceImpl) runtimeCapabilitiesLocked() *agentv1.RuntimeCapabilities {
 	capabilities := &agentv1.RuntimeCapabilities{}
 	if s.agentConf == nil {
@@ -92,6 +101,7 @@ func (s *AgentServiceImpl) runtimeCapabilitiesLocked() *agentv1.RuntimeCapabilit
 		capabilities.ContainerdOfflineV1 = s.offlineRuntimeReady != nil && s.offlineRuntimeReady()
 		capabilities.ContainerdWholeJobRetryV1 = capabilities.ContainerdOfflineV1 && s.agentConf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetry
 		capabilities.ContainerdRetryApprovalV1 = capabilities.ContainerdWholeJobRetryV1 && s.agentConf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetryApproval
+		capabilities.ContainerdFailedStepRetryV1 = taskpayload.FailedStepRuntimeAccepted && capabilities.ContainerdOfflineV1 && s.agentConf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry && s.failedStepRetryReady != nil && s.failedStepRetryReady()
 	}
 	return capabilities
 }

@@ -83,3 +83,51 @@ There is no Kubernetes backend, bridge networking, arbitrary plugin sandboxing, 
 See [the acceptance guide](../../docs/sandbox-containerd.md) for prerequisites, exact commands and the distinction between unit/spec tests and real runtime acceptance.
 
 Agent runtime capability scheduling and immutable DSL runtime propagation have hosted implementation-level evidence. The independent gate-enabled ordinary production entries also passed in hosted test binaries; both operator policies default off. See [the Agent integration boundary](../../docs/sandbox-agent-integration.md). Single-job/offline/no-automatic-retry limits remain; no upstream artifact-input DAG, online package installation, release OCI image startup or multi-tenant security guarantee is implied.
+
+## Local failed-step candidate (default off)
+
+`LiveSessionBackend` is an explicit, injectable candidate interface. Its independent
+`ContainerdConfig.EnableLiveStepRetry` switch defaults to false and is not exposed
+by the production configuration factory. Ordinary `Create` / `Start` / `Execute`
+retain their existing behavior. An ordinary `Start` or `Execute` cannot operate a
+live-session resource through the legacy API.
+
+A caller must first persist an exact `ResourceRef`, then call `CreateLiveSession`
+inside its normal creating phase, persist created/starting phases, and call the
+returned `LiveSession.Start` separately. The session fixes a non-forking
+`/bin/sleep` init and requires a nonzero numeric UID and GID. Starting pins the
+actual kernel process using pidfd; there is no numeric-PID fallback. The random
+session-incarnation UUID, original execution claim and exact resource are bound
+to the process-local handle.
+
+`ExecuteStep` requires an explicit first-attempt identity and admission digest.
+Only a known failed exit with confirmed exec reaping and drained output can
+produce an opaque `FailedStepBoundary`: the whole task is paused, its full PID
+list must contain only the pinned init, and every init thread's kernel child list
+must be empty, including zombies. `CheckBoundary` repeats those checks without
+resuming. A background descendant is a visible failure and triggers whole-task
+cleanup; it is never killed to pretend the original live continuation survived.
+
+`ResumeStep` accepts the original pending pointer only once. It requires the exact
+next attempt of that failed logical step, a distinct admission digest, unchanged
+command/environment/user/directory/timeout, and a fresh frozen-task verification.
+The bound is five total attempts. Successful logical steps can advance to a larger
+index; pending failed boundaries cannot use ordinary execution to skip admission.
+Stdin is unsupported because a mutable reader cannot prove equivalent replay;
+output writers are not serialized or treated as authority. All nonzero exits are
+frozen, so upper-layer candidate policy must reject `ContinueOnError` rather than
+silently use an unadmitted thaw path.
+
+The permit is consumed before Resume. Immediately before Resume, exec creation
+and exec Start, the local gate checks cancellation, stopping state and the exact
+admission's not-before/expiry. The cancellation mutex is never held across daemon
+IO. Admission expiry does not become the running command's timeout. Uncertain
+Pause/Resume acknowledgement, replaced identity, missing inspection, cancellation,
+or reused admission fails closed. JSON cannot serialize or reconstruct a boundary;
+restart remains cleanup-only. Runtime labels and pidfds do not fence a hostile
+privileged client racing containerd RPCs, so the existing exclusive cooperating
+runtime-owner limitation remains.
+
+This interface and its fake-runtime tests are implementation evidence only. The
+V16 private quiescence acceptance helper remains separate. No new real-container
+acceptance or production failed-step enablement is claimed by this candidate.

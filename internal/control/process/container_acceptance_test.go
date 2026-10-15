@@ -96,3 +96,60 @@ func TestContainerAcceptancePolicyClonesOnce(t *testing.T) {
 		t.Fatal("test-only injection enabled production configuration")
 	}
 }
+
+// TestContainerAcceptanceFailedStepPolicyGuards 验证独立候选注入不改变已接受的普通生产路径
+func TestContainerAcceptanceFailedStepPolicyGuards(t *testing.T) {
+	const image = "docker.io/library/alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	policy := taskqueue.OfflineRuntimePolicy{Enabled: true, AllowFailedStepRetry: true, AllowedImages: []string{image}, MaxCPU: "500m", MaxMemory: "64Mi"}
+	for _, test := range []struct {
+		name, enabled, required, allowedImage string
+		active, configured                    bool
+	}{
+		{name: "missing-opt-in", required: "1", allowedImage: image},
+		{name: "missing-mandatory", enabled: "1", allowedImage: image},
+		{name: "wrong-image", enabled: "1", required: "1", allowedImage: "other"},
+		{name: "active-process", enabled: "1", required: "1", allowedImage: image, active: true},
+		{name: "already-configured", enabled: "1", required: "1", allowedImage: image, configured: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("ARCENTRA_CONTAINERD_ACCEPTANCE", test.enabled)
+			t.Setenv("ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE", test.required)
+			t.Setenv("ARCENTRA_SANDBOX_TEST_IMAGE", test.allowedImage)
+			e := &Process{}
+			if test.active {
+				e.runs.Store("active", struct{}{})
+			}
+			if test.configured {
+				e.offlineRuntimePolicy = policy.Clone()
+				e.offlineRuntimePolicy.AllowFailedStepRetry = false
+			}
+			before := e.offlineRuntimePolicy.Clone()
+			if err := e.ConfigureContainerAcceptancePolicy(policy); err == nil {
+				t.Fatal("out-of-scope failed-step injection accepted")
+			}
+			if !reflect.DeepEqual(before, e.offlineRuntimePolicy) {
+				t.Fatal("rejected injection changed current policy")
+			}
+		})
+	}
+	t.Setenv("ARCENTRA_CONTAINERD_ACCEPTANCE", "1")
+	t.Setenv("ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE", "1")
+	t.Setenv("ARCENTRA_SANDBOX_TEST_IMAGE", image)
+	e := &Process{}
+	if taskqueue.FailedStepRuntimeAccepted {
+		if e.ConfigureContainerAcceptancePolicy(policy) == nil {
+			t.Fatal("accepted runtime allowed obsolete candidate policy injection")
+		}
+		return
+	}
+	if err := e.ConfigureContainerAcceptancePolicy(policy); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(e.offlineRuntimePolicy, policy) || e.offlineRuntimePolicy.ValidateProduction() == nil {
+		t.Fatal("candidate injection changed policy or opened production gate")
+	}
+	policy.AllowedImages[0] = "changed"
+	if e.offlineRuntimePolicy.AllowedImages[0] != image || e.ConfigureContainerAcceptancePolicy(e.offlineRuntimePolicy.Clone()) == nil {
+		t.Fatal("candidate policy was mutable or injected twice")
+	}
+}

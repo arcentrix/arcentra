@@ -2,8 +2,12 @@
 
 Retries are disabled unless a job has a complete, valid `retry` policy. Older
 `maxAttempts` / `delay` alone are now rejected rather than silently selecting a
-scope. The Build definition editor can apply a policy to its draft; normal
-validation, repository save permission and concurrency checks still apply.
+scope. The existing Build definition editor can apply a policy to its draft; normal
+validation, repository save permission and concurrency checks still apply. The
+offline live failed-step candidate passed gate-on runtime acceptance and its
+editor passed simulated-transport Chromium checks. [Backend PR 61](https://github.com/arcentrix/arcentra/pull/61)
+and [frontend PR 11](https://github.com/arcentrix/arcentra-web/pull/11) were draft when this evidence was recorded on 2026-10-15; acceptance does not establish release availability. [Verification
+scopes and exact evidence](failed-step-retry.md#acceptance-status).
 
 ```yaml
 jobs:
@@ -35,7 +39,7 @@ jobs:
   application-defined permission failures that share a generic exit code cannot
   be reliably inferred from output. Do not allowlist such a code.
 
-The existing policy runner is used by baremetal control-plane and Agent work. The container generation loop below uses the same explicit policy bounds with a separate fresh-session lifecycle. Missing executors, invalid configuration, source/condition errors,
+The existing policy runner is used by baremetal control-plane and Agent work. Offline container retries use the same explicit policy bounds with mode-specific lifecycle contracts below. Missing executors, invalid configuration, source/condition errors,
 permission/system errors, conventional shell 126/127 errors, signals,
 cancellation, deadline expiry, artifact failures, and log or terminal-record
 persistence failures are not retry triggers. Infrastructure persistence failures
@@ -106,7 +110,7 @@ Agent fabricating results.
 
 ## Offline container whole-job generations
 
-For `containerd-offline-v1`, only `mode: whole_job` is supported, and only when both Control `pipeline.offlineRuntime.allowWholeJobRetry` and Agent `agent.sandbox.containerd.policy.allowWholeJobRetry` are explicitly true. Both default to false. Runtime readiness advertises a separate versioned retry capability; labels or an older Agent cannot substitute for it. `failed_step` remains rejected: a private owned-task quiescence experiment now proves a narrow process-free boundary, but production step-attempt CAS and continuation admission are not implemented. Existing legitimate background work makes that narrow boundary ineligible; it is never silently killed and called lossless continuation.
+For `containerd-offline-v1`, `mode: whole_job` requires both Control `pipeline.offlineRuntime.allowWholeJobRetry` and Agent `agent.sandbox.containerd.policy.allowWholeJobRetry` to be explicitly true. Both default to false. Runtime readiness advertises a separate versioned retry capability; labels or an older Agent cannot substitute for it. The separate live `failed_step` candidate has both implementation and independent ordinary `NewProcess`/`StartWorker` gate-on acceptance; its PRs were draft when this evidence was recorded on 2026-10-15. Its independent policy, migration and live-session requirements are described [below](#offline-container-live-failed-step-retry).
 
 Each round has a fresh container, rootfs, tmpfs and workspace. All explicit steps repeat; external side effects are not rolled back. The first full source commit and registered input artifact set remain fixed across rounds. Checkout uses that full commit even when a branch moves; source/staging/hash/length failures stop the job. The reserved `ARCENTRA_JOB_GENERATION` environment value is the 1-based round number; job/step/runtime/Agent overrides are rejected. It is a diagnostic/testing value, not a permission or secret.
 
@@ -116,8 +120,28 @@ Only one acknowledged, non-continued, allowlisted pure shell exit can advance a 
 
 Job/pipeline cancellation, disabled Agent, changed inputs, exhausted policy, cleanup failure and drain all fence successor admission. The overall deadline includes every round and delay. Draining finishes and cleans the current round, then starts no successor. A cancelled/expired request may have been admitted before its cancellation became visible; no user command may proceed without the subsequent live step claim, and owned unstarted resources are cleaned.
 
-Approval-bearing retry requires the separate, default-off [durable exact-content gate](retry-approval.md). Only the exact manual `builtin:retry-approval` marker is supported, with trusted operator candidates and matching TLS Agent capability. The gate binds the pinned full source commit, all immutable inputs and complete finite retry plan before any container starts. Legacy first-run approvals cannot authorize retry. Deployment targets/steps remain outside this offline profile; removing a required gate is never an automatic workaround.
+Approval-bearing `whole_job` retry is supported by V17 through the separate, default-off [durable exact-content gate](retry-approval.md). Only the exact manual `builtin:retry-approval` marker is supported, with trusted operator candidates and matching TLS Agent capability. The gate binds the pinned full source commit, all immutable inputs and complete finite retry plan before any container starts. Legacy first-run approvals cannot authorize retry. Deployment targets/steps remain outside this offline profile; removing a required gate is never an automatic workaround.
 
 There is no automatic continuation after Agent/controller restart or an unresolved handoff. Preserve journals, receipts and generation rows. Read-only inspection does not resume execution. Use the existing explicitly offline reconciliation procedure only after all controllers/Agents and external work are stopped, then start a separately authorized fresh run. Never delete journals or rewrite claims to retry an ambiguous operation. Apply migration [006](../migrations/006_container_job_generations.md) explicitly after the immutable-input migration; no startup migration or historical retry-plan backfill occurs.
 
 The registered Agent remains trusted to report command and cleanup facts. These bindings prevent accidental cross-round authority and replay mistakes; they are not attestation against a compromised Agent or rootful runtime operator. The container remains offline and no network, host socket, privilege or capacity expansion is implied.
+
+## Offline container live failed-step retry
+
+`mode: failed_step` retains one continuously live generation, session, container,
+rootfs, tmpfs and workspace. Earlier successful steps execute once; only the
+eligible failed shell command repeats. Its partial file changes remain, with no
+rollback. Any background process or zombie at the retry boundary causes refusal
+and terminal cleanup, including work started by an earlier successful step.
+
+The exact candidate passed independent ordinary production `NewProcess`/`StartWorker`
+gate-on acceptance. Before any operator opt-in, review the exact accepted build
+and destination-specific checks, and require explicit
+[migration 008](../migrations/008_failed_step_admission_ledger.md), a capable Agent,
+and both Control `pipeline.offlineRuntime.allowFailedStepRetry` and Agent
+`agent.sandbox.containerd.policy.allowFailedStepRetry`. Both flags default off.
+Only explicit idempotent policies with 2–5 attempts and a distinct 1–125 exit-code
+allowlist qualify. `continueOnError` and approval-bearing `failed_step` plans are
+rejected; whole-job exact approval does not cover this combination. There is no
+restart continuation or post-terminal resume. See the [full contract and exact
+evidence](failed-step-retry.md), including the separate frontend fixture and actual-backend browser scopes. Backend PR 61 and frontend PR 11 were draft when this evidence was recorded on 2026-10-15.

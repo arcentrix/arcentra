@@ -64,6 +64,11 @@ type StepRun struct {
 	EndTime                 *time.Time `gorm:"column:end_time" json:"endTime"`
 	Duration                int64      `gorm:"column:duration" json:"duration"` // 毫秒
 	CreatedBy               string     `gorm:"column:created_by" json:"createdBy"`
+
+	// 以下三列只由不可变步骤准入事务写入，普通模型写入不得改变
+	AttemptAdmissionRequest       string `gorm:"column:attempt_admission_request;type:mediumtext;not null;default:('')" json:"-"`
+	AttemptAdmissionRequestDigest string `gorm:"column:attempt_admission_request_digest;type:varchar(67);not null;default:''" json:"-"`
+	AttemptAdmission              string `gorm:"column:attempt_admission;type:mediumtext;not null;default:('')" json:"-"`
 }
 
 func (StepRun) TableName() string {
