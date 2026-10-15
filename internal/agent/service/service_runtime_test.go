@@ -46,3 +46,18 @@ func TestWholeJobRetryCapabilityRequiresReadinessAndOperatorOptIn(t *testing.T) 
 		t.Fatal("failed runtime retained retry capability")
 	}
 }
+
+func TestFailedStepCapabilityCannotAdvertiseUnacceptedImplementation(t *testing.T) {
+	conf := &config.AgentConfig{Agent: config.AgentInfo{Mode: "sandbox"}}
+	conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry = true
+	service := NewAgentServiceImpl(conf, nil, nil)
+	service.SetOfflineRuntimeReadiness(func() bool { return true })
+	service.SetFailedStepRetryReadiness(func() bool { return true })
+	if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryV1 {
+		t.Fatal("unaccepted implementation advertised live retry")
+	}
+	service.SetFailedStepRetryReadiness(nil)
+	if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryV1 {
+		t.Fatal("missing live adapter advertised retry")
+	}
+}

@@ -438,6 +438,7 @@ func (a *AgentServiceImpl) ReportStepRunStatus(
 		return nil, err
 	}
 	ctx = agentidentity.WithGenerationReport(ctx, req.GenerationId, req.GenerationBindingDigest)
+	ctx = agentidentity.WithStepAttemptReport(ctx, req.StepAttemptAdmissionDigest)
 	if err := a.validateRuntimeStepReport(ctx, entity, claimID, int(req.Status)); err != nil {
 		return nil, err
 	}

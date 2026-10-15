@@ -63,6 +63,9 @@ func validateGenerationCancellationReceipt(ctx context.Context, tx *gorm.DB, job
 	if step == nil {
 		return nil
 	}
+	if plan.Policy.Mode == "failed_step" {
+		return validateFailedStepCancellation(ctx, tx, job, step, plan, g)
+	}
 	if step.GenerationID == "" && step.GenerationBindingDigest == "" {
 		if step.ClaimID != "" || step.Attempt < g.Number {
 			return fmt.Errorf("only unused current or future attempts may close under current generation")

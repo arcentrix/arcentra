@@ -32,6 +32,9 @@ const RuntimeContainerdOfflineV1 = "containerd-offline-v1"
 // 操作者策略仍默认关闭，启用必须通过配置、身份和生命周期校验
 const OfflineRuntimeAccepted = true
 
+// FailedStepRuntimeAccepted 在实际完整步骤续试验收完成前保持关闭
+const FailedStepRuntimeAccepted = false
+
 // RuntimeResources 保存明确的硬资源上限，不接受宿主路径或可选运行时参数
 type RuntimeResources struct {
 	CPU    string `json:"cpu"`
@@ -66,6 +69,7 @@ type OfflineRuntimePolicy struct {
 	AllowedImages              []string `json:"allowedImages" mapstructure:"allowedImages"`
 	MaxCPU                     string   `json:"maxCpu" mapstructure:"maxCpu"`
 	MaxMemory                  string   `json:"maxMemory" mapstructure:"maxMemory"`
+	AllowFailedStepRetry       bool     `json:"allowFailedStepRetry" mapstructure:"allowFailedStepRetry"`
 }
 
 // Clone 返回独立策略快照
@@ -98,6 +102,9 @@ func (p OfflineRuntimePolicy) Validate() error {
 
 // ValidateProduction 禁止在真实验收完成前启用生产配置
 func (p OfflineRuntimePolicy) ValidateProduction() error {
+	if p.AllowFailedStepRetry && !FailedStepRuntimeAccepted {
+		return fmt.Errorf("offline failed_step retry is unavailable pending complete live-session acceptance")
+	}
 	if p.Enabled && !OfflineRuntimeAccepted {
 		return fmt.Errorf("offline containerd runtime is unavailable pending dedicated-host acceptance")
 	}
@@ -227,7 +234,7 @@ func ValidateJobRuntime(payload *JobRunTaskPayload, policy OfflineRuntimePolicy)
 	if !payload.RetryApprovalRequired && payload.RetryApprovalTimeoutSeconds != 0 {
 		return fmt.Errorf("ungated job cannot carry retry approval budget")
 	}
-	if payload.RetryApprovalRequired && (payload.Runtime == nil || payload.Retry == nil || !policy.AllowWholeJobRetryApproval || payload.RetryApprovalTimeoutSeconds < 1 || payload.RetryApprovalTimeoutSeconds > 3600) {
+	if payload.RetryApprovalRequired && (payload.Runtime == nil || payload.Retry == nil || payload.Retry.Mode != "whole_job" || !policy.AllowWholeJobRetryApproval || payload.RetryApprovalTimeoutSeconds < 1 || payload.RetryApprovalTimeoutSeconds > 3600) {
 		return fmt.Errorf("durable retry approval requires enabled offline whole_job policy")
 	}
 	if payload.Runtime == nil {
@@ -246,6 +253,9 @@ func ValidateJobRuntime(payload *JobRunTaskPayload, policy OfflineRuntimePolicy)
 		return fmt.Errorf("offline runtime reserves its generation environment variable")
 	}
 	for _, step := range payload.Steps {
+		if payload.Retry != nil && payload.Retry.Mode == "failed_step" && step.ContinueOnError {
+			return fmt.Errorf("offline failed_step retry does not support continueOnError")
+		}
 		if _, exists := step.Env[RuntimeGenerationEnv]; exists {
 			return fmt.Errorf("offline runtime reserves its generation environment variable")
 		}
@@ -415,14 +425,20 @@ func ValidateRuntimeRetry(retry *pipelinev1.Retry, policy OfflineRuntimePolicy) 
 	if retry == nil {
 		return nil
 	}
-	if !policy.AllowWholeJobRetry {
-		return fmt.Errorf("offline runtime retries are unsupported unless operator allowWholeJobRetry is enabled")
-	}
-	if retry.Mode != "whole_job" {
-		return fmt.Errorf("offline runtime supports whole_job retry only; failed_step requires a proven quiescence boundary")
+	switch retry.Mode {
+	case "whole_job":
+		if !policy.AllowWholeJobRetry {
+			return fmt.Errorf("offline whole_job retry requires explicit operator allowWholeJobRetry")
+		}
+	case "failed_step":
+		if !policy.AllowFailedStepRetry {
+			return fmt.Errorf("offline failed_step retry requires independently enabled live-session admission")
+		}
+	default:
+		return fmt.Errorf("offline retry mode must be whole_job or failed_step")
 	}
 	if !retry.Idempotent || retry.MaxAttempts < 2 || retry.MaxAttempts > 5 {
-		return fmt.Errorf("offline whole_job retry requires idempotent=true and maxAttempts between 2 and 5")
+		return fmt.Errorf("offline retry requires idempotent=true and maxAttempts between 2 and 5")
 	}
 	if len(retry.AllowedExitCodes) == 0 {
 		return fmt.Errorf("offline retry requires explicit allowedExitCodes")

@@ -41,7 +41,7 @@ type Evidence struct {
 
 // Canonical 校验全部交叉绑定、完整有限计划和生产者清单
 func (e *Evidence) Canonical() (string, error) {
-	if e == nil || !e.RetryPlan.RetryApprovalRequired || e.RetryPlan.RetryApprovalTimeoutSeconds != e.Context.Policy.TimeoutSeconds || e.Version != 1 || e.Kind != Kind || !validID(e.ApprovalID) || e.Identity.Validate() != nil || !e.Context.RequiresJob(e.JobName) || e.Context.PipelineID != e.Identity.PipelineID || e.Context.PipelineRunID != e.Identity.PipelineRunID || e.CreatedAtUnixMilli <= 0 || e.ExpiresAtUnixMilli <= e.CreatedAtUnixMilli || e.ExpiresAtUnixMilli > e.CreatedAtUnixMilli+e.Context.Policy.TimeoutSeconds*1000 {
+	if e == nil || e.RetryPlan.Version != 1 || e.RetryPlan.Policy == nil || e.RetryPlan.Policy.Mode != "whole_job" || !e.RetryPlan.RetryApprovalRequired || e.RetryPlan.RetryApprovalTimeoutSeconds != e.Context.Policy.TimeoutSeconds || e.Version != 1 || e.Kind != Kind || !validID(e.ApprovalID) || e.Identity.Validate() != nil || !e.Context.RequiresJob(e.JobName) || e.Context.PipelineID != e.Identity.PipelineID || e.Context.PipelineRunID != e.Identity.PipelineRunID || e.CreatedAtUnixMilli <= 0 || e.ExpiresAtUnixMilli <= e.CreatedAtUnixMilli || e.ExpiresAtUnixMilli > e.CreatedAtUnixMilli+e.Context.Policy.TimeoutSeconds*1000 {
 		return "", fmt.Errorf("invalid approval evidence identity")
 	}
 	if _, err := e.Context.Canonical(); err != nil {

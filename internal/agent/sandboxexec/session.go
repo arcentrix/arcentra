@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/pkg/sandbox"
+	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/google/uuid"
 )
 
@@ -39,6 +40,8 @@ type Backend interface {
 // 持久会话要求显式非零 UID:GID，旧版 NewSession 才允许空值继承 Agent UID:GID
 // 不改变宿主文件所有权，运行模式及实际 UID 绑定由可信生产配置验证
 type Options struct {
+	StepRetryPlan        *taskpayload.JobRetryPlan
+	StepAttemptSlots     int
 	WorkspaceRoot        string
 	JobRunID             string
 	PipelineRunID        string
@@ -61,11 +64,21 @@ type Session struct {
 	mu                                                sync.Mutex
 	activeCancel                                      context.CancelFunc
 	closing, ready, removed, cleaned                  bool
+	draining                                          bool
+	refused                                           bool
 	sealed                                            bool
 	controller                                        *Controller
 	recordID                                          string
 	createOptions                                     *sandbox.CreateOptions
 	resourceRef                                       sandbox.ResourceRef
+	stepRetry                                         bool
+	stepPlan                                          *taskpayload.JobRetryPlan
+	jobDeadline                                       time.Time
+	live                                              sandbox.LiveSession
+	failedBoundary                                    *sandbox.FailedStepBoundary
+	failedAdmission                                   *taskpayload.StepAttemptAdmission
+	boundaryAudit                                     *taskpayload.PausedStepBoundary
+	boundarySequence                                  uint64
 }
 
 // NewSession 兼容旧版离线测试并立即启动容器，不提供崩溃恢复

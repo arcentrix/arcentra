@@ -14,9 +14,9 @@ import (
 	"github.com/containerd/containerd/namespaces"
 )
 
-// Capability probe only: no exported constructor, retry capability, durable
-// token, or controller admission path exists. A new process can only clean up
-// this resource; it cannot reconstruct the pinned init or resume the task.
+// The original private capability probe remains separate from the default-off
+// live-session adapter. Neither path has a durable capability: a new process
+// can clean up, but cannot reconstruct the pinned init or resume the task.
 // The approved image must provide this non-forking, single-process init.
 var quiescenceInit = []string{"/bin/sleep", "2147483647"}
 
@@ -62,22 +62,31 @@ func newTaskQuiescence(ctx context.Context, s *Containerd, opts CreateOptions, p
 		return nil, err
 	}
 	defer state.release()
+	return initializeQuiescence(ctx, s, state, pin)
+}
+
+// Called with the exact state lifecycle gate held, after controlled init starts.
+func initializeQuiescence(ctx context.Context, s *Containerd, state *containerState, pin func(context.Context, uint32) (pinnedInit, error)) (*taskQuiescence, error) {
 	state.mu.Lock()
 	stopping := state.stopping
 	state.mu.Unlock()
 	if state.removed || state.stopped || stopping || state.task == nil {
 		return nil, fmt.Errorf("quiescence initialization was canceled or removed")
 	}
-	if err = ctx.Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	q := &taskQuiescence{sandbox: s, state: state, pid: state.task.Pid()}
 	if q.pid == 0 {
 		return nil, fmt.Errorf("init task has no kernel PID")
 	}
+	if pin == nil {
+		return nil, fmt.Errorf("kernel init pin is required")
+	}
+	var err error
 	q.pin, err = pin(ctx, q.pid)
-	if err != nil {
-		return nil, fmt.Errorf("pin exact init process: %w", err)
+	if err != nil || q.pin == nil {
+		return nil, fmt.Errorf("pin exact init process: %w", errors.Join(err, fmt.Errorf("kernel init pin unavailable")))
 	}
 	state.quiescence = q
 	if err = q.verify(ctx, containerd.Running, true); err != nil {
@@ -92,7 +101,7 @@ func newTaskQuiescence(ctx context.Context, s *Containerd, opts CreateOptions, p
 }
 
 func (q *taskQuiescence) execute(ctx context.Context, cmd []string, opts *ExecuteOptions) (*ExecuteResult, error) {
-	result, err := q.sandbox.execute(ctx, q.state.ref.ID, cmd, opts, q)
+	result, err := q.sandbox.execute(ctx, q.state.ref.ID, cmd, opts, q, nil)
 	if err != nil {
 		// Execute has released the lifecycle gate. Removal uses a separate,
 		// bounded cleanup context and verifies ownership again, even on cancel.
@@ -157,9 +166,15 @@ func (q *taskQuiescence) verify(ctx context.Context, expected containerd.Process
 	return ctx.Err()
 }
 
-func (q *taskQuiescence) beforeExecute(ctx context.Context) error {
+func (q *taskQuiescence) beforeExecute(ctx context.Context, admission *liveExecution) error {
 	if q.invalid {
 		return fmt.Errorf("quiescence proof is permanently invalid")
+	}
+	if q.state.liveSession != nil {
+		if err := q.state.liveSession.admitStep(admission); err != nil {
+			q.invalid = true
+			return err
+		}
 	}
 	if !q.paused {
 		return q.verify(ctx, containerd.Running, false)
@@ -171,7 +186,7 @@ func (q *taskQuiescence) beforeExecute(ctx context.Context) error {
 	// Stop/Remove cancellation and Resume share one admission boundary.
 	// Cancellation already admitted here wins. Cancellation during the RPC
 	// is checked again before any continuation exec may be created.
-	if err := q.admit(ctx); err != nil {
+	if err := q.admitExecution(ctx, admission); err != nil {
 		q.invalid = true
 		return err
 	}
@@ -198,6 +213,24 @@ func (q *taskQuiescence) admit(ctx context.Context) error {
 	}
 	if q.state.stopping {
 		return fmt.Errorf("quiescence task is stopping")
+	}
+	return nil
+}
+
+func (q *taskQuiescence) admitExecution(ctx context.Context, admission *liveExecution) error {
+	q.state.mu.Lock()
+	defer q.state.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if q.state.stopping {
+		return fmt.Errorf("quiescence task is stopping")
+	}
+	if q.state.liveSession != nil {
+		if admission == nil || admission.session != q.state.liveSession {
+			return fmt.Errorf("live execution admission is missing")
+		}
+		return checkLiveStepTime(admission.step)
 	}
 	return nil
 }

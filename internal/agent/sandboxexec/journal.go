@@ -23,6 +23,7 @@ import (
 
 const journalVersion = 1
 const generationJournalVersion = 2
+const stepAttemptJournalVersion = 3
 const maxJournalRecordBytes = 16 * 1024
 const journalBindingFile = "owner.json"
 const journalLockFile = ".lock"
@@ -59,6 +60,9 @@ type journalRecord struct {
 	TransitionIntent      *taskpayload.JobGenerationTransition     `json:"transitionIntent,omitempty"`
 	SuccessorAdmission    *taskpayload.JobGeneration               `json:"successorAdmission,omitempty"`
 	GenerationObservation *taskpayload.JobGeneration               `json:"generationObservation,omitempty"`
+	ReservedStepAttempts  int                                      `json:"reservedStepAttempts,omitempty"`
+	StepSessionNonce      string                                   `json:"stepSessionNonce,omitempty"`
+	ActiveStepAttempt     string                                   `json:"activeStepAttempt,omitempty"`
 	FinalAcknowledged     bool                                     `json:"finalAcknowledged,omitempty"`
 }
 
@@ -77,6 +81,9 @@ func (c *Controller) document(record *journalRecord) journalDocument {
 	version := journalVersion
 	if record != nil && record.Generation != nil {
 		version = generationJournalVersion
+	}
+	if record != nil && record.StepSessionNonce != "" {
+		version = stepAttemptJournalVersion
 	}
 	return journalDocument{
 		Version: version, ControllerID: c.opts.ControllerID, AgentID: c.opts.AgentID,
@@ -338,6 +345,9 @@ func (c *Controller) resourceOwner(record journalRecord) string {
 	if record.Generation != nil {
 		identity = append(identity, "generation-v2", record.Generation.GenerationID, record.Generation.RuntimeClaimID, record.Generation.BindingDigest)
 	}
+	if record.StepSessionNonce != "" {
+		identity = append(identity, "failed-step-v3", record.StepSessionNonce)
+	}
 	body, _ := sonic.Marshal(identity)
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
@@ -363,6 +373,14 @@ func (c *Controller) validateRecord(record *journalRecord, name string) error {
 		strings.ContainsAny(record.Resource.Snapshotter, "\x00\r\n/\\") ||
 		record.Resource.Owner != c.resourceOwner(*record) {
 		return fmt.Errorf("sandbox journal resource identity is invalid")
+	}
+	if record.StepSessionNonce != "" {
+		nonce, err := uuid.Parse(record.StepSessionNonce)
+		if err != nil || nonce.String() != record.StepSessionNonce || record.Generation == nil || record.Generation.Number != 1 || record.ReservedStepAttempts < 1 || record.ReservedStepAttempts > c.opts.MaxRecords {
+			return fmt.Errorf("invalid original live step session identity")
+		}
+	} else if record.ActiveStepAttempt != "" || record.ReservedStepAttempts != 0 {
+		return fmt.Errorf("legacy journal cannot contain step attempt evidence")
 	}
 	if err := c.validateGenerationRecord(*record); err != nil {
 		return err

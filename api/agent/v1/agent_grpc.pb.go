@@ -35,6 +35,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	AgentService_ReconcileJobRetryApproval_FullMethodName = "/agent.v1.AgentService/ReconcileJobRetryApproval"
 	AgentService_ReconcileJobGeneration_FullMethodName    = "/agent.v1.AgentService/ReconcileJobGeneration"
+	AgentService_ReconcileStepAttempt_FullMethodName      = "/agent.v1.AgentService/ReconcileStepAttempt"
 	AgentService_GetOrRecordJobInputs_FullMethodName      = "/agent.v1.AgentService/GetOrRecordJobInputs"
 	AgentService_InspectJobExecution_FullMethodName       = "/agent.v1.AgentService/InspectJobExecution"
 	AgentService_Heartbeat_FullMethodName                 = "/agent.v1.AgentService/Heartbeat"
@@ -58,6 +59,7 @@ type AgentServiceClient interface {
 	ReconcileJobRetryApproval(ctx context.Context, in *ReconcileJobRetryApprovalRequest, opts ...grpc.CallOption) (*ReconcileJobRetryApprovalResponse, error)
 	// Bounded authenticated generation admission/advance; inspect never authorizes execution.
 	ReconcileJobGeneration(ctx context.Context, in *ReconcileJobGenerationRequest, opts ...grpc.CallOption) (*ReconcileJobGenerationResponse, error)
+	ReconcileStepAttempt(ctx context.Context, in *ReconcileStepAttemptRequest, opts ...grpc.CallOption) (*ReconcileStepAttemptResponse, error)
 	// Get before checkout; record once before staging. Never starts or retries execution.
 	GetOrRecordJobInputs(ctx context.Context, in *GetOrRecordJobInputsRequest, opts ...grpc.CallOption) (*GetOrRecordJobInputsResponse, error)
 	// Read-only confirmation for recovery of the original runtime execution.
@@ -106,6 +108,16 @@ func (c *agentServiceClient) ReconcileJobGeneration(ctx context.Context, in *Rec
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReconcileJobGenerationResponse)
 	err := c.cc.Invoke(ctx, AgentService_ReconcileJobGeneration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentServiceClient) ReconcileStepAttempt(ctx context.Context, in *ReconcileStepAttemptRequest, opts ...grpc.CallOption) (*ReconcileStepAttemptResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReconcileStepAttemptResponse)
+	err := c.cc.Invoke(ctx, AgentService_ReconcileStepAttempt_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -244,6 +256,7 @@ type AgentServiceServer interface {
 	ReconcileJobRetryApproval(context.Context, *ReconcileJobRetryApprovalRequest) (*ReconcileJobRetryApprovalResponse, error)
 	// Bounded authenticated generation admission/advance; inspect never authorizes execution.
 	ReconcileJobGeneration(context.Context, *ReconcileJobGenerationRequest) (*ReconcileJobGenerationResponse, error)
+	ReconcileStepAttempt(context.Context, *ReconcileStepAttemptRequest) (*ReconcileStepAttemptResponse, error)
 	// Get before checkout; record once before staging. Never starts or retries execution.
 	GetOrRecordJobInputs(context.Context, *GetOrRecordJobInputsRequest) (*GetOrRecordJobInputsResponse, error)
 	// Read-only confirmation for recovery of the original runtime execution.
@@ -283,6 +296,9 @@ func (UnimplementedAgentServiceServer) ReconcileJobRetryApproval(context.Context
 }
 func (UnimplementedAgentServiceServer) ReconcileJobGeneration(context.Context, *ReconcileJobGenerationRequest) (*ReconcileJobGenerationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReconcileJobGeneration not implemented")
+}
+func (UnimplementedAgentServiceServer) ReconcileStepAttempt(context.Context, *ReconcileStepAttemptRequest) (*ReconcileStepAttemptResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReconcileStepAttempt not implemented")
 }
 func (UnimplementedAgentServiceServer) GetOrRecordJobInputs(context.Context, *GetOrRecordJobInputsRequest) (*GetOrRecordJobInputsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetOrRecordJobInputs not implemented")
@@ -373,6 +389,24 @@ func _AgentService_ReconcileJobGeneration_Handler(srv interface{}, ctx context.C
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AgentServiceServer).ReconcileJobGeneration(ctx, req.(*ReconcileJobGenerationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentService_ReconcileStepAttempt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReconcileStepAttemptRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ReconcileStepAttempt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ReconcileStepAttempt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ReconcileStepAttempt(ctx, req.(*ReconcileStepAttemptRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -596,6 +630,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReconcileJobGeneration",
 			Handler:    _AgentService_ReconcileJobGeneration_Handler,
+		},
+		{
+			MethodName: "ReconcileStepAttempt",
+			Handler:    _AgentService_ReconcileStepAttempt_Handler,
 		},
 		{
 			MethodName: "GetOrRecordJobInputs",

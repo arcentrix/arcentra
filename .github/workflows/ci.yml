@@ -136,6 +136,26 @@ jobs:
           done
           go run scripts/acceptance/create_bucket.go
 
+      - name: Verify failed-step admission against disposable MySQL
+        timeout-minutes: 3
+        env:
+          ARCENTRA_STEP_ATTEMPT_MYSQL_TEST: "1"
+          ARCENTRA_STEP_ATTEMPT_MYSQL_DSN: "root:ci-only-mysql-password@tcp(127.0.0.1:13306)/arcentra_step_attempt_test_ci?charset=utf8mb4&parseTime=True&loc=UTC"
+        run: |
+          set -o pipefail
+          # A fresh schema on this run's existing disposable server only.
+          # The fixture refuses nonempty schemas and never creates databases or grants.
+          docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create arcentra_step_attempt_test_ci
+          test_name=TestStepAttemptMySQLExplicitOptInCASAndCancellation
+          go test -race -count=1 -timeout=2m -v -run "^${test_name}$" ./internal/control/repo | tee .acceptance/evidence/step-attempt-mysql.log
+          python3 scripts/acceptance/verify_containerd_test_log.py .acceptance/evidence/step-attempt-mysql.log 1 \
+            "$test_name" \
+            "$test_name/equal_and_conflicting_CAS_current_reports_and_upload_winner" \
+            "$test_name/cancel_before_advance" \
+            "$test_name/advance_before_cancel" \
+            "$test_name/cancel_before_publication" \
+            "$test_name/publication_before_cancel"
+
       - name: Verify real broker, MySQL, S3 and Agent execution
         run: |
           set -o pipefail

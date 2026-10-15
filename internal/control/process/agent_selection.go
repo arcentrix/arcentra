@@ -55,7 +55,7 @@ func (e *Process) selectAgentForRuntime(ctx context.Context, job *spec.Job, runt
 					continue
 				}
 			case taskqueue.RuntimeContainerdOfflineV1:
-				if runtime == nil || agent.OS != "linux" || !capabilities.ContainerdOfflineV1 || job.Retry != nil && !capabilities.ContainerdWholeJobRetryV1 || validation.IsDurableRetryApproval(job, e.offlineRuntimePolicy) && !capabilities.ContainerdRetryApprovalV1 {
+				if runtime == nil || agent.OS != "linux" || !capabilities.ContainerdOfflineV1 || job.Retry != nil && (job.Retry.Mode == "whole_job" && !capabilities.ContainerdWholeJobRetryV1 || job.Retry.Mode == "failed_step" && !capabilities.ContainerdFailedStepRetryV1 || job.Retry.Mode != "whole_job" && job.Retry.Mode != "failed_step") || validation.IsDurableRetryApproval(job, e.offlineRuntimePolicy) && !capabilities.ContainerdRetryApprovalV1 {
 					continue
 				}
 			default:
@@ -171,6 +171,12 @@ func decodeAgentRuntimeCapabilities(data []byte) (taskqueue.AgentRuntimeCapabili
 				return result, fmt.Errorf("invalid runtime retry approval readiness")
 			}
 			result.ContainerdRetryApprovalV1 = ready
+		case "containerdFailedStepRetryV1":
+			ready, ok := value.(bool)
+			if !ok {
+				return result, fmt.Errorf("invalid live step retry readiness")
+			}
+			result.ContainerdFailedStepRetryV1 = ready
 		case "containerdWholeJobRetryV1":
 			ready, ok := value.(bool)
 			if !ok {

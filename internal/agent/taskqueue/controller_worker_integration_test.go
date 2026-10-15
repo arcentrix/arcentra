@@ -137,6 +137,7 @@ type controllerWorkerFixture struct {
 	beforeTerminal      func(context.Context, proto.Message) error
 	observeTerminal     func(context.Context, proto.Message, any, error)
 	observeRequest      func(context.Context, any)
+	afterStepAttempt    func(context.Context, *agentv1.ReconcileStepAttemptRequest, *agentv1.ReconcileStepAttemptResponse, error) error
 	afterGeneration     func(context.Context, *agentv1.ReconcileJobGenerationRequest, *agentv1.ReconcileJobGenerationResponse, error) error
 	afterRetryApproval  func(context.Context, *agentv1.ReconcileJobRetryApprovalRequest, *agentv1.ReconcileJobRetryApprovalResponse, error) error
 	repos               *repo.Repositories
@@ -339,6 +340,17 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 			if hook != nil {
 				approvalResponse, _ := response.(*agentv1.ReconcileJobRetryApprovalResponse)
 				if hookErr := hook(ctx, approvalRequest, approvalResponse, err); hookErr != nil {
+					return nil, hookErr
+				}
+			}
+		}
+		if stepRequest, ok := request.(*agentv1.ReconcileStepAttemptRequest); ok {
+			f.mu.Lock()
+			hook := f.afterStepAttempt
+			f.mu.Unlock()
+			if hook != nil {
+				stepResponse, _ := response.(*agentv1.ReconcileStepAttemptResponse)
+				if hookErr := hook(ctx, stepRequest, stepResponse, err); hookErr != nil {
 					return nil, hookErr
 				}
 			}

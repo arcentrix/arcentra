@@ -734,13 +734,14 @@ func (x *TaskStatus) GetMetrics() map[string]string {
 // Heartbeat request
 // RuntimeCapabilities reports authenticated Agent readiness, independently of editable labels.
 type RuntimeCapabilities struct {
-	state                     protoimpl.MessageState `protogen:"open.v1"`
-	ContainerdRetryApprovalV1 bool                   `protobuf:"varint,4,opt,name=containerd_retry_approval_v1,json=containerdRetryApprovalV1,proto3" json:"containerd_retry_approval_v1,omitempty"` // Durable exact-content retry approval protocol readiness
-	ContainerdOfflineV1       bool                   `protobuf:"varint,1,opt,name=containerd_offline_v1,json=containerdOfflineV1,proto3" json:"containerd_offline_v1,omitempty"`
-	ExecutionMode             string                 `protobuf:"bytes,2,opt,name=execution_mode,json=executionMode,proto3" json:"execution_mode,omitempty"`                                            // baremetal or containerd-offline-v1, independent of readiness
-	ContainerdWholeJobRetryV1 bool                   `protobuf:"varint,3,opt,name=containerd_whole_job_retry_v1,json=containerdWholeJobRetryV1,proto3" json:"containerd_whole_job_retry_v1,omitempty"` // Explicit operator permission and ready generation controller
-	unknownFields             protoimpl.UnknownFields
-	sizeCache                 protoimpl.SizeCache
+	state                       protoimpl.MessageState `protogen:"open.v1"`
+	ContainerdRetryApprovalV1   bool                   `protobuf:"varint,4,opt,name=containerd_retry_approval_v1,json=containerdRetryApprovalV1,proto3" json:"containerd_retry_approval_v1,omitempty"` // Durable exact-content retry approval protocol readiness
+	ContainerdOfflineV1         bool                   `protobuf:"varint,1,opt,name=containerd_offline_v1,json=containerdOfflineV1,proto3" json:"containerd_offline_v1,omitempty"`
+	ExecutionMode               string                 `protobuf:"bytes,2,opt,name=execution_mode,json=executionMode,proto3" json:"execution_mode,omitempty"`                                                   // baremetal or containerd-offline-v1, independent of readiness
+	ContainerdWholeJobRetryV1   bool                   `protobuf:"varint,3,opt,name=containerd_whole_job_retry_v1,json=containerdWholeJobRetryV1,proto3" json:"containerd_whole_job_retry_v1,omitempty"`        // Explicit operator permission and ready generation controller
+	ContainerdFailedStepRetryV1 bool                   `protobuf:"varint,20,opt,name=containerd_failed_step_retry_v1,json=containerdFailedStepRetryV1,proto3" json:"containerd_failed_step_retry_v1,omitempty"` // Independent default-off live step retry protocol; distinct from approval work
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
 }
 
 func (x *RuntimeCapabilities) Reset() {
@@ -797,6 +798,13 @@ func (x *RuntimeCapabilities) GetExecutionMode() string {
 func (x *RuntimeCapabilities) GetContainerdWholeJobRetryV1() bool {
 	if x != nil {
 		return x.ContainerdWholeJobRetryV1
+	}
+	return false
+}
+
+func (x *RuntimeCapabilities) GetContainerdFailedStepRetryV1() bool {
+	if x != nil {
+		return x.ContainerdFailedStepRetryV1
 	}
 	return false
 }
@@ -1801,20 +1809,21 @@ func (x *ArtifactConfig) GetExpireDays() int64 {
 
 // Report step run status request
 type ReportStepRunStatusRequest struct {
-	state                   protoimpl.MessageState `protogen:"open.v1"`
-	AgentId                 string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`                                                            // Agent ID (required)
-	StepRunId               string                 `protobuf:"bytes,2,opt,name=step_run_id,json=stepRunId,proto3" json:"step_run_id,omitempty"`                                                    // Step run ID (required)
-	Status                  v1.StepRunStatus       `protobuf:"varint,3,opt,name=status,proto3,enum=steprun.v1.StepRunStatus" json:"status,omitempty"`                                              // Step run status
-	ExitCode                int32                  `protobuf:"varint,4,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`                                                        // Exit code
-	ErrorMessage            string                 `protobuf:"bytes,5,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`                                             // Error message
-	StartTime               int64                  `protobuf:"varint,6,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`                                                     // Start time (Unix timestamp in seconds)
-	EndTime                 int64                  `protobuf:"varint,7,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`                                                           // End time (Unix timestamp in seconds)
-	Metrics                 map[string]string      `protobuf:"bytes,8,rep,name=metrics,proto3" json:"metrics,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Step run execution metrics
-	GenerationId            string                 `protobuf:"bytes,9,opt,name=generation_id,json=generationId,proto3" json:"generation_id,omitempty"`
-	GenerationBindingDigest string                 `protobuf:"bytes,10,opt,name=generation_binding_digest,json=generationBindingDigest,proto3" json:"generation_binding_digest,omitempty"`
-	RetryableShellExit      bool                   `protobuf:"varint,11,opt,name=retryable_shell_exit,json=retryableShellExit,proto3" json:"retryable_shell_exit,omitempty"` // Explicit pure command failure evidence, false for mixed failures
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	state                      protoimpl.MessageState `protogen:"open.v1"`
+	AgentId                    string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`                                                            // Agent ID (required)
+	StepRunId                  string                 `protobuf:"bytes,2,opt,name=step_run_id,json=stepRunId,proto3" json:"step_run_id,omitempty"`                                                    // Step run ID (required)
+	Status                     v1.StepRunStatus       `protobuf:"varint,3,opt,name=status,proto3,enum=steprun.v1.StepRunStatus" json:"status,omitempty"`                                              // Step run status
+	ExitCode                   int32                  `protobuf:"varint,4,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`                                                        // Exit code
+	ErrorMessage               string                 `protobuf:"bytes,5,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`                                             // Error message
+	StartTime                  int64                  `protobuf:"varint,6,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`                                                     // Start time (Unix timestamp in seconds)
+	EndTime                    int64                  `protobuf:"varint,7,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`                                                           // End time (Unix timestamp in seconds)
+	Metrics                    map[string]string      `protobuf:"bytes,8,rep,name=metrics,proto3" json:"metrics,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Step run execution metrics
+	GenerationId               string                 `protobuf:"bytes,9,opt,name=generation_id,json=generationId,proto3" json:"generation_id,omitempty"`
+	GenerationBindingDigest    string                 `protobuf:"bytes,10,opt,name=generation_binding_digest,json=generationBindingDigest,proto3" json:"generation_binding_digest,omitempty"`
+	RetryableShellExit         bool                   `protobuf:"varint,11,opt,name=retryable_shell_exit,json=retryableShellExit,proto3" json:"retryable_shell_exit,omitempty"`                          // Explicit pure command failure evidence, false for mixed failures
+	StepAttemptAdmissionDigest string                 `protobuf:"bytes,12,opt,name=step_attempt_admission_digest,json=stepAttemptAdmissionDigest,proto3" json:"step_attempt_admission_digest,omitempty"` // Exact immutable failed_step admission, including first attempts
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
 }
 
 func (x *ReportStepRunStatusRequest) Reset() {
@@ -1922,6 +1931,13 @@ func (x *ReportStepRunStatusRequest) GetRetryableShellExit() bool {
 		return x.RetryableShellExit
 	}
 	return false
+}
+
+func (x *ReportStepRunStatusRequest) GetStepAttemptAdmissionDigest() string {
+	if x != nil {
+		return x.StepAttemptAdmissionDigest
+	}
+	return ""
 }
 
 // Report step run status response
@@ -3352,6 +3368,111 @@ func (x *ReconcileJobRetryApprovalResponse) GetResponseJson() string {
 	return ""
 }
 
+// Failed-step admission is immutable; execution permission is a separate fresh observation.
+type ReconcileStepAttemptRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	AgentId        string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	TransitionJson string                 `protobuf:"bytes,2,opt,name=transition_json,json=transitionJson,proto3" json:"transition_json,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ReconcileStepAttemptRequest) Reset() {
+	*x = ReconcileStepAttemptRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReconcileStepAttemptRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReconcileStepAttemptRequest) ProtoMessage() {}
+
+func (x *ReconcileStepAttemptRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReconcileStepAttemptRequest.ProtoReflect.Descriptor instead.
+func (*ReconcileStepAttemptRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *ReconcileStepAttemptRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *ReconcileStepAttemptRequest) GetTransitionJson() string {
+	if x != nil {
+		return x.TransitionJson
+	}
+	return ""
+}
+
+type ReconcileStepAttemptResponse struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	AdmissionJson    string                 `protobuf:"bytes,1,opt,name=admission_json,json=admissionJson,proto3" json:"admission_json,omitempty"`
+	ExecutionAllowed bool                   `protobuf:"varint,2,opt,name=execution_allowed,json=executionAllowed,proto3" json:"execution_allowed,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ReconcileStepAttemptResponse) Reset() {
+	*x = ReconcileStepAttemptResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReconcileStepAttemptResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReconcileStepAttemptResponse) ProtoMessage() {}
+
+func (x *ReconcileStepAttemptResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReconcileStepAttemptResponse.ProtoReflect.Descriptor instead.
+func (*ReconcileStepAttemptResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *ReconcileStepAttemptResponse) GetAdmissionJson() string {
+	if x != nil {
+		return x.AdmissionJson
+	}
+	return ""
+}
+
+func (x *ReconcileStepAttemptResponse) GetExecutionAllowed() bool {
+	if x != nil {
+		return x.ExecutionAllowed
+	}
+	return false
+}
+
 var File_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_agent_v1_agent_proto_rawDesc = "" +
@@ -3401,12 +3522,13 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\ametrics\x18\x06 \x03(\v2!.agent.v1.TaskStatus.MetricsEntryR\ametrics\x1a:\n" +
 	"\fMetricsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf3\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb9\x02\n" +
 	"\x13RuntimeCapabilities\x12?\n" +
 	"\x1ccontainerd_retry_approval_v1\x18\x04 \x01(\bR\x19containerdRetryApprovalV1\x122\n" +
 	"\x15containerd_offline_v1\x18\x01 \x01(\bR\x13containerdOfflineV1\x12%\n" +
 	"\x0eexecution_mode\x18\x02 \x01(\tR\rexecutionMode\x12@\n" +
-	"\x1dcontainerd_whole_job_retry_v1\x18\x03 \x01(\bR\x19containerdWholeJobRetryV1\"\xa2\x02\n" +
+	"\x1dcontainerd_whole_job_retry_v1\x18\x03 \x01(\bR\x19containerdWholeJobRetryV1\x12D\n" +
+	"\x1fcontainerd_failed_step_retry_v1\x18\x14 \x01(\bR\x1bcontainerdFailedStepRetryV1\"\xa2\x02\n" +
 	"\x10HeartbeatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1d\n" +
 	"\n" +
@@ -3515,7 +3637,7 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\vdestination\x18\x03 \x01(\tR\vdestination\x12\x16\n" +
 	"\x06expire\x18\x04 \x01(\bR\x06expire\x12\x1f\n" +
 	"\vexpire_days\x18\x05 \x01(\x03R\n" +
-	"expireDays\"\xa2\x04\n" +
+	"expireDays\"\xe5\x04\n" +
 	"\x1aReportStepRunStatusRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1e\n" +
 	"\vstep_run_id\x18\x02 \x01(\tR\tstepRunId\x121\n" +
@@ -3529,7 +3651,8 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\rgeneration_id\x18\t \x01(\tR\fgenerationId\x12:\n" +
 	"\x19generation_binding_digest\x18\n" +
 	" \x01(\tR\x17generationBindingDigest\x120\n" +
-	"\x14retryable_shell_exit\x18\v \x01(\bR\x12retryableShellExit\x1a:\n" +
+	"\x14retryable_shell_exit\x18\v \x01(\bR\x12retryableShellExit\x12A\n" +
+	"\x1dstep_attempt_admission_digest\x18\f \x01(\tR\x1astepAttemptAdmissionDigest\x1a:\n" +
 	"\fMetricsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"Q\n" +
@@ -3654,7 +3777,13 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12!\n" +
 	"\frequest_json\x18\x02 \x01(\tR\vrequestJson\"H\n" +
 	"!ReconcileJobRetryApprovalResponse\x12#\n" +
-	"\rresponse_json\x18\x01 \x01(\tR\fresponseJson*Q\n" +
+	"\rresponse_json\x18\x01 \x01(\tR\fresponseJson\"a\n" +
+	"\x1bReconcileStepAttemptRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12'\n" +
+	"\x0ftransition_json\x18\x02 \x01(\tR\x0etransitionJson\"r\n" +
+	"\x1cReconcileStepAttemptResponse\x12%\n" +
+	"\x0eadmission_json\x18\x01 \x01(\tR\radmissionJson\x12+\n" +
+	"\x11execution_allowed\x18\x02 \x01(\bR\x10executionAllowed*Q\n" +
 	"\tAckStatus\x12\x1a\n" +
 	"\x16ACK_STATUS_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rACK_STATUS_OK\x10\x01\x12\x15\n" +
@@ -3669,10 +3798,12 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x1bPLUGIN_LOCATION_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16PLUGIN_LOCATION_SERVER\x10\x01\x12\x1b\n" +
 	"\x17PLUGIN_LOCATION_STORAGE\x10\x02\x12\x1c\n" +
-	"\x18PLUGIN_LOCATION_REGISTRY\x10\x032\xf0\t\n" +
+	"\x18PLUGIN_LOCATION_REGISTRY\x10\x032\xd9\n" +
+	"\n" +
 	"\fAgentService\x12t\n" +
 	"\x19ReconcileJobRetryApproval\x12*.agent.v1.ReconcileJobRetryApprovalRequest\x1a+.agent.v1.ReconcileJobRetryApprovalResponse\x12m\n" +
 	"\x16ReconcileJobGeneration\x12'.agent.v1.ReconcileJobGenerationRequest\x1a(.agent.v1.ReconcileJobGenerationResponse\"\x00\x12g\n" +
+	"\x14ReconcileStepAttempt\x12%.agent.v1.ReconcileStepAttemptRequest\x1a&.agent.v1.ReconcileStepAttemptResponse\"\x00\x12g\n" +
 	"\x14GetOrRecordJobInputs\x12%.agent.v1.GetOrRecordJobInputsRequest\x1a&.agent.v1.GetOrRecordJobInputsResponse\"\x00\x12d\n" +
 	"\x13InspectJobExecution\x12$.agent.v1.InspectJobExecutionRequest\x1a%.agent.v1.InspectJobExecutionResponse\"\x00\x12F\n" +
 	"\tHeartbeat\x12\x1a.agent.v1.HeartbeatRequest\x1a\x1b.agent.v1.HeartbeatResponse\"\x00\x12C\n" +
@@ -3702,7 +3833,7 @@ func file_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 52)
+var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
 var file_agent_v1_agent_proto_goTypes = []any{
 	(AckStatus)(0),                            // 0: agent.v1.AckStatus
 	(AgentStatus)(0),                          // 1: agent.v1.AgentStatus
@@ -3749,18 +3880,20 @@ var file_agent_v1_agent_proto_goTypes = []any{
 	(*ReconcileJobGenerationResponse)(nil),    // 42: agent.v1.ReconcileJobGenerationResponse
 	(*ReconcileJobRetryApprovalRequest)(nil),  // 43: agent.v1.ReconcileJobRetryApprovalRequest
 	(*ReconcileJobRetryApprovalResponse)(nil), // 44: agent.v1.ReconcileJobRetryApprovalResponse
-	nil,                     // 45: agent.v1.TaskStatus.MetricsEntry
-	nil,                     // 46: agent.v1.RegisterRequest.LabelsEntry
-	nil,                     // 47: agent.v1.RegisterResponse.LabelsEntry
-	nil,                     // 48: agent.v1.StepRun.EnvEntry
-	nil,                     // 49: agent.v1.StepRun.SecretsEntry
-	nil,                     // 50: agent.v1.ReportStepRunStatusRequest.MetricsEntry
-	nil,                     // 51: agent.v1.UpdateLabelsRequest.LabelsEntry
-	nil,                     // 52: agent.v1.UpdateLabelsResponse.LabelsEntry
-	nil,                     // 53: agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
-	nil,                     // 54: agent.v1.AgentSelector.MatchLabelsEntry
-	(v1.StepRunStatus)(0),   // 55: steprun.v1.StepRunStatus
-	(*structpb.Struct)(nil), // 56: google.protobuf.Struct
+	(*ReconcileStepAttemptRequest)(nil),       // 45: agent.v1.ReconcileStepAttemptRequest
+	(*ReconcileStepAttemptResponse)(nil),      // 46: agent.v1.ReconcileStepAttemptResponse
+	nil,                                       // 47: agent.v1.TaskStatus.MetricsEntry
+	nil,                                       // 48: agent.v1.RegisterRequest.LabelsEntry
+	nil,                                       // 49: agent.v1.RegisterResponse.LabelsEntry
+	nil,                                       // 50: agent.v1.StepRun.EnvEntry
+	nil,                                       // 51: agent.v1.StepRun.SecretsEntry
+	nil,                                       // 52: agent.v1.ReportStepRunStatusRequest.MetricsEntry
+	nil,                                       // 53: agent.v1.UpdateLabelsRequest.LabelsEntry
+	nil,                                       // 54: agent.v1.UpdateLabelsResponse.LabelsEntry
+	nil,                                       // 55: agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
+	nil,                                       // 56: agent.v1.AgentSelector.MatchLabelsEntry
+	(v1.StepRunStatus)(0),                     // 57: steprun.v1.StepRunStatus
+	(*structpb.Struct)(nil),                   // 58: google.protobuf.Struct
 }
 var file_agent_v1_agent_proto_depIdxs = []int32{
 	5,  // 0: agent.v1.ConnectRequest.heartbeat:type_name -> agent.v1.ConnectHeartbeat
@@ -3772,61 +3905,63 @@ var file_agent_v1_agent_proto_depIdxs = []int32{
 	10, // 6: agent.v1.ConnectHeartbeat.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
 	20, // 7: agent.v1.TaskDispatch.step_runs:type_name -> agent.v1.StepRun
 	0,  // 8: agent.v1.TaskAck.status:type_name -> agent.v1.AckStatus
-	55, // 9: agent.v1.TaskStatus.status:type_name -> steprun.v1.StepRunStatus
-	45, // 10: agent.v1.TaskStatus.metrics:type_name -> agent.v1.TaskStatus.MetricsEntry
+	57, // 9: agent.v1.TaskStatus.status:type_name -> steprun.v1.StepRunStatus
+	47, // 10: agent.v1.TaskStatus.metrics:type_name -> agent.v1.TaskStatus.MetricsEntry
 	1,  // 11: agent.v1.HeartbeatRequest.status:type_name -> agent.v1.AgentStatus
 	10, // 12: agent.v1.HeartbeatRequest.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
-	46, // 13: agent.v1.RegisterRequest.labels:type_name -> agent.v1.RegisterRequest.LabelsEntry
+	48, // 13: agent.v1.RegisterRequest.labels:type_name -> agent.v1.RegisterRequest.LabelsEntry
 	10, // 14: agent.v1.RegisterRequest.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
-	47, // 15: agent.v1.RegisterResponse.labels:type_name -> agent.v1.RegisterResponse.LabelsEntry
+	49, // 15: agent.v1.RegisterResponse.labels:type_name -> agent.v1.RegisterResponse.LabelsEntry
 	15, // 16: agent.v1.RegisterResponse.storage:type_name -> agent.v1.StorageConfig
 	20, // 17: agent.v1.FetchStepRunResponse.step_runs:type_name -> agent.v1.StepRun
-	56, // 18: agent.v1.StepRun.args:type_name -> google.protobuf.Struct
-	48, // 19: agent.v1.StepRun.env:type_name -> agent.v1.StepRun.EnvEntry
-	49, // 20: agent.v1.StepRun.secrets:type_name -> agent.v1.StepRun.SecretsEntry
+	58, // 18: agent.v1.StepRun.args:type_name -> google.protobuf.Struct
+	50, // 19: agent.v1.StepRun.env:type_name -> agent.v1.StepRun.EnvEntry
+	51, // 20: agent.v1.StepRun.secrets:type_name -> agent.v1.StepRun.SecretsEntry
 	21, // 21: agent.v1.StepRun.artifacts:type_name -> agent.v1.ArtifactConfig
 	34, // 22: agent.v1.StepRun.agent_selector:type_name -> agent.v1.AgentSelector
 	36, // 23: agent.v1.StepRun.plugins:type_name -> agent.v1.PluginInfo
-	55, // 24: agent.v1.ReportStepRunStatusRequest.status:type_name -> steprun.v1.StepRunStatus
-	50, // 25: agent.v1.ReportStepRunStatusRequest.metrics:type_name -> agent.v1.ReportStepRunStatusRequest.MetricsEntry
-	51, // 26: agent.v1.UpdateLabelsRequest.labels:type_name -> agent.v1.UpdateLabelsRequest.LabelsEntry
-	52, // 27: agent.v1.UpdateLabelsResponse.labels:type_name -> agent.v1.UpdateLabelsResponse.LabelsEntry
-	53, // 28: agent.v1.ReportJobRunStatusRequest.artifact_uris:type_name -> agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
+	57, // 24: agent.v1.ReportStepRunStatusRequest.status:type_name -> steprun.v1.StepRunStatus
+	52, // 25: agent.v1.ReportStepRunStatusRequest.metrics:type_name -> agent.v1.ReportStepRunStatusRequest.MetricsEntry
+	53, // 26: agent.v1.UpdateLabelsRequest.labels:type_name -> agent.v1.UpdateLabelsRequest.LabelsEntry
+	54, // 27: agent.v1.UpdateLabelsResponse.labels:type_name -> agent.v1.UpdateLabelsResponse.LabelsEntry
+	55, // 28: agent.v1.ReportJobRunStatusRequest.artifact_uris:type_name -> agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
 	30, // 29: agent.v1.ReportJobRunStatusRequest.artifacts:type_name -> agent.v1.ArtifactResult
 	29, // 30: agent.v1.ReportJobRunStatusRequest.source_checkout:type_name -> agent.v1.SourceCheckout
-	54, // 31: agent.v1.AgentSelector.match_labels:type_name -> agent.v1.AgentSelector.MatchLabelsEntry
+	56, // 31: agent.v1.AgentSelector.match_labels:type_name -> agent.v1.AgentSelector.MatchLabelsEntry
 	35, // 32: agent.v1.AgentSelector.match_expressions:type_name -> agent.v1.LabelExpression
 	2,  // 33: agent.v1.PluginInfo.location:type_name -> agent.v1.PluginLocation
 	43, // 34: agent.v1.AgentService.ReconcileJobRetryApproval:input_type -> agent.v1.ReconcileJobRetryApprovalRequest
 	41, // 35: agent.v1.AgentService.ReconcileJobGeneration:input_type -> agent.v1.ReconcileJobGenerationRequest
-	39, // 36: agent.v1.AgentService.GetOrRecordJobInputs:input_type -> agent.v1.GetOrRecordJobInputsRequest
-	37, // 37: agent.v1.AgentService.InspectJobExecution:input_type -> agent.v1.InspectJobExecutionRequest
-	11, // 38: agent.v1.AgentService.Heartbeat:input_type -> agent.v1.HeartbeatRequest
-	13, // 39: agent.v1.AgentService.Register:input_type -> agent.v1.RegisterRequest
-	16, // 40: agent.v1.AgentService.Unregister:input_type -> agent.v1.UnregisterRequest
-	18, // 41: agent.v1.AgentService.FetchStepRun:input_type -> agent.v1.FetchStepRunRequest
-	22, // 42: agent.v1.AgentService.ReportStepRunStatus:input_type -> agent.v1.ReportStepRunStatusRequest
-	28, // 43: agent.v1.AgentService.ReportJobRunStatus:input_type -> agent.v1.ReportJobRunStatusRequest
-	24, // 44: agent.v1.AgentService.CancelStepRun:input_type -> agent.v1.CancelStepRunRequest
-	32, // 45: agent.v1.AgentService.CancelJobRun:input_type -> agent.v1.CancelJobRunRequest
-	26, // 46: agent.v1.AgentService.UpdateLabels:input_type -> agent.v1.UpdateLabelsRequest
-	3,  // 47: agent.v1.AgentService.Connect:input_type -> agent.v1.ConnectRequest
-	44, // 48: agent.v1.AgentService.ReconcileJobRetryApproval:output_type -> agent.v1.ReconcileJobRetryApprovalResponse
-	42, // 49: agent.v1.AgentService.ReconcileJobGeneration:output_type -> agent.v1.ReconcileJobGenerationResponse
-	40, // 50: agent.v1.AgentService.GetOrRecordJobInputs:output_type -> agent.v1.GetOrRecordJobInputsResponse
-	38, // 51: agent.v1.AgentService.InspectJobExecution:output_type -> agent.v1.InspectJobExecutionResponse
-	12, // 52: agent.v1.AgentService.Heartbeat:output_type -> agent.v1.HeartbeatResponse
-	14, // 53: agent.v1.AgentService.Register:output_type -> agent.v1.RegisterResponse
-	17, // 54: agent.v1.AgentService.Unregister:output_type -> agent.v1.UnregisterResponse
-	19, // 55: agent.v1.AgentService.FetchStepRun:output_type -> agent.v1.FetchStepRunResponse
-	23, // 56: agent.v1.AgentService.ReportStepRunStatus:output_type -> agent.v1.ReportStepRunStatusResponse
-	31, // 57: agent.v1.AgentService.ReportJobRunStatus:output_type -> agent.v1.ReportJobRunStatusResponse
-	25, // 58: agent.v1.AgentService.CancelStepRun:output_type -> agent.v1.CancelStepRunResponse
-	33, // 59: agent.v1.AgentService.CancelJobRun:output_type -> agent.v1.CancelJobRunResponse
-	27, // 60: agent.v1.AgentService.UpdateLabels:output_type -> agent.v1.UpdateLabelsResponse
-	4,  // 61: agent.v1.AgentService.Connect:output_type -> agent.v1.ConnectResponse
-	48, // [48:62] is the sub-list for method output_type
-	34, // [34:48] is the sub-list for method input_type
+	45, // 36: agent.v1.AgentService.ReconcileStepAttempt:input_type -> agent.v1.ReconcileStepAttemptRequest
+	39, // 37: agent.v1.AgentService.GetOrRecordJobInputs:input_type -> agent.v1.GetOrRecordJobInputsRequest
+	37, // 38: agent.v1.AgentService.InspectJobExecution:input_type -> agent.v1.InspectJobExecutionRequest
+	11, // 39: agent.v1.AgentService.Heartbeat:input_type -> agent.v1.HeartbeatRequest
+	13, // 40: agent.v1.AgentService.Register:input_type -> agent.v1.RegisterRequest
+	16, // 41: agent.v1.AgentService.Unregister:input_type -> agent.v1.UnregisterRequest
+	18, // 42: agent.v1.AgentService.FetchStepRun:input_type -> agent.v1.FetchStepRunRequest
+	22, // 43: agent.v1.AgentService.ReportStepRunStatus:input_type -> agent.v1.ReportStepRunStatusRequest
+	28, // 44: agent.v1.AgentService.ReportJobRunStatus:input_type -> agent.v1.ReportJobRunStatusRequest
+	24, // 45: agent.v1.AgentService.CancelStepRun:input_type -> agent.v1.CancelStepRunRequest
+	32, // 46: agent.v1.AgentService.CancelJobRun:input_type -> agent.v1.CancelJobRunRequest
+	26, // 47: agent.v1.AgentService.UpdateLabels:input_type -> agent.v1.UpdateLabelsRequest
+	3,  // 48: agent.v1.AgentService.Connect:input_type -> agent.v1.ConnectRequest
+	44, // 49: agent.v1.AgentService.ReconcileJobRetryApproval:output_type -> agent.v1.ReconcileJobRetryApprovalResponse
+	42, // 50: agent.v1.AgentService.ReconcileJobGeneration:output_type -> agent.v1.ReconcileJobGenerationResponse
+	46, // 51: agent.v1.AgentService.ReconcileStepAttempt:output_type -> agent.v1.ReconcileStepAttemptResponse
+	40, // 52: agent.v1.AgentService.GetOrRecordJobInputs:output_type -> agent.v1.GetOrRecordJobInputsResponse
+	38, // 53: agent.v1.AgentService.InspectJobExecution:output_type -> agent.v1.InspectJobExecutionResponse
+	12, // 54: agent.v1.AgentService.Heartbeat:output_type -> agent.v1.HeartbeatResponse
+	14, // 55: agent.v1.AgentService.Register:output_type -> agent.v1.RegisterResponse
+	17, // 56: agent.v1.AgentService.Unregister:output_type -> agent.v1.UnregisterResponse
+	19, // 57: agent.v1.AgentService.FetchStepRun:output_type -> agent.v1.FetchStepRunResponse
+	23, // 58: agent.v1.AgentService.ReportStepRunStatus:output_type -> agent.v1.ReportStepRunStatusResponse
+	31, // 59: agent.v1.AgentService.ReportJobRunStatus:output_type -> agent.v1.ReportJobRunStatusResponse
+	25, // 60: agent.v1.AgentService.CancelStepRun:output_type -> agent.v1.CancelStepRunResponse
+	33, // 61: agent.v1.AgentService.CancelJobRun:output_type -> agent.v1.CancelJobRunResponse
+	27, // 62: agent.v1.AgentService.UpdateLabels:output_type -> agent.v1.UpdateLabelsResponse
+	4,  // 63: agent.v1.AgentService.Connect:output_type -> agent.v1.ConnectResponse
+	49, // [49:64] is the sub-list for method output_type
+	34, // [34:49] is the sub-list for method input_type
 	34, // [34:34] is the sub-list for extension type_name
 	34, // [34:34] is the sub-list for extension extendee
 	0,  // [0:34] is the sub-list for field type_name
@@ -3852,7 +3987,7 @@ func file_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_v1_agent_proto_rawDesc), len(file_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   52,
+			NumMessages:   54,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

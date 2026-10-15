@@ -73,11 +73,13 @@ type Controller struct {
 	runtimeIOIdentity     string
 	records               map[string]journalRecord
 	admissions            map[string]generationAdmission
+	stepAttempts          map[string]stepAttemptJournal
 	sessions              map[string]*Session
 	runtimeBlocked        map[string]error
 	ready                 bool
 	reconciliationPending bool
 	closed                bool
+	draining              bool
 	fatal                 error
 	hook                  func(string) error
 }
@@ -110,7 +112,7 @@ func openController(ctx context.Context, backend DurableBackend, opts Controller
 	if pathsOverlap(opts.JournalRoot, opts.WorkspaceRoot) {
 		return nil, fmt.Errorf("sandbox journal must be separate from the workspace root")
 	}
-	c := &Controller{opts: opts, backend: backend, records: make(map[string]journalRecord), admissions: make(map[string]generationAdmission), sessions: make(map[string]*Session), runtimeBlocked: make(map[string]error), hook: hook}
+	c := &Controller{opts: opts, backend: backend, records: make(map[string]journalRecord), admissions: make(map[string]generationAdmission), stepAttempts: make(map[string]stepAttemptJournal), sessions: make(map[string]*Session), runtimeBlocked: make(map[string]error), hook: hook}
 	defer func() {
 		if resultErr != nil {
 			_ = c.closeHandles()
@@ -168,7 +170,7 @@ func openController(ctx context.Context, backend DurableBackend, opts Controller
 		return nil, err
 	}
 	c.ready = true
-	c.reconciliationPending = len(c.records)+len(c.admissions) > 0
+	c.reconciliationPending = c.journalCount() > 0
 	return c, nil
 }
 
@@ -192,6 +194,7 @@ func (c *Controller) load(ctx context.Context) error {
 	}
 	names := make([]string, 0, len(entries))
 	admissionNames := make([]string, 0, len(entries))
+	stepNames := make([]string, 0, len(entries))
 	hasBinding := false
 	for _, entry := range entries {
 		name := entry.Name()
@@ -210,6 +213,14 @@ func (c *Controller) load(ctx context.Context) error {
 		case journalBindingFile:
 			hasBinding = true
 		default:
+			if strings.HasPrefix(name, "step-") {
+				id, parseErr := uuid.Parse(strings.TrimSuffix(strings.TrimPrefix(name, "step-"), ".json"))
+				if parseErr != nil || name != "step-"+id.String()+".json" {
+					return fmt.Errorf("invalid step attempt journal filename")
+				}
+				stepNames = append(stepNames, name)
+				continue
+			}
 			if strings.HasPrefix(name, "admission-") {
 				id, err := uuid.Parse(strings.TrimSuffix(strings.TrimPrefix(name, "admission-"), ".json"))
 				if err != nil || name != "admission-"+id.String()+".json" {
@@ -226,7 +237,7 @@ func (c *Controller) load(ctx context.Context) error {
 		}
 	}
 	if !hasBinding {
-		if len(names)+len(admissionNames) != 0 {
+		if len(names)+len(admissionNames)+len(stepNames) != 0 {
 			return fmt.Errorf("sandbox journal owner binding is missing")
 		}
 		return c.writeJournal(ctx, journalBindingFile, nil)
@@ -259,6 +270,16 @@ func (c *Controller) load(ctx context.Context) error {
 			return err
 		}
 		c.records[record.ID] = *record
+	}
+	for _, name := range stepNames {
+		a, err := c.readStepAttempt(ctx, name)
+		if err != nil {
+			return err
+		}
+		c.stepAttempts[name] = *a
+	}
+	if err := c.validateStepAttemptHistory(); err != nil {
+		return err
 	}
 	return c.validateGenerationHistory()
 }
@@ -410,16 +431,16 @@ func (c *Controller) persist(ctx context.Context, record journalRecord) error {
 // Allocate 持久化完整资源意图并分配工作目录，不创建或启动任何容器
 // 调用方在可信输入暂存成功后调用 Start，输入凭据不会写入日志
 func (c *Controller) Allocate(ctx context.Context, opts Options) (*Session, error) {
-	return c.allocate(ctx, opts, nil)
+	return c.allocate(ctx, opts, nil, false)
 }
 
-func (c *Controller) allocate(ctx context.Context, opts Options, generation *taskpayload.JobGeneration) (*Session, error) {
+func (c *Controller) allocate(ctx context.Context, opts Options, generation *taskpayload.JobGeneration, stepRetry bool) (*Session, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := c.check(ctx); err != nil {
 		return nil, err
 	}
-	if c.reconciliationPending || len(c.runtimeBlocked) != 0 || c.pendingGenerationHandoff() {
+	if c.draining || c.reconciliationPending || len(c.runtimeBlocked) != 0 || (c.pendingGenerationHandoff() || c.pendingStepAttemptHandoff()) {
 		return nil, fmt.Errorf("sandbox startup has unacknowledged execution outcomes")
 	}
 	if opts.WorkspaceRoot != "" && opts.WorkspaceRoot != c.opts.WorkspaceRoot {
@@ -441,7 +462,14 @@ func (c *Controller) allocate(ctx context.Context, opts Options, generation *tas
 	if err := c.validateGenerationAllocation(ctx, opts, generation); err != nil {
 		return nil, err
 	}
-	if len(c.records)+len(c.admissions) >= c.opts.MaxRecords {
+	needed := 1
+	if stepRetry {
+		if opts.StepAttemptSlots < 1 || opts.StepAttemptSlots > c.opts.MaxRecords {
+			return nil, fmt.Errorf("failed-step plan requires a bounded reserved attempt count")
+		}
+		needed += opts.StepAttemptSlots
+	}
+	if c.reservedJournalCount()+needed > c.opts.MaxRecords {
 		return nil, fmt.Errorf("sandbox journal record quota exceeded")
 	}
 	id := uuid.NewString()
@@ -451,6 +479,10 @@ func (c *Controller) allocate(ctx context.Context, opts Options, generation *tas
 	record := journalRecord{
 		ID: id, PipelineRunID: opts.PipelineRunID, JobRunID: opts.JobRunID, ExecutionClaimID: opts.ExecutionClaimID,
 		RuntimeBindingDigest: opts.RuntimeBindingDigest, Directory: "job-" + id, Phase: phaseIntent, Generation: generation,
+	}
+	if stepRetry {
+		record.StepSessionNonce = uuid.NewString()
+		record.ReservedStepAttempts = opts.StepAttemptSlots
 	}
 	ref, err := c.backend.PrepareResource(ctx, "arcentra-"+id, "pending-owner-resolution")
 	if err != nil {
@@ -500,7 +532,7 @@ func (c *Controller) allocate(ctx context.Context, opts Options, generation *tas
 	s := &Session{
 		backend: c.backend, controller: c, recordID: id, root: c.workspaceRoot, rootPath: c.opts.WorkspaceRoot,
 		directory: record.Directory, workspace: workspace, workspaceInfo: info, containerID: ref.ID, user: user, resourceRef: ref,
-		gate: make(chan struct{}, 1), createOptions: &sandbox.CreateOptions{
+		stepRetry: stepRetry, gate: make(chan struct{}, 1), createOptions: &sandbox.CreateOptions{
 			Resource: &ref, Image: opts.Image, User: user,
 			Command:    []string{"sh", "-ec", "trap 'exit 0' TERM INT; while :; do sleep 1; done"},
 			WorkingDir: "/", NetworkMode: "none", Resources: &resources,
@@ -518,7 +550,7 @@ func (c *Controller) allocate(ctx context.Context, opts Options, generation *tas
 func (c *Controller) Ready() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.ready && !c.closed && c.fatal == nil && !c.reconciliationPending && len(c.runtimeBlocked) == 0 && !c.pendingGenerationHandoff()
+	return c.ready && !c.closed && !c.draining && c.fatal == nil && !c.reconciliationPending && len(c.runtimeBlocked) == 0 && !c.pendingGenerationHandoff() && !c.pendingStepAttemptHandoff()
 }
 
 // HasJob 判断作业是否仍有执行记录或等待业务结果确认的墓碑
@@ -653,6 +685,9 @@ func (c *Controller) AcknowledgeCompletion(ctx context.Context, executionClaimID
 			}
 		}
 	}
+	if err := c.acknowledgeStepAttempts(ctx, executionClaimID); err != nil {
+		return c.poison(err)
+	}
 	for _, id := range ids {
 		if err := c.removeJournalRecord(ctx, id); err != nil {
 			return c.poison(err)
@@ -663,7 +698,7 @@ func (c *Controller) AcknowledgeCompletion(ctx context.Context, executionClaimID
 			return c.poison(err)
 		}
 	}
-	if len(c.records)+len(c.admissions) == 0 {
+	if c.journalCount() == 0 {
 		c.reconciliationPending = false
 	}
 	return nil

@@ -57,10 +57,10 @@ func validateRuntimeStepClaim(ctx context.Context, tx *gorm.DB, expected *model.
 		return err
 	}
 	var current model.StepRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("step_run_id", "job_run_id", "pipeline_id", "pipeline_run_id", "agent_id", "claim_id", "status", "generation_id", "generation_binding_digest").Where("step_run_id = ?", expected.StepRunID).First(&current).Error; err != nil {
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("step_run_id", "job_run_id", "pipeline_id", "pipeline_run_id", "agent_id", "claim_id", "status", "generation_id", "generation_binding_digest", "attempt_admission_request", "attempt_admission_request_digest", "attempt_admission").Where("step_run_id = ?", expected.StepRunID).First(&current).Error; err != nil {
 		return err
 	}
-	if current.StepRunID != expected.StepRunID || current.JobRunID != expected.JobRunID || current.PipelineID != expected.PipelineID || current.PipelineRunID != expected.PipelineRunID || current.AgentID != expected.AgentID || current.ClaimID != expected.ClaimID || current.Status != expected.Status || current.GenerationID != expected.GenerationID || current.GenerationBindingDigest != expected.GenerationBindingDigest {
+	if !sameStepAdmission(&current, expected) || current.StepRunID != expected.StepRunID || current.JobRunID != expected.JobRunID || current.PipelineID != expected.PipelineID || current.PipelineRunID != expected.PipelineRunID || current.AgentID != expected.AgentID || current.ClaimID != expected.ClaimID || current.Status != expected.Status || current.GenerationID != expected.GenerationID || current.GenerationBindingDigest != expected.GenerationBindingDigest {
 		return fmt.Errorf("runtime step ownership changed")
 	}
 	return nil

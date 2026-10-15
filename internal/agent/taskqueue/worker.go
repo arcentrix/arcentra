@@ -342,8 +342,25 @@ func executeStepRunViaExecutor(
 	if execErr == nil && status != steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS {
 		execErr = fmt.Errorf("step failed: %s", errMsg)
 	}
+	// 日志完成后再验证本地暂停能力，冻结终态之前决定纯命令失败标志
+	// 后续回执重放绝不重新观察能力或改变已经持久化的终态字节
+	pureStepExit := false
+	if attempt := stepAttemptFromContext(ctx); attempt != nil && status == steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED {
+		if generation := generationFromContext(ctx); generation != nil {
+			if code, eligible := sandboxexec.RetryCommandExitCode(execErr, generation.payload.Retry.AllowedExitCodes); eligible && code == exitCode {
+				if boundaryErr := attempt.session.HasPausedStepBoundary(stepCtx, attempt.admission); boundaryErr != nil {
+					execErr = errors.Join(execErr, fmt.Errorf("failed-step continuation refused: %w", boundaryErr))
+					errMsg = execErr.Error()
+				} else {
+					pureStepExit = true
+				}
+			}
+		}
+	}
 	return retainStepReport(ctx, payload.StepRunID, execErr, func(reportCtx context.Context) error {
-		if generation := generationFromContext(reportCtx); generation != nil && generation.retryableStep(payload.StepRunID) && status == steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED {
+		if stepAttemptFromContext(reportCtx) != nil {
+			reportCtx = context.WithValue(reportCtx, generationPureExitKey{}, pureStepExit)
+		} else if generation := generationFromContext(reportCtx); generation != nil && generation.retryableStep(payload.StepRunID) && status == steprunv1.StepRunStatus_STEP_RUN_STATUS_FAILED {
 			code, eligible := sandboxexec.RetryCommandExitCode(execErr, generation.payload.Retry.AllowedExitCodes)
 			if eligible && code == exitCode {
 				reportCtx = context.WithValue(reportCtx, generationPureExitKey{}, true)
@@ -503,7 +520,12 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 	var session *offlineJobSession
 	runtimeCompletionRequired := false
 	if jobErr == nil && payload.Runtime != nil && payload.Retry != nil {
-		generated := executeContainerGenerations(ctx, jobCtx, agentConf, grpcClient, execManager, payload, st, reference, start)
+		var generated generationJobResult
+		if payload.Retry.Mode == "failed_step" {
+			generated = executeContainerFailedSteps(ctx, jobCtx, agentConf, grpcClient, execManager, payload, st, reference, start)
+		} else {
+			generated = executeContainerGenerations(ctx, jobCtx, agentConf, grpcClient, execManager, payload, st, reference, start)
+		}
 		if generated.uncertain {
 			return generated.err
 		}
@@ -766,6 +788,12 @@ func reportStepRunStatus(
 		req.GenerationBindingDigest = generation.generation.BindingDigest
 		pure, _ := reportCtx.Value(generationPureExitKey{}).(bool)
 		req.RetryableShellExit = pure
+	}
+	if attempt := stepAttemptFromContext(reportCtx); attempt != nil {
+		if attempt.admission.Scope.StepRunID != stepRunID {
+			return terminalPersistenceFailure(fmt.Errorf("step report changed its admitted attempt"))
+		}
+		req.StepAttemptAdmissionDigest = attempt.admission.BindingDigest
 	}
 	if status >= steprunv1.StepRunStatus_STEP_RUN_STATUS_SUCCESS {
 		return reportTerminalStatus(reportCtx, grpcClient, agentConf, "step", stepRunID, req)

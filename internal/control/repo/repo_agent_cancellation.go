@@ -119,6 +119,7 @@ func (r *StepRunRepo) CommitCancellationReceipt(ctx context.Context, expected *m
 			Where("status = ? AND claim_id = ? AND cancellation_claim_id = ? AND terminal_report_digest = ?", model.JobRunStatusCancelled, expected.ClaimID, expected.CancellationClaimID, "").
 			Where("attempt = ? AND step_index = ? AND previous_step_run_id = ?", expected.Attempt, expected.StepIndex, expected.PreviousStepRunID).
 			Where("generation_id = ? AND generation_binding_digest = ?", expected.GenerationID, expected.GenerationBindingDigest).
+			Where("attempt_admission_request = ? AND attempt_admission_request_digest = ? AND attempt_admission = ?", expected.AttemptAdmissionRequest, expected.AttemptAdmissionRequestDigest, expected.AttemptAdmission).
 			UpdateColumn("terminal_report_digest", digest))
 	})
 }

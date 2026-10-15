@@ -35,6 +35,7 @@ import (
 	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
 	"github.com/containerd/containerd"
+	tasksapi "github.com/containerd/containerd/api/services/tasks/v1"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/namespaces"
 )
@@ -86,9 +87,26 @@ func realContainerEnvironment(getenv func(string) string) (*realContainerSetting
 
 // startContainerAcceptanceWorker 只替换关闭门禁之前的测试组装，使用实际处理器、队列、持久日志和认证恢复
 // 当门禁独立开放后，同一验收自动改用未修改的生产 StartWorker
-func startContainerAcceptanceWorker(ctx context.Context, conf *config.AgentConfig, client *agentgrpc.ClientWrapper, manager *executor.Manager) (_ nova.TaskQueue, resultErr error) {
-	if taskpayload.OfflineRuntimeAccepted {
-		return StartWorker(ctx, conf, client, manager)
+func startContainerAcceptanceWorker(ctx context.Context, conf *config.AgentConfig, client *agentgrpc.ClientWrapper, manager *executor.Manager) (nova.TaskQueue, error) {
+	return startContainerAcceptanceWorkerObserved(ctx, conf, client, manager, nil)
+}
+
+func startContainerAcceptanceWorkerObserved(ctx context.Context, conf *config.AgentConfig, client *agentgrpc.ClientWrapper, manager *executor.Manager, observer *sandbox.ContainerAcceptanceObserver) (_ nova.TaskQueue, resultErr error) {
+	if taskpayload.OfflineRuntimeAccepted && (!conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry || taskpayload.FailedStepRuntimeAccepted) {
+		queue, err := StartWorker(ctx, conf, client, manager)
+		if err != nil || observer == nil {
+			return queue, err
+		}
+		worker, ok := queue.(*workerQueues)
+		if !ok || worker.offline == nil {
+			_ = queue.Stop()
+			return nil, fmt.Errorf("production worker did not return its exact runtime")
+		}
+		if err := sandbox.ObserveContainerAcceptanceRuntime(worker.offline.backend, *observer); err != nil {
+			_ = queue.Stop()
+			return nil, err
+		}
+		return queue, nil
 	}
 	if os.Getenv("ARCENTRA_CONTAINERD_ACCEPTANCE") != "1" || os.Getenv("ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE") != "1" {
 		return nil, fmt.Errorf("explicit container acceptance flags required")
@@ -137,7 +155,7 @@ func startContainerAcceptanceWorker(ctx context.Context, conf *config.AgentConfi
 	if err := reports.replayBound(ctx, client, conf); err != nil {
 		return nil, err
 	}
-	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: cfg.UnixSocket, Namespace: cfg.Namespace, NetworkMode: "none", RuntimeRoot: cfg.RuntimeRoot, FIFODir: cfg.FIFODir}, log.Logger{})
+	backend, err := sandbox.NewContainerdSandbox(&sandbox.ContainerdConfig{UnixSocket: cfg.UnixSocket, Namespace: cfg.Namespace, NetworkMode: "none", RuntimeRoot: cfg.RuntimeRoot, FIFODir: cfg.FIFODir, EnableLiveStepRetry: cfg.Policy.AllowFailedStepRetry}, log.Logger{})
 	if err != nil {
 		return nil, err
 	}
@@ -146,11 +164,16 @@ func startContainerAcceptanceWorker(ctx context.Context, conf *config.AgentConfi
 			_ = backend.Close()
 		}
 	}()
+	if observer != nil {
+		if err := sandbox.ObserveContainerAcceptanceRuntime(backend, *observer); err != nil {
+			return nil, err
+		}
+	}
 	controller, err := sandboxexec.OpenController(ctx, backend, sandboxexec.ControllerOptions{JournalRoot: cfg.JournalDir, WorkspaceRoot: conf.Agent.WorkspaceDir, ControllerID: binding, AgentID: conf.Agent.ID, MaxRecords: 1000})
 	if err != nil {
 		return nil, err
 	}
-	offline := &durableOfflineRuntime{backend: backend, controller: controller, user: cfg.User}
+	offline := &durableOfflineRuntime{backend: backend, controller: controller, user: cfg.User, allowFailedStepRetry: cfg.Policy.AllowFailedStepRetry, drainDone: make(chan struct{})}
 	defer func() {
 		if resultErr != nil {
 			_ = offline.Close(context.Background())
@@ -162,7 +185,11 @@ func startContainerAcceptanceWorker(ctx context.Context, conf *config.AgentConfi
 	if !offline.Ready() {
 		return nil, fmt.Errorf("real runtime recovery did not become ready")
 	}
-	workerCtx := withOfflineJobRuntime(ctx, offline)
+	var executionRuntime offlineJobRuntime = offline
+	if cfg.Policy.AllowFailedStepRetry && !taskpayload.FailedStepRuntimeAccepted {
+		executionRuntime = &containerAcceptanceStepRuntime{durableOfflineRuntime: offline}
+	}
+	workerCtx := withOfflineJobRuntime(ctx, executionRuntime)
 	qcfg := conf.TaskQueue
 	codec, err := taskpayload.ResolveMessageCodec(qcfg.MessageFormat, qcfg.MessageCodec)
 	if err != nil {
@@ -228,18 +255,19 @@ func startContainerAcceptanceWorker(ctx context.Context, conf *config.AgentConfi
 
 type containerAcceptanceJournal struct {
 	Record *struct {
-		SessionID      string                                   `json:"id"`
-		RunID          string                                   `json:"pipelineRunID"`
-		JobRunID       string                                   `json:"jobRunID"`
-		Claim          string                                   `json:"executionClaimID"`
-		Binding        string                                   `json:"runtimeBindingDigest"`
-		Directory      string                                   `json:"directory"`
-		Phase          string                                   `json:"phase"`
-		Device         uint64                                   `json:"device"`
-		Inode          uint64                                   `json:"inode"`
-		Resource       sandbox.ResourceRef                      `json:"resource"`
-		Generation     *taskpayload.JobGeneration               `json:"generation,omitempty"`
-		CleanupReceipt *taskpayload.JobGenerationCleanupReceipt `json:"cleanupReceipt,omitempty"`
+		StepSessionNonce string                                   `json:"stepSessionNonce,omitempty"`
+		SessionID        string                                   `json:"id"`
+		RunID            string                                   `json:"pipelineRunID"`
+		JobRunID         string                                   `json:"jobRunID"`
+		Claim            string                                   `json:"executionClaimID"`
+		Binding          string                                   `json:"runtimeBindingDigest"`
+		Directory        string                                   `json:"directory"`
+		Phase            string                                   `json:"phase"`
+		Device           uint64                                   `json:"device"`
+		Inode            uint64                                   `json:"inode"`
+		Resource         sandbox.ResourceRef                      `json:"resource"`
+		Generation       *taskpayload.JobGeneration               `json:"generation,omitempty"`
+		CleanupReceipt   *taskpayload.JobGenerationCleanupReceipt `json:"cleanupReceipt,omitempty"`
 	} `json:"record"`
 }
 
@@ -264,6 +292,12 @@ func containerAcceptanceRecords(root string) ([]containerAcceptanceJournal, erro
 		}
 		if strings.HasPrefix(entry.Name(), "admission-") {
 			if err := validateContainerAcceptanceAdmission(root, entry.Name(), data); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if strings.HasPrefix(entry.Name(), "step-") {
+			if _, err := validateContainerAcceptanceStepAttempt(root, entry.Name(), data); err != nil {
 				return nil, err
 			}
 			continue
@@ -324,24 +358,39 @@ func (s *containerAcceptanceStorage) UploadStream(ctx context.Context, key strin
 	}
 	defer client.Close()
 	runtimeCtx := namespaces.WithNamespace(ctx, s.namespace)
-	container, err := client.LoadContainer(runtimeCtx, record.Resource.ID)
-	if err != nil {
-		return err
-	}
-	task, err := container.Task(runtimeCtx, nil)
-	if err != nil {
-		return err
-	}
-	state, err := task.Status(runtimeCtx)
-	if err != nil {
-		return err
-	}
-	if state.Status != containerd.Stopped {
-		return fmt.Errorf("artifact upload observed live container task: %s", state.Status)
-	}
-	pids, err := task.Pids(runtimeCtx)
-	if (err != nil && !errdefs.IsNotFound(errdefs.FromGRPC(err))) || len(pids) != 0 {
-		return fmt.Errorf("artifact upload observed remaining container processes: count=%d error=%v", len(pids), err)
+	if record.StepSessionNonce != "" {
+		// Live-session sealing removes its exact task/container/snapshot to
+		// avoid later cleanup relying on a dead pidfd. Only its workspace is
+		// retained for immutable final publication. Prove all three absences.
+		if _, err := client.LoadContainer(runtimeCtx, record.Resource.ID); !errdefs.IsNotFound(errdefs.FromGRPC(err)) {
+			return fmt.Errorf("live sealed upload retained container metadata: %v", err)
+		}
+		if _, err := client.SnapshotService(record.Resource.Snapshotter).Stat(runtimeCtx, record.Resource.ID+"-snapshot"); !errdefs.IsNotFound(errdefs.FromGRPC(err)) {
+			return fmt.Errorf("live sealed upload retained snapshot: %v", err)
+		}
+		if _, err := client.TaskService().Get(runtimeCtx, &tasksapi.GetRequest{ContainerID: record.Resource.ID}); !errdefs.IsNotFound(errdefs.FromGRPC(err)) {
+			return fmt.Errorf("live sealed upload retained task: %v", err)
+		}
+	} else {
+		container, err := client.LoadContainer(runtimeCtx, record.Resource.ID)
+		if err != nil {
+			return err
+		}
+		task, err := container.Task(runtimeCtx, nil)
+		if err != nil {
+			return err
+		}
+		state, err := task.Status(runtimeCtx)
+		if err != nil {
+			return err
+		}
+		if state.Status != containerd.Stopped {
+			return fmt.Errorf("artifact upload observed live container task: %s", state.Status)
+		}
+		pids, err := task.Pids(runtimeCtx)
+		if (err != nil && !errdefs.IsNotFound(errdefs.FromGRPC(err))) || len(pids) != 0 {
+			return fmt.Errorf("artifact upload observed remaining container processes: count=%d error=%v", len(pids), err)
+		}
 	}
 	writer := filepath.Join(s.workspace, record.Directory, "dist", "background.txt")
 	before, readErr := os.ReadFile(writer)

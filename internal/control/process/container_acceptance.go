@@ -13,12 +13,13 @@ import (
 )
 
 // ConfigureContainerAcceptancePolicy 仅在专用验收构建注入单一固定镜像策略
-// 普通发行构建没有此方法；不会改变生产门禁或已提交作业的策略
+// 普通发行构建没有此方法；只为尚未通过独立验收的运行时能力注入
+// 不会改变生产门禁、既有策略或已提交作业的策略
 func (e *Process) ConfigureContainerAcceptancePolicy(policy taskqueue.OfflineRuntimePolicy) error {
 	if os.Getenv("ARCENTRA_CONTAINERD_ACCEPTANCE") != "1" || os.Getenv("ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE") != "1" {
 		return fmt.Errorf("explicit dedicated container acceptance authorization is required")
 	}
-	if taskqueue.OfflineRuntimeAccepted || !policy.Enabled || len(policy.AllowedImages) != 1 || policy.AllowedImages[0] != os.Getenv("ARCENTRA_SANDBOX_TEST_IMAGE") {
+	if (taskqueue.OfflineRuntimeAccepted && (!policy.AllowFailedStepRetry || taskqueue.FailedStepRuntimeAccepted)) || !policy.Enabled || len(policy.AllowedImages) != 1 || policy.AllowedImages[0] != os.Getenv("ARCENTRA_SANDBOX_TEST_IMAGE") {
 		return fmt.Errorf("acceptance injection is restricted to the gated single-image test profile")
 	}
 	if err := policy.Validate(); err != nil {

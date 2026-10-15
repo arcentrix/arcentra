@@ -80,7 +80,7 @@ func generationClient(t *testing.T, db *gorm.DB, after func(proto.Message) error
 func generationRPCContext(claim string) context.Context {
 	return metadata.NewOutgoingContext(context.Background(), metadata.Pairs("authorization", "Bearer generation-fixture-token", "x-arcentra-claim-id", claim))
 }
-func generationServiceFixture(t *testing.T, path string) (*gorm.DB, taskqueue.JobGenerationTransition, *taskqueue.JobInputManifest) {
+func generationServiceFixture(t *testing.T, path string, modes ...string) (*gorm.DB, taskqueue.JobGenerationTransition, *taskqueue.JobInputManifest) {
 	t.Helper()
 	ctx := context.Background()
 	db := generationTestDB(t, path, true)
@@ -93,13 +93,16 @@ func generationServiceFixture(t *testing.T, path string) (*gorm.DB, taskqueue.Jo
 		}
 	}
 	policy := &pipelinev1.Retry{Mode: "whole_job", MaxAttempts: 2, Idempotent: true, AllowedExitCodes: []int32{9}}
+	if len(modes) > 0 {
+		policy.Mode = modes[0]
+	}
 	policyJSON, _ := sonic.MarshalString(policy)
 	for index, id := range []string{"step-1", "step-2"} {
 		previous := ""
 		if index > 0 {
 			previous = "step-1"
 		}
-		if err := db.WithContext(ctx).Create(&model.StepRun{StepRunID: id, Name: "shell", JobRunID: "job", PipelineID: "pipeline", PipelineRunID: "run", Attempt: index + 1, RetryMode: "whole_job", RetryPolicy: policyJSON, PreviousStepRunID: previous, Uses: "shell", Status: 1}).Error; err != nil {
+		if err := db.WithContext(ctx).Create(&model.StepRun{StepRunID: id, Name: "shell", JobRunID: "job", PipelineID: "pipeline", PipelineRunID: "run", Attempt: index + 1, RetryMode: policy.Mode, RetryPolicy: policyJSON, PreviousStepRunID: previous, Uses: "shell", Status: 1}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}

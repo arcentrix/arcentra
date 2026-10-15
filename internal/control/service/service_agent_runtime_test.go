@@ -203,3 +203,27 @@ func TestRuntimeCapabilitiesPreserveModeBeforeReadiness(t *testing.T) {
 		}
 	}
 }
+
+func TestFailedStepCapabilityPreservesIndependentRuntimeReadiness(t *testing.T) {
+	for _, item := range []struct {
+		mode, os      string
+		offline, want bool
+	}{
+		{taskqueue.RuntimeContainerdOfflineV1, "linux", true, true},
+		{taskqueue.RuntimeContainerdOfflineV1, "linux", false, false},
+		{taskqueue.RuntimeContainerdOfflineV1, "windows", true, false},
+		{taskqueue.ExecutionModeBaremetal, "linux", true, false},
+	} {
+		encoded := agentRuntimeCapabilities(&agentv1.RuntimeCapabilities{ExecutionMode: item.mode, ContainerdOfflineV1: item.offline, ContainerdFailedStepRetryV1: true}, item.os)
+		var actual taskqueue.AgentRuntimeCapabilities
+		if err := sonic.Unmarshal(encoded, &actual); err != nil {
+			t.Fatal(err)
+		}
+		if actual.ContainerdFailedStepRetryV1 != item.want {
+			t.Fatal("failed-step capability escaped mode/readiness scope")
+		}
+		if actual.ContainerdWholeJobRetryV1 {
+			t.Fatal("failed-step capability enabled another retry mode")
+		}
+	}
+}

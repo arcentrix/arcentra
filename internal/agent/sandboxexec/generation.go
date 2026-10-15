@@ -17,7 +17,7 @@ import (
 // AllocateGeneration 只为当前进程已持久保存的控制面准入分配全新的整作业会话
 // 原始作业认领保持不变，独立运行认领决定本代资源身份；恢复启动绝不重放执行
 func (c *Controller) AllocateGeneration(ctx context.Context, opts Options, generation taskpayload.JobGeneration) (*Session, error) {
-	return c.allocate(ctx, opts, &generation)
+	return c.allocate(ctx, opts, &generation, false)
 }
 
 func copyGeneration(g *taskpayload.JobGeneration) *taskpayload.JobGeneration {
@@ -159,6 +159,9 @@ func (c *Controller) validateGenerationRecord(record journalRecord) error {
 	if record.Phase == phaseClosed && record.CleanupReceipt == nil {
 		return fmt.Errorf("closed generation cleanup receipt is missing")
 	}
+	if record.StepSessionNonce != "" && (record.Generation.Number != 1 || record.TransitionIntent != nil || record.SuccessorAdmission != nil) {
+		return fmt.Errorf("failed-step session cannot advance whole-job generations")
+	}
 	if record.TransitionIntent != nil {
 		if record.Phase != phaseClosed || record.CleanupReceipt == nil {
 			return fmt.Errorf("generation transition precedes verified closure")
@@ -274,6 +277,9 @@ func (c *Controller) generationRecord(ctx context.Context, request taskpayload.J
 			disk, err := c.readJournal(ctx, record.ID+".json")
 			if err != nil || disk == nil || !reflect.DeepEqual(*disk, record) {
 				return journalRecord{}, c.poison(fmt.Errorf("generation predecessor journal changed"))
+			}
+			if record.StepSessionNonce != "" {
+				return journalRecord{}, fmt.Errorf("failed-step session cannot advance whole-job generations")
 			}
 			if record.Phase != phaseClosed || record.FinalAcknowledged {
 				return journalRecord{}, fmt.Errorf("generation is not a closed retry predecessor")
