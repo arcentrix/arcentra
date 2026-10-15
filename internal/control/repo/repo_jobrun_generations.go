@@ -139,8 +139,17 @@ func validateGenerationLive(ctx context.Context, tx *gorm.DB, job *model.JobRun,
 	return nil
 }
 func loadGeneration(ctx context.Context, tx *gorm.DB, id string) (*model.JobRunGeneration, *taskqueue.JobGeneration, error) {
+	return loadGenerationRead(ctx, tx, id, true)
+}
+
+// 非锁定读取仅用于已锁定终态父作业的不可执行历史证据
+func loadGenerationRead(ctx context.Context, tx *gorm.DB, id string, lock bool) (*model.JobRunGeneration, *taskqueue.JobGeneration, error) {
 	var record model.JobRunGeneration
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(generationColumns).Where("generation_id = ?", id).First(&record).Error; err != nil {
+	query := tx.WithContext(ctx)
+	if lock {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.Select(generationColumns).Where("generation_id = ?", id).First(&record).Error; err != nil {
 		return nil, nil, err
 	}
 	descriptor, err := taskqueue.ParseJobGeneration(record.GenerationJSON)

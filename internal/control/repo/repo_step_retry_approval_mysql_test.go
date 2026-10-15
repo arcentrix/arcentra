@@ -511,9 +511,24 @@ func TestStepRetryApprovalMySQLSuccessfulProducerHistoricalReplyLockOrder(t *tes
 			}
 			// 第二事务已经取得共享 run 的 UPDATE 锁才会继续等待成功生产者的精确 job 行
 			sawRunLock := false
+			var producerLocks []string
+			beforeName := "test:producer-lock-footprint-" + uuid.NewString()
+			if err := producer.db.Callback().Query().Before("gorm:query").Register(beforeName, func(tx *gorm.DB) {
+				lock, ok := tx.Statement.Clauses["FOR"].Expression.(clause.Locking)
+				if tx.Statement.Context.Value(stepAttemptMySQLOrderKey{}) == "first" && ok && lock.Strength != "" {
+					producerLocks = append(producerLocks, tx.Statement.Table+":"+lock.Strength)
+					t.Logf("terminal producer query lock footprint: table=%s strength=%s", tx.Statement.Table, lock.Strength)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = producer.db.Callback().Query().Remove(beforeName) })
 			name := "test:consumer-run-lock-" + uuid.NewString()
 			if err := producer.db.Callback().Query().After("gorm:query").Register(name, func(tx *gorm.DB) {
 				lock, ok := tx.Statement.Clauses["FOR"].Expression.(clause.Locking)
+				if tx.Error != nil && tx.Statement.Context.Value(stepAttemptMySQLOrderKey{}) != nil {
+					t.Logf("contended query error: owner=%v table=%s lock=%s error=%v", tx.Statement.Context.Value(stepAttemptMySQLOrderKey{}), tx.Statement.Table, lock.Strength, tx.Error)
+				}
 				if tx.Error == nil && tx.Statement.Context.Value(stepAttemptMySQLOrderKey{}) == "second" && tx.Statement.Table == (model.PipelineRun{}).TableName() && ok && lock.Strength == "UPDATE" {
 					run, exact := tx.Statement.Dest.(*model.PipelineRun)
 					if !exact || tx.RowsAffected != 1 || run.RunID != producer.identity.PipelineRunID {
@@ -534,6 +549,10 @@ func TestStepRetryApprovalMySQLSuccessfulProducerHistoricalReplyLockOrder(t *tes
 			if !sawRunLock {
 				t.Fatal("consumer did not hold the shared run lock before producer-row contention")
 			}
+			if !reflect.DeepEqual(producerLocks, []string{(model.JobRun{}).TableName() + ":UPDATE"}) {
+				t.Fatalf("terminal producer must lock only its original parent, never shared generation/step/run/agent rows: %v", producerLocks)
+			}
+
 			if (operation == "admit" || operation == "inspect") && (historical == nil || historical.ExecutionAllowed || !reflect.DeepEqual(historical.Admission, upload)) {
 				t.Fatal("producer historical reply changed bytes or renewed execution")
 			}

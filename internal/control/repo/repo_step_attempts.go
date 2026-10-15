@@ -53,12 +53,44 @@ func loadStepAttemptLedger(ctx context.Context, tx *gorm.DB, job *model.JobRun, 
 	if plan.Policy.Mode != "failed_step" || plan.Version != 2 || g.Number != 1 || job.CurrentGeneration != 1 || job.CurrentGenerationID != g.GenerationID || !generationMatchesJob(g, job) {
 		return nil, fmt.Errorf("failed_step requires its fixed initial generation")
 	}
-	var all []model.StepRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(stepAttemptColumns).Where("job_run_id = ?", job.JobRunID).Order("step_index ASC").Order("attempt ASC").Find(&all).Error; err != nil {
+	// 父 job 锁串行化本作业的所有合法账本变更；非锁定枚举仅检查额外/缺失分配
+	// job_run_id 没有专用索引，禁止用此条件 FOR UPDATE 扫描并锁住别的作业步骤
+	var allocated []model.StepRun
+	if err := tx.WithContext(ctx).Select(stepAttemptColumns).Where("job_run_id = ?", job.JobRunID).Find(&allocated).Error; err != nil {
 		return nil, err
 	}
-	if len(all) != len(plan.Steps)*int(plan.Policy.MaxAttempts) {
+	if len(allocated) != len(plan.Steps)*int(plan.Policy.MaxAttempts) {
 		return nil, fmt.Errorf("complete immutable step allocation is required")
+	}
+	expectedIDs := make(map[string]bool, len(allocated))
+	for _, planned := range plan.Steps {
+		for _, id := range planned.AttemptRunIDs {
+			expectedIDs[id] = true
+		}
+	}
+	for _, row := range allocated {
+		if !expectedIDs[row.StepRunID] {
+			return nil, fmt.Errorf("step allocation contains unexpected or duplicate identity")
+		}
+		delete(expectedIDs, row.StepRunID)
+	}
+	if len(expectedIDs) != 0 {
+		return nil, fmt.Errorf("step allocation is missing immutable identity")
+	}
+	// 每次只按唯一业务键锁定冻结计划中的一行，顺序固定为逻辑步骤/尝试号
+	// 不使用 IN 或依赖优化器选择范围扫描，避免消费者与成功生产者形成跨作业锁环
+	all := allocated
+	if !model.IsJobRunTerminal(job.Status) {
+		all = make([]model.StepRun, 0, len(allocated))
+		for _, planned := range plan.Steps {
+			for _, id := range planned.AttemptRunIDs {
+				var row model.StepRun
+				if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(stepAttemptColumns).Where("step_run_id = ?", id).First(&row).Error; err != nil {
+					return nil, err
+				}
+				all = append(all, row)
+			}
+		}
 	}
 	byID := map[string]model.StepRun{}
 	for _, row := range all {
@@ -231,7 +263,7 @@ func (r *JobRunRepo) ReconcileStepAttempt(ctx context.Context, request taskqueue
 		// 先验证不可变账本；历史/inspect 路径绝不获取共享 run/agent 锁
 		// 消费者可能正持有共享 run 并等待本终态生产者的 job 锁
 		// 只有下面真正申请执行的路径才在父 job 锁内验证当前 run/agent
-		record, g, err := loadGeneration(ctx, tx, job.CurrentGenerationID)
+		record, g, err := loadGenerationRead(ctx, tx, job.CurrentGenerationID, !model.IsJobRunTerminal(job.Status))
 		if err != nil {
 			return err
 		}

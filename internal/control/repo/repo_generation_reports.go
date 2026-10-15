@@ -230,6 +230,10 @@ func validateGenerationJobReport(ctx context.Context, tx *gorm.DB, job *model.Jo
 
 func rejectStepGenerationUpdates(updates map[string]any) error {
 	for key := range updates {
+		normalized := strings.ReplaceAll(strings.ToLower(key), "_", "")
+		if normalized == "jobrunid" || normalized == "steprunid" {
+			return fmt.Errorf("generic step mutation cannot change allocation identity")
+		}
 		if stepAttemptField(key) || generationField(key) || strings.ReplaceAll(strings.ToLower(key), "_", "") == "retryableshellexit" {
 			return fmt.Errorf("generation evidence requires atomic authenticated report")
 		}
