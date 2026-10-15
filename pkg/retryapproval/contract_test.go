@@ -101,8 +101,10 @@ func TestRetryMarkerIsPartOfExecutableDigest(t *testing.T) {
 }
 
 func TestWholeJobApprovalCannotRelabelFailedStepPlan(t *testing.T) {
- e := fixture(t)
- e.RetryPlan.Version = 2
- e.RetryPlan.Policy.Mode = "failed_step"
- if _, err := e.Canonical(); err == nil { t.Fatal("whole-job evidence accepted failed-step plan") }
+	e := fixture(t)
+	e.RetryPlan.Version = 2
+	e.RetryPlan.Policy.Mode = "failed_step"
+	if _, err := e.Canonical(); err == nil {
+		t.Fatal("whole-job evidence accepted failed-step plan")
+	}
 }
