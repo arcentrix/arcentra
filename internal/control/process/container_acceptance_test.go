@@ -153,3 +153,71 @@ func TestContainerAcceptanceFailedStepPolicyGuards(t *testing.T) {
 		t.Fatal("candidate policy was mutable or injected twice")
 	}
 }
+
+// TestContainerAcceptanceFailedStepApprovalGuards 验证审批组合候选只能在专用验收中单次注入
+func TestContainerAcceptanceFailedStepApprovalGuards(t *testing.T) {
+	const image = "fixture/image@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	policy := taskqueue.OfflineRuntimePolicy{Enabled: true, AllowFailedStepRetry: true, AllowFailedStepRetryApproval: true, AllowedImages: []string{image}, MaxCPU: "500m", MaxMemory: "64Mi"}
+	for _, tc := range []struct {
+		name                        string
+		mutate                      func(*taskqueue.OfflineRuntimePolicy)
+		enabled, required           string
+		active, stopped, configured bool
+	}{
+		{name: "missing-opt-in", required: "1"},
+		{name: "missing-mandatory", enabled: "1"},
+		{name: "disabled", enabled: "1", required: "1", mutate: func(p *taskqueue.OfflineRuntimePolicy) { p.Enabled = false }},
+		{name: "missing-base-step-permission", enabled: "1", required: "1", mutate: func(p *taskqueue.OfflineRuntimePolicy) { p.AllowFailedStepRetry = false }},
+		{name: "wrong-image", enabled: "1", required: "1", mutate: func(p *taskqueue.OfflineRuntimePolicy) {
+			p.AllowedImages = []string{"other@sha256:" + strings.Repeat("b", 64)}
+		}},
+		{name: "multiple-images", enabled: "1", required: "1", mutate: func(p *taskqueue.OfflineRuntimePolicy) { p.AllowedImages = append(p.AllowedImages, image) }},
+		{name: "active", enabled: "1", required: "1", active: true},
+		{name: "stopped", enabled: "1", required: "1", stopped: true},
+		{name: "already-configured", enabled: "1", required: "1", configured: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ARCENTRA_CONTAINERD_ACCEPTANCE", tc.enabled)
+			t.Setenv("ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE", tc.required)
+			t.Setenv("ARCENTRA_SANDBOX_TEST_IMAGE", image)
+			p := policy.Clone()
+			if tc.mutate != nil {
+				tc.mutate(&p)
+			}
+			e := &Process{stopped: tc.stopped}
+			if tc.active {
+				e.runs.Store("active", struct{}{})
+			}
+			if tc.configured {
+				e.offlineRuntimePolicy = policy.Clone()
+			}
+			before := e.offlineRuntimePolicy.Clone()
+			if e.ConfigureContainerAcceptancePolicy(p) == nil {
+				t.Fatal("out-of-scope approval injection accepted")
+			}
+			if !reflect.DeepEqual(before, e.offlineRuntimePolicy) {
+				t.Fatal("rejected candidate mutated policy")
+			}
+		})
+	}
+	t.Setenv("ARCENTRA_CONTAINERD_ACCEPTANCE", "1")
+	t.Setenv("ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE", "1")
+	t.Setenv("ARCENTRA_SANDBOX_TEST_IMAGE", image)
+	e := &Process{}
+	if taskqueue.FailedStepRetryApprovalAccepted {
+		if e.ConfigureContainerAcceptancePolicy(policy) == nil {
+			t.Fatal("accepted feature retained candidate injection")
+		}
+		return
+	}
+	if err := e.ConfigureContainerAcceptancePolicy(policy); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(e.offlineRuntimePolicy, policy) || e.offlineRuntimePolicy.ValidateProduction() == nil {
+		t.Fatal("candidate changed policy or opened production")
+	}
+	policy.AllowedImages[0] = "changed"
+	if e.offlineRuntimePolicy.AllowedImages[0] != image || e.ConfigureContainerAcceptancePolicy(e.offlineRuntimePolicy.Clone()) == nil {
+		t.Fatal("mutable or repeated candidate injection")
+	}
+}

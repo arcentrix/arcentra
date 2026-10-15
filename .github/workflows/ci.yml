@@ -181,12 +181,25 @@ jobs:
             if grep -q '^--- SKIP: TestRetryApprovalMySQL' ".acceptance/evidence/retry-approval-mysql-$suite.log"; then exit 1; fi
           done
 
+      - name: Verify approved live-step admission with actual MySQL authorization
+        timeout-minutes: 5
+        run: |
+          set -o pipefail
+          for suite in repo service; do
+            schema="arcentra_retry_approval_test_step_$suite"
+            docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create "$schema"
+            ARCENTRA_REQUIRE_RETRY_APPROVAL_MYSQL=1 \
+            ARCENTRA_RETRY_APPROVAL_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
+              go test -race -v -count=1 -timeout=2m -run '^TestStepRetryApprovalMySQL' "./internal/control/$suite" | tee ".acceptance/evidence/step-retry-approval-mysql-$suite.log"
+            python3 scripts/acceptance/verify_step_approval_mysql_log.py ".acceptance/evidence/step-retry-approval-mysql-$suite.log" "$suite"
+          done
+
       - name: Check out pinned frontend acceptance client
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: c0b0fd280f80ed5bc8dcea6d638352d73bbeb289
+          ref: ccf4519bbf2e09171fcb733ea19d8e3fa2ba606f
           path: .acceptance/frontend
           persist-credentials: false
 

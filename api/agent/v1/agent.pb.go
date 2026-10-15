@@ -734,14 +734,15 @@ func (x *TaskStatus) GetMetrics() map[string]string {
 // Heartbeat request
 // RuntimeCapabilities reports authenticated Agent readiness, independently of editable labels.
 type RuntimeCapabilities struct {
-	state                       protoimpl.MessageState `protogen:"open.v1"`
-	ContainerdRetryApprovalV1   bool                   `protobuf:"varint,4,opt,name=containerd_retry_approval_v1,json=containerdRetryApprovalV1,proto3" json:"containerd_retry_approval_v1,omitempty"` // Durable exact-content retry approval protocol readiness
-	ContainerdOfflineV1         bool                   `protobuf:"varint,1,opt,name=containerd_offline_v1,json=containerdOfflineV1,proto3" json:"containerd_offline_v1,omitempty"`
-	ExecutionMode               string                 `protobuf:"bytes,2,opt,name=execution_mode,json=executionMode,proto3" json:"execution_mode,omitempty"`                                                   // baremetal or containerd-offline-v1, independent of readiness
-	ContainerdWholeJobRetryV1   bool                   `protobuf:"varint,3,opt,name=containerd_whole_job_retry_v1,json=containerdWholeJobRetryV1,proto3" json:"containerd_whole_job_retry_v1,omitempty"`        // Explicit operator permission and ready generation controller
-	ContainerdFailedStepRetryV1 bool                   `protobuf:"varint,20,opt,name=containerd_failed_step_retry_v1,json=containerdFailedStepRetryV1,proto3" json:"containerd_failed_step_retry_v1,omitempty"` // Independent default-off live step retry protocol; distinct from approval work
-	unknownFields               protoimpl.UnknownFields
-	sizeCache                   protoimpl.SizeCache
+	state                               protoimpl.MessageState `protogen:"open.v1"`
+	ContainerdFailedStepRetryApprovalV1 bool                   `protobuf:"varint,21,opt,name=containerd_failed_step_retry_approval_v1,json=containerdFailedStepRetryApprovalV1,proto3" json:"containerd_failed_step_retry_approval_v1,omitempty"` // Independent acceptance, operator policy and live step readiness required
+	ContainerdRetryApprovalV1           bool                   `protobuf:"varint,4,opt,name=containerd_retry_approval_v1,json=containerdRetryApprovalV1,proto3" json:"containerd_retry_approval_v1,omitempty"`                                    // Durable exact-content retry approval protocol readiness
+	ContainerdOfflineV1                 bool                   `protobuf:"varint,1,opt,name=containerd_offline_v1,json=containerdOfflineV1,proto3" json:"containerd_offline_v1,omitempty"`
+	ExecutionMode                       string                 `protobuf:"bytes,2,opt,name=execution_mode,json=executionMode,proto3" json:"execution_mode,omitempty"`                                                   // baremetal or containerd-offline-v1, independent of readiness
+	ContainerdWholeJobRetryV1           bool                   `protobuf:"varint,3,opt,name=containerd_whole_job_retry_v1,json=containerdWholeJobRetryV1,proto3" json:"containerd_whole_job_retry_v1,omitempty"`        // Explicit operator permission and ready generation controller
+	ContainerdFailedStepRetryV1         bool                   `protobuf:"varint,20,opt,name=containerd_failed_step_retry_v1,json=containerdFailedStepRetryV1,proto3" json:"containerd_failed_step_retry_v1,omitempty"` // Independent default-off live step retry protocol; distinct from approval work
+	unknownFields                       protoimpl.UnknownFields
+	sizeCache                           protoimpl.SizeCache
 }
 
 func (x *RuntimeCapabilities) Reset() {
@@ -772,6 +773,13 @@ func (x *RuntimeCapabilities) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RuntimeCapabilities.ProtoReflect.Descriptor instead.
 func (*RuntimeCapabilities) Descriptor() ([]byte, []int) {
 	return file_agent_v1_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RuntimeCapabilities) GetContainerdFailedStepRetryApprovalV1() bool {
+	if x != nil {
+		return x.ContainerdFailedStepRetryApprovalV1
+	}
+	return false
 }
 
 func (x *RuntimeCapabilities) GetContainerdRetryApprovalV1() bool {
@@ -3522,8 +3530,9 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\ametrics\x18\x06 \x03(\v2!.agent.v1.TaskStatus.MetricsEntryR\ametrics\x1a:\n" +
 	"\fMetricsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb9\x02\n" +
-	"\x13RuntimeCapabilities\x12?\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x90\x03\n" +
+	"\x13RuntimeCapabilities\x12U\n" +
+	"(containerd_failed_step_retry_approval_v1\x18\x15 \x01(\bR#containerdFailedStepRetryApprovalV1\x12?\n" +
 	"\x1ccontainerd_retry_approval_v1\x18\x04 \x01(\bR\x19containerdRetryApprovalV1\x122\n" +
 	"\x15containerd_offline_v1\x18\x01 \x01(\bR\x13containerdOfflineV1\x12%\n" +
 	"\x0eexecution_mode\x18\x02 \x01(\tR\rexecutionMode\x12@\n" +

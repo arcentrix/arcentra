@@ -27,6 +27,9 @@ type stepAttemptFixture struct {
 }
 
 func newStepAttemptFixture(t *testing.T, delay string) *stepAttemptFixture {
+	return newStepAttemptFixtureConfigured(t, delay, nil)
+}
+func newStepAttemptFixtureConfigured(t *testing.T, delay string, configure func(*generationFixture)) *stepAttemptFixture {
 	t.Helper()
 	ctx, db, jobs, _ := sourceTestRepository(t)
 	if err := db.WithContext(ctx).AutoMigrate(&model.Agent{}, &model.PipelineRun{}, &model.JobRunGeneration{}, &model.Pipeline{}, &model.Project{}); err != nil {
@@ -37,7 +40,7 @@ func newStepAttemptFixture(t *testing.T, delay string) *stepAttemptFixture {
 			t.Fatal(err)
 		}
 	}
-	return populateStepAttemptFixture(t, ctx, db, jobs, delay)
+	return populateStepAttemptFixtureForJobConfigured(t, ctx, db, jobs, delay, "job", configure)
 }
 func populateStepAttemptFixture(t *testing.T, ctx context.Context, db *gorm.DB, jobs *JobRunRepo, delay string) *stepAttemptFixture {
 	t.Helper()
@@ -45,6 +48,9 @@ func populateStepAttemptFixture(t *testing.T, ctx context.Context, db *gorm.DB, 
 }
 
 func populateStepAttemptFixtureForJob(t *testing.T, ctx context.Context, db *gorm.DB, jobs *JobRunRepo, delay, jobID string) *stepAttemptFixture {
+	return populateStepAttemptFixtureForJobConfigured(t, ctx, db, jobs, delay, jobID, nil)
+}
+func populateStepAttemptFixtureForJobConfigured(t *testing.T, ctx context.Context, db *gorm.DB, jobs *JobRunRepo, delay, jobID string, configure func(*generationFixture)) *stepAttemptFixture {
 	t.Helper()
 	if err := jobs.UpdateByJobRunID(ctx, jobID, map[string]any{"artifact_storage_id": "storage", "artifact_storage_fingerprint": strings.Repeat("a", 64), "artifact_storage_type": "s3"}); err != nil {
 		t.Fatal(err)
@@ -97,6 +103,9 @@ func populateStepAttemptFixtureForJob(t *testing.T, ctx context.Context, db *gor
 	initial := taskqueue.JobGenerationTransition{Version: 1, Identity: identity, RetryPlanDigest: job.RetryPlanDigest, Operation: "admit"}
 	initial.RequestDigest, _ = initial.Digest()
 	base := &generationFixture{ctx: ctx, db: db, jobs: jobs, steps: &StepRunRepo{IDatabase: statusTestDB{db}}, identity: identity, manifest: manifest, admit: initial, plan: plan}
+	if configure != nil {
+		configure(base)
+	}
 	generation := base.admission(t)
 	base.pin(t)
 	runtimeID := generation.RuntimeClaimID

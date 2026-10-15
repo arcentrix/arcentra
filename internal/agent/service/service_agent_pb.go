@@ -102,6 +102,7 @@ func (s *AgentServiceImpl) runtimeCapabilitiesLocked() *agentv1.RuntimeCapabilit
 		capabilities.ContainerdWholeJobRetryV1 = capabilities.ContainerdOfflineV1 && s.agentConf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetry
 		capabilities.ContainerdRetryApprovalV1 = capabilities.ContainerdWholeJobRetryV1 && s.agentConf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetryApproval
 		capabilities.ContainerdFailedStepRetryV1 = taskpayload.FailedStepRuntimeAccepted && capabilities.ContainerdOfflineV1 && s.agentConf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry && s.failedStepRetryReady != nil && s.failedStepRetryReady()
+		capabilities.ContainerdFailedStepRetryApprovalV1 = taskpayload.FailedStepRetryApprovalAccepted && capabilities.ContainerdFailedStepRetryV1 && s.agentConf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetryApproval
 	}
 	return capabilities
 }

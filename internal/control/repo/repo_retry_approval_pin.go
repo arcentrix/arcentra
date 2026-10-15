@@ -72,8 +72,12 @@ func pinRetryApproval(ctx context.Context, tx *gorm.DB, job *model.JobRun) error
 	if !expiry.After(now) {
 		return fmt.Errorf("original job deadline expired")
 	}
+	kind, err := retryapproval.KindForPlan(plan)
+	if err != nil {
+		return err
+	}
 	id := uuid.NewString()
-	ev := &retryapproval.Evidence{Version: 1, Kind: retryapproval.Kind, ApprovalID: id, Context: *c, Identity: generationIdentity(job), JobName: job.JobName, RetryPlan: *plan, RetryPlanDigest: job.RetryPlanDigest, Runtime: taskqueue.RuntimeRequest{Type: job.RuntimeType, Image: job.RuntimeImage, Resources: taskqueue.RuntimeResources{CPU: job.RuntimeCPU, Memory: job.RuntimeMemory}, BindingDigest: job.RuntimeBindingDigest}, Inputs: *inputs, InputManifestDigest: job.InputManifestDigest, Artifacts: make([]retryapproval.Artifact, 0, len(inputs.Artifacts)), CreatedAtUnixMilli: now.UnixMilli(), ExpiresAtUnixMilli: expiry.UnixMilli()}
+	ev := &retryapproval.Evidence{Version: 1, Kind: kind, ApprovalID: id, Context: *c, Identity: generationIdentity(job), JobName: job.JobName, RetryPlan: *plan, RetryPlanDigest: job.RetryPlanDigest, Runtime: taskqueue.RuntimeRequest{Type: job.RuntimeType, Image: job.RuntimeImage, Resources: taskqueue.RuntimeResources{CPU: job.RuntimeCPU, Memory: job.RuntimeMemory}, BindingDigest: job.RuntimeBindingDigest}, Inputs: *inputs, InputManifestDigest: job.InputManifestDigest, Artifacts: make([]retryapproval.Artifact, 0, len(inputs.Artifacts)), CreatedAtUnixMilli: now.UnixMilli(), ExpiresAtUnixMilli: expiry.UnixMilli()}
 	if job.SourceBindingDigest != "" {
 		ev.Source, err = sourceprovenance.NewBinding(job.PipelineID, job.PipelineRunID, job.JobRunID, job.SourceType, job.SourceRepository, job.SourceRef)
 		if err != nil {
@@ -103,7 +107,7 @@ func pinRetryApproval(ctx context.Context, tx *gorm.DB, job *model.JobRun) error
 	if err != nil {
 		return err
 	}
-	req := &model.ApprovalRequest{ApprovalID: id, RetryJobRunID: &job.JobRunID, BindingKind: retryapproval.Kind, EvidenceJSON: encoded, EvidenceHash: hash, Version: 1, PipelineRunID: job.PipelineRunID, JobName: job.JobName, Plugin: retryapproval.Plugin, Status: model.ApprovalStatusPending, PolicyID: c.Policy.ID, Mode: c.Policy.Mode, RequiredApproverCount: c.Policy.RequiredApproverCount, CandidateApprovers: candidates, RequestedBy: c.ActorID, ExpiresAt: &expiry}
+	req := &model.ApprovalRequest{ApprovalID: id, RetryJobRunID: &job.JobRunID, BindingKind: kind, EvidenceJSON: encoded, EvidenceHash: hash, Version: 1, PipelineRunID: job.PipelineRunID, JobName: job.JobName, Plugin: retryapproval.Plugin, Status: model.ApprovalStatusPending, PolicyID: c.Policy.ID, Mode: c.Policy.Mode, RequiredApproverCount: c.Policy.RequiredApproverCount, CandidateApprovers: candidates, RequestedBy: c.ActorID, ExpiresAt: &expiry}
 	req.CreatedAt = now
 	req.UpdatedAt = now
 	if _, err := model.ApprovalCandidates(req); err != nil {

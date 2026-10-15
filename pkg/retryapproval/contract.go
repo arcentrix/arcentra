@@ -16,8 +16,41 @@ import (
 	"github.com/bytedance/sonic"
 )
 
-// Kind 标识唯一受支持的精确内容审批
+// Kind 标识既有整作业精确内容审批
 const Kind = "retry_whole_job_v1"
+
+// FailedStepKind 标识保持同一活动会话的精确失败步骤审批
+const FailedStepKind = "retry_failed_step_v1"
+
+// KindForPlan 从完整规范计划派生审批种类，禁止版本与模式替换
+func KindForPlan(plan *taskqueue.JobRetryPlan) (string, error) {
+	if plan == nil || !plan.RetryApprovalRequired {
+		return "", fmt.Errorf("approval requires a gated retry plan")
+	}
+	if _, err := plan.Canonical(); err != nil {
+		return "", err
+	}
+	switch {
+	case plan.Version == 1 && plan.Policy.Mode == "whole_job":
+		return Kind, nil
+	case plan.Version == 2 && plan.Policy.Mode == "failed_step":
+		return FailedStepKind, nil
+	default:
+		return "", fmt.Errorf("unsupported approval plan tuple")
+	}
+}
+
+// ValidateKindPlan 验证审批种类与完整冻结计划严格匹配
+func ValidateKindPlan(kind string, plan *taskqueue.JobRetryPlan) error {
+	expected, err := KindForPlan(plan)
+	if err != nil {
+		return err
+	}
+	if kind != expected {
+		return fmt.Errorf("approval kind does not match retry plan")
+	}
+	return nil
+}
 
 // Plugin 为内置审批门禁名称
 const Plugin = "builtin:retry-approval"

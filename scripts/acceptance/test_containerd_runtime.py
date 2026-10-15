@@ -1,6 +1,7 @@
 """Offline policy regression tests. No daemon, privilege, mounts or network."""
 import importlib.util
 import os
+import sys
 from pathlib import Path
 import tempfile
 import tomllib
@@ -54,6 +55,29 @@ class RuntimeTestLogTests(unittest.TestCase):
         for repetitions, expected in ((0, self.expected), (1, []), (1, ["TestSession", "TestSession"])):
             with self.subTest(repetitions=repetitions, expected=expected), self.assertRaises(ValueError):
                 TEST_LOG.verify(self.round + "PASS\n", repetitions, expected)
+
+
+class StepApprovalMySQLLogTests(unittest.TestCase):
+    def verifier(self):
+        spec = importlib.util.spec_from_file_location("step_approval_log", Path(__file__).with_name("verify_step_approval_mysql_log.py"))
+        module = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(sys.modules, {"verify_containerd_test_log": TEST_LOG}):
+            spec.loader.exec_module(module)
+        return module
+
+    def test_requires_all_composed_cases_without_skips(self):
+        module = self.verifier()
+        for suite in ("repo", "service"):
+            names = module.expected(suite)
+            text = "\n".join("=== RUN   " + name + "\n--- PASS: " + name + " (0.01s)" for name in names) + "\nPASS\n"
+            module.verify(text, 1, names)
+            for broken in (text.replace("--- PASS: " + names[-1], "--- SKIP: " + names[-1]), text.replace("--- PASS: " + names[-1] + " (0.01s)\n", "")):
+                with self.subTest(suite=suite), self.assertRaises(ValueError):
+                    module.verify(broken, 1, names)
+
+    def test_unknown_suite_cannot_omit_required_cases(self):
+        with self.assertRaises(ValueError):
+            self.verifier().expected("unknown")
 
 
 class RuntimeGuardTests(unittest.TestCase):
@@ -227,6 +251,8 @@ class RuntimeGuardTests(unittest.TestCase):
         for case in ("same-live-session-immutable-inputs-ack-loss", "earlier-background-refused", "adopted-zombie-refused", "cancel-before-successor", "uncertain-resume-cleans"):
             self.assertIn('TestRealContainerJobAcceptance/failed-step/' + case, script)
         self.assertIn('TestDurableControllerContainerdAcceptance/cancel TestDurableControllerContainerdAcceptance/timeout', script)
+        for case in ('approved-finite-plan', 'cancel-pending', 'revoke-before-successor', 'revoke-after-CAS-before-RUNNING', 'lost-CAS-ACK-then-revoke'):
+            self.assertIn('TestRealContainerJobAcceptance/failed-step-approval/durable-retry-approval-' + case, script)
         self.assertIn('verify_containerd_test_log.py "$EVIDENCE/$name.log" "$repetitions" "$@"', script)
 
 

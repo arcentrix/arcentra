@@ -84,3 +84,20 @@ func TestFailedStepCapabilityRequiresOperatorAndBothReadinessProbes(t *testing.T
 		t.Fatal("baremetal mode advertised live container retry")
 	}
 }
+
+func TestFailedStepApprovalCapabilityRemainsBehindIndependentAcceptance(t *testing.T) {
+	conf := &config.AgentConfig{Agent: config.AgentInfo{Mode: "sandbox"}}
+	service := NewAgentServiceImpl(conf, nil, nil)
+	service.SetOfflineRuntimeReadiness(func() bool { return true })
+	service.SetFailedStepRetryReadiness(func() bool { return true })
+	conf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetry = true
+	conf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetryApproval = true
+	conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry = true
+	if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryApprovalV1 {
+		t.Fatal("conjunction of old flags advertised new capability")
+	}
+	conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetryApproval = true
+	if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryApprovalV1 {
+		t.Fatal("unaccepted combination advertised")
+	}
+}

@@ -52,7 +52,7 @@ jobs:
           make deps-check
           make codegen
           make fmt-check
-          go test -race -count=1 -tags=sandbox_acceptance -run '^(TestContainerAcceptancePolicy.*|TestContainerAcceptanceFailedStepPolicyGuards|TestRealContainerAcceptanceGate|TestRealContainerStepRetryAcceptanceGate|TestContainerAcceptanceObserverGuards|TestAcceptanceWorker.*)$' ./internal/control/process ./internal/agent/taskqueue ./pkg/sandbox
+          go test -race -count=1 -tags=sandbox_acceptance -run '^(TestContainerAcceptancePolicy.*|TestContainerAcceptanceFailedStepPolicyGuards|TestContainerAcceptanceFailedStepApprovalGuards|TestFailedStepApproval.*|TestRealContainerAcceptanceGate|TestRealContainerStepRetryAcceptanceGate|TestContainerAcceptanceObserverGuards|TestAcceptanceWorker.*)$' ./internal/control/process ./internal/agent/taskqueue ./pkg/sandbox
           mkdir -p .acceptance/containerd-bin .acceptance/containerd-evidence
           go test -race -tags=sandbox_acceptance -c -o .acceptance/containerd-bin/sandbox.test ./pkg/sandbox
           go test -race -tags=sandbox_acceptance -c -o .acceptance/containerd-bin/sandboxexec.test ./internal/agent/sandboxexec

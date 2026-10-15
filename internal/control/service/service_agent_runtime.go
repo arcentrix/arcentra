@@ -26,6 +26,7 @@ func agentRuntimeCapabilities(capabilities *agentv1.RuntimeCapabilities, os stri
 		report.ContainerdWholeJobRetryV1 = report.ContainerdOfflineV1 && capabilities.ContainerdWholeJobRetryV1
 		report.ContainerdRetryApprovalV1 = report.ContainerdWholeJobRetryV1 && capabilities.ContainerdRetryApprovalV1
 		report.ContainerdFailedStepRetryV1 = report.ContainerdOfflineV1 && capabilities.ContainerdFailedStepRetryV1
+		report.ContainerdFailedStepRetryApprovalV1 = report.ContainerdFailedStepRetryV1 && capabilities.ContainerdFailedStepRetryApprovalV1
 	case "":
 		if capabilities.ContainerdOfflineV1 {
 			report.ExecutionMode = "unknown"

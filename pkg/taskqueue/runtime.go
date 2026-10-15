@@ -35,6 +35,9 @@ const OfflineRuntimeAccepted = true
 // FailedStepRuntimeAccepted 标记已通过真实闭环验收的活动步骤续试实现，操作者仍需独立显式启用
 const FailedStepRuntimeAccepted = true
 
+// FailedStepRetryApprovalAccepted 标记组合审批路径是否通过独立验收，生产默认关闭
+const FailedStepRetryApprovalAccepted = false
+
 // RuntimeResources 保存明确的硬资源上限，不接受宿主路径或可选运行时参数
 type RuntimeResources struct {
 	CPU    string `json:"cpu"`
@@ -63,13 +66,14 @@ func (r *RuntimeRequest) UnmarshalJSON(data []byte) error {
 
 // OfflineRuntimePolicy 保存操作者配置，不得由流水线或队列请求扩大
 type OfflineRuntimePolicy struct {
-	Enabled                    bool     `json:"enabled" mapstructure:"enabled"`
-	AllowWholeJobRetryApproval bool     `json:"allowWholeJobRetryApproval" mapstructure:"allowWholeJobRetryApproval"`
-	AllowWholeJobRetry         bool     `json:"allowWholeJobRetry" mapstructure:"allowWholeJobRetry"`
-	AllowedImages              []string `json:"allowedImages" mapstructure:"allowedImages"`
-	MaxCPU                     string   `json:"maxCpu" mapstructure:"maxCpu"`
-	MaxMemory                  string   `json:"maxMemory" mapstructure:"maxMemory"`
-	AllowFailedStepRetry       bool     `json:"allowFailedStepRetry" mapstructure:"allowFailedStepRetry"`
+	AllowFailedStepRetryApproval bool     `json:"allowFailedStepRetryApproval" mapstructure:"allowFailedStepRetryApproval"`
+	Enabled                      bool     `json:"enabled" mapstructure:"enabled"`
+	AllowWholeJobRetryApproval   bool     `json:"allowWholeJobRetryApproval" mapstructure:"allowWholeJobRetryApproval"`
+	AllowWholeJobRetry           bool     `json:"allowWholeJobRetry" mapstructure:"allowWholeJobRetry"`
+	AllowedImages                []string `json:"allowedImages" mapstructure:"allowedImages"`
+	MaxCPU                       string   `json:"maxCpu" mapstructure:"maxCpu"`
+	MaxMemory                    string   `json:"maxMemory" mapstructure:"maxMemory"`
+	AllowFailedStepRetry         bool     `json:"allowFailedStepRetry" mapstructure:"allowFailedStepRetry"`
 }
 
 // Clone 返回独立策略快照
@@ -102,6 +106,9 @@ func (p OfflineRuntimePolicy) Validate() error {
 
 // ValidateProduction 禁止在真实验收完成前启用生产配置
 func (p OfflineRuntimePolicy) ValidateProduction() error {
+	if p.AllowFailedStepRetryApproval && !FailedStepRetryApprovalAccepted {
+		return fmt.Errorf("offline failed_step retry approval is unavailable pending independent acceptance")
+	}
 	if p.AllowFailedStepRetry && !FailedStepRuntimeAccepted {
 		return fmt.Errorf("offline failed_step retry is unavailable pending complete live-session acceptance")
 	}
@@ -234,8 +241,8 @@ func ValidateJobRuntime(payload *JobRunTaskPayload, policy OfflineRuntimePolicy)
 	if !payload.RetryApprovalRequired && payload.RetryApprovalTimeoutSeconds != 0 {
 		return fmt.Errorf("ungated job cannot carry retry approval budget")
 	}
-	if payload.RetryApprovalRequired && (payload.Runtime == nil || payload.Retry == nil || payload.Retry.Mode != "whole_job" || !policy.AllowWholeJobRetryApproval || payload.RetryApprovalTimeoutSeconds < 1 || payload.RetryApprovalTimeoutSeconds > 3600) {
-		return fmt.Errorf("durable retry approval requires enabled offline whole_job policy")
+	if payload.RetryApprovalRequired && (payload.Runtime == nil || payload.Retry == nil || !AllowsRetryApproval(payload.Retry, policy) || payload.RetryApprovalTimeoutSeconds < 1 || payload.RetryApprovalTimeoutSeconds > 3600) {
+		return fmt.Errorf("durable retry approval requires independently enabled exact offline retry policy")
 	}
 	if payload.Runtime == nil {
 		return nil
@@ -457,4 +464,19 @@ func ValidateRuntimeRetry(retry *pipelinev1.Retry, policy OfflineRuntimePolicy) 
 		}
 	}
 	return nil
+}
+
+// AllowsRetryApproval 按精确模式检查独立审批策略，不将旧能力组合提升为新能力
+func AllowsRetryApproval(retry *pipelinev1.Retry, policy OfflineRuntimePolicy) bool {
+	if retry == nil || !policy.Enabled {
+		return false
+	}
+	switch retry.Mode {
+	case "whole_job":
+		return policy.AllowWholeJobRetry && policy.AllowWholeJobRetryApproval && ValidateWholeJobRetryPolicy(retry) == nil
+	case "failed_step":
+		return policy.AllowFailedStepRetry && policy.AllowFailedStepRetryApproval && ValidateFailedStepRetryPolicy(retry) == nil
+	default:
+		return false
+	}
 }

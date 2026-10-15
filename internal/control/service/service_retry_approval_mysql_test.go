@@ -37,6 +37,10 @@ type mysqlAuthFixture struct {
 }
 
 func mysqlAuthGeneration(t *testing.T, db *gorm.DB, prefix, pipeline string) (taskqueue.JobGenerationTransition, *taskqueue.JobInputManifest) {
+	return mysqlAuthGenerationMode(t, db, prefix, pipeline, "whole_job")
+}
+
+func mysqlAuthGenerationMode(t *testing.T, db *gorm.DB, prefix, pipeline, mode string) (taskqueue.JobGenerationTransition, *taskqueue.JobInputManifest) {
 	ctx := context.Background()
 	if err := db.WithContext(ctx).AutoMigrate(&model.Agent{}, &model.JobRunGeneration{}); err != nil {
 		t.Fatal(err)
@@ -46,14 +50,18 @@ func mysqlAuthGeneration(t *testing.T, db *gorm.DB, prefix, pipeline string) (ta
 			t.Fatal(err)
 		}
 	}
-	policy := &pipelinev1.Retry{Mode: "whole_job", MaxAttempts: 2, Idempotent: true, AllowedExitCodes: []int32{9}}
+	policy := &pipelinev1.Retry{Mode: mode, MaxAttempts: 2, Idempotent: true, AllowedExitCodes: []int32{9}}
 	policyJSON, _ := sonic.MarshalString(policy)
+	stepArgs := "{}"
+	if mode == "failed_step" {
+		stepArgs = `{"run":"exit 9"}`
+	}
 	for index, id := range []string{prefix + "step-1", prefix + "step-2"} {
 		previous := ""
 		if index > 0 {
 			previous = prefix + "step-1"
 		}
-		if err := db.WithContext(ctx).Create(&model.StepRun{Args: "{}", Env: "{}", Secrets: "{}", LabelSelector: "{}", StepRunID: id, Name: "shell", JobRunID: prefix + "job", PipelineID: pipeline, PipelineRunID: prefix + "run", Attempt: index + 1, RetryMode: "whole_job", RetryPolicy: policyJSON, PreviousStepRunID: previous, Uses: "shell", Status: 1}).Error; err != nil {
+		if err := db.WithContext(ctx).Create(&model.StepRun{Args: stepArgs, Env: "{}", Secrets: "{}", LabelSelector: "{}", StepRunID: id, Name: "shell", JobRunID: prefix + "job", PipelineID: pipeline, PipelineRunID: prefix + "run", Attempt: index + 1, RetryMode: mode, RetryPolicy: policyJSON, PreviousStepRunID: previous, Uses: "shell", Status: 1}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -80,8 +88,12 @@ func mysqlAuthGeneration(t *testing.T, db *gorm.DB, prefix, pipeline string) (ta
 	return req, manifest
 }
 func mysqlAuthSeed(t *testing.T, db *gorm.DB, prefix, project, pipeline, actor, voter string, timeout int, expiry time.Time) *mysqlAuthFixture {
+	return mysqlAuthSeedMode(t, db, prefix, project, pipeline, actor, voter, timeout, expiry, "whole_job")
+}
+
+func mysqlAuthSeedMode(t *testing.T, db *gorm.DB, prefix, project, pipeline, actor, voter string, timeout int, expiry time.Time, mode string) *mysqlAuthFixture {
 	t.Helper()
-	admit, manifest := mysqlAuthGeneration(t, db, prefix, pipeline)
+	admit, manifest := mysqlAuthGenerationMode(t, db, prefix, pipeline, mode)
 	ctx := context.Background()
 	if err := db.AutoMigrate(&model.Pipeline{}, &model.Project{}, &model.User{}, &model.Team{}, &model.TeamMember{}, &model.Role{}, &model.RoleGrant{}, &model.Permission{}, &model.RolePermissionBinding{}, &model.ApprovalRequest{}, &model.ApprovalDecision{}); err != nil {
 		t.Fatal(err)
@@ -122,7 +134,7 @@ func mysqlAuthSeed(t *testing.T, db *gorm.DB, prefix, project, pipeline, actor, 
 
 	// 重建带显式门禁和固定预算的完整计划，而非复用旧无门禁计划摘要
 	runtime := &taskqueue.RuntimeRequest{Type: taskqueue.RuntimeContainerdOfflineV1, Image: "fixture/image@sha256:" + strings.Repeat("a", 64), Resources: taskqueue.RuntimeResources{CPU: "500m", Memory: "64Mi"}, BindingDigest: admit.Identity.RuntimeBindingDigest}
-	payload := &taskqueue.JobRunTaskPayload{PipelineID: pipeline, PipelineRunID: prefix + "run", JobRunID: prefix + "job", JobName: "build", AgentID: prefix + "agent", Runtime: runtime, Retry: &pipelinev1.Retry{Mode: "whole_job", MaxAttempts: 2, Idempotent: true, AllowedExitCodes: []int32{9}}, RetryApprovalRequired: true, RetryApprovalTimeoutSeconds: policy.TimeoutSeconds, Steps: []taskqueue.StepPayload{{Name: "shell", StepRunID: prefix + "step-1", AttemptRunIDs: []string{prefix + "step-1", prefix + "step-2"}, Uses: "shell", Args: map[string]any{"run": "exit 9"}}}}
+	payload := &taskqueue.JobRunTaskPayload{PipelineID: pipeline, PipelineRunID: prefix + "run", JobRunID: prefix + "job", JobName: "build", AgentID: prefix + "agent", Runtime: runtime, Retry: &pipelinev1.Retry{Mode: mode, MaxAttempts: 2, Idempotent: true, AllowedExitCodes: []int32{9}}, RetryApprovalRequired: true, RetryApprovalTimeoutSeconds: policy.TimeoutSeconds, Steps: []taskqueue.StepPayload{{Name: "shell", StepRunID: prefix + "step-1", AttemptRunIDs: []string{prefix + "step-1", prefix + "step-2"}, Uses: "shell", Args: map[string]any{"run": "exit 9"}}}}
 	plan, err := taskqueue.NewJobRetryPlan(payload)
 	if err != nil {
 		t.Fatal(err)

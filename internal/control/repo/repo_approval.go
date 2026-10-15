@@ -151,7 +151,7 @@ func (r *ApprovalRepo) Decide(ctx context.Context, id, actor, decision, reason s
 	if err != nil {
 		return nil, err
 	}
-	if initial.RetryJobRunID != nil || initial.BindingKind == retryapproval.Kind || initial.Plugin == retryapproval.Plugin {
+	if initial.RetryJobRunID != nil || (initial.BindingKind == retryapproval.Kind || initial.BindingKind == retryapproval.FailedStepKind) || initial.Plugin == retryapproval.Plugin {
 		return r.decideRetryApproval(ctx, initial, actor, decision, reason)
 	}
 	if initial.BindingKind != "" || initial.EvidenceJSON != "" {
@@ -336,8 +336,11 @@ func (r *ApprovalRepo) finishPending(ctx context.Context, id string, status int,
 	}
 	var result *model.ApprovalRequest
 	err = r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if initial.RetryJobRunID != nil || initial.BindingKind == retryapproval.Kind {
-			if _, err := lockRetryApprovalJob(ctx, tx, initial); err != nil {
+		var retryJob *model.JobRun
+		if initial.RetryJobRunID != nil || (initial.BindingKind == retryapproval.Kind || initial.BindingKind == retryapproval.FailedStepKind) {
+			var err error
+			retryJob, err = lockRetryApprovalJob(ctx, tx, initial)
+			if err != nil {
 				return err
 			}
 		}
@@ -351,6 +354,11 @@ func (r *ApprovalRepo) finishPending(ctx context.Context, id string, status int,
 		}
 		if value.Status != model.ApprovalStatusPending {
 			return nil
+		}
+		if retryJob != nil {
+			if _, _, err := validateRetryApprovalBinding(ctx, tx, retryJob); err != nil {
+				return err
+			}
 		}
 		if status == model.ApprovalStatusExpired && (value.ExpiresAt == nil || time.Now().Before(*value.ExpiresAt)) {
 			return nil

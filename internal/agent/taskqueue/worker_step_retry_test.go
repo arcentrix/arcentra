@@ -39,6 +39,7 @@ type fakeStepRetryRuntime struct {
 	persistAdmissionErr, consumeErr, boundaryErr error
 	afterAdmission                               func(taskpayload.StepAttemptAdmission)
 	afterConsumed                                func(taskpayload.StepAttemptAdmission)
+	beforeStart                                  func(context.Context) error
 }
 
 func (r *fakeStepRetryRuntime) AllocateStepRetryGeneration(ctx context.Context, p *taskpayload.JobRunTaskPayload, claim string, g taskpayload.JobGeneration) (offlineSession, error) {
@@ -61,6 +62,18 @@ type fakeStepRetrySession struct {
 	paused            bool
 	boundarySequence  uint64
 	stepCalls         []taskpayload.StepAttemptAdmission
+}
+
+func (s *fakeStepRetrySession) Start(ctx context.Context) error {
+	if s.owner.beforeStart != nil {
+		if err := s.owner.beforeStart(ctx); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.fakeGenerationSession.Start(ctx)
 }
 
 func (s *fakeStepRetrySession) Execute(context.Context, *executor.ExecutionRequest) (*executor.ExecutionResult, error) {

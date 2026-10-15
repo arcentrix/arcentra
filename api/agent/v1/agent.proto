@@ -141,6 +141,7 @@ enum AgentStatus {
 // Heartbeat request
 // RuntimeCapabilities reports authenticated Agent readiness, independently of editable labels.
 message RuntimeCapabilities {
+  bool containerd_failed_step_retry_approval_v1 = 21; // Independent acceptance, operator policy and live step readiness required
   bool containerd_retry_approval_v1 = 4; // Durable exact-content retry approval protocol readiness
   bool containerd_offline_v1 = 1;
   string execution_mode = 2; // baremetal or containerd-offline-v1, independent of readiness

@@ -15,10 +15,18 @@ import (
 func gatedPinFixture(t *testing.T) *generationFixture {
 	t.Helper()
 	f := newGenerationFixture(t)
+	configureGatedPinFixture(t, f)
+	return f
+}
+
+func configureGatedPinFixture(t *testing.T, f *generationFixture) {
+	configureGatedPinFixturePolicy(t, f, retryapproval.Policy{ID: "policy", Candidates: []string{"voter"}, Mode: "any", RequiredApproverCount: 1, TimeoutSeconds: 300})
+}
+func configureGatedPinFixturePolicy(t *testing.T, f *generationFixture, policy retryapproval.Policy) {
+	t.Helper()
 	if err := f.db.WithContext(f.ctx).AutoMigrate(&model.ApprovalRequest{}, &model.ApprovalDecision{}); err != nil {
 		t.Fatal(err)
 	}
-	policy := retryapproval.Policy{ID: "policy", Candidates: []string{"voter"}, Mode: "any", RequiredApproverCount: 1, TimeoutSeconds: 300}
 	policy.Fingerprint, _ = policy.Digest()
 	c := retryapproval.RunContext{Version: 1, ProjectID: "project", PipelineID: "pipeline", PipelineRunID: "run", ActorID: "actor", DefinitionCommitSHA: strings.Repeat("a", 40), DefinitionPath: "pipeline.yaml", ResolvedDefinitionDigest: "v1:" + strings.Repeat("b", 64), GatedJobs: []string{"build"}, Policy: policy}
 	body, err := c.Canonical()
@@ -41,7 +49,6 @@ func gatedPinFixture(t *testing.T) *generationFixture {
 	}
 	f.admit.RetryPlanDigest = planDigest
 	f.admit.RequestDigest, _ = f.admit.Digest()
-	return f
 }
 func TestRetryApprovalPinIsAtomicAndNeverRenews(t *testing.T) {
 	f := gatedPinFixture(t)

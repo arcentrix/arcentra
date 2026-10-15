@@ -15,11 +15,11 @@ import (
 
 // IsDurableRetryApproval 只识别经过完整运行时策略验证的精确人工门禁
 func IsDurableRetryApproval(job *spec.Job, policy taskqueue.OfflineRuntimePolicy) bool {
-	if job == nil || job.Approval == nil || !policy.AllowWholeJobRetryApproval || !policy.AllowWholeJobRetry || !policy.Enabled {
+	if job == nil || job.Approval == nil || !taskqueue.AllowsRetryApproval(job.Retry, policy) {
 		return false
 	}
 	a := job.Approval
-	return a.Required && a.Type == "manual" && a.Plugin == "builtin:retry-approval" && len(spec.StructAsMap(a.Params)) == 0 && taskqueue.ValidateWholeJobRetryPolicy(job.Retry) == nil
+	return a.Required && a.Type == "manual" && a.Plugin == "builtin:retry-approval" && len(spec.StructAsMap(a.Params)) == 0 && taskqueue.ValidateContainerRetryPolicy(job.Retry) == nil
 }
 
 // RetryApprovalJobNames 返回定义中需要持久审批的完整作业集合，拒绝错误拼写或不支持的上下文
@@ -33,7 +33,7 @@ func RetryApprovalJobNames(p *spec.Pipeline, policy taskqueue.OfflineRuntimePoli
 			continue
 		}
 		if p.Runtime == nil || p.Runtime.Type != taskqueue.RuntimeContainerdOfflineV1 || !IsDurableRetryApproval(j, policy) {
-			return nil, fmt.Errorf("durable retry approval requires exact manual gate and enabled offline whole_job policy")
+			return nil, fmt.Errorf("durable retry approval requires exact manual gate and independently enabled exact offline retry policy")
 		}
 		names = append(names, j.Name)
 	}

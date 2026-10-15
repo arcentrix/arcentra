@@ -28,11 +28,13 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/process"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	controlservice "github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/nova"
+	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	"github.com/arcentrix/arcentra/pkg/sandbox"
 	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
@@ -51,8 +53,10 @@ import (
 // 普通构建没有此适配器；恢复、队列、处理器、收据和所有效果仍走实际实现
 type containerAcceptanceStepRuntime struct{ *durableOfflineRuntime }
 
+func (r *containerAcceptanceStepRuntime) failedStepApprovalAcceptance() bool { return true }
+
 func (r *containerAcceptanceStepRuntime) AllocateStepRetryGeneration(ctx context.Context, payload *taskpayload.JobRunTaskPayload, claim string, generation taskpayload.JobGeneration) (offlineSession, error) {
-	if os.Getenv("ARCENTRA_CONTAINERD_ACCEPTANCE") != "1" || os.Getenv("ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE") != "1" || taskpayload.FailedStepRuntimeAccepted {
+	if payload == nil || os.Getenv("ARCENTRA_CONTAINERD_ACCEPTANCE") != "1" || os.Getenv("ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE") != "1" || (taskpayload.FailedStepRuntimeAccepted && !payload.RetryApprovalRequired) || taskpayload.FailedStepRetryApprovalAccepted {
 		return nil, fmt.Errorf("closed-gate allocation adapter requires exact dedicated acceptance")
 	}
 	if r == nil || r.durableOfflineRuntime == nil {
@@ -1856,4 +1860,57 @@ func containerAcceptanceStepQueueDrained(t *testing.T, f *controllerWorkerFixtur
 	if err != nil || finalWatermark != watermark {
 		t.Fatal("task publication changed while checking final commit watermark")
 	}
+}
+
+// containerAcceptanceFailedStepApproval 只在原隔离环境中组装关闭门禁的新组合
+func containerAcceptanceFailedStepApproval(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, publisher executor.LogPublisher, retained map[string]string, services *controlservice.Services, approvalPolicy *retryapproval.Policy, lifecycle *containerApprovalLifecycle) {
+	containerAcceptanceDrainWithAudit(t, f, retained)
+	if err := f.worker.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	f.engine.Stop()
+	policy := f.conf.Agent.Sandbox.Containerd.Policy.Clone()
+	policy.AllowFailedStepRetry = true
+	policy.AllowFailedStepRetryApproval = true
+	f.conf.Agent.Sandbox.Containerd.Policy = policy
+	if taskpayload.FailedStepRetryApprovalAccepted || policy.ValidateProduction() == nil || ValidateExecutionConfig(f.conf) == nil {
+		t.Fatal("combination production gate must remain closed")
+	}
+	// 使用独立合成审批人，旧夹具的真实授权记录保留到其清理阶段
+	previousPolicy := approvalPolicy
+	candidatePolicy := *approvalPolicy
+	candidatePolicy.ID = "step-approval-" + id.GetUild()
+	candidatePolicy.Candidates = []string{"step-reviewer-a-" + id.GetUild(), "step-reviewer-b-" + id.GetUild()}
+	candidatePolicy.Fingerprint = ""
+	approvalPolicy = &candidatePolicy
+	if err := services.ConfigureRetryApprovalPolicy(approvalPolicy); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := services.ConfigureRetryApprovalPolicy(previousPolicy); err != nil {
+			t.Error(err)
+		}
+	}()
+	recording := &controllerWorkerRecordingQueue{TaskQueue: f.producer, fixture: f}
+	processConfig := &controlconfig.AppConfig{Pipeline: controlconfig.PipelineConfig{RetryApproval: approvalPolicy}}
+	f.engine = process.NewProcess(f.repos, nil, recording, nil, &log.Logger{SugaredLogger: zap.NewNop().Sugar()}, processConfig, nil)
+	t.Cleanup(f.engine.Stop)
+	if err := f.engine.ConfigureContainerAcceptancePolicy(policy); err != nil {
+		t.Fatal(err)
+	}
+	events := &containerAcceptanceStepRuntimeEvents{}
+	manager := executor.NewExecutorManager()
+	manager.Register(executor.NewShellExecutor())
+	manager.SetLogPublisher(publisher)
+	queue, err := startContainerAcceptanceWorkerObserved(f.ctx, f.conf, f.client, manager, events.observer())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.worker = queue.(*workerQueues)
+	if !f.worker.OfflineRuntimeReady() || taskpayload.FailedStepRetryApprovalAccepted {
+		t.Fatal("closed candidate readiness widened production advertisement")
+	}
+	containerAcceptanceRetryApproval(t, f, cfg, store, retained, services, approvalPolicy, lifecycle, events)
+	containerAcceptanceDrainWithAudit(t, f, retained)
+	containerAcceptanceStepQueueDrained(t, f)
 }

@@ -257,6 +257,18 @@ func stepAttemptScope(identity taskpayload.JobInputIdentity, generation taskpayl
 // 成功步骤和失败步骤的文件变更都保留，源和作业输入只准备一次
 func executeContainerFailedSteps(ctx, jobCtx context.Context, conf *config.AgentConfig, client *agentgrpc.ClientWrapper, manager *executor.Manager, payload *taskpayload.JobRunTaskPayload, store storage.IStorage, reference taskpayload.ArtifactReference, start time.Time) (result generationJobResult) {
 	result = generationJobResult{ctx: ctx, artifacts: &artifactExecutor{job: payload, storage: store, reference: reference, uploaded: map[string]string{}}}
+	// 固定预算从原作业准备前开始；等待和每次准入不得续期
+	approvalWait := newRetryApprovalWait(jobCtx)
+	if payload.RetryApprovalRequired {
+		if payload.RetryApprovalTimeoutSeconds < 1 || payload.RetryApprovalTimeoutSeconds > 3600 {
+			result.err = fmt.Errorf("fixed operator retry approval budget required")
+			return result
+		}
+		operatorDeadline := time.Now().Add(time.Duration(payload.RetryApprovalTimeoutSeconds) * time.Second)
+		if operatorDeadline.Before(approvalWait.deadline) {
+			approvalWait.deadline = operatorDeadline
+		}
+	}
 	visited := make(map[string]bool)
 	defer func() {
 		if result.session != nil {
@@ -349,7 +361,7 @@ func executeContainerFailedSteps(ctx, jobCtx context.Context, conf *config.Agent
 		result.uncertain = true
 		return result
 	}
-	gen := &generationExecution{generation: generation, payload: payload, receipts: map[string]generationReceipt{}}
+	gen := &generationExecution{approvalWait: approvalWait, generation: generation, payload: payload, receipts: map[string]generationReceipt{}}
 	result.ctx = context.WithValue(ctx, generationContextKey{}, gen)
 	jobCtx = context.WithValue(jobCtx, generationContextKey{}, gen)
 	allocated, err := runtime.AllocateStepRetryGeneration(jobCtx, payload, generationRequest.Identity.ClaimID, generation)
@@ -376,6 +388,11 @@ func executeContainerFailedSteps(ctx, jobCtx context.Context, conf *config.Agent
 		result.err = err
 		return result
 	}
+	// 只准备并固定可信输入；审批通过前不得创建容器、任务或步骤意图
+	if err = waitRetryApproval(jobCtx, client, gen, runtime.AdmissionDone()); err != nil {
+		result.err = err
+		return result
+	}
 	inputDigest, err := readGenerationInputDigest(jobCtx, client, payload)
 	if err != nil {
 		result.err = err
@@ -395,6 +412,11 @@ func executeContainerFailedSteps(ctx, jobCtx context.Context, conf *config.Agent
 		transition := taskpayload.StepAttemptTransition{Version: 1, Operation: "admit", Scope: stepAttemptScope(generationRequest.Identity, generation, inputDigest, descriptor, plan, 1)}
 		for attempt := 1; attempt <= len(plan.AttemptRunIDs); attempt++ {
 			if err = waitStepRetry(jobCtx, runtime.AdmissionDone(), 0); err != nil {
+				result.err = err
+				return result
+			}
+			// 历史终态与准入 ACK 不是权限：每个新意图（含首步）都重新检查
+			if err = admitRetryApproval(jobCtx, client); err != nil {
 				result.err = err
 				return result
 			}
@@ -495,7 +517,23 @@ func executeContainerFailedSteps(ctx, jobCtx context.Context, conf *config.Agent
 				err = checkStepAdmissionTime(jobCtx, admission)
 			}
 			if err == nil {
-				err = result.session.beforeStep(jobCtx, step)
+				err = admitRetryApproval(jobCtx, client)
+			}
+			if err == nil {
+				err = checkStepAdmissionTime(jobCtx, admission)
+			}
+			if err == nil {
+				// 准入只界定启动窗口，不缩短已经启动命令的原步骤预算
+				startDeadline := time.UnixMilli(admission.ExpiresUnixMilli)
+				if payload.RetryApprovalRequired && gen.approvalWait.deadline.Before(startDeadline) {
+					startDeadline = gen.approvalWait.deadline
+				}
+				startCtx, startCancel := context.WithDeadline(jobCtx, startDeadline)
+				err = result.session.beforeStep(startCtx, step)
+				if err == nil {
+					err = startCtx.Err()
+				}
+				startCancel()
 			}
 			if err != nil {
 				result.err = reportUnstarted(err, false)
