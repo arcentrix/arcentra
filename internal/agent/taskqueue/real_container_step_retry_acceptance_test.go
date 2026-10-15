@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -342,17 +343,19 @@ func containerAcceptanceReadExact(workspace, name, want string) error {
 }
 
 type containerAcceptanceStepObservation struct {
-	mu                                      sync.Mutex
-	err                                     error
-	owner                                   containerAcceptanceJournal
-	scope                                   taskpayload.StepAttemptIdentity
-	manifest, digest                        string
-	requests, responses                     []string
-	uploads                                 map[string]containerAcceptanceJournal
-	downloads                               map[string]int
-	lostFailure, lostCAS, lostJob, advanced bool
-	pausedPID                               uint32
-	failedReceiptDeliveries                 int
+	mu                                           sync.Mutex
+	err                                          error
+	owner                                        containerAcceptanceJournal
+	scope                                        taskpayload.StepAttemptIdentity
+	manifest, digest                             string
+	requests, responses                          []string
+	uploads                                      map[string]containerAcceptanceJournal
+	downloads                                    map[string]int
+	lostFailure, lostCAS, lostJob, advanced      bool
+	pausedPID                                    uint32
+	failedReceiptDeliveries                      int
+	secondTerminalSeen, failedTwice, proofExists bool
+	successorStepID                              string
 }
 
 func (o *containerAcceptanceStepObservation) fail(err error) {
@@ -451,7 +454,7 @@ func containerAcceptanceStepWait(ctx context.Context, failure func() error, read
 	}
 }
 
-func containerAcceptanceStepWaitRun(t *testing.T, f *controllerWorkerFixture, runID string, wanted int, failure func() error) {
+func containerAcceptanceStepWaitRun(t *testing.T, f *controllerWorkerFixture, runID string, wanted int, failure func() error, diagnostics ...func()) {
 	t.Helper()
 	err := containerAcceptanceStepWait(f.ctx, failure, func(ctx context.Context) (bool, error) {
 		run, err := f.repos.Pipeline.GetRun(ctx, runID)
@@ -469,17 +472,179 @@ func containerAcceptanceStepWaitRun(t *testing.T, f *controllerWorkerFixture, ru
 	if err == nil {
 		return
 	}
-	// Bounded status-only diagnostics; never print command, manifest or token data.
+	for _, diagnostic := range diagnostics {
+		diagnostic()
+	}
+	// Bounded synthetic-fixture diagnostics: redacted errors, no structured
+	// payloads or arbitrary log content.
 	ctx, cancel := context.WithTimeout(f.ctx, 2*time.Second)
 	defer cancel()
+	diagnosticCtx := withTerminalSecrets(ctx, f.conf, nil, nil)
 	jobs, queryErr := f.repos.JobRun.ListByPipelineRunID(ctx, runID)
 	if queryErr != nil {
 		t.Logf("failed-step diagnostic query: %v", queryErr)
 	}
 	for _, job := range jobs[:min(len(jobs), 6)] {
-		t.Logf("failed-step job=%s status=%d generation=%d inputs=%s provenance=%s", job.JobRunID, job.Status, job.CurrentGeneration, job.InputManifestState, job.SourceProvenanceState)
+		t.Logf("failed-step job=%s status=%d generation=%d inputs=%s provenance=%s error=%s", job.JobRunID, job.Status, job.CurrentGeneration, job.InputManifestState, job.SourceProvenanceState, containerAcceptanceStepDiagnosticError(diagnosticCtx, job.ErrorMessage))
+	}
+	steps, _, queryErr := f.repos.StepRun.List(ctx, repo.StepRunFilter{PipelineRunID: runID, PageSize: 24})
+	if queryErr != nil {
+		t.Logf("failed-step attempt diagnostic query: %v", queryErr)
+	}
+	ids := make([]string, 0, len(steps))
+	for _, step := range steps {
+		exit := "none"
+		if step.ExitCode != nil {
+			exit = fmt.Sprint(*step.ExitCode)
+		}
+		t.Logf("failed-step attempt=%s index=%d number=%d status=%d exit=%s admitted=%t retryable=%t receipt=%t error=%s", step.StepRunID, step.StepIndex, step.Attempt, step.Status, exit, step.AttemptAdmission != "", step.RetryableShellExit, step.TerminalReportDigest != "", containerAcceptanceStepDiagnosticError(diagnosticCtx, step.ErrorMessage))
+		ids = append(ids, step.StepRunID)
+	}
+	if len(ids) > 0 {
+		logs, queryErr := f.repos.Log.ListByStepRunIDs(ctx, ids, 0, 1000)
+		if queryErr != nil {
+			t.Logf("failed-step marker diagnostic query: %v", queryErr)
+		}
+		counts, logErr := containerAcceptanceStepMarkerCounts(logs, f.conf.Agent.ID)
+		if logErr != nil {
+			t.Logf("failed-step marker reconstruction: %v", logErr)
+		}
+		for _, marker := range containerAcceptanceStepDiagnosticMarkers {
+			t.Logf("failed-step synthetic marker=%s count=%d", marker, counts[marker])
+		}
 	}
 	t.Fatalf("failed-step pipeline %s: %v", runID, err)
+}
+
+var containerAcceptanceStepDiagnosticMarkers = []string{
+	"step-earlier-once", "step-retry-enter", "step-retry-state-checked", "step-failed-first",
+	"step-retry-partials-checked", "step-failed-second", "step-downstream-proof",
+}
+
+var errContainerAcceptanceStepLogGap = errors.New("synthetic marker log positions are incomplete")
+
+// 日志正文是任意 Write 分片；按各步骤行号重建流后只统计完整白名单行
+func containerAcceptanceStepMarkerCounts(logs []*model.StepRunLog, agentID string) (map[string]int, error) {
+	ordered := append([]*model.StepRunLog(nil), logs...)
+	for _, entry := range ordered {
+		if entry == nil || entry.StepRunID == "" || entry.LogID == "" || entry.AgentID != agentID || entry.LineNumber <= 0 {
+			return nil, fmt.Errorf("synthetic log lost persisted identity/ordering")
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].StepRunID != ordered[j].StepRunID {
+			return ordered[i].StepRunID < ordered[j].StepRunID
+		}
+		return ordered[i].LineNumber < ordered[j].LineNumber
+	})
+	streams := map[string]*strings.Builder{}
+	lastLine := map[string]int32{}
+	bytes := 0
+	for _, entry := range ordered {
+		if lastLine[entry.StepRunID] == entry.LineNumber {
+			return nil, fmt.Errorf("synthetic log repeated an immutable line identity")
+		}
+		if lastLine[entry.StepRunID]+1 != entry.LineNumber {
+			return nil, errContainerAcceptanceStepLogGap
+		}
+		lastLine[entry.StepRunID] = entry.LineNumber
+		bytes += len(entry.Content)
+		if bytes > 1024*1024 {
+			return nil, fmt.Errorf("synthetic marker diagnostic exceeds bounded log size")
+		}
+		if entry.Stream == "stdout" {
+			if streams[entry.StepRunID] == nil {
+				streams[entry.StepRunID] = &strings.Builder{}
+			}
+			streams[entry.StepRunID].WriteString(entry.Content)
+		}
+	}
+	counts := map[string]int{}
+	for _, stream := range streams {
+		lines := strings.Split(stream.String(), "\n")
+		for _, line := range lines[:len(lines)-1] {
+			for _, marker := range containerAcceptanceStepDiagnosticMarkers {
+				if line == marker {
+					counts[marker]++
+				}
+			}
+		}
+	}
+	return counts, nil
+}
+
+// 只输出固定类别和摘要，不输出错误中的命令、环境、凭据或任意日志正文
+func containerAcceptanceStepErrorSummary(message string) string {
+	if message == "" {
+		return "none"
+	}
+	lower := strings.ToLower(message)
+	var classes []string
+	for _, item := range []struct{ fragment, class string }{
+		{"resume does not match exact failed step successor and command", "resume-command-binding"},
+		{"processes other than", "non-init-process"}, {"child processes", "init-children"},
+		{"pidfd", "init-pin"}, {"quiescence", "quiescence"}, {"resume", "resume"},
+		{"boundary", "boundary"}, {"admission", "admission"}, {"consum", "consumption"},
+		{"seal", "sealing"}, {"artifact", "artifact"}, {"upload", "upload"},
+		{"snapshot", "snapshot"}, {"workspace", "workspace"}, {"journal", "journal"},
+		{"log persistence", "log-persistence"}, {"exit code", "command-exit"},
+		{"exec process", "exec-process"}, {"permission", "permission"}, {"not found", "not-found"},
+		{"deadline", "deadline"}, {"timeout", "timeout"}, {"cancel", "cancel"},
+		{"attempt not admitted", "unused-attempt"},
+	} {
+		if strings.Contains(lower, item.fragment) {
+			classes = append(classes, item.class)
+		}
+	}
+	if len(classes) == 0 {
+		classes = append(classes, "unclassified")
+	}
+	return fmt.Sprintf("classes=%s bytes=%d sha256=%x", strings.Join(classes, ","), len(message), sha256.Sum256([]byte(message)))
+}
+
+// 仅供完全合成的本验收失败诊断；重用终态脱敏，限制长度并拒绝展开结构化载荷
+func containerAcceptanceStepDiagnosticError(ctx context.Context, message string) string {
+	summary := containerAcceptanceStepErrorSummary(message)
+	if message == "" || len(message) > 8192 || strings.ContainsAny(message, "{}") {
+		return summary
+	}
+	data, err := encodeSafeTerminalPayload(ctx, &agentv1.ReportStepRunStatusRequest{ErrorMessage: message})
+	if err != nil {
+		return summary + " detail=redaction-unavailable"
+	}
+	var redacted agentv1.ReportStepRunStatusRequest
+	if proto.Unmarshal(data, &redacted) != nil {
+		return summary + " detail=redaction-unavailable"
+	}
+	text := []rune(redacted.ErrorMessage)
+	if len(text) > 768 {
+		text = append(text[:768], []rune("[truncated]")...)
+	}
+	return summary + fmt.Sprintf(" detail=%q", string(text))
+}
+
+func containerAcceptanceStepRuntimeDiagnostic(t *testing.T, events *containerAcceptanceStepRuntimeEvents, o *containerAcceptanceStepObservation) {
+	t.Helper()
+	o.mu.Lock()
+	owner := o.owner
+	t.Logf("failed-step observer: failedReceipts=%d advanceRequests=%d advanceResponses=%d lostFailure=%t lostCAS=%t lostJob=%t sourceAdvanced=%t secondTerminalSeen=%t failedCountXX=%t proofExists=%t", o.failedReceiptDeliveries, len(o.requests), len(o.responses), o.lostFailure, o.lostCAS, o.lostJob, o.advanced, o.secondTerminalSeen, o.failedTwice, o.proofExists)
+	o.mu.Unlock()
+	if owner.Record == nil {
+		return
+	}
+	events.mu.Lock()
+	defer events.mu.Unlock()
+	counts := map[string]int{}
+	for _, event := range events.events {
+		if event.Resource != owner.Record.Resource {
+			continue
+		}
+		counts[event.Operation]++
+		if event.Err != nil {
+			t.Logf("failed-step SDK operation=%s error=%s", event.Operation, containerAcceptanceStepErrorSummary(event.Err.Error()))
+		}
+	}
+	t.Logf("failed-step actual SDK counts=%v", counts)
 }
 
 func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, events *containerAcceptanceStepRuntimeEvents, retained map[string]string) {
@@ -579,6 +744,7 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 				o.err = errors.Join(o.err, fmt.Errorf("advance preceded second committed failed terminal delivery: %d", o.failedReceiptDeliveries))
 			}
 			o.requests = append(o.requests, req.TransitionJson)
+			o.successorStepID = tr.Scope.StepRunID
 		}
 		o.mu.Unlock()
 		if mismatch {
@@ -663,6 +829,21 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 		if callErr != nil {
 			return
 		}
+		if req, ok := raw.(*agentv1.ReportStepRunStatusRequest); ok {
+			o.mu.Lock()
+			owner, successor := o.owner, o.successorStepID
+			o.mu.Unlock()
+			if owner.Record != nil && successor != "" && req.StepRunId == successor {
+				workspace := filepath.Join(f.conf.Agent.WorkspaceDir, owner.Record.Directory)
+				count, countErr := os.ReadFile(filepath.Join(workspace, "failed-count"))
+				proof, proofErr := os.Stat(filepath.Join(workspace, "proof", "result.txt"))
+				o.mu.Lock()
+				o.secondTerminalSeen = true
+				o.failedTwice = countErr == nil && string(count) == "xx"
+				o.proofExists = proofErr == nil && proof.Mode().IsRegular()
+				o.mu.Unlock()
+			}
+		}
 		if req, ok := raw.(*agentv1.ReportStepRunStatusRequest); ok && req.RetryableShellExit {
 			o.mu.Lock()
 			o.failedReceiptDeliveries++
@@ -711,6 +892,7 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
  printf 'step-earlier-once\n'`
 	want := "earlier=x;failed=xx;source=" + initialCommit + ";seed=upstream-input;partial=retained"
 	retry := fmt.Sprintf(`set -eu
+ printf 'step-retry-enter\n'
  test "$(cat earlier-count)" = x
  test "$(cat /tmp/step-earlier)" = rootfs
  test "$(cat /dev/shm/step-earlier)" = tmpfs
@@ -718,6 +900,7 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
  test "$(stat -c '%%d:%%i' /workspace)" = "$(cat original-workspace-identity)"
  test "$(cat source.txt)" = 'initial checkout'
  cmp seed/input.txt .artifacts/step-seed/seed/input.txt
+ printf 'step-retry-state-checked\n'
  printf x >> failed-count
  if test "$(cat failed-count)" = x; then
    printf retained > failed-partial
@@ -730,6 +913,7 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
  test "$(cat failed-partial)" = retained
  test "$(cat /tmp/step-failed)" = failed-rootfs
  test "$(cat /dev/shm/step-failed)" = failed-tmpfs
+ printf 'step-retry-partials-checked\n'
  mkdir proof
  printf '%%s' '%s' > proof/result.txt
  printf 'step-failed-second\n'`, want)
@@ -739,7 +923,7 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 			containerAcceptanceArtifactStep("fetch", "download", map[string]any{"job": "step-seed", "paths": []any{"seed/*"}}), controllerWorkerShell("earlier", first), controllerWorkerShell("retry-command", retry), containerAcceptanceArtifactStep("publish", "upload", map[string]any{"paths": []any{"proof/result.txt"}})}},
 		&spec.Job{Name: "step-downstream", DependsOn: []string{"step-consumer"}, Steps: []*spec.Step{containerAcceptanceArtifactStep("fetch-proof", "download", map[string]any{"job": "step-consumer", "paths": []any{"proof/*"}}), controllerWorkerShell("verify-proof", "test \"$(cat proof/result.txt)\" = '"+want+"'; cmp proof/result.txt .artifacts/step-consumer/proof/result.txt; printf 'step-downstream-proof\\n'")}},
 	)
-	containerAcceptanceStepWaitRun(t, f, run.RunID, model.PipelineStatusSuccess, o.failure)
+	containerAcceptanceStepWaitRun(t, f, run.RunID, model.PipelineStatusSuccess, o.failure, func() { containerAcceptanceStepRuntimeDiagnostic(t, events, o) })
 	containerAcceptanceDrainWithAudit(t, f, retained)
 	o.mu.Lock()
 	observedErr := o.err
@@ -811,25 +995,33 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 	if err != nil || pid == 0 || pid != pausedPID || counts["create"] != 1 || counts["task-start"] != 1 || counts["exec-create"] != 3 || counts["exec-start"] != 3 || counts["exec-delete"] != 3 || counts["pause"] != 1 || counts["resume"] != 1 {
 		t.Fatalf("actual runtime duplicated effects or changed init: %v pid=%d paused=%d err=%v", counts, pid, pausedPID, err)
 	}
-	realStackWaitLogs(t, f, steps, map[string]string{"step-earlier-once": "stdout", "step-failed-first": "stdout", "step-failed-second": "stdout", "step-downstream-proof": "stdout"})
 	var ids []string
 	for _, step := range steps {
 		ids = append(ids, step.StepRunID)
 	}
-	logs, err := f.repos.Log.ListByStepRunIDs(f.ctx, ids, 0, 1000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	markers := map[string]int{}
-	for _, line := range logs {
-		if line.Stream == "stdout" {
-			markers[strings.TrimSpace(line.Content)]++
+	wantedMarkers := map[string]int{"step-earlier-once": 1, "step-failed-first": 1, "step-failed-second": 1, "step-downstream-proof": 1, "step-retry-enter": 2, "step-retry-state-checked": 2, "step-retry-partials-checked": 1}
+	if err := containerAcceptanceStepWait(f.ctx, o.failure, func(ctx context.Context) (bool, error) {
+		logs, err := f.repos.Log.ListByStepRunIDs(ctx, ids, 0, 1000)
+		if err != nil {
+			return false, err
 		}
-	}
-	for _, marker := range []string{"step-earlier-once", "step-failed-first", "step-failed-second", "step-downstream-proof"} {
-		if markers[marker] != 1 {
-			t.Fatalf("command output %s repeated/lost: %d", marker, markers[marker])
+		markers, err := containerAcceptanceStepMarkerCounts(logs, f.conf.Agent.ID)
+		if errors.Is(err, errContainerAcceptanceStepLogGap) {
+			return false, nil // Kafka log persistence may still be catching up.
 		}
+		if err != nil {
+			return false, err
+		}
+		complete := true
+		for marker, want := range wantedMarkers {
+			if markers[marker] > want {
+				return false, fmt.Errorf("command output %s repeated: %d want=%d", marker, markers[marker], want)
+			}
+			complete = complete && markers[marker] == want
+		}
+		return complete, nil
+	}); err != nil {
+		t.Fatalf("exact synthetic command log counts: %v", err)
 	}
 	rows, total, err := f.repos.Artifact.List(f.ctx, repo.ArtifactQuery{ProjectID: f.projectID, RunID: run.RunID, Limit: 20})
 	if err != nil || total != 2 {
@@ -1203,6 +1395,61 @@ func TestRealContainerStepRetryAcceptanceGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	admission := client.admitted[request.RequestDigest]
+	t.Run("synthetic-marker-chunks-preserve-exact-counts", func(t *testing.T) {
+		row := func(id, stream, content string, line int32) *model.StepRunLog {
+			return &model.StepRunLog{LogID: fmt.Sprintf("%s-%d", id, line), AgentID: "agent", StepRunID: id, Stream: stream, LineNumber: line, Content: content}
+		}
+		logs := []*model.StepRunLog{
+			row("second", "stdout", "step-retry-enter\nstep-failed-second\n", 1),
+			row("first", "stdout", "try-enter\nstep-failed-first\n", 3),
+			row("first", "stderr", "step-failed-second\n", 2),
+			row("first", "stdout", "step-re", 1),
+			row("foreign-fragment", "stdout", "step-failed-", 1),
+			row("different-step", "stdout", "second\n", 1),
+			row("not-exact", "stdout", "prefix step-failed-second\nstep-failed-second", 1),
+		}
+		counts, err := containerAcceptanceStepMarkerCounts(logs, "agent")
+		if err != nil || counts["step-retry-enter"] != 2 || counts["step-failed-first"] != 1 || counts["step-failed-second"] != 1 {
+			t.Fatalf("ordered split/coalesced markers changed exact counts: %v %v", counts, err)
+		}
+		logs = append(logs, row("second", "stdout", "step-failed-second\n", 2))
+		counts, err = containerAcceptanceStepMarkerCounts(logs, "agent")
+		if err != nil || counts["step-failed-second"] != 2 {
+			t.Fatal("repeated execution marker was hidden")
+		}
+		logs = append(logs, row("second", "stdout", "step-failed-second\n", 2))
+		if _, err := containerAcceptanceStepMarkerCounts(logs, "agent"); err == nil {
+			t.Fatal("duplicate immutable log position accepted")
+		}
+		for _, incomplete := range [][]*model.StepRunLog{
+			{row("gap", "stdout", "step-failed-", 1), row("gap", "stdout", "second\n", 3)},
+			{row("missing-prefix", "stdout", "step-failed-second\n", 2)},
+		} {
+			if counts, err := containerAcceptanceStepMarkerCounts(incomplete, "agent"); !errors.Is(err, errContainerAcceptanceStepLogGap) || len(counts) != 0 {
+				t.Fatal("missing log fragment fabricated a complete execution marker")
+			}
+		}
+	})
+	t.Run("bounded-redacted-failure-diagnostics", func(t *testing.T) {
+		const secret = "synthetic-private-value"
+		ctx := context.WithValue(context.Background(), terminalSecretsContextKey{}, []string{secret})
+		message := "resume exact quiescence task: " + secret + " https://user:password@example.test/x?token=query-secret"
+		detail := containerAcceptanceStepDiagnosticError(ctx, message)
+		if !strings.Contains(detail, "resume exact quiescence task") || !strings.Contains(detail, "[REDACTED]") || strings.Contains(detail, secret) || strings.Contains(detail, "password") || strings.Contains(detail, "query-secret") {
+			t.Fatalf("diagnostic lost cause or leaked synthetic credential: %s", detail)
+		}
+		for _, message := range []string{"{" + secret + "}", strings.Repeat("x", 9000) + secret} {
+			if detail := containerAcceptanceStepDiagnosticError(ctx, message); strings.Contains(detail, secret) || strings.Contains(detail, "detail=") {
+				t.Fatal("structured or oversized content expanded in diagnostics")
+			}
+		}
+		if detail := containerAcceptanceStepDiagnosticError(ctx, strings.Repeat("x", 1000)); !strings.Contains(detail, "[truncated]") || len(detail) > 1000 {
+			t.Fatal("diagnostic bound was lost")
+		}
+		if summary := containerAcceptanceStepErrorSummary("resume does not match exact failed step successor and command " + secret); !strings.Contains(summary, "resume-command-binding") || strings.Contains(summary, secret) {
+			t.Fatal("runtime classification lost exact category or leaked content")
+		}
+	})
 	t.Run("pinned-source-is-not-terminal-provenance", func(t *testing.T) {
 		commit := strings.Repeat("a", 40)
 		scope := request.Scope
