@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestFailedStepPolicyIsIndependentAndProductionRemainsClosed(t *testing.T) {
+func TestFailedStepPolicyRequiresIndependentOperatorPermission(t *testing.T) {
 	retry := &pipelinev1.Retry{Mode: "failed_step", MaxAttempts: 2, Idempotent: true, AllowedExitCodes: []int32{23}}
 	policy := runtimeTestPolicy()
 	policy.AllowWholeJobRetry = true
@@ -16,15 +16,18 @@ func TestFailedStepPolicyIsIndependentAndProductionRemainsClosed(t *testing.T) {
 	if err := ValidateRuntimeRetry(retry, policy); err != nil {
 		t.Fatal(err)
 	}
-	if FailedStepRuntimeAccepted {
-		t.Fatal("unverified live-session production gate enabled")
+	if !FailedStepRuntimeAccepted {
+		t.Fatal("accepted live-session implementation gate is closed")
 	}
-	if err := policy.ValidateProduction(); err == nil {
-		t.Fatal("unverified failed-step operator flag accepted")
+	if err := policy.ValidateProduction(); err != nil {
+		t.Fatal("explicit accepted failed-step policy rejected", err)
 	}
 	policy.Enabled = false
-	if err := policy.ValidateProduction(); err == nil {
-		t.Fatal("dormant unverified flag silently accepted")
+	if err := policy.ValidateProduction(); err != nil {
+		t.Fatal("disabled runtime configuration rejected", err)
+	}
+	if (OfflineRuntimePolicy{}).AllowFailedStepRetry {
+		t.Fatal("failed-step permission must default off")
 	}
 	policy.AllowFailedStepRetry = false
 	if err := policy.ValidateProduction(); err != nil {

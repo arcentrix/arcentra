@@ -147,6 +147,7 @@ func StartWorker(
 	}
 
 	handler := newWorkerHandler(workerCtx, agentConf, grpcClient, execManager, reports)
+	handler = observeAcceptanceWorkerHandler(workerCtx, handler)
 
 	controlOptions := append([]nova.QueueOption{}, options...)
 	controlOptions = append(controlOptions, nova.WithTopicPrefix(taskqueue.AgentControlTopicPrefix(agentConf.Agent.ID)), nova.WithGroupID("arcentra-agent-control-"+agentConf.Agent.ID))
@@ -179,6 +180,7 @@ func StartWorker(
 		return nil, taskqueue.WrapStartupError("start task queue", err)
 	}
 	runCtx, cancelReports := context.WithCancel(workerCtx)
+	runCtx = observeAcceptanceWorkerReplay(runCtx)
 	result := &workerQueues{offline: offline, TaskQueue: queue, control: control, reports: reports, cancelReports: cancelReports, reportsDone: make(chan struct{})}
 	started = true
 	safe.Go(func() {

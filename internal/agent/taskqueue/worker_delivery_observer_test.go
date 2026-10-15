@@ -116,6 +116,9 @@ func (o *workerDeliveryObserver) wrap(handler nova.IHandler) nova.HandlerFunc {
 		return err
 	}
 }
+func (o *workerDeliveryObserver) backgroundContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, workerDeliveryBackgroundKey{}, true)
+}
 func (o *workerDeliveryObserver) snapshot() workerDeliverySnapshot {
 	o.mu.Lock()
 	defer o.mu.Unlock()

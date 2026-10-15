@@ -97,10 +97,13 @@ func startContainerAcceptanceWorkerObserved(ctx context.Context, conf *config.Ag
 	if len(deliveries) > 0 {
 		delivery = deliveries[0]
 	}
-	if taskpayload.OfflineRuntimeAccepted && (!conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry || taskpayload.FailedStepRuntimeAccepted) {
-		if delivery != nil {
-			return nil, fmt.Errorf("handler observation requires closed-gate acceptance assembly")
+	if delivery != nil {
+		if os.Getenv("ARCENTRA_CONTAINERD_ACCEPTANCE") != "1" || os.Getenv("ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE") != "1" {
+			return nil, fmt.Errorf("explicit container acceptance flags required")
 		}
+		ctx = context.WithValue(ctx, acceptanceWorkerObserverKey{}, delivery)
+	}
+	if taskpayload.OfflineRuntimeAccepted && (!conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry || taskpayload.FailedStepRuntimeAccepted) {
 		queue, err := StartWorker(ctx, conf, client, manager)
 		if err != nil || observer == nil {
 			return queue, err
@@ -241,16 +244,12 @@ func startContainerAcceptanceWorkerObserved(ctx context.Context, conf *config.Ag
 		return nil, err
 	}
 	handler := newWorkerHandler(workerCtx, conf, client, manager, reports)
-	if delivery != nil {
-		handler = delivery.wrap(handler)
-	}
+	handler = observeAcceptanceWorkerHandler(workerCtx, handler)
 	if err := queue.Start(handler); err != nil {
 		return nil, err
 	}
 	replayCtx, cancel := context.WithCancel(workerCtx)
-	if delivery != nil {
-		replayCtx = context.WithValue(replayCtx, workerDeliveryBackgroundKey{}, true)
-	}
+	replayCtx = observeAcceptanceWorkerReplay(replayCtx)
 	result := &workerQueues{offline: offline, TaskQueue: queue, control: control, reports: reports, cancelReports: cancel, reportsDone: make(chan struct{})}
 	safe.Go(func() {
 		defer close(result.reportsDone)

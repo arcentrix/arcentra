@@ -67,6 +67,26 @@ retry behavior are unchanged. The authorized CI privilege boundary is unchanged:
 one disposable VM, one isolated rootful daemon, non-root Go tests, no host-security
 changes or production secrets, a 25-minute limit, and mandatory cleanup evidence.
 
+## Live failed-step retry: separate implementation evidence
+
+The closed-gate live failed-step implementation passed on 2026-10-15 in
+[run 38682739091](https://github.com/arcentrix/arcentra/actions/runs/38682739091),
+remote `ffc843a3`, tree `d3512066883a3df4d93c50559e94d415fd850867`.
+All five live scenarios, seven restart phases, strict source/input checks, exact
+lost-ACK replay, once-only effects and cleanup passed.
+[Cleanup artifact 11949115418](https://github.com/arcentrix/arcentra/actions/runs/38682739091/artifacts/11949115418)
+has SHA-256 `c1ac15a9b03893c3f8cbb7d95473fa3e56617c5e9ef1a37327d9173e41358405`.
+Ordinary [CI run 38682739082](https://github.com/arcentrix/arcentra/actions/runs/38682739082)
+passed, including actual MySQL row-lock contention and the existing backend/browser journey. That run used the prior frontend pin; it does not establish the new retry editor combination.
+
+That run retained `FailedStepRuntimeAccepted = false`. This candidate opens the
+compiled failed-step gate, but its exact ordinary production `StartWorker`
+verification remains pending. The older offline-runtime gate-on pass above does
+not establish this new path. Both `allowFailedStepRetry` policies default off;
+no migration, capability or compiled gate implicitly enables them. Follow the
+[failed-step contract and prerequisites](pipeline/failed-step-retry.md). Its UI is not released ([draft PR 11](https://github.com/arcentrix/arcentra-web/pull/11); fixture CI passed, combined acceptance pending). V17 exact-content approval already supports `whole_job`
+retry separately; combining approval with `failed_step` remains rejected.
+
 ## Current offline profile and sequential-chain limits
 
 - Trusted code, either one Agent job or one explicit linear chain of Agent jobs.
@@ -80,7 +100,7 @@ changes or production secrets, a 25-minute limit, and mandatory cleanup evidence
 - Trusted host Git checkout before the container runs; trusted host artifact
   publication only after every container process is sealed. Host Git, object-store
   and image operations may use network access. Container commands cannot.
-- Explicit bounded `whole_job` retry requires a separate default-off operator permission and fresh journaled generation per round. `failed_step`, execution resumption and takeover after a crash remain unsupported. Recovery removes only exact journaled resources and reconciles original authenticated facts; interrupted work needs an explicitly requested fresh run.
+- Explicit bounded `whole_job` retry requires a separate default-off operator permission and fresh journaled generation per round. Live `failed_step` has separate accepted implementation evidence and pending gate-on verification; it keeps the original session/workspace and partial file changes. Background/zombie processes, approval-bearing failed-step plans and `continueOnError` are rejected. Neither mode resumes or takes over work after a crash. Recovery removes only exact journaled resources and reconciles original authenticated facts; interrupted work needs an explicitly requested fresh run.
 - Multiple jobs must form one explicit dependency chain: one root, at most one
   predecessor and successor per job, and all jobs reachable from that root.
   Disconnected roots, branches, joins, cycles and mixed host/deployment execution
@@ -171,7 +191,7 @@ jobs:
           script: test "$(cat dist/result.txt)" = "offline artifact"
 ```
 
-Container `whole_job` retries use the separate opt-in [fresh-generation contract](pipeline/retries.md#offline-container-whole-job-generations). `failed_step` and approval-bearing retry jobs are rejected before dispatch. Existing trusted-baremetal retry modes are unchanged. Branches, joins and disconnected roots remain outside this linear-chain profile.
+Container `whole_job` retries use the separate opt-in [fresh-generation contract](pipeline/retries.md#offline-container-whole-job-generations), including the separately enabled V17 [exact-content approval](pipeline/retry-approval.md). Live `failed_step` uses an independent [same-session contract](pipeline/failed-step-retry.md), with gate-on verification still pending; approval-bearing failed-step plans remain rejected before dispatch. Existing trusted-baremetal retry modes are unchanged. Branches, joins and disconnected roots remain outside this linear-chain profile.
 
 ## Immutable source and artifact inputs
 
@@ -204,7 +224,7 @@ and historical terminal receipt replay remain unchanged.
 
 Apply the [explicit immutable-input migration](migrations/005_immutable_job_inputs.md)
 before upgrading container Agents. Existing records remain `unknown`; terminal
-source observations are never backfilled as first-checkout pins. The input prerequisite alone does not enable retry. Whole-job generations additionally require [migration 006](migrations/006_container_job_generations.md), explicit operator retry permission and capable Agents; failed-step retry and command re-execution after restart remain unsupported.
+source observations are never backfilled as first-checkout pins. The input prerequisite alone does not enable retry. Whole-job generations additionally require [migration 006](migrations/006_container_job_generations.md), explicit operator retry permission and capable Agents; their exact-content approval gate also requires [migration 007](migrations/007_retry_approval_binding.md). Live failed-step retry additionally requires [migration 008](migrations/008_failed_step_admission_ledger.md), its own matching capability and two explicit default-off policies after exact gate-on validation. Command re-execution after restart remains unsupported.
 
 ## Review-only configuration template
 
@@ -221,6 +241,8 @@ Control:
 [pipeline.offlineRuntime]
 enabled = false
 allowWholeJobRetry = false
+allowWholeJobRetryApproval = false
+allowFailedStepRetry = false
 allowedImages = ["docker.io/library/alpine@sha256:1f3591b8a02ea153f41c5bba878ad477f63ab3d19349762cb77504db02a23e15"]
 maxCpu = "500m"
 maxMemory = "64Mi"
@@ -273,6 +295,8 @@ memory = ""
 [agent.sandbox.containerd.policy]
 enabled = false
 allowWholeJobRetry = false
+allowWholeJobRetryApproval = false
+allowFailedStepRetry = false
 allowedImages = ["docker.io/library/alpine@sha256:1f3591b8a02ea153f41c5bba878ad477f63ab3d19349762cb77504db02a23e15"]
 maxCpu = "500m"
 maxMemory = "64Mi"
@@ -331,6 +355,16 @@ build-tool compatibility.
 5. Verify authenticated runtime readiness, submit one trusted bounded job, confirm
    its actual result/artifact/logs and cleanup, and test same-identity restart on
    that authorized destination before broader use. Labels alone never admit work.
+
+For optional retry modes, apply the additional explicit migration prerequisites
+above and verify matching Agent capabilities before changing either retry policy.
+`allowWholeJobRetry`, `allowWholeJobRetryApproval` and `allowFailedStepRetry` are
+separate, default-off choices on both Control and Agent. The failed-step candidate
+still requires its own exact ordinary `StartWorker` gate-on result; the base
+runtime evidence in step 3 is insufficient. Explicit idempotent 2–5-attempt plans
+and a distinct 1–125 shell exit-code allowlist are mandatory. Failed-step retries
+retain partial files and prior successful effects, reject any background/zombie
+process, approval or `continueOnError`, and cannot continue after Agent restart.
 
 Keep policy off if any prerequisite or result is uncertain. No test, migration,
 example, or successful cleanup authorizes a production rollout by itself.

@@ -244,8 +244,11 @@ func containerAcceptanceFailedStepRetry(t *testing.T, f *controllerWorkerFixture
 		t.Fatal(err)
 	}
 	f.worker = queue.(*workerQueues)
-	if !f.worker.OfflineRuntimeReady() || !taskpayload.FailedStepRuntimeAccepted && f.worker.FailedStepRetryReady() {
-		t.Fatal("candidate readiness widened production advertisement")
+	if !f.worker.OfflineRuntimeReady() || f.worker.FailedStepRetryReady() != taskpayload.FailedStepRuntimeAccepted {
+		t.Fatal("failed-step readiness does not match the selected production entry")
+	}
+	if taskpayload.FailedStepRuntimeAccepted {
+		t.Log("failed-step gate-on: ordinary NewProcess and StartWorker; capability from actual worker readiness; closed-gate adapters unused")
 	}
 	if !t.Run("same-live-session-immutable-inputs-ack-loss", func(t *testing.T) { containerAcceptanceStepRetrySuccess(t, f, cfg, store, events, retained, delivery) }) {
 		return
@@ -266,15 +269,21 @@ func containerAcceptanceFailedStepRetry(t *testing.T, f *controllerWorkerFixture
 			t.Fatal("consumed failed-step journal survived exact completion acknowledgement")
 		}
 	}
-	t.Log("real failed-step candidate: original generation/session/PID/workspace, retained failed partial writes, exact ACK replays, immutable inputs/artifact provenance, background/zombie refusal, cancel-wins and uncertain Resume cleanup; production gate unchanged")
+	t.Log("real failed-step acceptance: original generation/session/PID/workspace, retained failed partial writes, exact ACK replays, immutable inputs/artifact provenance, background/zombie refusal, cancel-wins and uncertain Resume cleanup; production gate unchanged")
 }
 
 func containerAcceptanceStepSubmit(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, jobs ...*spec.Job) *model.PipelineRun {
 	t.Helper()
-	// The test advertises only to its authenticated synthetic Agent. Production
-	// FailedStepRetryReady remains false until the separately reviewed gate opens.
+	// Gate-on capability comes from the actual started worker. The closed-gate
+	// candidate adapter can advertise only inside this isolated test fixture.
+	ready := f.worker.FailedStepRetryReady()
+	if !taskpayload.FailedStepRuntimeAccepted {
+		ready = true
+	} else if !ready {
+		t.Fatal("production worker has not admitted failed-step capability")
+	}
 	ctx, cancel := f.client.WithTimeoutAndAuth(f.ctx)
-	response, err := f.client.AgentClient.Heartbeat(ctx, &agentv1.HeartbeatRequest{AgentId: f.conf.Agent.ID, Status: agentv1.AgentStatus_AGENT_STATUS_IDLE, Timestamp: time.Now().Unix(), RuntimeCapabilities: &agentv1.RuntimeCapabilities{ContainerdOfflineV1: f.worker.OfflineRuntimeReady(), ContainerdWholeJobRetryV1: true, ContainerdFailedStepRetryV1: true, ExecutionMode: taskpayload.RuntimeContainerdOfflineV1}})
+	response, err := f.client.AgentClient.Heartbeat(ctx, &agentv1.HeartbeatRequest{AgentId: f.conf.Agent.ID, Status: agentv1.AgentStatus_AGENT_STATUS_IDLE, Timestamp: time.Now().Unix(), RuntimeCapabilities: &agentv1.RuntimeCapabilities{ContainerdOfflineV1: f.worker.OfflineRuntimeReady(), ContainerdWholeJobRetryV1: true, ContainerdFailedStepRetryV1: ready, ExecutionMode: taskpayload.RuntimeContainerdOfflineV1}})
 	cancel()
 	if err != nil || response == nil || !response.Success {
 		t.Fatalf("candidate authenticated heartbeat: %v", err)

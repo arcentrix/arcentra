@@ -32,8 +32,8 @@ const RuntimeContainerdOfflineV1 = "containerd-offline-v1"
 // 操作者策略仍默认关闭，启用必须通过配置、身份和生命周期校验
 const OfflineRuntimeAccepted = true
 
-// FailedStepRuntimeAccepted 在实际完整步骤续试验收完成前保持关闭
-const FailedStepRuntimeAccepted = false
+// FailedStepRuntimeAccepted 标记已通过真实闭环验收的活动步骤续试实现，操作者仍需独立显式启用
+const FailedStepRuntimeAccepted = true
 
 // RuntimeResources 保存明确的硬资源上限，不接受宿主路径或可选运行时参数
 type RuntimeResources struct {

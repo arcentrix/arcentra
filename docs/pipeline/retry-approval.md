@@ -141,5 +141,9 @@ positive calls after quorum. It is absent from normal builds.
 
 Test results must name the exact tested commit and distinguish fixture-driven UI
 checks from real backend/browser journeys. No production cluster or external
-model is configured by these tests. Actual results for this new gate are recorded
-only after its exact CI candidate passes.
+model is configured by these tests. The exact whole-job approval implementation
+passed at merged backend commit `bda78247222a48ac1a0425e64769fda73e2ba129`:
+[ordinary/actual-browser CI](https://github.com/arcentrix/arcentra/actions/runs/38673170855)
+and [dedicated runtime CI](https://github.com/arcentrix/arcentra/actions/runs/38673170856).
+These results do not authorize approval-bearing `failed_step` plans, which remain
+rejected pending their separate implementation and acceptance.
