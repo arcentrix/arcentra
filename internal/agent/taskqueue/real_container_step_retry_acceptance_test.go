@@ -242,9 +242,13 @@ func containerAcceptanceFailedStepRetry(t *testing.T, f *controllerWorkerFixture
 	if !f.worker.OfflineRuntimeReady() || !taskpayload.FailedStepRuntimeAccepted && f.worker.FailedStepRetryReady() {
 		t.Fatal("candidate readiness widened production advertisement")
 	}
-	t.Run("same-live-session-immutable-inputs-ack-loss", func(t *testing.T) { containerAcceptanceStepRetrySuccess(t, f, cfg, store, events, retained) })
+	if !t.Run("same-live-session-immutable-inputs-ack-loss", func(t *testing.T) { containerAcceptanceStepRetrySuccess(t, f, cfg, store, events, retained) }) {
+		return
+	}
 	for _, scenario := range []string{"earlier-background-refused", "adopted-zombie-refused", "cancel-before-successor", "uncertain-resume-cleans"} {
-		t.Run(scenario, func(t *testing.T) { containerAcceptanceStepRetryRefusal(t, f, cfg, store, events, retained, scenario) })
+		if !t.Run(scenario, func(t *testing.T) { containerAcceptanceStepRetryRefusal(t, f, cfg, store, events, retained, scenario) }) {
+			return
+		}
 	}
 	containerAcceptanceDrainWithAudit(t, f, retained)
 	containerAcceptanceStepQueueDrained(t, f)
@@ -354,9 +358,128 @@ type containerAcceptanceStepObservation struct {
 func (o *containerAcceptanceStepObservation) fail(err error) {
 	if err != nil {
 		o.mu.Lock()
-		o.err = errors.Join(o.err, err)
+		if o.err == nil {
+			o.err = err
+		}
 		o.mu.Unlock()
 	}
+}
+
+func (o *containerAcceptanceStepObservation) failure() error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.err
+}
+
+func containerAcceptanceStepPinnedInputs(job *model.JobRun, scope taskpayload.StepAttemptIdentity, commit string) error {
+	if job == nil {
+		return fmt.Errorf("pinned job is missing")
+	}
+	identity := taskpayload.JobInputIdentity{PipelineID: job.PipelineID, PipelineRunID: job.PipelineRunID, JobRunID: job.JobRunID, AgentID: job.AgentID, ClaimID: job.ClaimID, RuntimeBindingDigest: job.RuntimeBindingDigest, SourceBindingDigest: job.SourceBindingDigest}
+	if identity != scope.Identity || job.InputManifestState != "pinned" {
+		return fmt.Errorf("original input identity or pinned state changed")
+	}
+	manifest, err := taskpayload.ParseJobInputManifest(job.InputManifest)
+	if err != nil {
+		return fmt.Errorf("parse canonical pinned inputs: %w", err)
+	}
+	digest, err := manifest.Digest(identity)
+	if err != nil || digest != job.InputManifestDigest || digest != scope.InputManifestDigest || manifest.SourceCommit != commit {
+		return fmt.Errorf("canonical input digest or original source pin changed: %v", err)
+	}
+	// Input pinning precedes all logical admissions. SourceResolvedCommit is
+	// separate terminal provenance, populated only by the final job receipt.
+	if job.SourceResolvedCommit != "" || job.SourceProvenanceState != "unknown" || model.IsJobRunTerminal(job.Status) {
+		return fmt.Errorf("pre-execution pin was confused with terminal provenance: status=%d provenance=%q", job.Status, job.SourceProvenanceState)
+	}
+	return nil
+}
+
+func containerAcceptanceStepCommittedAdmission(row *model.StepRun, req *agentv1.ReconcileStepAttemptRequest, response *agentv1.ReconcileStepAttemptResponse) error {
+	if req == nil || response == nil || row == nil {
+		return fmt.Errorf("actual CAS request, response or committed row missing")
+	}
+	tr, err := taskpayload.ParseStepAttemptTransition(req.TransitionJson)
+	if err != nil {
+		return fmt.Errorf("parse canonical CAS request: %w", err)
+	}
+	a, err := taskpayload.ParseStepAttemptAdmission(response.AdmissionJson)
+	if err != nil {
+		return fmt.Errorf("parse canonical CAS admission: %w", err)
+	}
+	if err := a.ValidateTransition(*tr); err != nil {
+		return fmt.Errorf("CAS admission binding: %w", err)
+	}
+	if !response.ExecutionAllowed || req.AgentId != tr.Scope.Identity.AgentID || row.StepRunID != tr.Scope.StepRunID || row.JobRunID != tr.Scope.Identity.JobRunID || row.PipelineRunID != tr.Scope.Identity.PipelineRunID {
+		return fmt.Errorf("actual CAS permission or committed row identity changed")
+	}
+	// These columns are MEDIUMTEXT, not MySQL JSON. Preserve exact canonical
+	// bytes as well as validated identities and the independent digest column.
+	if row.AttemptAdmission != response.AdmissionJson || row.AttemptAdmissionRequest != req.TransitionJson || row.AttemptAdmissionRequestDigest != tr.RequestDigest {
+		return fmt.Errorf("committed CAS bytes/digest differ: admission=%t request=%t digest=%t", row.AttemptAdmission == response.AdmissionJson, row.AttemptAdmissionRequest == req.TransitionJson, row.AttemptAdmissionRequestDigest == tr.RequestDigest)
+	}
+	return nil
+}
+
+// 回调仅记录错误，由当前子测试等待者报错，避免 RPC goroutine 或父测试调用 FailNow
+func containerAcceptanceStepWait(ctx context.Context, failure func() error, ready func(context.Context) (bool, error)) error {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := failure(); err != nil {
+			return fmt.Errorf("failed-step observer: %w", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		pollCtx, pollCancel := context.WithTimeout(ctx, 2*time.Second)
+		done, err := ready(pollCtx)
+		pollCancel()
+		if observed := failure(); observed != nil {
+			return fmt.Errorf("failed-step observer: %w", observed)
+		}
+		if err != nil || done {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func containerAcceptanceStepWaitRun(t *testing.T, f *controllerWorkerFixture, runID string, wanted int, failure func() error) {
+	t.Helper()
+	err := containerAcceptanceStepWait(f.ctx, failure, func(ctx context.Context) (bool, error) {
+		run, err := f.repos.Pipeline.GetRun(ctx, runID)
+		if err != nil || run == nil {
+			return false, fmt.Errorf("read pipeline %s: %v", runID, err)
+		}
+		if run.Status == wanted {
+			return true, nil
+		}
+		if run.Status == model.PipelineStatusFailed || run.Status == model.PipelineStatusSuccess || run.Status == model.PipelineStatusCancelled {
+			return false, fmt.Errorf("pipeline status=%d want=%d", run.Status, wanted)
+		}
+		return false, nil
+	})
+	if err == nil {
+		return
+	}
+	// Bounded status-only diagnostics; never print command, manifest or token data.
+	ctx, cancel := context.WithTimeout(f.ctx, 2*time.Second)
+	defer cancel()
+	jobs, queryErr := f.repos.JobRun.ListByPipelineRunID(ctx, runID)
+	if queryErr != nil {
+		t.Logf("failed-step diagnostic query: %v", queryErr)
+	}
+	for _, job := range jobs[:min(len(jobs), 6)] {
+		t.Logf("failed-step job=%s status=%d generation=%d inputs=%s provenance=%s", job.JobRunID, job.Status, job.CurrentGeneration, job.InputManifestState, job.SourceProvenanceState)
+	}
+	t.Fatalf("failed-step pipeline %s: %v", runID, err)
 }
 
 func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, events *containerAcceptanceStepRuntimeEvents, retained map[string]string) {
@@ -365,7 +488,8 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 	sourceURL, initialCommit, changedCommit, advanceBranch := containerAcceptanceMutableRetrySource(t, f.ctx)
 	store.mu.Lock()
 	initialUploads := store.sealedUploads
-	store.afterUpload = func(_ context.Context, key string, owner containerAcceptanceJournal) error {
+	store.afterUpload = func(_ context.Context, key string, owner containerAcceptanceJournal) (resultErr error) {
+		defer func() { o.fail(resultErr) }()
 		o.mu.Lock()
 		defer o.mu.Unlock()
 		if _, exists := o.uploads[key]; exists {
@@ -377,7 +501,8 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 		o.uploads[key] = owner
 		return nil
 	}
-	store.beforeDownload = func(ctx context.Context, key string) error {
+	store.beforeDownload = func(ctx context.Context, key string) (resultErr error) {
+		defer func() { o.fail(resultErr) }()
 		records, err := containerAcceptanceRecords(f.conf.Agent.Sandbox.Containerd.JournalDir)
 		if err != nil {
 			return err
@@ -436,8 +561,12 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 			return
 		}
 		job, err := f.repos.JobRun.GetByJobRunID(ctx, tr.Scope.Identity.JobRunID)
-		if err != nil || job == nil || job.InputManifestDigest != tr.Scope.InputManifestDigest || job.SourceResolvedCommit != initialCommit {
-			o.fail(fmt.Errorf("CAS changed immutable input/source pin: %v", err))
+		if err != nil {
+			o.fail(fmt.Errorf("read CAS input pin: %w", err))
+			return
+		}
+		if err := containerAcceptanceStepPinnedInputs(job, tr.Scope, initialCommit); err != nil {
+			o.fail(fmt.Errorf("observe %s step %s input pin: %w", tr.Operation, tr.Scope.StepRunID, err))
 			return
 		}
 		o.mu.Lock()
@@ -496,20 +625,24 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 		}
 	}
 	f.afterStepAttempt = func(ctx context.Context, req *agentv1.ReconcileStepAttemptRequest, response *agentv1.ReconcileStepAttemptResponse, callErr error) error {
+		// Unexpected service/observer failures must reach the subtest waiter;
+		// only the deliberate committed advance ACK loss remains retryable.
 		if callErr != nil {
+			o.fail(fmt.Errorf("actual ReconcileStepAttempt: %w", callErr))
 			return nil
 		}
 		tr, err := taskpayload.ParseStepAttemptTransition(req.TransitionJson)
-		if err != nil || response == nil {
-			return fmt.Errorf("invalid actual step CAS response: %v", err)
-		}
-		a, err := taskpayload.ParseStepAttemptAdmission(response.AdmissionJson)
-		if err != nil || a.ValidateTransition(*tr) != nil || !response.ExecutionAllowed {
-			return fmt.Errorf("actual CAS did not return exact permission: %v", err)
+		if err != nil {
+			o.fail(fmt.Errorf("parse observed CAS request: %w", err))
+			return o.failure()
 		}
 		row, err := f.repos.StepRun.GetByStepRunID(ctx, tr.Scope.StepRunID)
-		if err != nil || row == nil || row.AttemptAdmission != response.AdmissionJson || row.AttemptAdmissionRequest != req.TransitionJson {
-			return fmt.Errorf("CAS response differs from committed MySQL admission: %v", err)
+		if err == nil {
+			err = containerAcceptanceStepCommittedAdmission(row, req, response)
+		}
+		if err != nil {
+			o.fail(fmt.Errorf("observe %s step %s committed CAS: %w", tr.Operation, tr.Scope.StepRunID, err))
+			return o.failure()
 		}
 		o.mu.Lock()
 		defer o.mu.Unlock()
@@ -606,7 +739,7 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 			containerAcceptanceArtifactStep("fetch", "download", map[string]any{"job": "step-seed", "paths": []any{"seed/*"}}), controllerWorkerShell("earlier", first), controllerWorkerShell("retry-command", retry), containerAcceptanceArtifactStep("publish", "upload", map[string]any{"paths": []any{"proof/result.txt"}})}},
 		&spec.Job{Name: "step-downstream", DependsOn: []string{"step-consumer"}, Steps: []*spec.Step{containerAcceptanceArtifactStep("fetch-proof", "download", map[string]any{"job": "step-consumer", "paths": []any{"proof/*"}}), controllerWorkerShell("verify-proof", "test \"$(cat proof/result.txt)\" = '"+want+"'; cmp proof/result.txt .artifacts/step-consumer/proof/result.txt; printf 'step-downstream-proof\\n'")}},
 	)
-	f.waitRun(run.RunID, model.PipelineStatusSuccess)
+	containerAcceptanceStepWaitRun(t, f, run.RunID, model.PipelineStatusSuccess, o.failure)
 	containerAcceptanceDrainWithAudit(t, f, retained)
 	o.mu.Lock()
 	observedErr := o.err
@@ -748,7 +881,7 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 	// A subsequent real Kafka job is a FIFO barrier, making duplicate-delivery
 	// absence observable rather than a timing-only sleep.
 	barrier := containerAcceptanceStepSubmit(t, f, cfg, &spec.Job{Name: "step-after-duplicate", Steps: []*spec.Step{controllerWorkerShell("barrier", "true")}})
-	f.waitRun(barrier.RunID, model.PipelineStatusSuccess)
+	containerAcceptanceStepWaitRun(t, f, barrier.RunID, model.PipelineStatusSuccess, o.failure)
 	containerAcceptanceDrainWithAudit(t, f, retained)
 	after, err := f.repos.JobRun.GetByJobRunID(f.ctx, consumer.JobRunID)
 	if err != nil || !reflect.DeepEqual(consumer, after) {
@@ -773,9 +906,16 @@ func containerAcceptanceStepRetryRefusal(t *testing.T, f *controllerWorkerFixtur
 	fail := func(err error) {
 		if err != nil {
 			mu.Lock()
-			observationErr = errors.Join(observationErr, err)
+			if observationErr == nil {
+				observationErr = err
+			}
 			mu.Unlock()
 		}
+	}
+	failureErr := func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		return observationErr
 	}
 	store.mu.Lock()
 	uploadsBefore := store.sealedUploads
@@ -815,11 +955,17 @@ func containerAcceptanceStepRetryRefusal(t *testing.T, f *controllerWorkerFixtur
 		}
 	}
 	f.afterStepAttempt = func(_ context.Context, req *agentv1.ReconcileStepAttemptRequest, response *agentv1.ReconcileStepAttemptResponse, callErr error) error {
-		if callErr != nil || response == nil {
+		if callErr != nil {
+			fail(fmt.Errorf("actual refusal ReconcileStepAttempt: %w", callErr))
 			return nil
+		}
+		if response == nil {
+			fail(fmt.Errorf("actual refusal CAS returned no response"))
+			return failureErr()
 		}
 		tr, err := taskpayload.ParseStepAttemptTransition(req.TransitionJson)
 		if err != nil {
+			fail(err)
 			return err
 		}
 		if scenario == "cancel-before-successor" && tr.Operation == "advance" {
@@ -933,22 +1079,34 @@ func containerAcceptanceStepRetryRefusal(t *testing.T, f *controllerWorkerFixtur
 	wantRun, wantJob := model.PipelineStatusFailed, model.JobRunStatusFailed
 	if scenario == "cancel-before-successor" {
 		var tr taskpayload.StepAttemptTransition
-		select {
-		case tr = <-committed:
-		case <-f.ctx.Done():
-			t.Fatal(f.ctx.Err())
+		if err := containerAcceptanceStepWait(f.ctx, failureErr, func(context.Context) (bool, error) {
+			select {
+			case tr = <-committed:
+				return true, nil
+			default:
+				return false, nil
+			}
+		}); err != nil {
+			t.Fatalf("wait for committed successor before cancellation: %v", err)
 		}
-		f.wait("successor admission saved before cancel-wins delay", func() bool {
+		if err := containerAcceptanceStepWait(f.ctx, failureErr, func(context.Context) (bool, error) {
 			document, err := containerAcceptanceStepDocumentFor(f.conf.Agent.Sandbox.Containerd.JournalDir, tr)
-			return err == nil && document.Attempt.Admission != nil && !document.Attempt.Consumed
-		})
+			return err == nil && document.Attempt.Admission != nil && !document.Attempt.Consumed, err
+		}); err != nil {
+			t.Fatalf("successor admission saved before cancel-wins delay: %v", err)
+		}
 		if err := f.engine.CancelRun(run.RunID); err != nil {
 			t.Fatal(err)
 		}
-		f.wait("actual Kafka control cancellation reaches Agent", func() bool { _, ok := cancelledJobs.Load(tr.Scope.Identity.JobRunID); return ok })
+		if err := containerAcceptanceStepWait(f.ctx, failureErr, func(context.Context) (bool, error) {
+			_, ok := cancelledJobs.Load(tr.Scope.Identity.JobRunID)
+			return ok, nil
+		}); err != nil {
+			t.Fatalf("actual Kafka control cancellation reaches Agent: %v", err)
+		}
 		wantRun, wantJob = model.PipelineStatusCancelled, model.JobRunStatusCancelled
 	}
-	f.waitRun(run.RunID, wantRun)
+	containerAcceptanceStepWaitRun(t, f, run.RunID, wantRun, failureErr)
 	containerAcceptanceDrainWithAudit(t, f, retained)
 	mu.Lock()
 	record, actualErr, witness, advances := owner, observationErr, terminalWitness, advanceCount
@@ -1045,6 +1203,107 @@ func TestRealContainerStepRetryAcceptanceGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	admission := client.admitted[request.RequestDigest]
+	t.Run("pinned-source-is-not-terminal-provenance", func(t *testing.T) {
+		commit := strings.Repeat("a", 40)
+		scope := request.Scope
+		scope.Identity.SourceBindingDigest = "v1:" + strings.Repeat("b", 64)
+		manifest, err := taskpayload.NewJobInputManifest(commit, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := manifest.Canonical()
+		if err != nil {
+			t.Fatal(err)
+		}
+		digest, err := manifest.Digest(scope.Identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope.InputManifestDigest = digest
+		i := scope.Identity
+		job := model.JobRun{PipelineID: i.PipelineID, PipelineRunID: i.PipelineRunID, JobRunID: i.JobRunID, AgentID: i.AgentID, ClaimID: i.ClaimID, RuntimeBindingDigest: i.RuntimeBindingDigest, SourceBindingDigest: i.SourceBindingDigest, Status: model.JobRunStatusRunning, InputManifestState: "pinned", InputManifest: encoded, InputManifestDigest: digest, SourceProvenanceState: "unknown"}
+		if err := containerAcceptanceStepPinnedInputs(&job, scope, commit); err != nil {
+			t.Fatalf("valid pre-execution source pin rejected: %v", err)
+		}
+		for name, mutate := range map[string]func(*model.JobRun){
+			"foreign-agent":        func(j *model.JobRun) { j.AgentID += "-foreign" },
+			"foreign-source":       func(j *model.JobRun) { j.SourceBindingDigest = "v1:" + strings.Repeat("c", 64) },
+			"unpinned":             func(j *model.JobRun) { j.InputManifestState = "unknown" },
+			"digest":               func(j *model.JobRun) { j.InputManifestDigest = "v1:" + strings.Repeat("d", 64) },
+			"noncanonical-inputs":  func(j *model.JobRun) { j.InputManifest += " " },
+			"premature-provenance": func(j *model.JobRun) { j.SourceResolvedCommit, j.SourceProvenanceState = commit, "reported" },
+			"terminal-job":         func(j *model.JobRun) { j.Status = model.JobRunStatusSuccess },
+		} {
+			t.Run(name, func(t *testing.T) {
+				changed := job
+				mutate(&changed)
+				if err := containerAcceptanceStepPinnedInputs(&changed, scope, commit); err == nil {
+					t.Fatal("changed input identity or lifecycle accepted")
+				}
+			})
+		}
+		if err := containerAcceptanceStepPinnedInputs(&job, scope, strings.Repeat("e", 40)); err == nil {
+			t.Fatal("changed source pin accepted")
+		}
+	})
+	t.Run("committed-cas-exact-bytes-and-digests", func(t *testing.T) {
+		body, err := admission.Canonical()
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := &agentv1.ReconcileStepAttemptRequest{AgentId: request.Scope.Identity.AgentID, TransitionJson: client.requests[0]}
+		response := &agentv1.ReconcileStepAttemptResponse{AdmissionJson: body, ExecutionAllowed: true}
+		row := model.StepRun{StepRunID: request.Scope.StepRunID, JobRunID: request.Scope.Identity.JobRunID, PipelineRunID: request.Scope.Identity.PipelineRunID, AttemptAdmissionRequest: req.TransitionJson, AttemptAdmissionRequestDigest: request.RequestDigest, AttemptAdmission: body}
+		if err := containerAcceptanceStepCommittedAdmission(&row, req, response); err != nil {
+			t.Fatal(err)
+		}
+		for name, mutate := range map[string]func(*model.StepRun){
+			"request-whitespace":  func(r *model.StepRun) { r.AttemptAdmissionRequest += " " },
+			"response-whitespace": func(r *model.StepRun) { r.AttemptAdmission += " " },
+			"request-digest":      func(r *model.StepRun) { r.AttemptAdmissionRequestDigest = "v1:" + strings.Repeat("f", 64) },
+			"row-identity":        func(r *model.StepRun) { r.StepRunID += "-foreign" },
+		} {
+			t.Run(name, func(t *testing.T) {
+				changed := row
+				mutate(&changed)
+				if err := containerAcceptanceStepCommittedAdmission(&changed, req, response); err == nil {
+					t.Fatal("committed bytes, digest or identity mismatch accepted")
+				}
+			})
+		}
+		response.ExecutionAllowed = false
+		if err := containerAcceptanceStepCommittedAdmission(&row, req, response); err == nil {
+			t.Fatal("observation mistaken for permission")
+		}
+	})
+	t.Run("observer-fails-before-terminal-wait", func(t *testing.T) {
+		observer := &containerAcceptanceStepObservation{}
+		cause := errors.New("synthetic precise observer failure")
+		observer.fail(cause)
+		observer.fail(errors.New("later error must not replace the first cause"))
+		polls := 0
+		err := containerAcceptanceStepWait(context.Background(), observer.failure, func(context.Context) (bool, error) {
+			polls++
+			return false, nil
+		})
+		if !errors.Is(err, cause) || polls != 0 {
+			t.Fatalf("observer failure hidden by terminal polling: polls=%d err=%v", polls, err)
+		}
+		observer = &containerAcceptanceStepObservation{}
+		err = containerAcceptanceStepWait(context.Background(), observer.failure, func(context.Context) (bool, error) {
+			observer.fail(cause)
+			return true, nil
+		})
+		if !errors.Is(err, cause) {
+			t.Fatalf("terminal success hid a concurrent observer failure: %v", err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		observer = &containerAcceptanceStepObservation{}
+		if err := containerAcceptanceStepWait(ctx, observer.failure, func(context.Context) (bool, error) { return false, nil }); !errors.Is(err, context.Canceled) {
+			t.Fatalf("observer wait lost cancellation bound: %v", err)
+		}
+	})
 	root := t.TempDir()
 	var original containerAcceptanceStepDocument
 	original.Version, original.ControllerID, original.AgentID, original.WorkspaceRoot, original.Namespace, original.RuntimeIOIdentity = 3, "synthetic-controller", payload.AgentID, "/synthetic-workspace", request.Scope.Session.Namespace, "synthetic-io"
