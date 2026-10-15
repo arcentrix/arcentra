@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
@@ -22,6 +23,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/shared/agentidentity"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	agentgrpc "github.com/arcentrix/arcentra/internal/shared/grpc"
+	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/safe"
 	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
@@ -31,6 +33,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -80,6 +83,12 @@ func (c *liveStepACKTransport) ReconcileStepAttempt(ctx context.Context, req *ag
 // TestFailedStepWorkerBufconnTLSServiceSQLiteRetainsFixedGeneration 验证真实 TLS/服务/SQLite 与工作器的完整步骤协议
 // 不走生产调度开关，不运行 containerd，不声称 SQLite 能证明 MySQL 行锁
 func TestFailedStepWorkerBufconnTLSServiceSQLiteRetainsFixedGeneration(t *testing.T) {
+	for _, mode := range []string{"step-and-CAS", "job-ACK-preflight-replay", "job-ACK-background-replay"} {
+		t.Run(mode, func(t *testing.T) { testFailedStepWorkerTLSReplay(t, mode) })
+	}
+}
+
+func testFailedStepWorkerTLSReplay(t *testing.T, mode string) {
 	conf, p, r, _ := fakeStepRetryFixture(t, 3)
 	ctx := context.Background()
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "step-worker.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
@@ -126,13 +135,46 @@ func TestFailedStepWorkerBufconnTLSServiceSQLiteRetainsFixedGeneration(t *testin
 	tlsOptions := controllerWorkerTLS(t)
 	listener := bufconn.Listen(1024 * 1024)
 	token := "fixed-step-worker-test-token"
+	var receiptMu sync.Mutex
+	var jobReceipts, failedStepReceipts []controllerWorkerReceipt
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsOptions.serverTLS)), grpc.UnaryInterceptor(func(callCtx context.Context, request any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		md, _ := metadata.FromIncomingContext(callCtx)
 		values := md.Get("authorization")
 		if len(values) != 1 || values[0] != "bearer "+token {
 			return nil, status.Error(codes.Unauthenticated, "fixed test token required")
 		}
-		return handler(agentidentity.WithIdentity(callCtx, agentidentity.Identity{ID: p.AgentID}), request)
+		response, callErr := handler(agentidentity.WithIdentity(callCtx, agentidentity.Identity{ID: p.AgentID}), request)
+		if req, ok := request.(*agentv1.ReportStepRunStatusRequest); ok && req.RetryableShellExit && callErr == nil && mode != "step-and-CAS" {
+			claims := md.Get(executionClaimMetadataKey)
+			if len(claims) != 1 {
+				return nil, status.Error(codes.InvalidArgument, "missing failed-step claim")
+			}
+			payload, marshalErr := proto.MarshalOptions{Deterministic: true}.Marshal(req)
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			receiptMu.Lock()
+			failedStepReceipts = append(failedStepReceipts, controllerWorkerReceipt{claim: claims[0], payload: payload, message: proto.Clone(req)})
+			receiptMu.Unlock()
+		}
+		if req, ok := request.(*agentv1.ReportJobRunStatusRequest); ok && req.Status >= 4 && callErr == nil && mode != "step-and-CAS" {
+			claims := md.Get(executionClaimMetadataKey)
+			if len(claims) != 1 {
+				return nil, status.Error(codes.InvalidArgument, "missing original execution claim")
+			}
+			payload, marshalErr := proto.MarshalOptions{Deterministic: true}.Marshal(req)
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			receiptMu.Lock()
+			jobReceipts = append(jobReceipts, controllerWorkerReceipt{claim: claims[0], payload: payload, message: proto.Clone(req)})
+			lose := len(jobReceipts) == 1
+			receiptMu.Unlock()
+			if lose {
+				return nil, status.Error(codes.Unavailable, "test lost first committed job ACK")
+			}
+		}
+		return response, callErr
 	}))
 	agentv1.RegisterAgentServiceServer(server, controlservice.NewAgentServiceImpl(controlservice.NewAgentService(agents, steps, nil, jobs), nil))
 	safe.Go(func() { _ = server.Serve(listener) })
@@ -170,8 +212,87 @@ func TestFailedStepWorkerBufconnTLSServiceSQLiteRetainsFixedGeneration(t *testin
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = outbox.close() })
-	if err := executeJobRun(withOfflineJobRuntime(withTerminalOutbox(ctx, outbox), r), conf, client, executor.NewExecutorManager(), p); err != nil {
-		t.Fatal(err)
+	if mode == "step-and-CAS" {
+		if err := executeJobRun(withOfflineJobRuntime(withTerminalOutbox(ctx, outbox), r), conf, client, executor.NewExecutorManager(), p); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		observation := &workerDeliveryObserver{targetID: p.JobRunID, failureIndex: 1}
+		client.AgentClient = &workerDeliveryClient{AgentServiceClient: transport, observer: observation}
+		handler := observation.wrap(newWorkerHandler(withOfflineJobRuntime(ctx, r), conf, client, executor.NewExecutorManager(), outbox))
+		body, err := sonic.Marshal(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task := &nova.Task{Type: taskpayload.TaskTypeJobRun, Payload: body}
+		observation.original(task) // A single synthetic enqueue, invoking the real handler below.
+		if err := handler.ProcessTask(ctx, task); status.Code(err) != codes.Unavailable {
+			t.Fatalf("committed ACK loss did not request redelivery: %v", err)
+		}
+		cacheCtx := withTerminalOutbox(ctx, outbox)
+		if _, pending := pendingJobReports.Load(receiptKey(cacheCtx, "job", p.JobRunID)); !pending || !outbox.has("job", p.JobRunID) {
+			t.Fatal("ACK loss did not retain both durable and pending completion receipts")
+		}
+		receiptMu.Lock()
+		firstCount := len(jobReceipts)
+		receiptMu.Unlock()
+		if firstCount != 1 {
+			t.Fatalf("initial committed receipt count=%d", firstCount)
+		}
+		if mode == "job-ACK-background-replay" {
+			background := context.WithValue(ctx, workerDeliveryBackgroundKey{}, true)
+			if err := outbox.replayBound(background, client, conf); err != nil {
+				t.Fatal(err)
+			}
+			if _, pending := pendingJobReports.Load(receiptKey(cacheCtx, "job", p.JobRunID)); !pending || outbox.has("job", p.JobRunID) {
+				t.Fatal("background replay did not preserve pending completion independently")
+			}
+		}
+		if err := handler.ProcessTask(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		receiptMu.Lock()
+		receipts := append([]controllerWorkerReceipt(nil), jobReceipts...)
+		receiptMu.Unlock()
+		before := observation.snapshot()
+		var failedTransition *taskpayload.StepAttemptTransition
+		for _, encoded := range transport.requests {
+			candidate, err := taskpayload.ParseStepAttemptTransition(encoded)
+			if err == nil && candidate.Operation == "advance" {
+				failedTransition = candidate
+				break
+			}
+		}
+		receiptMu.Lock()
+		stepReceipts := append([]controllerWorkerReceipt(nil), failedStepReceipts...)
+		receiptMu.Unlock()
+		if failedTransition == nil {
+			t.Fatal("failed-step successor never requested")
+		}
+		if err := before.validateStep(stepReceipts, *failedTransition); err != nil {
+			t.Fatal(err)
+		}
+
+		if automatic, err := before.validate(receipts, false); err != nil || !automatic || len(receipts) != 3 {
+			t.Fatalf("deterministic real handler replay: automatic=%t receipts=%d error=%v", automatic, len(receipts), err)
+		}
+		saved, err := jobs.GetByJobRunID(ctx, p.JobRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture := &controllerWorkerFixture{t: t, pipelineID: p.PipelineID, receipts: map[string][]controllerWorkerReceipt{"job/" + p.JobRunID: receipts}}
+		fixture.assertReceipt("job", p.JobRunID, saved.ClaimID, saved.TerminalReportDigest, p.PipelineRunID, p.JobRunID)
+		observation.markManual()
+		if err := handler.ProcessTask(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		receiptMu.Lock()
+		afterReceipts := append([]controllerWorkerReceipt(nil), jobReceipts...)
+		receiptMu.Unlock()
+		after := observation.snapshot()
+		if _, err := after.validate(afterReceipts, true); err != nil || !reflect.DeepEqual(before.calls, after.calls) || !reflect.DeepEqual(before.stepCalls, after.stepCalls) || !reflect.DeepEqual(receipts, afterReceipts) {
+			t.Fatalf("manual duplicate changed completed receipt: %v", err)
+		}
 	}
 	if !reflect.DeepEqual(effects, []string{"0/1", "1/1", "1/2", "2/1"}) || r.allocations != 1 || r.acknowledgements != 1 {
 		t.Fatalf("fixed session effects changed: %v allocations=%d ACKs=%d", effects, r.allocations, r.acknowledgements)

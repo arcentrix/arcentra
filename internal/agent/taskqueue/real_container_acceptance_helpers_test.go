@@ -92,8 +92,15 @@ func startContainerAcceptanceWorker(ctx context.Context, conf *config.AgentConfi
 	return startContainerAcceptanceWorkerObserved(ctx, conf, client, manager, nil)
 }
 
-func startContainerAcceptanceWorkerObserved(ctx context.Context, conf *config.AgentConfig, client *agentgrpc.ClientWrapper, manager *executor.Manager, observer *sandbox.ContainerAcceptanceObserver) (_ nova.TaskQueue, resultErr error) {
+func startContainerAcceptanceWorkerObserved(ctx context.Context, conf *config.AgentConfig, client *agentgrpc.ClientWrapper, manager *executor.Manager, observer *sandbox.ContainerAcceptanceObserver, deliveries ...*workerDeliveryObserver) (_ nova.TaskQueue, resultErr error) {
+	var delivery *workerDeliveryObserver
+	if len(deliveries) > 0 {
+		delivery = deliveries[0]
+	}
 	if taskpayload.OfflineRuntimeAccepted && (!conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry || taskpayload.FailedStepRuntimeAccepted) {
+		if delivery != nil {
+			return nil, fmt.Errorf("handler observation requires closed-gate acceptance assembly")
+		}
 		queue, err := StartWorker(ctx, conf, client, manager)
 		if err != nil || observer == nil {
 			return queue, err
@@ -233,10 +240,17 @@ func startContainerAcceptanceWorkerObserved(ctx context.Context, conf *config.Ag
 	})); err != nil {
 		return nil, err
 	}
-	if err := queue.Start(newWorkerHandler(workerCtx, conf, client, manager, reports)); err != nil {
+	handler := newWorkerHandler(workerCtx, conf, client, manager, reports)
+	if delivery != nil {
+		handler = delivery.wrap(handler)
+	}
+	if err := queue.Start(handler); err != nil {
 		return nil, err
 	}
 	replayCtx, cancel := context.WithCancel(workerCtx)
+	if delivery != nil {
+		replayCtx = context.WithValue(replayCtx, workerDeliveryBackgroundKey{}, true)
+	}
 	result := &workerQueues{offline: offline, TaskQueue: queue, control: control, reports: reports, cancelReports: cancel, reportsDone: make(chan struct{})}
 	safe.Go(func() {
 		defer close(result.reportsDone)

@@ -222,7 +222,10 @@ func containerAcceptanceFailedStepRetry(t *testing.T, f *controllerWorkerFixture
 	if taskpayload.FailedStepRuntimeAccepted {
 		processConfig = &controlconfig.AppConfig{Pipeline: controlconfig.PipelineConfig{OfflineRuntime: policy}}
 	}
-	f.engine = process.NewProcess(f.repos, nil, &controllerWorkerRecordingQueue{TaskQueue: f.producer, fixture: f}, nil, &log.Logger{SugaredLogger: zap.NewNop().Sugar()}, processConfig, nil)
+	delivery := &workerDeliveryObserver{targetName: "step-consumer", failureIndex: 2}
+	f.client.AgentClient = &workerDeliveryClient{AgentServiceClient: f.client.AgentClient, observer: delivery}
+	recording := &controllerWorkerRecordingQueue{TaskQueue: f.producer, fixture: f}
+	f.engine = process.NewProcess(f.repos, nil, &workerDeliveryQueue{TaskQueue: recording, observer: delivery}, nil, &log.Logger{SugaredLogger: zap.NewNop().Sugar()}, processConfig, nil)
 	t.Cleanup(f.engine.Stop)
 	if !taskpayload.FailedStepRuntimeAccepted {
 		if policy.ValidateProduction() == nil || ValidateExecutionConfig(f.conf) == nil {
@@ -236,7 +239,7 @@ func containerAcceptanceFailedStepRetry(t *testing.T, f *controllerWorkerFixture
 	manager := executor.NewExecutorManager()
 	manager.Register(executor.NewShellExecutor())
 	manager.SetLogPublisher(publisher)
-	queue, err := startContainerAcceptanceWorkerObserved(f.ctx, f.conf, f.client, manager, events.observer())
+	queue, err := startContainerAcceptanceWorkerObserved(f.ctx, f.conf, f.client, manager, events.observer(), delivery)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +247,7 @@ func containerAcceptanceFailedStepRetry(t *testing.T, f *controllerWorkerFixture
 	if !f.worker.OfflineRuntimeReady() || !taskpayload.FailedStepRuntimeAccepted && f.worker.FailedStepRetryReady() {
 		t.Fatal("candidate readiness widened production advertisement")
 	}
-	if !t.Run("same-live-session-immutable-inputs-ack-loss", func(t *testing.T) { containerAcceptanceStepRetrySuccess(t, f, cfg, store, events, retained) }) {
+	if !t.Run("same-live-session-immutable-inputs-ack-loss", func(t *testing.T) { containerAcceptanceStepRetrySuccess(t, f, cfg, store, events, retained, delivery) }) {
 		return
 	}
 	for _, scenario := range []string{"earlier-background-refused", "adopted-zombie-refused", "cancel-before-successor", "uncertain-resume-cleans"} {
@@ -350,6 +353,7 @@ type containerAcceptanceStepObservation struct {
 	scope                                        taskpayload.StepAttemptIdentity
 	manifest, digest                             string
 	requests, responses                          []string
+	barrierOwner                                 containerAcceptanceJournal
 	uploads                                      map[string]containerAcceptanceJournal
 	downloads                                    map[string]int
 	lostFailure, lostCAS, lostJob, advanced      bool
@@ -648,7 +652,7 @@ func containerAcceptanceStepRuntimeDiagnostic(t *testing.T, events *containerAcc
 	t.Logf("failed-step actual SDK counts=%v", counts)
 }
 
-func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, events *containerAcceptanceStepRuntimeEvents, retained map[string]string) {
+func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, events *containerAcceptanceStepRuntimeEvents, retained map[string]string, delivery *workerDeliveryObserver) {
 	t.Helper()
 	o := &containerAcceptanceStepObservation{uploads: map[string]containerAcceptanceJournal{}, downloads: map[string]int{}}
 	sourceURL, initialCommit, changedCommit, advanceBranch := containerAcceptanceMutableRetrySource(t, f.ctx)
@@ -707,6 +711,7 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 	}
 	store.mu.Unlock()
 	f.mu.Lock()
+	initialLostACKs := f.lostACKs
 	f.observeRequest = func(ctx context.Context, raw any) {
 		req, ok := raw.(*agentv1.ReconcileStepAttemptRequest)
 		if !ok {
@@ -742,9 +747,6 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 		}
 		mismatch := o.scope.Session != tr.Scope.Session || o.scope.GenerationID != tr.Scope.GenerationID || o.scope.GenerationBindingDigest != tr.Scope.GenerationBindingDigest || o.scope.Identity != tr.Scope.Identity || o.manifest != job.InputManifest || o.digest != job.InputManifestDigest
 		if tr.Operation == "advance" {
-			if o.failedReceiptDeliveries != 2 {
-				o.err = errors.Join(o.err, fmt.Errorf("advance preceded second committed failed terminal delivery: %d", o.failedReceiptDeliveries))
-			}
 			o.requests = append(o.requests, req.TransitionJson)
 			o.successorStepID = tr.Scope.StepRunID
 		}
@@ -754,6 +756,18 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 			return
 		}
 		if tr.Operation != "advance" {
+			return
+		}
+		f.mu.Lock()
+		failedReceipts := append([]controllerWorkerReceipt(nil), f.receipts["step/"+tr.PreviousStepRunID]...)
+		f.mu.Unlock()
+		if err := delivery.snapshot().validateStep(failedReceipts, *tr); err != nil {
+			o.fail(err)
+			return
+		}
+		cacheCtx := withTerminalOutbox(ctx, f.worker.reports)
+		if _, pending := pendingStepReports.Load(receiptKey(cacheCtx, "step", tr.PreviousStepRunID)); pending || f.worker.reports.has("step", tr.PreviousStepRunID) {
+			o.fail(fmt.Errorf("advance preceded pending and durable failed-step ACK completion"))
 			return
 		}
 		previous, err := f.repos.StepRun.GetByStepRunID(ctx, tr.PreviousStepRunID)
@@ -827,7 +841,7 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 		}
 		return nil
 	}
-	f.observeTerminal = func(_ context.Context, raw proto.Message, _ any, callErr error) {
+	f.observeTerminal = func(ctx context.Context, raw proto.Message, _ any, callErr error) {
 		if callErr != nil {
 			return
 		}
@@ -856,6 +870,32 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 				f.mu.Lock()
 				f.loseStepTerminalACK = true
 				f.mu.Unlock()
+			}
+		}
+		if req, ok := raw.(*agentv1.ReportJobRunStatusRequest); ok {
+			delivery.mu.Lock()
+			manual := delivery.manual
+			delivery.mu.Unlock()
+			if manual {
+				job, err := f.repos.JobRun.GetByJobRunID(ctx, req.JobRunId)
+				if err != nil {
+					o.fail(err)
+					return
+				}
+				if job != nil && job.JobName == "step-after-duplicate" {
+					records, err := containerAcceptanceRecords(f.conf.Agent.Sandbox.Containerd.JournalDir)
+					if err != nil {
+						o.fail(err)
+						return
+					}
+					for _, record := range records {
+						if record.Record.JobRunID == req.JobRunId && record.Record.RunID == job.PipelineRunID {
+							o.mu.Lock()
+							o.barrierOwner = record
+							o.mu.Unlock()
+						}
+					}
+				}
 			}
 		}
 		if req, ok := raw.(*agentv1.ReportJobRunStatusRequest); ok && len(req.Artifacts) > 0 {
@@ -927,6 +967,7 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 	)
 	containerAcceptanceStepWaitRun(t, f, run.RunID, model.PipelineStatusSuccess, o.failure, func() {
 		containerAcceptanceStepRuntimeDiagnostic(t, events, o)
+		t.Logf("failed-step delivery %s", delivery.snapshot().summary())
 		store.mu.Lock()
 		failures, diagnostic := store.uploadFailureCount-initialStorageFailures, store.lastUploadFailure
 		store.mu.Unlock()
@@ -997,8 +1038,29 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 	if admitted != 5 || failed != 1 || publication == nil {
 		t.Fatalf("expected 5 admitted attempts and one eligible failure, got %d/%d", admitted, failed)
 	}
-	containerAcceptanceExactStepReplay(t, f, "step", failedAttempt.StepRunID, failedAttempt.ClaimID, failedAttempt.TerminalReportDigest, run.RunID, consumer.JobRunID)
-	containerAcceptanceExactStepReplay(t, f, "job", consumer.JobRunID, consumer.ClaimID, consumer.TerminalReportDigest, run.RunID, consumer.JobRunID)
+	failedTransition, err := taskpayload.ParseStepAttemptTransition(o.requests[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	failedReceipts := append([]controllerWorkerReceipt(nil), f.receipts["step/"+failedAttempt.StepRunID]...)
+	f.mu.Unlock()
+	if err := delivery.snapshot().validateStep(failedReceipts, *failedTransition); err != nil {
+		t.Fatal(err)
+	}
+	f.assertReceipt("step", failedAttempt.StepRunID, failedAttempt.ClaimID, failedAttempt.TerminalReportDigest, run.RunID, consumer.JobRunID)
+	f.mu.Lock()
+	jobReceipts := append([]controllerWorkerReceipt(nil), f.receipts["job/"+consumer.JobRunID]...)
+	lostACKs := f.lostACKs - initialLostACKs
+	f.mu.Unlock()
+	beforeDuplicate := delivery.snapshot()
+	t.Logf("job ACK delivery %s", beforeDuplicate.summary())
+	automatic, err := beforeDuplicate.validate(jobReceipts, false)
+	if err != nil || lostACKs != 2 {
+		t.Fatalf("source-attributed terminal ACK replay: %v injected=%d want=2 (step+job)", err, lostACKs)
+	}
+	f.assertReceipt("job", consumer.JobRunID, consumer.ClaimID, consumer.TerminalReportDigest, run.RunID, consumer.JobRunID)
+	t.Logf("job ACK replay: committed=%d originalHandlerInvocations=%d automaticKafkaRedelivery=%t (every RPC source, result, claim, digest and byte verified)", len(jobReceipts), len(beforeDuplicate.invocations), automatic)
 	counts, pid, err := events.counts(owner.Record.Resource)
 	if err != nil || pid == 0 || pid != pausedPID || counts["create"] != 1 || counts["task-start"] != 1 || counts["exec-create"] != 3 || counts["exec-start"] != 3 || counts["exec-delete"] != 3 || counts["pause"] != 1 || counts["resume"] != 1 {
 		t.Fatalf("actual runtime duplicated effects or changed init: %v pid=%d paused=%d err=%v", counts, pid, pausedPID, err)
@@ -1072,6 +1134,16 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 	if uploads != 2 {
 		t.Fatalf("ACK loss duplicated S3 publication: %d", uploads)
 	}
+	o.mu.Lock()
+	beforeDownloads := make(map[string]int, len(o.downloads))
+	for key, value := range o.downloads {
+		beforeDownloads[key] = value
+	}
+	o.mu.Unlock()
+	events.mu.Lock()
+	beforeManualSDK := len(events.events)
+	events.mu.Unlock()
+	delivery.markManual()
 	f.mu.Lock()
 	duplicate := f.tasks[consumer.JobRunID]
 	f.mu.Unlock()
@@ -1091,7 +1163,39 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 	if err != nil || !reflect.DeepEqual(counts, afterCounts) {
 		t.Fatal("duplicate Kafka delivery repeated an original runtime effect")
 	}
-	t.Log("earlier=1, failed-command=2, generation=1, session=1, init=1, Resume=1, publication=1; exact failed terminal/CAS/job ACK replay and duplicate Kafka delivery retained immutable source/input/artifact provenance")
+	f.mu.Lock()
+	afterReceipts := append([]controllerWorkerReceipt(nil), f.receipts["job/"+consumer.JobRunID]...)
+	afterLostACKs := f.lostACKs - initialLostACKs
+	afterFailedReceipts := append([]controllerWorkerReceipt(nil), f.receipts["step/"+failedAttempt.StepRunID]...)
+	f.mu.Unlock()
+	afterDuplicate := delivery.snapshot()
+	if _, err := afterDuplicate.validate(afterReceipts, true); err != nil || !reflect.DeepEqual(beforeDuplicate.calls, afterDuplicate.calls) || !reflect.DeepEqual(beforeDuplicate.stepCalls, afterDuplicate.stepCalls) || !reflect.DeepEqual(failedReceipts, afterFailedReceipts) || !reflect.DeepEqual(jobReceipts, afterReceipts) || afterLostACKs != lostACKs {
+		t.Fatalf("manual Kafka duplicate changed terminal delivery ledger: %v", err)
+	}
+	f.assertReceipt("job", consumer.JobRunID, consumer.ClaimID, consumer.TerminalReportDigest, run.RunID, consumer.JobRunID)
+	store.mu.Lock()
+	finalUploads := store.sealedUploads - initialUploads
+	store.mu.Unlock()
+	o.mu.Lock()
+	sameDownloads := reflect.DeepEqual(beforeDownloads, o.downloads)
+	o.mu.Unlock()
+	if finalUploads != uploads || !sameDownloads {
+		t.Fatal("manual Kafka duplicate repeated S3 upload or input download")
+	}
+	o.mu.Lock()
+	barrierOwner := o.barrierOwner
+	o.mu.Unlock()
+	if barrierOwner.Record == nil || barrierOwner.Record.RunID != barrier.RunID {
+		t.Fatal("manual duplicate FIFO barrier lacks its exact observed runtime owner")
+	}
+	events.mu.Lock()
+	delta := append([]sandbox.ContainerAcceptanceEvent(nil), events.events[beforeManualSDK:]...)
+	events.mu.Unlock()
+	if err := containerAcceptanceStepBarrierEffects(delta, barrierOwner.Record.Resource); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log("earlier=1, failed-command=2, generation=1, session=1, init=1, Resume=1, publication=1; exact failed terminal/CAS/job ACK replay and separately observed manual Kafka duplicate retained immutable source/input/artifact provenance")
 }
 
 func containerAcceptanceStepRetryRefusal(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, events *containerAcceptanceStepRuntimeEvents, retained map[string]string, scenario string) {
@@ -1403,6 +1507,27 @@ func TestRealContainerStepRetryAcceptanceGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	admission := client.admitted[request.RequestDigest]
+	t.Run("manual-duplicate-all-runtime-effects", func(t *testing.T) {
+		barrier := sandbox.ResourceRef{ID: "barrier", Owner: "exact-owner"}
+		var events []sandbox.ContainerAcceptanceEvent
+		for _, op := range []string{"create", "task-start", "exec-create", "exec-start", "exec-delete"} {
+			events = append(events, sandbox.ContainerAcceptanceEvent{Resource: barrier, Operation: op})
+		}
+		if err := containerAcceptanceStepBarrierEffects(events, barrier); err != nil {
+			t.Fatal(err)
+		}
+		extra := append(append([]sandbox.ContainerAcceptanceEvent(nil), events...), sandbox.ContainerAcceptanceEvent{Resource: sandbox.ResourceRef{ID: "new-duplicate-resource"}, Operation: "create"})
+		if err := containerAcceptanceStepBarrierEffects(extra, barrier); err == nil {
+			t.Fatal("duplicate-created different resource was hidden")
+		}
+		if err := containerAcceptanceStepBarrierEffects(events[:4], barrier); err == nil {
+			t.Fatal("incomplete FIFO barrier accepted")
+		}
+		extra = append(append([]sandbox.ContainerAcceptanceEvent(nil), events...), events[2])
+		if err := containerAcceptanceStepBarrierEffects(extra, barrier); err == nil {
+			t.Fatal("extra same-owner exec was hidden")
+		}
+	})
 	t.Run("sealed-runtime-native-and-grpc-absence", func(t *testing.T) {
 		native := fmt.Errorf("synthetic absent container: %w", errdefs.ErrNotFound)
 		grpc := status.Error(codes.NotFound, "synthetic absent task")
@@ -1686,17 +1811,19 @@ func TestRealContainerStepRetryAcceptanceGate(t *testing.T) {
 	}
 }
 
-func containerAcceptanceExactStepReplay(t *testing.T, f *controllerWorkerFixture, kind, runID, claim, digest, pipelineRunID, jobRunID string) {
-	t.Helper()
-	f.mu.Lock()
-	receipts := append([]controllerWorkerReceipt(nil), f.receipts[kind+"/"+runID]...)
-	f.mu.Unlock()
-	if len(receipts) != 2 || !bytes.Equal(receipts[0].payload, receipts[1].payload) || !proto.Equal(receipts[0].message, receipts[1].message) {
-		t.Fatalf("lost %s ACK requires exactly two identical committed terminal messages, got %d", kind, len(receipts))
+func containerAcceptanceStepBarrierEffects(events []sandbox.ContainerAcceptanceEvent, barrier sandbox.ResourceRef) error {
+	counts := map[string]int{}
+	for _, event := range events {
+		if event.Resource != barrier || event.Err != nil {
+			return fmt.Errorf("manual duplicate created an extra or failed runtime effect")
+		}
+		counts[event.Operation]++
 	}
-	// Independently recomputes the original deterministic protobuf digest and
-	// checks every replay's original claim, pipeline, run and job binding.
-	f.assertReceipt(kind, runID, claim, digest, pipelineRunID, jobRunID)
+	expected := map[string]int{"create": 1, "task-start": 1, "exec-create": 1, "exec-start": 1, "exec-delete": 1}
+	if !reflect.DeepEqual(counts, expected) {
+		return fmt.Errorf("manual duplicate SDK delta differs from exact one-command FIFO barrier: %v", counts)
+	}
+	return nil
 }
 
 // 比较真实代理分区的最终高水位，避免新增前置场景后固定低阈值误报已提交
