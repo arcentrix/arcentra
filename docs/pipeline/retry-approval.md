@@ -2,8 +2,8 @@
 
 This optional gate is separate from Kubernetes deployment approval and the legacy
 in-memory generic approval plugin. It is disabled by default. It supports only
-`containerd-offline-v1` with `whole_job` retry; container `failed_step` remains
-rejected. It adds no network, host socket, privilege, concurrency or automatic
+`containerd-offline-v1` with `whole_job` retry; combining this approval with
+container `failed_step` remains rejected. It adds no network, host socket, privilege, concurrency or automatic
 restart capability.
 
 ## Upgrade and operator configuration

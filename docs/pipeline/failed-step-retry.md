@@ -1,22 +1,26 @@
-# Offline failed-step retry: accepted implementation, gate-on validation pending
+# Offline failed-step retry: gate-on candidate accepted
 
-The complete live-session/durable step-attempt implementation passed the
-closed-gate hosted runtime acceptance on 2026-10-15. This candidate opens the
-compiled acceptance gate, but its ordinary production `StartWorker` gate-on
-verification is **pending**. The earlier result must not be treated as evidence
-for this candidate's changed startup path. See [exact evidence](#acceptance-status).
+The live-session/durable step-attempt implementation and its ordinary production
+`NewProcess`/`StartWorker` gate-on path passed independent hosted acceptance on
+2026-10-15. The accepted backend candidate is
+`3f7d81283afcabaf62af0e705a8d0b1252035024`, tree
+`af529d00f50999cf4f5b9c1f9be9cbca7b6a6841`. See [exact evidence](#acceptance-status).
 
+[Backend PR 61](https://github.com/arcentrix/arcentra/pull/61) and
+[frontend PR 11](https://github.com/arcentrix/arcentra-web/pull/11) were draft when this evidence was recorded on 2026-10-15; this is candidate acceptance, not a main release or deployment.
+Current merge/release status is available from those PRs and the delivered revision manifest.
 Control `pipeline.offlineRuntime.allowFailedStepRetry` and Agent
 `agent.sandbox.containerd.policy.allowFailedStepRetry` both default to false.
-Neither this candidate nor a successful test implicitly enables either policy.
+Neither the accepted gate nor a successful test implicitly enables either policy.
 Existing baremetal retry and accepted offline whole-job retry retain their
-contracts. The failed-step UI is not released ([draft PR 11](https://github.com/arcentrix/arcentra-web/pull/11); fixture CI passed, combined acceptance pending).
+contracts. The failed-step editor has fixture-based Chromium evidence; the
+actual-backend journey and runtime execution evidence have separate scopes below.
 
 ## Operator prerequisites
 
-Keep failed-step policy disabled until the exact candidate has passed ordinary
-production-entry acceptance and destination-specific checks. Then, before
-explicitly opting in:
+The exact candidate above has passed ordinary production-entry acceptance. Keep
+failed-step policy disabled until the intended build and destination-specific
+checks are reviewed. Before explicitly opting in on an authorized destination:
 
 1. Back up and explicitly apply [migration 008](../migrations/008_failed_step_admission_ledger.md)
    with the earlier runtime, immutable-input and generation schema migrations.
@@ -89,26 +93,58 @@ still-live Agent only under the original current authority and deadlines.
 
 ## Acceptance status
 
-The closed-gate implementation evidence is tied to remote commit `ffc843a3`,
-source tree `d3512066883a3df4d93c50559e94d415fd850867`:
+### Gate-on candidate and distinct verification scopes
+
+The accepted backend head is `3f7d81283afcabaf62af0e705a8d0b1252035024`,
+source tree `af529d00f50999cf4f5b9c1f9be9cbca7b6a6841`; the tested merge is
+`5f04d1f9c0c4ae0d50c147a9d993d010d2c5686a`.
+
+- [Runtime run 38684719818](https://github.com/arcentrix/arcentra/actions/runs/38684719818)
+  passed with `FailedStepRuntimeAccepted = true`, ordinary `NewProcess` and
+  `StartWorker`, and capability derived from actual worker readiness. Closed-gate
+  adapters were unused. All five live failed-step scenarios, seven restart phases
+  and prior runtime regressions passed without skipped tests. Earlier steps ran
+  once, the selected failed command twice, with one generation/session/init,
+  one Resume and one final publication. Exact receipt/CAS/job ACK replay and
+  independently observed Kafka duplication preserved bytes, claims and digests.
+  Background/zombie/cancel refusals had no successor effects, Resume or artifact;
+  uncertain Resume had one Resume call but no successor effects or artifact.
+- [Cleanup artifact 11949518772](https://github.com/arcentrix/arcentra/actions/runs/38684719818/artifacts/11949518772)
+  reports `passed: true`, `leaksBeforeFallback: []`, `cleanupErrors: []`.
+  SHA-256: `21a1b526e3404d6ee2d08cb3b02aa4de9d1783491f5293fc6bc1a9ee75a79628`.
+- [Ordinary CI run 38684719835](https://github.com/arcentrix/arcentra/actions/runs/38684719835)
+  passed quality checks. The five real MySQL step-attempt scenarios with four
+  exact server row-lock wait witnesses and the existing nine repository plus four
+  service approval tests all ran without skips in their dedicated integration lane.
+  Its actual-backend browser
+  journey pinned frontend `c0b0fd280f80ed5bc8dcea6d638352d73bbeb289` and completed
+  the existing real installation, execution, logs and artifact journey with zero
+  errors and four downloads.
+  [Browser artifact 11950580259](https://github.com/arcentrix/arcentra/actions/runs/38684719835/artifacts/11950580259)
+  SHA-256: `8fc0720ece34cb17bc55a6612156d73006466bf7975d4c28247a6fec94c95a7c`.
+- [Frontend run 38683724510](https://github.com/arcentrix/arcentra-web/actions/runs/38683724510)
+  passed quality and Chromium checks at that frontend head. Failed-step editor
+  draft guards and no-autosave behavior were verified with simulated API transport.
+  The actual-backend browser journey did not select and execute `failed_step`;
+  actual failed-step execution is established by the separate runtime run above.
+
+Both PRs were draft when this evidence was recorded on 2026-10-15. These exact-candidate results do not certify another
+revision, release OCI startup, a production deployment, Kubernetes rollout or
+external model integration. No production cluster or model is configured by this
+feature. Ordinary tests and SQLite fixtures alone cannot prove MySQL lock behavior
+or kernel isolation; changed runtime code requires fresh exact-code evidence.
+
+### Earlier closed-gate implementation evidence
+
+The earlier implementation passed at remote `ffc843a3`, source tree
+`d3512066883a3df4d93c50559e94d415fd850867`, with
+`FailedStepRuntimeAccepted = false`:
 
 - [Runtime run 38682739091](https://github.com/arcentrix/arcentra/actions/runs/38682739091)
-  passed all five live failed-step scenarios and seven restart phases, including
-  strict source/input checks, exact lost-ACK replay, once-only effects and cleanup.
+  passed all five live scenarios and seven restart phases, including strict
+  source/input checks, exact lost-ACK replay, once-only effects and cleanup.
 - [Cleanup artifact 11949115418](https://github.com/arcentrix/arcentra/actions/runs/38682739091/artifacts/11949115418)
-  has SHA-256 `c1ac15a9b03893c3f8cbb7d95473fa3e56617c5e9ef1a37327d9173e41358405`.
-- Ordinary [CI run 38682739082](https://github.com/arcentrix/arcentra/actions/runs/38682739082)
-  passed, including actual MySQL contention and the existing backend/browser journey using the prior frontend pin. Its result is separate from
-  the runtime result.
-
-`FailedStepRuntimeAccepted` was false for that accepted implementation run. This
-candidate changes the compiled gate to true; its ordinary `StartWorker` entry
-must be independently exercised on the exact final candidate before gate-on
-acceptance can be claimed. No gate-on passing result is recorded here yet.
-Ordinary tests and SQLite fixtures alone cannot prove MySQL lock behavior or
-kernel isolation. Retain exact commit/tree, final-code quality results and real
-MySQL/containerd evidence separately; a prior tree's pass does not cover changes.
-
-These results do not establish release OCI startup, a production deployment,
-Kubernetes rollout or external model integration. No production cluster or model
-is configured by this feature.
+  SHA-256: `c1ac15a9b03893c3f8cbb7d95473fa3e56617c5e9ef1a37327d9173e41358405`.
+- [Ordinary CI run 38682739082](https://github.com/arcentrix/arcentra/actions/runs/38682739082)
+  passed MySQL contention and the existing backend/browser journey using the
+  prior frontend pin. It does not substitute for the later gate-on evidence.

@@ -4,9 +4,10 @@ At this probe stage, the production `containerd-offline-v1` profile rejected
 `failed_step`. The probe alone was not a new retry mode or execution permission;
 it did not change operator policies, network isolation, capacity or restart
 behavior. The later [durable failed-step implementation](failed-step-retry.md)
-has passed closed-gate acceptance; ordinary gate-on entry verification for the
-current candidate remains pending. This historical document is not opt-in
-guidance or evidence for that later startup path.
+has passed both closed-gate implementation acceptance and independent ordinary
+`NewProcess`/`StartWorker` gate-on candidate acceptance. Backend PR 61 and frontend
+PR 11 were draft when this evidence was recorded on 2026-10-15. This historical document is not opt-in guidance or evidence
+for that later startup path; use the linked current contract and exact results.
 
 ## Proposed narrow boundary
 

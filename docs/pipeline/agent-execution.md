@@ -2,9 +2,26 @@
 
 ## Supported runtime and trust boundary
 
-The current worker executes trusted shell jobs on a dedicated bare-metal host (or inside the already-isolated agent container). Configure `agent.mode = "baremetal"`, `agent.sandbox.enable = false`, and leave `deniedCommands` and `resourceLimits` empty. `conf.d/agent.baremetal.example.toml` is the explicit development example.
+The trusted baremetal profile executes shell jobs on a dedicated host (or inside the already-isolated Agent container). Configure `agent.mode = "baremetal"`, `agent.sandbox.enable = false`, and leave `deniedCommands` and `resourceLimits` empty. `conf.d/agent.baremetal.example.toml` is the explicit development example.
 
-Startup rejects sandbox mode, requested Docker execution, and restrictions the worker cannot enforce. Selecting a container image does not currently create per-job isolation. Never point an unrestricted agent at untrusted pull-request code, and do not share its filesystem or service credentials with unrelated tenants. Shell steps inherit the agent's process environment, then apply agent, job, and step environment overrides. Containerd/Kubernetes job runtimes and mandatory resource enforcement remain unsupported.
+Requested Docker/Kubernetes Agent execution and restrictions the worker cannot
+enforce remain rejected. Selecting an image alone does not enable isolation.
+Never point an unrestricted baremetal Agent at untrusted pull-request code, and
+do not share its filesystem or service credentials with unrelated tenants.
+Baremetal shell steps inherit the Agent's process environment, then apply Agent,
+job and step environment overrides.
+
+The separate, explicitly enabled `containerd-offline-v1` profile supports bounded
+trusted-code isolation, an allowlisted digest-pinned image and explicit CPU/memory
+limits. Both Control and Agent operator policies default off. Its no-egress,
+linear-chain, staging/sealing and private-workspace rules are documented in
+[sandbox integration](../sandbox-agent-integration.md) and [operator opt-in](../offline-runtime-acceptance.md).
+The baremetal step types, environment inheritance and caller-selected workspaces
+below do not expand that offline profile. Whole-job container retry uses a fresh
+generation; live failed-step retry retains one session/workspace and partial
+files. See [retry contracts](retries.md) and [V18 exact-candidate acceptance](failed-step-retry.md).
+Backend PR 61 and frontend PR 11 were draft when this evidence was recorded on 2026-10-15; acceptance does not enable a
+production deployment or either operator policy.
 
 Install Go at the version required by `go.mod` for development. The runtime needs a POSIX `sh` and `git`; scripts can require additional project-specific tools. Steps run through `sh -ec` so failed commands stop the script. Unix process-group cancellation terminates descendant processes, and captured stdout/stderr are each bounded to 4 MiB while logs stream separately.
 
@@ -12,7 +29,7 @@ Install Go at the version required by `go.mod` for development. The runtime need
 
 The Kafka worker executes one job at a time to preserve message acknowledgment order. Set `agent.maxConcurrentJobs = 1`; an omitted/zero value means effective capacity 1. Negative values and values above 1 are rejected at startup and registration, and the Agent advertises only capacity 1. `job.concurrency` is rejected by production pipeline validation because named cross-job/cross-run locking is not implemented.
 
-Agent jobs accept explicit `shell` or `builtin:shell` steps (actions: omitted, `run`, `script`, `command`), `builtin:artifacts` (`upload` or `download` in a whole-job task), and `http` (action omitted or `request`). Shell steps require a nonempty `run`, `script`, `command` or `commands` argument. HTTP steps require an absolute HTTP(S) `url` without embedded credentials and run through the existing HTTP executor on the trusted Agent host. An HTTP step's `run` argument is never interpreted as a shell command.
+Baremetal Agent jobs accept explicit `shell` or `builtin:shell` steps (actions: omitted, `run`, `script`, `command`), `builtin:artifacts` (`upload` or `download` in a whole-job task), and `http` (action omitted or `request`). Shell steps require a nonempty `run`, `script`, `command` or `commands` argument. HTTP steps require an absolute HTTP(S) `url` without embedded credentials and run through the existing HTTP executor on the trusted Agent host. An HTTP step's `run` argument is never interpreted as a shell command.
 
 Unknown native plugin names and version-qualified plugin names are rejected before host workspace/source/artifact preparation, even when their arguments contain a shell command or URL. Pipeline validation checks every step in an Agent-dispatched job, including steps without their own `runOnAgent` flag. Local control-plane plugin validation is unchanged. Old queue tasks with an empty `uses` and a shell command remain compatible; new pipeline definitions require an explicit `uses`. Unsupported queued work is claimed and reported as failed, rather than silently discarded or retried as a native plugin.
 
@@ -44,9 +61,15 @@ S3, MinIO, OSS, GCS, and COS providers expose an additive streaming interface. T
 
 CloudEvents are appended in execution order, with pipeline-run, job-run, step-run, and agent identifiers. Shell stdout/stderr also stream to `BUILD_LOGS` with the actual step-run ID, independent of whether an event publisher is enabled. Reporting uses authenticated RPC contexts even when the execution context has been cancelled.
 
-Every failed terminal step RPC, including skipped/cancelled steps and preparation/condition failures, retains an in-memory delivery receipt. Job completion waits for these reports, and a reporting failure does not turn a successful command into an execution failure. A failed terminal job RPC also retains an in-memory delivery receipt. Retrying that task resends the terminal status without rerunning its shell command or artifact transfers. Successfully reported command failures are acknowledged rather than endlessly re-executed. Completed or otherwise stale control-plane claims are also acknowledged without execution.
+Current terminal delivery uses the durable, claim-bound outbox described in
+[terminal reports](../agent-terminal-reports.md). Step receipts, including
+skipped/cancelled and preparation/condition outcomes, precede job completion.
+Unacknowledged results replay their original bytes and claim without rerunning
+shell commands or artifact transfers. Reporting delay does not turn a successful
+command into a command failure; persistence failure fences later commands.
+Completed or otherwise stale control-plane claims never grant new execution.
 
-This is not an exactly-once execution guarantee. A process crash before final status delivery can leave a running record requiring reconciliation: terminal RPC receipts and claim UUIDs are not yet durable, and there is no automatic cross-restart execution lease or takeover; explicit offline reconciliation is available. A restarted process cannot adopt a running claim from the old process. Build-log delivery now uses a separate bounded durable spool with fsync-before-acceptance and stable replay IDs; broker outages retain queued logs until acknowledged. Full or failed disks explicitly fail execution. See `implementation.md` for configuration, retention and surviving-disk assumptions. Generic native plugins, per-job sandboxing, artifact retention policies, and cross-restart terminal reconciliation need additional implementation.
+This is not an exactly-once execution guarantee. A crash before a result is durably saved can leave an unknown execution result requiring reconciliation. Saved receipts require the same surviving disk and original identity; they do not grant an automatic cross-restart execution lease or takeover. Explicit offline reconciliation is available. A restarted process cannot adopt a running claim from the old process. Build-log delivery now uses a separate bounded durable spool with fsync-before-acceptance and stable replay IDs; broker outages retain queued logs until acknowledged. Full or failed disks explicitly fail execution. See `implementation.md` for configuration, retention and surviving-disk assumptions. Generic native plugins and runtime profiles beyond the bounded offline containerd profile remain unsupported. Current durable terminal-report recovery and artifact lifecycle contracts are documented in [terminal reports](../agent-terminal-reports.md) and [artifact lifecycle](../artifact-lifecycle.md); neither permits execution takeover.
 
 ## Regression tests
 

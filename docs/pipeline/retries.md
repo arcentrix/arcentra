@@ -4,8 +4,10 @@ Retries are disabled unless a job has a complete, valid `retry` policy. Older
 `maxAttempts` / `delay` alone are now rejected rather than silently selecting a
 scope. The existing Build definition editor can apply a policy to its draft; normal
 validation, repository save permission and concurrency checks still apply. The
-offline live failed-step UI is not released ([draft PR 11](https://github.com/arcentrix/arcentra-web/pull/11); fixture CI passed, combined acceptance pending); backend acceptance does not
-establish UI availability.
+offline live failed-step candidate passed gate-on runtime acceptance and its
+editor passed simulated-transport Chromium checks. [Backend PR 61](https://github.com/arcentrix/arcentra/pull/61)
+and [frontend PR 11](https://github.com/arcentrix/arcentra-web/pull/11) were draft when this evidence was recorded on 2026-10-15; acceptance does not establish release availability. [Verification
+scopes and exact evidence](failed-step-retry.md#acceptance-status).
 
 ```yaml
 jobs:
@@ -108,7 +110,7 @@ Agent fabricating results.
 
 ## Offline container whole-job generations
 
-For `containerd-offline-v1`, `mode: whole_job` requires both Control `pipeline.offlineRuntime.allowWholeJobRetry` and Agent `agent.sandbox.containerd.policy.allowWholeJobRetry` to be explicitly true. Both default to false. Runtime readiness advertises a separate versioned retry capability; labels or an older Agent cannot substitute for it. The separate live `failed_step` implementation has closed-gate runtime acceptance, while this gate-on candidate still awaits exact ordinary `StartWorker` verification. Its independent policy, migration and live-session requirements are described [below](#offline-container-live-failed-step-retry).
+For `containerd-offline-v1`, `mode: whole_job` requires both Control `pipeline.offlineRuntime.allowWholeJobRetry` and Agent `agent.sandbox.containerd.policy.allowWholeJobRetry` to be explicitly true. Both default to false. Runtime readiness advertises a separate versioned retry capability; labels or an older Agent cannot substitute for it. The separate live `failed_step` candidate has both implementation and independent ordinary `NewProcess`/`StartWorker` gate-on acceptance; its PRs were draft when this evidence was recorded on 2026-10-15. Its independent policy, migration and live-session requirements are described [below](#offline-container-live-failed-step-retry).
 
 Each round has a fresh container, rootfs, tmpfs and workspace. All explicit steps repeat; external side effects are not rolled back. The first full source commit and registered input artifact set remain fixed across rounds. Checkout uses that full commit even when a branch moves; source/staging/hash/length failures stop the job. The reserved `ARCENTRA_JOB_GENERATION` environment value is the 1-based round number; job/step/runtime/Agent overrides are rejected. It is a diagnostic/testing value, not a permission or secret.
 
@@ -132,9 +134,9 @@ eligible failed shell command repeats. Its partial file changes remain, with no
 rollback. Any background process or zombie at the retry boundary causes refusal
 and terminal cleanup, including work started by an earlier successful step.
 
-The complete implementation passed closed-gate acceptance; this candidate's
-ordinary production `StartWorker` gate-on verification is pending. Before any
-operator opt-in, require exact final-code gate-on evidence, explicit
+The exact candidate passed independent ordinary production `NewProcess`/`StartWorker`
+gate-on acceptance. Before any operator opt-in, review the exact accepted build
+and destination-specific checks, and require explicit
 [migration 008](../migrations/008_failed_step_admission_ledger.md), a capable Agent,
 and both Control `pipeline.offlineRuntime.allowFailedStepRetry` and Agent
 `agent.sandbox.containerd.policy.allowFailedStepRetry`. Both flags default off.
@@ -142,4 +144,4 @@ Only explicit idempotent policies with 2–5 attempts and a distinct 1–125 exi
 allowlist qualify. `continueOnError` and approval-bearing `failed_step` plans are
 rejected; whole-job exact approval does not cover this combination. There is no
 restart continuation or post-terminal resume. See the [full contract and exact
-evidence](failed-step-retry.md); the failed-step UI is not released ([draft PR 11](https://github.com/arcentrix/arcentra-web/pull/11); fixture CI passed, combined acceptance pending).
+evidence](failed-step-retry.md), including the separate frontend fixture and actual-backend browser scopes. Backend PR 61 and frontend PR 11 were draft when this evidence was recorded on 2026-10-15.

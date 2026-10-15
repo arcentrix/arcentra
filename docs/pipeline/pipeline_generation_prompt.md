@@ -29,15 +29,13 @@ include:                   # [可选] 引用模板库中的模板
       param_name: value
 
 runtime:                   # [可选] 全局运行时配置
-  type: string             #   运行时类型，如 "docker"、"kubernetes"
-  image: string            #   默认容器镜像
+  type: string             #   当前隔离模式仅 containerd-offline-v1；裸机省略 runtime
+  image: string            #   离线模式必须为操作者允许的 image@sha256:...
   env:                     #   全局环境变量
     KEY: "value"
-  resources:               #   资源限制
-    cpuRequest: string
-    cpuLimit: string
-    memoryRequest: string
-    memoryLimit: string
+  resources:               #   离线模式必须显式配置，且不超过双端操作者上限
+    cpu: string            #   如 "500m"
+    memory: string         #   如 "64Mi"
 
 jobs:                      # [必填] 作业列表（至少一个 Job）
   - ...                    #   详见 Job 结构
@@ -59,7 +57,7 @@ triggers:                  # [可选] 触发器列表
   timeout: string          # [可选] 最大运行时间，格式 "30m"、"1h"、"300s"
   when: string             # [可选] 条件表达式，为 true 时才执行
   retry:                   # [可选] 显式重试；省略时不重试
-    mode: string           # 必填 failed_step | whole_job；复用当前工作区
+    mode: string           # 必填 failed_step | whole_job；工作区语义取决于 runtime，见下文
     idempotent: true        # 必须显式确认重复执行和外部副作用安全
     allowedExitCodes: [9]   # 明确允许的 shell 退出码，1..125，非空且不重复
     maxAttempts: int        #   总尝试次数（包含首次），必须为 2..5
@@ -148,7 +146,18 @@ triggers:                  # [可选] 触发器列表
 
 当前 Kafka Agent 仅串行执行作业，`maxConcurrentJobs` 只能为 1 或默认值 0。不要生成命名 `concurrency` 锁；非空值会被生产校验拒绝。
 
-任何 Step 指定 `runOnAgent: true` 时，整个 Job 都在 Agent 执行。该 Job 仅允许 `shell` / `builtin:shell`（动作省略或 `run` / `script` / `command`）、`builtin:artifacts`（`upload` / `download`）和显式 `http`（动作省略或 `request`，参数使用无内嵌凭据的绝对 HTTP(S) URL）。Agent 不支持原生插件或版本化插件名称，不能通过添加 `run` / `url` 参数绕过该限制。Shell 参数必须提供非空 `run`、`script`、`command` 或 `commands`。
+裸机配置中，任何 Step 指定 `runOnAgent: true` 时，整个 Job 都在 Agent 执行。该 Job 仅允许 `shell` / `builtin:shell`（动作省略或 `run` / `script` / `command`）、`builtin:artifacts`（`upload` / `download`）和显式 `http`（动作省略或 `request`，参数使用无内嵌凭据的绝对 HTTP(S) URL）。Agent 不支持原生插件或版本化插件名称，不能通过添加 `run` / `url` 参数绕过该限制。Shell 参数必须提供非空 `run`、`script`、`command` 或 `commands`。
+
+### 离线运行时与重试生成边界
+
+以下限制优先于后面的通用插件表和扩展示例；不得用示例生成离线模式不支持的组合。
+
+- `containerd-offline-v1` 仅接受可信代码、操作者允许的摘要固定镜像、显式 CPU/内存上限和匹配的非 root UID:GID。双端离线策略与所选重试权限均默认关闭，YAML 不能启用操作者策略，也不能凭标签推断 Agent 能力。不了解目标环境是否已配置时，先确认，不假定已启用。
+- 离线 Job 必须组成单个 Job 或一条显式线性依赖链，全部步骤使用所选 Agent；只允许前置 `builtin:artifacts` 下载、`shell`/`builtin:shell`（动作省略或 `run`）和后置制品上传。禁止分支/汇合、HTTP、原生插件、OCI 构建、联网安装、部署步骤/target、主机挂载和宿主执行回退。
+- 裸机 `failed_step` 与 `whole_job` 都复用原工作区；前者只重跑失败步骤，后者重跑全部显式步骤。离线 `whole_job` 每轮使用新的 generation、container、rootfs、tmpfs 和 workspace，固定最初源代码提交与制品输入，完成前一轮清理后才准入下一轮。不得把它描述为复用原文件系统或回滚外部副作用。
+- 离线 `failed_step` 仅重跑失败 shell 命令，保留同一持续存活的 generation/session/container/workspace/rootfs/tmpfs，先前成功步骤只执行一次，失败命令的部分文件变更也保留。必须有 migration 008、匹配 Agent 能力和 Control/Agent 双端显式 `allowFailedStepRetry`；不得生成 approval 或 `continueOnError` 组合。后台进程或 zombie 会拒绝续试；没有跨 Agent 重启续跑或终态后恢复。
+- 两种重试都必须由操作者明确确认 `idempotent: true`，总尝试数为 2–5，退出码白名单非空、无重复且范围为 1–125；不明确这些条件时不能擅自加入重试策略。离线 `whole_job` 审批仅支持另行启用的精确 `required: true`、`type: manual`、`plugin: builtin:retry-approval`，params 省略或为空；审批人和 quorum 来自可信操作者配置，不能由 YAML 自行指定。此审批不适用于 `failed_step`。
+- V18 精确候选已通过独立正常入口验收，2026-10-15 记录该证据时后端 PR 61、前端 PR 11 仍为 draft；当前发布状态以 PR 和交付清单为准。不能把验收等同已配置生产环境。详见[重试合同](retries.md)、[失败步骤要求与证据](failed-step-retry.md)及[离线配置](../offline-runtime-acceptance.md)。
 
 以下插件表是扩展设计参考，不表示这些插件已经能在 Agent 上运行；本地控制平面插件还需实际安装和注册。
 
@@ -183,7 +192,7 @@ triggers:                  # [可选] 触发器列表
 1. **namespace 必须填写**，根据用户描述的环境选择合适的值
 2. **每个 Job 至少有一个 Step**，每个 Step 必须有 `name` 和 `uses`
 3. **Job 名称在 Pipeline 内必须唯一**，使用 kebab-case 命名
-4. **使用 `dependsOn` 表达 Job 间依赖关系**，形成 DAG；无依赖的 Job 并行执行
+4. **使用 `dependsOn` 表达 Job 间依赖关系**；离线 runtime 只能生成单 Job 或一条显式线性链，不能生成并行分支/汇合
 5. **Source 通常只在需要代码检出时配置**，Git 类型需要 `repo` 字段
 6. **timeout 格式**：数字 + 单位后缀（`s`/`m`/`h`），如 `"30m"`
 7. **变量引用**使用 `${{ }}` 语法，不要使用 `${}`

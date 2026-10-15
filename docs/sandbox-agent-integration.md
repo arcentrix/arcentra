@@ -8,14 +8,17 @@ That run retained `OfflineRuntimeAccepted = false` and used narrowly build-tagge
 
 The V10 [backend main CI](https://github.com/arcentrix/arcentra/actions/runs/38393872734) remains the earlier trusted-baremetal real-service/browser baseline. The separate runtime evidence came from an authorized disposable GitHub VM, not privileged execution in the restricted implementation workspace. The [runtime harness](../scripts/acceptance/CONTAINERD_RUNTIME.md) owns only its temporary daemon and preserves the original 25-minute/no-production-secret boundary. Neither result certifies release OCI images, production infrastructure or hostile multi-tenancy.
 
-The separate live failed-step implementation passed closed-gate
-[run 38682739091](https://github.com/arcentrix/arcentra/actions/runs/38682739091)
-for remote `ffc843a3`, tree `d3512066883a3df4d93c50559e94d415fd850867`.
-This candidate's ordinary `StartWorker` gate-on verification is still pending;
-the earlier ordinary-entry acceptance above applies to its stated older revision.
-Both `allowFailedStepRetry` policies remain default off. See [exact evidence,
-migration 008 and the live-session contract](pipeline/failed-step-retry.md).
-The failed-step UI is not released ([draft PR 11](https://github.com/arcentrix/arcentra-web/pull/11); fixture CI passed, combined acceptance pending).
+V18 live failed-step retry separately passed
+[gate-on runtime run 38684719818](https://github.com/arcentrix/arcentra/actions/runs/38684719818)
+at backend head `3f7d81283afcabaf62af0e705a8d0b1252035024`, tree
+`af529d00f50999cf4f5b9c1f9be9cbca7b6a6841`. Ordinary `NewProcess`/`StartWorker`,
+actual worker readiness, all five live scenarios, seven restart phases and cleanup
+passed. Ordinary CI also passed, including the existing actual-backend browser
+journey at the new frontend pin. Failed-step editor interaction has separate
+simulated-transport Chromium evidence; real failed-step execution is established
+by the runtime run. [Backend PR 61](https://github.com/arcentrix/arcentra/pull/61)
+and [frontend PR 11](https://github.com/arcentrix/arcentra-web/pull/11) were draft when this evidence was recorded on 2026-10-15. Both `allowFailedStepRetry` policies remain default off. See [exact
+evidence, migration 008 and the live-session contract](pipeline/failed-step-retry.md).
 
 ## Bounded offline job profile
 
@@ -105,4 +108,4 @@ The controller's local pipeline-run semaphore, the Agent's single-message-at-a-t
 
 The Agent advertises an explicit execution mode separately from readiness. A containerd-mode Agent is excluded from baremetal dispatch even while it is not ready; a legacy Agent with no mode report remains eligible only for the old baremetal path. Unknown modes fail selection. If an already-bound structurally valid task reaches the same Agent after its image/resource policy is tightened or its configured execution mode changes, the Agent claims that exact task and reports a failed, unexecuted result. It does not allocate a session, clone source or transfer artifacts. Unresolved runtime recovery instead blocks consumption without claiming or acknowledging new work.
 
-The original one-job validator constraint is extended only to an explicit linear dependency chain. Serial Agent capacity remains one; it does not prohibit A completing before B starts. Every job is validated independently and receives its own claim, immutable runtime binding, session and private workspace. Published upstream artifacts are staged through trusted storage before the downstream container starts. Branching, joins, disconnected roots, mixed host/deployment execution remain rejected. Container whole-job retries require the separate default-off generation permission and exact immutable inputs; their exact-content approval is separately supported. Live failed-step retries have an independent default-off same-session contract with accepted implementation evidence and pending gate-on verification; approval-bearing failed-step plans remain rejected. Existing skipped-dependency semantics are unchanged: missing mandatory inputs must fail before a downstream container starts. See [the chain contract and final-code acceptance requirements](offline-runtime-acceptance.md#sequential-chain-contract).
+The original one-job validator constraint is extended only to an explicit linear dependency chain. Serial Agent capacity remains one; it does not prohibit A completing before B starts. Every job is validated independently and receives its own claim, immutable runtime binding, session and private workspace. Published upstream artifacts are staged through trusted storage before the downstream container starts. Branching, joins, disconnected roots, mixed host/deployment execution remain rejected. Container whole-job retries require the separate default-off generation permission and exact immutable inputs; their exact-content approval is separately supported. Live failed-step retries have an independent default-off same-session contract with exact-candidate implementation and ordinary gate-on entry acceptance; approval-bearing failed-step plans remain rejected. Existing skipped-dependency semantics are unchanged: missing mandatory inputs must fail before a downstream container starts. See [the chain contract and final-code acceptance requirements](offline-runtime-acceptance.md#sequential-chain-contract).
