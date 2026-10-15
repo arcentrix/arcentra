@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/validation"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
 )
@@ -22,6 +23,9 @@ func (e *Process) selectAgentForRuntime(ctx context.Context, job *spec.Job, runt
 	}
 	if err := taskqueue.ValidateRuntimeRequest(runtime, e.offlineRuntimePolicy); err != nil {
 		return "", err
+	}
+	if job.Approval != nil && job.Approval.Plugin == "builtin:retry-approval" && (runtime == nil || !validation.IsDurableRetryApproval(job, e.offlineRuntimePolicy)) {
+		return "", fmt.Errorf("durable retry approval unavailable")
 	}
 	if runtime != nil {
 		if err := taskqueue.ValidateRuntimeRetry(job.Retry, e.offlineRuntimePolicy); err != nil {
@@ -51,7 +55,7 @@ func (e *Process) selectAgentForRuntime(ctx context.Context, job *spec.Job, runt
 					continue
 				}
 			case taskqueue.RuntimeContainerdOfflineV1:
-				if runtime == nil || agent.OS != "linux" || !capabilities.ContainerdOfflineV1 || job.Retry != nil && !capabilities.ContainerdWholeJobRetryV1 {
+				if runtime == nil || agent.OS != "linux" || !capabilities.ContainerdOfflineV1 || job.Retry != nil && !capabilities.ContainerdWholeJobRetryV1 || validation.IsDurableRetryApproval(job, e.offlineRuntimePolicy) && !capabilities.ContainerdRetryApprovalV1 {
 					continue
 				}
 			default:
@@ -161,6 +165,12 @@ func decodeAgentRuntimeCapabilities(data []byte) (taskqueue.AgentRuntimeCapabili
 				return result, fmt.Errorf("invalid runtime readiness")
 			}
 			result.ContainerdOfflineV1 = ready
+		case "containerdRetryApprovalV1":
+			ready, ok := value.(bool)
+			if !ok {
+				return result, fmt.Errorf("invalid runtime retry approval readiness")
+			}
+			result.ContainerdRetryApprovalV1 = ready
 		case "containerdWholeJobRetryV1":
 			ready, ok := value.(bool)
 			if !ok {

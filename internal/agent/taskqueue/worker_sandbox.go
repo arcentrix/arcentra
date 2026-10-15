@@ -68,13 +68,16 @@ func validateOfflineJob(ctx context.Context, conf *config.AgentConfig, payload *
 func offlineJobValidation(ctx context.Context, conf *config.AgentConfig, payload *taskpayload.JobRunTaskPayload) (error, error) {
 	sandboxMode := conf != nil && strings.EqualFold(conf.Agent.Mode, "sandbox")
 	if payload.Runtime == nil {
+		if payload.RetryApprovalRequired {
+			return nil, fmt.Errorf("retry approval requires offline runtime")
+		}
 		if sandboxMode {
 			return fmt.Errorf("sandbox agent requires an explicit offline runtime job"), nil
 		}
 		return nil, nil
 	}
 	request := payload.Runtime
-	structuralPolicy := taskpayload.OfflineRuntimePolicy{Enabled: true, AllowWholeJobRetry: true, AllowedImages: []string{request.Image}, MaxCPU: request.Resources.CPU, MaxMemory: request.Resources.Memory}
+	structuralPolicy := taskpayload.OfflineRuntimePolicy{Enabled: true, AllowWholeJobRetry: true, AllowWholeJobRetryApproval: true, AllowedImages: []string{request.Image}, MaxCPU: request.Resources.CPU, MaxMemory: request.Resources.Memory}
 	if err := taskpayload.ValidateJobRuntime(payload, structuralPolicy); err != nil {
 		return nil, err
 	}
@@ -90,6 +93,9 @@ func offlineJobValidation(ctx context.Context, conf *config.AgentConfig, payload
 	}
 	if err := taskpayload.ValidateRuntimeRetry(payload.Retry, conf.Agent.Sandbox.Containerd.Policy); err != nil {
 		return fmt.Errorf("offline runtime retry denied by current Agent policy"), nil
+	}
+	if payload.RetryApprovalRequired && !conf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetryApproval {
+		return fmt.Errorf("retry approval denied by current Agent policy"), nil
 	}
 	return nil, nil
 }

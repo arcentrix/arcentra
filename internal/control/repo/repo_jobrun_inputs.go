@@ -85,6 +85,9 @@ func (r *JobRunRepo) GetOrRecordJobInputs(ctx context.Context, identity taskqueu
 					return fmt.Errorf("input manifest is already pinned to different inputs")
 				}
 			}
+			if err := pinRetryApproval(ctx, tx, &current); err != nil {
+				return err
+			}
 			result = current
 			return nil
 		}
@@ -111,6 +114,9 @@ func (r *JobRunRepo) GetOrRecordJobInputs(ctx context.Context, identity taskqueu
 			return err
 		}
 		current.InputManifestState, current.InputManifest, current.InputManifestDigest = "pinned", encoded, digest
+		if err := pinRetryApproval(ctx, tx, &current); err != nil {
+			return err
+		}
 		result = current
 		return nil
 	})

@@ -24,6 +24,9 @@ func verifiedPipelineActor(ctx context.Context) string {
 	return actor
 }
 
+// VerifiedPipelineActor 返回认证入口固定的身份，不能从请求正文创建权限
+func VerifiedPipelineActor(ctx context.Context) string { return verifiedPipelineActor(ctx) }
+
 // PipelineDeploymentReview 组合不可变 DSL 计划及已配置的精确发布目标
 type PipelineDeploymentReview struct {
 	*deployment.PipelineDeploymentPlan

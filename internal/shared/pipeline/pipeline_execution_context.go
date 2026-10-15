@@ -86,6 +86,8 @@ type ExecutionContext struct {
 	Runtime *taskqueue.RuntimeRequest
 	// RuntimePolicy 保存操作者策略快照，默认禁用
 	RuntimePolicy taskqueue.OfflineRuntimePolicy
+	// RetryApprovalTimeoutSeconds 保存可信运行上下文的固定审批等待预算
+	RetryApprovalTimeoutSeconds int64
 	// CancelJob 通知远程 Agent 停止作业
 	CancelJob func(context.Context, string, string, string) error
 	// StepRunIDs 保存当前作业的步骤执行标识

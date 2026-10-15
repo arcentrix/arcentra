@@ -61,12 +61,14 @@ type PipelineServiceImpl struct {
 	deployment       *DeploymentService
 	templateResolver *PipelineTemplateService
 
+	services             *Services
 	offlineRuntimePolicy taskqueue.OfflineRuntimePolicy
 }
 
 // NewPipelineServiceImpl creates pipeline grpc service.
 func NewPipelineServiceImpl(services *Services) *PipelineServiceImpl {
 	implementation := &PipelineServiceImpl{
+		services:         services,
 		pipelineRepo:     services.PipelineRepo,
 		projectRepo:      services.ProjectRepo,
 		stepRunRepo:      services.StepRunRepo,
@@ -356,7 +358,7 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 			}, nil
 		}
 		if existing != nil {
-			if err := validateDeploymentDuplicate(ctx, req, existing); err != nil {
+			if err := validatePipelineTriggerDuplicate(ctx, req, existing); err != nil {
 				return &pipelinev1.TriggerPipelineResponse{Success: false, Message: err.Error(), Error: s.error(409, err.Error(), "conflict", nil)}, nil
 			}
 			return &pipelinev1.TriggerPipelineResponse{
@@ -428,6 +430,9 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 		Env:                 variablesJSON,
 		TotalJobs:           len(parsedSpec.Jobs),
 	}
+	if err := s.captureRetryApprovalTrigger(ctx, req, pipeline, run, parsedSpec); err != nil {
+		return &pipelinev1.TriggerPipelineResponse{Success: false, Message: err.Error(), Error: s.error(403, err.Error(), "retry_approval_validation", nil)}, nil
+	}
 	if deploymentConsent != nil {
 		run.AllowDeployments = deploymentConsent.AllowDeployments
 		run.DeploymentActorID = deploymentConsent.DeploymentActorID
@@ -437,11 +442,11 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 		// Definition revision is not proof of the separately cloned source revision.
 		run.CommitSha = ""
 	}
-	if err := s.pipelineRepo.CreateRun(ctx, run); err != nil {
+	if err := createPipelineTriggerRun(ctx, s.pipelineRepo, run); err != nil {
 		if requestID != "" && isDuplicateEntryError(err) {
 			existing, getErr := s.pipelineRepo.GetRunByRequestID(ctx, pipeline.PipelineID, requestID)
 			if getErr == nil && existing != nil {
-				if err := validateDeploymentDuplicate(ctx, req, existing); err != nil {
+				if err := validatePipelineTriggerDuplicate(ctx, req, existing); err != nil {
 					return &pipelinev1.TriggerPipelineResponse{Success: false, Message: err.Error(), Error: s.error(409, err.Error(), "conflict", nil)}, nil
 				}
 				return &pipelinev1.TriggerPipelineResponse{
@@ -473,7 +478,7 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 			log.Warnw("increment pipeline runs failed", "error", err)
 		}
 	}
-	if err := engine.Submit(run, parsedSpec); err != nil {
+	if err := submitPipelineRun(ctx, engine, run, parsedSpec); err != nil {
 		now := time.Now()
 		_ = s.pipelineRepo.UpdateRun(ctx, run.RunID, map[string]any{"status": model.PipelineStatusFailed, "end_time": now})
 		_ = s.pipelineRepo.Update(ctx, run.PipelineID, map[string]any{"status": model.PipelineStatusFailed})

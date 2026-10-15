@@ -735,6 +735,7 @@ func (x *TaskStatus) GetMetrics() map[string]string {
 // RuntimeCapabilities reports authenticated Agent readiness, independently of editable labels.
 type RuntimeCapabilities struct {
 	state                     protoimpl.MessageState `protogen:"open.v1"`
+	ContainerdRetryApprovalV1 bool                   `protobuf:"varint,4,opt,name=containerd_retry_approval_v1,json=containerdRetryApprovalV1,proto3" json:"containerd_retry_approval_v1,omitempty"` // Durable exact-content retry approval protocol readiness
 	ContainerdOfflineV1       bool                   `protobuf:"varint,1,opt,name=containerd_offline_v1,json=containerdOfflineV1,proto3" json:"containerd_offline_v1,omitempty"`
 	ExecutionMode             string                 `protobuf:"bytes,2,opt,name=execution_mode,json=executionMode,proto3" json:"execution_mode,omitempty"`                                            // baremetal or containerd-offline-v1, independent of readiness
 	ContainerdWholeJobRetryV1 bool                   `protobuf:"varint,3,opt,name=containerd_whole_job_retry_v1,json=containerdWholeJobRetryV1,proto3" json:"containerd_whole_job_retry_v1,omitempty"` // Explicit operator permission and ready generation controller
@@ -770,6 +771,13 @@ func (x *RuntimeCapabilities) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RuntimeCapabilities.ProtoReflect.Descriptor instead.
 func (*RuntimeCapabilities) Descriptor() ([]byte, []int) {
 	return file_agent_v1_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RuntimeCapabilities) GetContainerdRetryApprovalV1() bool {
+	if x != nil {
+		return x.ContainerdRetryApprovalV1
+	}
+	return false
 }
 
 func (x *RuntimeCapabilities) GetContainerdOfflineV1() bool {
@@ -3247,6 +3255,103 @@ func (x *ReconcileJobGenerationResponse) GetGenerationJson() string {
 	return ""
 }
 
+// Exact canonical observe/admit requests; observe never grants execution.
+type ReconcileJobRetryApprovalRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	RequestJson   string                 `protobuf:"bytes,2,opt,name=request_json,json=requestJson,proto3" json:"request_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReconcileJobRetryApprovalRequest) Reset() {
+	*x = ReconcileJobRetryApprovalRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReconcileJobRetryApprovalRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReconcileJobRetryApprovalRequest) ProtoMessage() {}
+
+func (x *ReconcileJobRetryApprovalRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReconcileJobRetryApprovalRequest.ProtoReflect.Descriptor instead.
+func (*ReconcileJobRetryApprovalRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *ReconcileJobRetryApprovalRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *ReconcileJobRetryApprovalRequest) GetRequestJson() string {
+	if x != nil {
+		return x.RequestJson
+	}
+	return ""
+}
+
+type ReconcileJobRetryApprovalResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ResponseJson  string                 `protobuf:"bytes,1,opt,name=response_json,json=responseJson,proto3" json:"response_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReconcileJobRetryApprovalResponse) Reset() {
+	*x = ReconcileJobRetryApprovalResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReconcileJobRetryApprovalResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReconcileJobRetryApprovalResponse) ProtoMessage() {}
+
+func (x *ReconcileJobRetryApprovalResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReconcileJobRetryApprovalResponse.ProtoReflect.Descriptor instead.
+func (*ReconcileJobRetryApprovalResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *ReconcileJobRetryApprovalResponse) GetResponseJson() string {
+	if x != nil {
+		return x.ResponseJson
+	}
+	return ""
+}
+
 var File_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_agent_v1_agent_proto_rawDesc = "" +
@@ -3296,8 +3401,9 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\ametrics\x18\x06 \x03(\v2!.agent.v1.TaskStatus.MetricsEntryR\ametrics\x1a:\n" +
 	"\fMetricsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb2\x01\n" +
-	"\x13RuntimeCapabilities\x122\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf3\x01\n" +
+	"\x13RuntimeCapabilities\x12?\n" +
+	"\x1ccontainerd_retry_approval_v1\x18\x04 \x01(\bR\x19containerdRetryApprovalV1\x122\n" +
 	"\x15containerd_offline_v1\x18\x01 \x01(\bR\x13containerdOfflineV1\x12%\n" +
 	"\x0eexecution_mode\x18\x02 \x01(\tR\rexecutionMode\x12@\n" +
 	"\x1dcontainerd_whole_job_retry_v1\x18\x03 \x01(\bR\x19containerdWholeJobRetryV1\"\xa2\x02\n" +
@@ -3543,7 +3649,12 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12'\n" +
 	"\x0ftransition_json\x18\x02 \x01(\tR\x0etransitionJson\"I\n" +
 	"\x1eReconcileJobGenerationResponse\x12'\n" +
-	"\x0fgeneration_json\x18\x01 \x01(\tR\x0egenerationJson*Q\n" +
+	"\x0fgeneration_json\x18\x01 \x01(\tR\x0egenerationJson\"`\n" +
+	" ReconcileJobRetryApprovalRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12!\n" +
+	"\frequest_json\x18\x02 \x01(\tR\vrequestJson\"H\n" +
+	"!ReconcileJobRetryApprovalResponse\x12#\n" +
+	"\rresponse_json\x18\x01 \x01(\tR\fresponseJson*Q\n" +
 	"\tAckStatus\x12\x1a\n" +
 	"\x16ACK_STATUS_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rACK_STATUS_OK\x10\x01\x12\x15\n" +
@@ -3558,8 +3669,9 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x1bPLUGIN_LOCATION_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16PLUGIN_LOCATION_SERVER\x10\x01\x12\x1b\n" +
 	"\x17PLUGIN_LOCATION_STORAGE\x10\x02\x12\x1c\n" +
-	"\x18PLUGIN_LOCATION_REGISTRY\x10\x032\xfa\b\n" +
-	"\fAgentService\x12m\n" +
+	"\x18PLUGIN_LOCATION_REGISTRY\x10\x032\xf0\t\n" +
+	"\fAgentService\x12t\n" +
+	"\x19ReconcileJobRetryApproval\x12*.agent.v1.ReconcileJobRetryApprovalRequest\x1a+.agent.v1.ReconcileJobRetryApprovalResponse\x12m\n" +
 	"\x16ReconcileJobGeneration\x12'.agent.v1.ReconcileJobGenerationRequest\x1a(.agent.v1.ReconcileJobGenerationResponse\"\x00\x12g\n" +
 	"\x14GetOrRecordJobInputs\x12%.agent.v1.GetOrRecordJobInputsRequest\x1a&.agent.v1.GetOrRecordJobInputsResponse\"\x00\x12d\n" +
 	"\x13InspectJobExecution\x12$.agent.v1.InspectJobExecutionRequest\x1a%.agent.v1.InspectJobExecutionResponse\"\x00\x12F\n" +
@@ -3590,63 +3702,65 @@ func file_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
+var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 52)
 var file_agent_v1_agent_proto_goTypes = []any{
-	(AckStatus)(0),                         // 0: agent.v1.AckStatus
-	(AgentStatus)(0),                       // 1: agent.v1.AgentStatus
-	(PluginLocation)(0),                    // 2: agent.v1.PluginLocation
-	(*ConnectRequest)(nil),                 // 3: agent.v1.ConnectRequest
-	(*ConnectResponse)(nil),                // 4: agent.v1.ConnectResponse
-	(*ConnectHeartbeat)(nil),               // 5: agent.v1.ConnectHeartbeat
-	(*TaskDispatch)(nil),                   // 6: agent.v1.TaskDispatch
-	(*TaskCancel)(nil),                     // 7: agent.v1.TaskCancel
-	(*TaskAck)(nil),                        // 8: agent.v1.TaskAck
-	(*TaskStatus)(nil),                     // 9: agent.v1.TaskStatus
-	(*RuntimeCapabilities)(nil),            // 10: agent.v1.RuntimeCapabilities
-	(*HeartbeatRequest)(nil),               // 11: agent.v1.HeartbeatRequest
-	(*HeartbeatResponse)(nil),              // 12: agent.v1.HeartbeatResponse
-	(*RegisterRequest)(nil),                // 13: agent.v1.RegisterRequest
-	(*RegisterResponse)(nil),               // 14: agent.v1.RegisterResponse
-	(*StorageConfig)(nil),                  // 15: agent.v1.StorageConfig
-	(*UnregisterRequest)(nil),              // 16: agent.v1.UnregisterRequest
-	(*UnregisterResponse)(nil),             // 17: agent.v1.UnregisterResponse
-	(*FetchStepRunRequest)(nil),            // 18: agent.v1.FetchStepRunRequest
-	(*FetchStepRunResponse)(nil),           // 19: agent.v1.FetchStepRunResponse
-	(*StepRun)(nil),                        // 20: agent.v1.StepRun
-	(*ArtifactConfig)(nil),                 // 21: agent.v1.ArtifactConfig
-	(*ReportStepRunStatusRequest)(nil),     // 22: agent.v1.ReportStepRunStatusRequest
-	(*ReportStepRunStatusResponse)(nil),    // 23: agent.v1.ReportStepRunStatusResponse
-	(*CancelStepRunRequest)(nil),           // 24: agent.v1.CancelStepRunRequest
-	(*CancelStepRunResponse)(nil),          // 25: agent.v1.CancelStepRunResponse
-	(*UpdateLabelsRequest)(nil),            // 26: agent.v1.UpdateLabelsRequest
-	(*UpdateLabelsResponse)(nil),           // 27: agent.v1.UpdateLabelsResponse
-	(*ReportJobRunStatusRequest)(nil),      // 28: agent.v1.ReportJobRunStatusRequest
-	(*SourceCheckout)(nil),                 // 29: agent.v1.SourceCheckout
-	(*ArtifactResult)(nil),                 // 30: agent.v1.ArtifactResult
-	(*ReportJobRunStatusResponse)(nil),     // 31: agent.v1.ReportJobRunStatusResponse
-	(*CancelJobRunRequest)(nil),            // 32: agent.v1.CancelJobRunRequest
-	(*CancelJobRunResponse)(nil),           // 33: agent.v1.CancelJobRunResponse
-	(*AgentSelector)(nil),                  // 34: agent.v1.AgentSelector
-	(*LabelExpression)(nil),                // 35: agent.v1.LabelExpression
-	(*PluginInfo)(nil),                     // 36: agent.v1.PluginInfo
-	(*InspectJobExecutionRequest)(nil),     // 37: agent.v1.InspectJobExecutionRequest
-	(*InspectJobExecutionResponse)(nil),    // 38: agent.v1.InspectJobExecutionResponse
-	(*GetOrRecordJobInputsRequest)(nil),    // 39: agent.v1.GetOrRecordJobInputsRequest
-	(*GetOrRecordJobInputsResponse)(nil),   // 40: agent.v1.GetOrRecordJobInputsResponse
-	(*ReconcileJobGenerationRequest)(nil),  // 41: agent.v1.ReconcileJobGenerationRequest
-	(*ReconcileJobGenerationResponse)(nil), // 42: agent.v1.ReconcileJobGenerationResponse
-	nil,                                    // 43: agent.v1.TaskStatus.MetricsEntry
-	nil,                                    // 44: agent.v1.RegisterRequest.LabelsEntry
-	nil,                                    // 45: agent.v1.RegisterResponse.LabelsEntry
-	nil,                                    // 46: agent.v1.StepRun.EnvEntry
-	nil,                                    // 47: agent.v1.StepRun.SecretsEntry
-	nil,                                    // 48: agent.v1.ReportStepRunStatusRequest.MetricsEntry
-	nil,                                    // 49: agent.v1.UpdateLabelsRequest.LabelsEntry
-	nil,                                    // 50: agent.v1.UpdateLabelsResponse.LabelsEntry
-	nil,                                    // 51: agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
-	nil,                                    // 52: agent.v1.AgentSelector.MatchLabelsEntry
-	(v1.StepRunStatus)(0),                  // 53: steprun.v1.StepRunStatus
-	(*structpb.Struct)(nil),                // 54: google.protobuf.Struct
+	(AckStatus)(0),                            // 0: agent.v1.AckStatus
+	(AgentStatus)(0),                          // 1: agent.v1.AgentStatus
+	(PluginLocation)(0),                       // 2: agent.v1.PluginLocation
+	(*ConnectRequest)(nil),                    // 3: agent.v1.ConnectRequest
+	(*ConnectResponse)(nil),                   // 4: agent.v1.ConnectResponse
+	(*ConnectHeartbeat)(nil),                  // 5: agent.v1.ConnectHeartbeat
+	(*TaskDispatch)(nil),                      // 6: agent.v1.TaskDispatch
+	(*TaskCancel)(nil),                        // 7: agent.v1.TaskCancel
+	(*TaskAck)(nil),                           // 8: agent.v1.TaskAck
+	(*TaskStatus)(nil),                        // 9: agent.v1.TaskStatus
+	(*RuntimeCapabilities)(nil),               // 10: agent.v1.RuntimeCapabilities
+	(*HeartbeatRequest)(nil),                  // 11: agent.v1.HeartbeatRequest
+	(*HeartbeatResponse)(nil),                 // 12: agent.v1.HeartbeatResponse
+	(*RegisterRequest)(nil),                   // 13: agent.v1.RegisterRequest
+	(*RegisterResponse)(nil),                  // 14: agent.v1.RegisterResponse
+	(*StorageConfig)(nil),                     // 15: agent.v1.StorageConfig
+	(*UnregisterRequest)(nil),                 // 16: agent.v1.UnregisterRequest
+	(*UnregisterResponse)(nil),                // 17: agent.v1.UnregisterResponse
+	(*FetchStepRunRequest)(nil),               // 18: agent.v1.FetchStepRunRequest
+	(*FetchStepRunResponse)(nil),              // 19: agent.v1.FetchStepRunResponse
+	(*StepRun)(nil),                           // 20: agent.v1.StepRun
+	(*ArtifactConfig)(nil),                    // 21: agent.v1.ArtifactConfig
+	(*ReportStepRunStatusRequest)(nil),        // 22: agent.v1.ReportStepRunStatusRequest
+	(*ReportStepRunStatusResponse)(nil),       // 23: agent.v1.ReportStepRunStatusResponse
+	(*CancelStepRunRequest)(nil),              // 24: agent.v1.CancelStepRunRequest
+	(*CancelStepRunResponse)(nil),             // 25: agent.v1.CancelStepRunResponse
+	(*UpdateLabelsRequest)(nil),               // 26: agent.v1.UpdateLabelsRequest
+	(*UpdateLabelsResponse)(nil),              // 27: agent.v1.UpdateLabelsResponse
+	(*ReportJobRunStatusRequest)(nil),         // 28: agent.v1.ReportJobRunStatusRequest
+	(*SourceCheckout)(nil),                    // 29: agent.v1.SourceCheckout
+	(*ArtifactResult)(nil),                    // 30: agent.v1.ArtifactResult
+	(*ReportJobRunStatusResponse)(nil),        // 31: agent.v1.ReportJobRunStatusResponse
+	(*CancelJobRunRequest)(nil),               // 32: agent.v1.CancelJobRunRequest
+	(*CancelJobRunResponse)(nil),              // 33: agent.v1.CancelJobRunResponse
+	(*AgentSelector)(nil),                     // 34: agent.v1.AgentSelector
+	(*LabelExpression)(nil),                   // 35: agent.v1.LabelExpression
+	(*PluginInfo)(nil),                        // 36: agent.v1.PluginInfo
+	(*InspectJobExecutionRequest)(nil),        // 37: agent.v1.InspectJobExecutionRequest
+	(*InspectJobExecutionResponse)(nil),       // 38: agent.v1.InspectJobExecutionResponse
+	(*GetOrRecordJobInputsRequest)(nil),       // 39: agent.v1.GetOrRecordJobInputsRequest
+	(*GetOrRecordJobInputsResponse)(nil),      // 40: agent.v1.GetOrRecordJobInputsResponse
+	(*ReconcileJobGenerationRequest)(nil),     // 41: agent.v1.ReconcileJobGenerationRequest
+	(*ReconcileJobGenerationResponse)(nil),    // 42: agent.v1.ReconcileJobGenerationResponse
+	(*ReconcileJobRetryApprovalRequest)(nil),  // 43: agent.v1.ReconcileJobRetryApprovalRequest
+	(*ReconcileJobRetryApprovalResponse)(nil), // 44: agent.v1.ReconcileJobRetryApprovalResponse
+	nil,                     // 45: agent.v1.TaskStatus.MetricsEntry
+	nil,                     // 46: agent.v1.RegisterRequest.LabelsEntry
+	nil,                     // 47: agent.v1.RegisterResponse.LabelsEntry
+	nil,                     // 48: agent.v1.StepRun.EnvEntry
+	nil,                     // 49: agent.v1.StepRun.SecretsEntry
+	nil,                     // 50: agent.v1.ReportStepRunStatusRequest.MetricsEntry
+	nil,                     // 51: agent.v1.UpdateLabelsRequest.LabelsEntry
+	nil,                     // 52: agent.v1.UpdateLabelsResponse.LabelsEntry
+	nil,                     // 53: agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
+	nil,                     // 54: agent.v1.AgentSelector.MatchLabelsEntry
+	(v1.StepRunStatus)(0),   // 55: steprun.v1.StepRunStatus
+	(*structpb.Struct)(nil), // 56: google.protobuf.Struct
 }
 var file_agent_v1_agent_proto_depIdxs = []int32{
 	5,  // 0: agent.v1.ConnectRequest.heartbeat:type_name -> agent.v1.ConnectHeartbeat
@@ -3658,59 +3772,61 @@ var file_agent_v1_agent_proto_depIdxs = []int32{
 	10, // 6: agent.v1.ConnectHeartbeat.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
 	20, // 7: agent.v1.TaskDispatch.step_runs:type_name -> agent.v1.StepRun
 	0,  // 8: agent.v1.TaskAck.status:type_name -> agent.v1.AckStatus
-	53, // 9: agent.v1.TaskStatus.status:type_name -> steprun.v1.StepRunStatus
-	43, // 10: agent.v1.TaskStatus.metrics:type_name -> agent.v1.TaskStatus.MetricsEntry
+	55, // 9: agent.v1.TaskStatus.status:type_name -> steprun.v1.StepRunStatus
+	45, // 10: agent.v1.TaskStatus.metrics:type_name -> agent.v1.TaskStatus.MetricsEntry
 	1,  // 11: agent.v1.HeartbeatRequest.status:type_name -> agent.v1.AgentStatus
 	10, // 12: agent.v1.HeartbeatRequest.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
-	44, // 13: agent.v1.RegisterRequest.labels:type_name -> agent.v1.RegisterRequest.LabelsEntry
+	46, // 13: agent.v1.RegisterRequest.labels:type_name -> agent.v1.RegisterRequest.LabelsEntry
 	10, // 14: agent.v1.RegisterRequest.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
-	45, // 15: agent.v1.RegisterResponse.labels:type_name -> agent.v1.RegisterResponse.LabelsEntry
+	47, // 15: agent.v1.RegisterResponse.labels:type_name -> agent.v1.RegisterResponse.LabelsEntry
 	15, // 16: agent.v1.RegisterResponse.storage:type_name -> agent.v1.StorageConfig
 	20, // 17: agent.v1.FetchStepRunResponse.step_runs:type_name -> agent.v1.StepRun
-	54, // 18: agent.v1.StepRun.args:type_name -> google.protobuf.Struct
-	46, // 19: agent.v1.StepRun.env:type_name -> agent.v1.StepRun.EnvEntry
-	47, // 20: agent.v1.StepRun.secrets:type_name -> agent.v1.StepRun.SecretsEntry
+	56, // 18: agent.v1.StepRun.args:type_name -> google.protobuf.Struct
+	48, // 19: agent.v1.StepRun.env:type_name -> agent.v1.StepRun.EnvEntry
+	49, // 20: agent.v1.StepRun.secrets:type_name -> agent.v1.StepRun.SecretsEntry
 	21, // 21: agent.v1.StepRun.artifacts:type_name -> agent.v1.ArtifactConfig
 	34, // 22: agent.v1.StepRun.agent_selector:type_name -> agent.v1.AgentSelector
 	36, // 23: agent.v1.StepRun.plugins:type_name -> agent.v1.PluginInfo
-	53, // 24: agent.v1.ReportStepRunStatusRequest.status:type_name -> steprun.v1.StepRunStatus
-	48, // 25: agent.v1.ReportStepRunStatusRequest.metrics:type_name -> agent.v1.ReportStepRunStatusRequest.MetricsEntry
-	49, // 26: agent.v1.UpdateLabelsRequest.labels:type_name -> agent.v1.UpdateLabelsRequest.LabelsEntry
-	50, // 27: agent.v1.UpdateLabelsResponse.labels:type_name -> agent.v1.UpdateLabelsResponse.LabelsEntry
-	51, // 28: agent.v1.ReportJobRunStatusRequest.artifact_uris:type_name -> agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
+	55, // 24: agent.v1.ReportStepRunStatusRequest.status:type_name -> steprun.v1.StepRunStatus
+	50, // 25: agent.v1.ReportStepRunStatusRequest.metrics:type_name -> agent.v1.ReportStepRunStatusRequest.MetricsEntry
+	51, // 26: agent.v1.UpdateLabelsRequest.labels:type_name -> agent.v1.UpdateLabelsRequest.LabelsEntry
+	52, // 27: agent.v1.UpdateLabelsResponse.labels:type_name -> agent.v1.UpdateLabelsResponse.LabelsEntry
+	53, // 28: agent.v1.ReportJobRunStatusRequest.artifact_uris:type_name -> agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
 	30, // 29: agent.v1.ReportJobRunStatusRequest.artifacts:type_name -> agent.v1.ArtifactResult
 	29, // 30: agent.v1.ReportJobRunStatusRequest.source_checkout:type_name -> agent.v1.SourceCheckout
-	52, // 31: agent.v1.AgentSelector.match_labels:type_name -> agent.v1.AgentSelector.MatchLabelsEntry
+	54, // 31: agent.v1.AgentSelector.match_labels:type_name -> agent.v1.AgentSelector.MatchLabelsEntry
 	35, // 32: agent.v1.AgentSelector.match_expressions:type_name -> agent.v1.LabelExpression
 	2,  // 33: agent.v1.PluginInfo.location:type_name -> agent.v1.PluginLocation
-	41, // 34: agent.v1.AgentService.ReconcileJobGeneration:input_type -> agent.v1.ReconcileJobGenerationRequest
-	39, // 35: agent.v1.AgentService.GetOrRecordJobInputs:input_type -> agent.v1.GetOrRecordJobInputsRequest
-	37, // 36: agent.v1.AgentService.InspectJobExecution:input_type -> agent.v1.InspectJobExecutionRequest
-	11, // 37: agent.v1.AgentService.Heartbeat:input_type -> agent.v1.HeartbeatRequest
-	13, // 38: agent.v1.AgentService.Register:input_type -> agent.v1.RegisterRequest
-	16, // 39: agent.v1.AgentService.Unregister:input_type -> agent.v1.UnregisterRequest
-	18, // 40: agent.v1.AgentService.FetchStepRun:input_type -> agent.v1.FetchStepRunRequest
-	22, // 41: agent.v1.AgentService.ReportStepRunStatus:input_type -> agent.v1.ReportStepRunStatusRequest
-	28, // 42: agent.v1.AgentService.ReportJobRunStatus:input_type -> agent.v1.ReportJobRunStatusRequest
-	24, // 43: agent.v1.AgentService.CancelStepRun:input_type -> agent.v1.CancelStepRunRequest
-	32, // 44: agent.v1.AgentService.CancelJobRun:input_type -> agent.v1.CancelJobRunRequest
-	26, // 45: agent.v1.AgentService.UpdateLabels:input_type -> agent.v1.UpdateLabelsRequest
-	3,  // 46: agent.v1.AgentService.Connect:input_type -> agent.v1.ConnectRequest
-	42, // 47: agent.v1.AgentService.ReconcileJobGeneration:output_type -> agent.v1.ReconcileJobGenerationResponse
-	40, // 48: agent.v1.AgentService.GetOrRecordJobInputs:output_type -> agent.v1.GetOrRecordJobInputsResponse
-	38, // 49: agent.v1.AgentService.InspectJobExecution:output_type -> agent.v1.InspectJobExecutionResponse
-	12, // 50: agent.v1.AgentService.Heartbeat:output_type -> agent.v1.HeartbeatResponse
-	14, // 51: agent.v1.AgentService.Register:output_type -> agent.v1.RegisterResponse
-	17, // 52: agent.v1.AgentService.Unregister:output_type -> agent.v1.UnregisterResponse
-	19, // 53: agent.v1.AgentService.FetchStepRun:output_type -> agent.v1.FetchStepRunResponse
-	23, // 54: agent.v1.AgentService.ReportStepRunStatus:output_type -> agent.v1.ReportStepRunStatusResponse
-	31, // 55: agent.v1.AgentService.ReportJobRunStatus:output_type -> agent.v1.ReportJobRunStatusResponse
-	25, // 56: agent.v1.AgentService.CancelStepRun:output_type -> agent.v1.CancelStepRunResponse
-	33, // 57: agent.v1.AgentService.CancelJobRun:output_type -> agent.v1.CancelJobRunResponse
-	27, // 58: agent.v1.AgentService.UpdateLabels:output_type -> agent.v1.UpdateLabelsResponse
-	4,  // 59: agent.v1.AgentService.Connect:output_type -> agent.v1.ConnectResponse
-	47, // [47:60] is the sub-list for method output_type
-	34, // [34:47] is the sub-list for method input_type
+	43, // 34: agent.v1.AgentService.ReconcileJobRetryApproval:input_type -> agent.v1.ReconcileJobRetryApprovalRequest
+	41, // 35: agent.v1.AgentService.ReconcileJobGeneration:input_type -> agent.v1.ReconcileJobGenerationRequest
+	39, // 36: agent.v1.AgentService.GetOrRecordJobInputs:input_type -> agent.v1.GetOrRecordJobInputsRequest
+	37, // 37: agent.v1.AgentService.InspectJobExecution:input_type -> agent.v1.InspectJobExecutionRequest
+	11, // 38: agent.v1.AgentService.Heartbeat:input_type -> agent.v1.HeartbeatRequest
+	13, // 39: agent.v1.AgentService.Register:input_type -> agent.v1.RegisterRequest
+	16, // 40: agent.v1.AgentService.Unregister:input_type -> agent.v1.UnregisterRequest
+	18, // 41: agent.v1.AgentService.FetchStepRun:input_type -> agent.v1.FetchStepRunRequest
+	22, // 42: agent.v1.AgentService.ReportStepRunStatus:input_type -> agent.v1.ReportStepRunStatusRequest
+	28, // 43: agent.v1.AgentService.ReportJobRunStatus:input_type -> agent.v1.ReportJobRunStatusRequest
+	24, // 44: agent.v1.AgentService.CancelStepRun:input_type -> agent.v1.CancelStepRunRequest
+	32, // 45: agent.v1.AgentService.CancelJobRun:input_type -> agent.v1.CancelJobRunRequest
+	26, // 46: agent.v1.AgentService.UpdateLabels:input_type -> agent.v1.UpdateLabelsRequest
+	3,  // 47: agent.v1.AgentService.Connect:input_type -> agent.v1.ConnectRequest
+	44, // 48: agent.v1.AgentService.ReconcileJobRetryApproval:output_type -> agent.v1.ReconcileJobRetryApprovalResponse
+	42, // 49: agent.v1.AgentService.ReconcileJobGeneration:output_type -> agent.v1.ReconcileJobGenerationResponse
+	40, // 50: agent.v1.AgentService.GetOrRecordJobInputs:output_type -> agent.v1.GetOrRecordJobInputsResponse
+	38, // 51: agent.v1.AgentService.InspectJobExecution:output_type -> agent.v1.InspectJobExecutionResponse
+	12, // 52: agent.v1.AgentService.Heartbeat:output_type -> agent.v1.HeartbeatResponse
+	14, // 53: agent.v1.AgentService.Register:output_type -> agent.v1.RegisterResponse
+	17, // 54: agent.v1.AgentService.Unregister:output_type -> agent.v1.UnregisterResponse
+	19, // 55: agent.v1.AgentService.FetchStepRun:output_type -> agent.v1.FetchStepRunResponse
+	23, // 56: agent.v1.AgentService.ReportStepRunStatus:output_type -> agent.v1.ReportStepRunStatusResponse
+	31, // 57: agent.v1.AgentService.ReportJobRunStatus:output_type -> agent.v1.ReportJobRunStatusResponse
+	25, // 58: agent.v1.AgentService.CancelStepRun:output_type -> agent.v1.CancelStepRunResponse
+	33, // 59: agent.v1.AgentService.CancelJobRun:output_type -> agent.v1.CancelJobRunResponse
+	27, // 60: agent.v1.AgentService.UpdateLabels:output_type -> agent.v1.UpdateLabelsResponse
+	4,  // 61: agent.v1.AgentService.Connect:output_type -> agent.v1.ConnectResponse
+	48, // [48:62] is the sub-list for method output_type
+	34, // [34:48] is the sub-list for method input_type
 	34, // [34:34] is the sub-list for extension type_name
 	34, // [34:34] is the sub-list for extension extendee
 	0,  // [0:34] is the sub-list for field type_name
@@ -3736,7 +3852,7 @@ func file_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_v1_agent_proto_rawDesc), len(file_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   50,
+			NumMessages:   52,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

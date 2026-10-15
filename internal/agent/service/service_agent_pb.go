@@ -91,6 +91,7 @@ func (s *AgentServiceImpl) runtimeCapabilitiesLocked() *agentv1.RuntimeCapabilit
 		capabilities.ExecutionMode = "containerd-offline-v1"
 		capabilities.ContainerdOfflineV1 = s.offlineRuntimeReady != nil && s.offlineRuntimeReady()
 		capabilities.ContainerdWholeJobRetryV1 = capabilities.ContainerdOfflineV1 && s.agentConf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetry
+		capabilities.ContainerdRetryApprovalV1 = capabilities.ContainerdWholeJobRetryV1 && s.agentConf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetryApproval
 	}
 	return capabilities
 }

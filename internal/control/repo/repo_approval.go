@@ -11,6 +11,7 @@ import (
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/database"
+	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -48,12 +49,12 @@ type ApprovalRepo struct{ database.IDatabase }
 // NewApprovalRepo 创建审批仓储，不执行数据库迁移
 func NewApprovalRepo(db database.IDatabase) IApprovalRepository { return &ApprovalRepo{db} }
 
-var approvalColumns = []string{"approval_id", "pipeline_run_id", "job_name", "step_name", "plugin", "status", "policy_id", "mode", "required_approver_count", "approved_count", "rejected_count", "environment", "requested_by", "approved_by", "reason", "callback_url", "notify_channels", "candidate_approvers", "expires_at", "deployment_release_id", "evidence_hash", "version", "created_at", "updated_at"}
+var approvalColumns = []string{"approval_id", "pipeline_run_id", "job_name", "step_name", "plugin", "status", "policy_id", "mode", "required_approver_count", "approved_count", "rejected_count", "environment", "requested_by", "approved_by", "reason", "callback_url", "notify_channels", "candidate_approvers", "expires_at", "deployment_release_id", "evidence_hash", "version", "created_at", "updated_at", "retry_job_run_id", "binding_kind", "evidence_json"}
 var approvalDecisionColumns = []string{"decision_id", "approval_id", "user_id", "decision", "comment", "created_at", "updated_at"}
 
 // Create 保存经过校验的待审批请求
 func (r *ApprovalRepo) Create(ctx context.Context, req *model.ApprovalRequest) error {
-	if req == nil || !validApprovalID(req.ApprovalID) || !validApprovalID(req.PipelineRunID) || req.Status != model.ApprovalStatusPending || req.ApprovedCount != 0 || req.RejectedCount != 0 {
+	if req == nil || req.RetryJobRunID != nil || req.Plugin == retryapproval.Plugin || req.BindingKind != "" || req.EvidenceJSON != "" || !validApprovalID(req.ApprovalID) || !validApprovalID(req.PipelineRunID) || req.Status != model.ApprovalStatusPending || req.ApprovedCount != 0 || req.RejectedCount != 0 {
 		return ErrApprovalInvalid
 	}
 	if _, err := model.ApprovalCandidates(req); err != nil {
@@ -149,6 +150,12 @@ func (r *ApprovalRepo) Decide(ctx context.Context, id, actor, decision, reason s
 	initial, err := r.GetByApprovalID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if initial.RetryJobRunID != nil || initial.BindingKind == retryapproval.Kind || initial.Plugin == retryapproval.Plugin {
+		return r.decideRetryApproval(ctx, initial, actor, decision, reason)
+	}
+	if initial.BindingKind != "" || initial.EvidenceJSON != "" {
+		return nil, ErrApprovalInvalid
 	}
 	var result *model.ApprovalRequest
 	var expired bool
@@ -323,13 +330,25 @@ func (r *ApprovalRepo) finishPending(ctx context.Context, id string, status int,
 	if !validApprovalID(id) {
 		return nil, ErrApprovalInvalid
 	}
+	initial, err := r.GetByApprovalID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	var result *model.ApprovalRequest
-	err := r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if initial.RetryJobRunID != nil || initial.BindingKind == retryapproval.Kind {
+			if _, err := lockRetryApprovalJob(ctx, tx, initial); err != nil {
+				return err
+			}
+		}
 		value, err := lockApproval(tx, id)
 		if err != nil {
 			return err
 		}
 		result = value
+		if !sameDeploymentStep(initial.RetryJobRunID, value.RetryJobRunID) || initial.BindingKind != value.BindingKind {
+			return ErrApprovalConflict
+		}
 		if value.Status != model.ApprovalStatusPending {
 			return nil
 		}

@@ -36,6 +36,9 @@ func (r *JobRunRepo) CancelAgentJobIfCurrent(ctx context.Context, runID string, 
 		if job.AgentID == "" && job.ClaimID != "" {
 			return fmt.Errorf("claimed job requires agent ownership")
 		}
+		if err := cancelPendingRetryApproval(ctx, tx, &job, "job execution canceled"); err != nil {
+			return err
+		}
 		patch := maps.Clone(updates)
 		patch["cancellation_claim_id"] = job.ClaimID
 		patch["updated_at"] = time.Now()

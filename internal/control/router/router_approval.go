@@ -18,6 +18,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/http/middleware"
+	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	"github.com/bytedance/sonic"
 	"github.com/bytedance/sonic/ast"
 	"github.com/gofiber/fiber/v2"
@@ -156,6 +157,7 @@ func validApprovalRouteID(id string) bool {
 }
 
 type approvalDetail struct {
+	RetryReview *retryapproval.Review `json:"retryReview,omitempty"`
 	*model.ApprovalRequest
 	CanApprove          bool   `json:"canApprove"`
 	CanReject           bool   `json:"canReject"`
@@ -165,6 +167,12 @@ type approvalDetail struct {
 
 func (rt *Router) approvalDetailFor(c *fiber.Ctx, value *model.ApprovalRequest) approvalDetail {
 	result := approvalDetail{ApprovalRequest: value}
+	review, reviewErr := rt.Services.Approval.RetryReview(c.Context(), value)
+	if reviewErr != nil {
+		result.DecisionBlockReason = "retry approval evidence unavailable"
+		return result
+	}
+	result.RetryReview = review
 	subject, ok := collectionSubject(c)
 	if !ok || subject.IsAgent || value == nil {
 		result.DecisionBlockReason = "authenticated user is required"

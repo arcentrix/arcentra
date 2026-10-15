@@ -49,7 +49,7 @@ func (r *JobRunRepo) Create(ctx context.Context, jobRun *model.JobRun) error {
 	if jobRun == nil {
 		return gorm.ErrInvalidData
 	}
-	if !emptyJobGeneration(jobRun) || !emptyJobInputs(jobRun) || !emptyRuntime(jobRun) || jobRun.SourceExpectationCaptured || jobRun.SourceType != "" || jobRun.SourceRepository != "" || jobRun.SourceRef != "" || jobRun.SourceBindingDigest != "" || jobRun.SourceResolvedCommit != "" || (jobRun.SourceProvenanceState != "" && jobRun.SourceProvenanceState != "unknown") {
+	if !emptyRetryApproval(jobRun) || !emptyJobGeneration(jobRun) || !emptyJobInputs(jobRun) || !emptyRuntime(jobRun) || jobRun.SourceExpectationCaptured || jobRun.SourceType != "" || jobRun.SourceRepository != "" || jobRun.SourceRef != "" || jobRun.SourceBindingDigest != "" || jobRun.SourceResolvedCommit != "" || (jobRun.SourceProvenanceState != "" && jobRun.SourceProvenanceState != "unknown") {
 		return gorm.ErrInvalidData
 	}
 	if err := normalizeJSONFields(map[string]*string{"env": &jobRun.Env, "artifact_references": &jobRun.ArtifactReferences, "artifact_uris": &jobRun.ArtifactURIs}, jobRunJSONDefaults); err != nil {
@@ -87,7 +87,7 @@ func (r *JobRunRepo) UpdateByJobRunID(ctx context.Context, jobRunID string, upda
 		return err
 	}
 	updates["updated_at"] = time.Now()
-	query := r.Database().WithContext(ctx).Model(&model.JobRun{}).Where("job_run_id = ? AND retry_plan = ? AND retry_plan_digest = ?", jobRunID, "", "")
+	query := r.Database().WithContext(ctx).Model(&model.JobRun{}).Where("job_run_id = ? AND retry_plan = ? AND retry_plan_digest = ?", jobRunID, "", "").Where("retry_approval_required = ? AND retry_approval_id = ? AND retry_approval_evidence_hash = ?", false, "", "")
 	if changesJobIdentity(updates) {
 		return reportedStatusResult(query.Where("source_expectation_captured = ?", false).Updates(updates))
 	}

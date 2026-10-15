@@ -30,6 +30,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/validation"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
+	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	"github.com/arcentrix/arcentra/pkg/serde"
 )
 
@@ -237,6 +238,13 @@ func (rc *Coordinator) executeDAG(ctx context.Context) error {
 	}
 	execCtx.Runtime = runtime
 	execCtx.RuntimePolicy = rc.engine.offlineRuntimePolicy.Clone()
+	if rc.run.RetryApprovalContext != "" {
+		captured, err := retryapproval.ParseRunContext(rc.run.RetryApprovalContext)
+		if err != nil {
+			return err
+		}
+		execCtx.RetryApprovalTimeoutSeconds = captured.Policy.TimeoutSeconds
+	}
 	execCtx.SelectAgent = func(ctx context.Context, job *spec.Job) (string, error) {
 		return rc.engine.selectAgentForRuntime(ctx, job, runtime)
 	}

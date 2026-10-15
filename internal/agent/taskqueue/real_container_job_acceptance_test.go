@@ -34,6 +34,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/logstream"
 	kafkaconfig "github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/nova"
+	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	"github.com/arcentrix/arcentra/pkg/sandbox"
 	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
@@ -136,7 +137,7 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	policy := taskpayload.OfflineRuntimePolicy{Enabled: true, AllowWholeJobRetry: true, AllowedImages: []string{settings.image}, MaxCPU: "500m", MaxMemory: "64Mi"}
+	policy := taskpayload.OfflineRuntimePolicy{Enabled: true, AllowWholeJobRetry: true, AllowWholeJobRetryApproval: true, AllowedImages: []string{settings.image}, MaxCPU: "500m", MaxMemory: "64Mi"}
 	setupCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	db := realStackDatabase(t, setupCtx, settings.stack.dsn)
@@ -150,6 +151,14 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(publisher.Close)
+	approvalPolicy := &retryapproval.Policy{ID: "approval-" + id.GetUild(), Candidates: []string{"reviewer-a-" + id.GetUild(), "reviewer-b-" + id.GetUild()}, Mode: "all", RequiredApproverCount: 2, TimeoutSeconds: 60}
+	var approvalServices *controlservice.Services
+	lifecycleAudit := &containerApprovalLifecycle{calls: make(map[string]map[string]int)}
+	removeObserver, err := sandbox.ObserveAcceptanceLifecycle(settings.namespace, lifecycleAudit.record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(removeObserver)
 	options := controllerWorkerTLS(t)
 	options.timeout = 7 * time.Minute
 	options.backend = &controllerWorkerBackend{db: db, brokers: settings.stack.brokers, store: observedStore, storageConfig: storageConfig, reference: reference, logPublisher: publisher, authentication: realStackAuthentication, prepareTopics: func(t *testing.T, ctx context.Context, agentID string) {
@@ -160,9 +169,18 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 		conf.Agent.WorkspaceDir = workspace
 		conf.Agent.Sandbox = config.SandboxConfig{Enable: true, Runtime: "containerd", Containerd: config.ContainerdConfig{Policy: policy, Namespace: settings.namespace, JournalDir: journal, User: fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid()), Network: "none", UnixSocket: settings.socket, RuntimeRoot: settings.runtimeRoot, FIFODir: settings.fifoDir}}
 	}
+	options.configureRepositories = func(repositories *repo.Repositories) {
+		approvalServices = controlservice.NewServices(workerTestDatabase{db}, nil, repositories)
+		if err := approvalServices.ConfigureRetryApprovalPolicy(approvalPolicy); err != nil {
+			t.Fatal(err)
+		}
+		if err := approvalServices.ConfigureRetryApprovalAuthorization(); err != nil {
+			t.Fatal(err)
+		}
+	}
 	options.startWorker = startContainerAcceptanceWorker
 	if taskpayload.OfflineRuntimeAccepted {
-		options.processConfig = &controlconfig.AppConfig{Pipeline: controlconfig.PipelineConfig{OfflineRuntime: policy}}
+		options.processConfig = &controlconfig.AppConfig{Pipeline: controlconfig.PipelineConfig{OfflineRuntime: policy, RetryApproval: approvalPolicy}}
 	}
 	var f *controllerWorkerFixture
 	t.Cleanup(func() {
@@ -421,6 +439,7 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	retainedAudit := containerAcceptanceControllerTimeout(t, f, settings, publisher)
 	containerAcceptanceArtifactChain(t, f, settings, observedStore)
 	containerAcceptanceWholeJobRetry(t, f, settings, observedStore, retainedAudit)
+	containerAcceptanceRetryApproval(t, f, settings, observedStore, retainedAudit, approvalServices, approvalPolicy, lifecycleAudit)
 	testRealContainerGenerationCancellationFence(t, f)
 	if !containerAcceptanceAuditMatches(retainedAudit, controllerTerminalRecords(f)) {
 		t.Fatal("completed acceptance changed retained timeout audit or left new terminal receipts")
@@ -443,6 +462,9 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 		if entry.Name() != ".terminal-report-outbox" {
 			t.Fatalf("workspace cleanup left %s", entry.Name())
 		}
+	}
+	if t.Failed() {
+		return
 	}
 	t.Log("real linear-chain failure, control-queue cancellation, timeout, registered artifact transfer, subsequent healthy execution and exact owned cleanup verified; bounded whole-job retry verified; branching, parallel jobs and failed-step continuation remain unsupported")
 }

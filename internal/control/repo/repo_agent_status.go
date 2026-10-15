@@ -46,7 +46,7 @@ func (r *JobRunRepo) PatchStatusIfCurrent(ctx context.Context, runID string, cur
 	}
 	updates["updated_at"] = time.Now()
 	result := r.Database().WithContext(ctx).Model(&model.JobRun{}).
-		Where("job_run_id = ? AND status = ? AND retry_plan = ? AND retry_plan_digest = ?", runID, current, "", "").Updates(updates)
+		Where("job_run_id = ? AND status = ? AND retry_plan = ? AND retry_plan_digest = ?", runID, current, "", "").Where("retry_approval_required = ? AND retry_approval_id = ? AND retry_approval_evidence_hash = ?", false, "", "").Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -131,19 +131,24 @@ func (r *JobRunRepo) PatchReportedStatus(ctx context.Context, expected *model.Jo
 			}
 		}
 		updates["updated_at"] = time.Now()
-		return reportedStatusResult(reportedJobQuery(tx.Model(&model.JobRun{}), expected).Updates(updates))
+		if err := reportedStatusResult(reportedJobQuery(tx.Model(&model.JobRun{}), expected).Updates(updates)); err != nil {
+			return err
+		}
+		next, _ := updates["status"].(int)
+		return validateRetryApprovalCommit(ctx, tx, expected, next)
 	})
 }
 
 func reportedJobQuery(tx *gorm.DB, expected *model.JobRun) *gorm.DB {
 	return tx.Where("job_run_id = ? AND status = ? AND agent_id = ? AND claim_id = ?", expected.JobRunID, expected.Status, expected.AgentID, expected.ClaimID).
-		Where("pipeline_id = ? AND pipeline_run_id = ?", expected.PipelineID, expected.PipelineRunID).
+		Where("pipeline_id = ? AND pipeline_run_id = ? AND job_name = ?", expected.PipelineID, expected.PipelineRunID, expected.JobName).
 		Where("terminal_report_digest = ? AND cancellation_claim_id = ?", expected.TerminalReportDigest, expected.CancellationClaimID).
 		Where("source_expectation_captured = ? AND source_type = ? AND source_repository = ? AND source_ref = ?", expected.SourceExpectationCaptured, expected.SourceType, expected.SourceRepository, expected.SourceRef).
 		Where("source_binding_digest = ? AND source_resolved_commit = ? AND source_provenance_state = ?", expected.SourceBindingDigest, expected.SourceResolvedCommit, expected.SourceProvenanceState).
 		Where("runtime_type = ? AND runtime_image = ? AND runtime_cpu = ? AND runtime_memory = ? AND runtime_binding_digest = ?", expected.RuntimeType, expected.RuntimeImage, expected.RuntimeCPU, expected.RuntimeMemory, expected.RuntimeBindingDigest).
 		Where("input_expectation = ? AND input_manifest_state = ? AND input_manifest = ? AND input_manifest_digest = ?", expected.InputExpectation, expected.InputManifestState, expected.InputManifest, expected.InputManifestDigest).
-		Where("retry_plan = ? AND retry_plan_digest = ? AND current_generation_id = ? AND current_generation = ?", expected.RetryPlan, expected.RetryPlanDigest, expected.CurrentGenerationID, expected.CurrentGeneration)
+		Where("retry_plan = ? AND retry_plan_digest = ? AND current_generation_id = ? AND current_generation = ?", expected.RetryPlan, expected.RetryPlanDigest, expected.CurrentGenerationID, expected.CurrentGeneration).
+		Where("retry_approval_required = ? AND retry_approval_id = ? AND retry_approval_evidence_hash = ?", expected.RetryApprovalRequired, expected.RetryApprovalID, expected.RetryApprovalEvidenceHash)
 }
 
 func reportedStatusResult(result *gorm.DB) error {

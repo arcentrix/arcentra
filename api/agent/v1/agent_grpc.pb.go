@@ -33,19 +33,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentService_ReconcileJobGeneration_FullMethodName = "/agent.v1.AgentService/ReconcileJobGeneration"
-	AgentService_GetOrRecordJobInputs_FullMethodName   = "/agent.v1.AgentService/GetOrRecordJobInputs"
-	AgentService_InspectJobExecution_FullMethodName    = "/agent.v1.AgentService/InspectJobExecution"
-	AgentService_Heartbeat_FullMethodName              = "/agent.v1.AgentService/Heartbeat"
-	AgentService_Register_FullMethodName               = "/agent.v1.AgentService/Register"
-	AgentService_Unregister_FullMethodName             = "/agent.v1.AgentService/Unregister"
-	AgentService_FetchStepRun_FullMethodName           = "/agent.v1.AgentService/FetchStepRun"
-	AgentService_ReportStepRunStatus_FullMethodName    = "/agent.v1.AgentService/ReportStepRunStatus"
-	AgentService_ReportJobRunStatus_FullMethodName     = "/agent.v1.AgentService/ReportJobRunStatus"
-	AgentService_CancelStepRun_FullMethodName          = "/agent.v1.AgentService/CancelStepRun"
-	AgentService_CancelJobRun_FullMethodName           = "/agent.v1.AgentService/CancelJobRun"
-	AgentService_UpdateLabels_FullMethodName           = "/agent.v1.AgentService/UpdateLabels"
-	AgentService_Connect_FullMethodName                = "/agent.v1.AgentService/Connect"
+	AgentService_ReconcileJobRetryApproval_FullMethodName = "/agent.v1.AgentService/ReconcileJobRetryApproval"
+	AgentService_ReconcileJobGeneration_FullMethodName    = "/agent.v1.AgentService/ReconcileJobGeneration"
+	AgentService_GetOrRecordJobInputs_FullMethodName      = "/agent.v1.AgentService/GetOrRecordJobInputs"
+	AgentService_InspectJobExecution_FullMethodName       = "/agent.v1.AgentService/InspectJobExecution"
+	AgentService_Heartbeat_FullMethodName                 = "/agent.v1.AgentService/Heartbeat"
+	AgentService_Register_FullMethodName                  = "/agent.v1.AgentService/Register"
+	AgentService_Unregister_FullMethodName                = "/agent.v1.AgentService/Unregister"
+	AgentService_FetchStepRun_FullMethodName              = "/agent.v1.AgentService/FetchStepRun"
+	AgentService_ReportStepRunStatus_FullMethodName       = "/agent.v1.AgentService/ReportStepRunStatus"
+	AgentService_ReportJobRunStatus_FullMethodName        = "/agent.v1.AgentService/ReportJobRunStatus"
+	AgentService_CancelStepRun_FullMethodName             = "/agent.v1.AgentService/CancelStepRun"
+	AgentService_CancelJobRun_FullMethodName              = "/agent.v1.AgentService/CancelJobRun"
+	AgentService_UpdateLabels_FullMethodName              = "/agent.v1.AgentService/UpdateLabels"
+	AgentService_Connect_FullMethodName                   = "/agent.v1.AgentService/Connect"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -54,6 +55,7 @@ const (
 //
 // AgentService - Main interface for communication between Agent and Server
 type AgentServiceClient interface {
+	ReconcileJobRetryApproval(ctx context.Context, in *ReconcileJobRetryApprovalRequest, opts ...grpc.CallOption) (*ReconcileJobRetryApprovalResponse, error)
 	// Bounded authenticated generation admission/advance; inspect never authorizes execution.
 	ReconcileJobGeneration(ctx context.Context, in *ReconcileJobGenerationRequest, opts ...grpc.CallOption) (*ReconcileJobGenerationResponse, error)
 	// Get before checkout; record once before staging. Never starts or retries execution.
@@ -88,6 +90,16 @@ type agentServiceClient struct {
 
 func NewAgentServiceClient(cc grpc.ClientConnInterface) AgentServiceClient {
 	return &agentServiceClient{cc}
+}
+
+func (c *agentServiceClient) ReconcileJobRetryApproval(ctx context.Context, in *ReconcileJobRetryApprovalRequest, opts ...grpc.CallOption) (*ReconcileJobRetryApprovalResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReconcileJobRetryApprovalResponse)
+	err := c.cc.Invoke(ctx, AgentService_ReconcileJobRetryApproval_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *agentServiceClient) ReconcileJobGeneration(ctx context.Context, in *ReconcileJobGenerationRequest, opts ...grpc.CallOption) (*ReconcileJobGenerationResponse, error) {
@@ -229,6 +241,7 @@ type AgentService_ConnectClient = grpc.BidiStreamingClient[ConnectRequest, Conne
 //
 // AgentService - Main interface for communication between Agent and Server
 type AgentServiceServer interface {
+	ReconcileJobRetryApproval(context.Context, *ReconcileJobRetryApprovalRequest) (*ReconcileJobRetryApprovalResponse, error)
 	// Bounded authenticated generation admission/advance; inspect never authorizes execution.
 	ReconcileJobGeneration(context.Context, *ReconcileJobGenerationRequest) (*ReconcileJobGenerationResponse, error)
 	// Get before checkout; record once before staging. Never starts or retries execution.
@@ -265,6 +278,9 @@ type AgentServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAgentServiceServer struct{}
 
+func (UnimplementedAgentServiceServer) ReconcileJobRetryApproval(context.Context, *ReconcileJobRetryApprovalRequest) (*ReconcileJobRetryApprovalResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReconcileJobRetryApproval not implemented")
+}
 func (UnimplementedAgentServiceServer) ReconcileJobGeneration(context.Context, *ReconcileJobGenerationRequest) (*ReconcileJobGenerationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReconcileJobGeneration not implemented")
 }
@@ -323,6 +339,24 @@ func RegisterAgentServiceServer(s grpc.ServiceRegistrar, srv AgentServiceServer)
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&AgentService_ServiceDesc, srv)
+}
+
+func _AgentService_ReconcileJobRetryApproval_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReconcileJobRetryApprovalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ReconcileJobRetryApproval(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ReconcileJobRetryApproval_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ReconcileJobRetryApproval(ctx, req.(*ReconcileJobRetryApprovalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _AgentService_ReconcileJobGeneration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -555,6 +589,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "agent.v1.AgentService",
 	HandlerType: (*AgentServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ReconcileJobRetryApproval",
+			Handler:    _AgentService_ReconcileJobRetryApproval_Handler,
+		},
 		{
 			MethodName: "ReconcileJobGeneration",
 			Handler:    _AgentService_ReconcileJobGeneration_Handler,

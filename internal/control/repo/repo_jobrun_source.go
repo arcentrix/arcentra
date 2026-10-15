@@ -14,7 +14,7 @@ import (
 )
 
 var jobSourceColumns = []string{"source_expectation_captured", "source_type", "source_repository", "source_ref", "source_binding_digest", "source_resolved_commit", "source_provenance_state"}
-var jobSnapshotColumns = append([]string{"job_run_id", "pipeline_id", "pipeline_run_id", "agent_id", "claim_id", "status", "cancellation_claim_id", "terminal_report_digest", "start_time", "timeout"}, append(append(append(jobSourceColumns, jobRuntimeColumns...), jobInputColumns...), jobGenerationColumns...)...)
+var jobSnapshotColumns = append([]string{"job_run_id", "job_name", "retry_approval_required", "retry_approval_id", "retry_approval_evidence_hash", "pipeline_id", "pipeline_run_id", "agent_id", "claim_id", "status", "cancellation_claim_id", "terminal_report_digest", "start_time", "timeout"}, append(append(append(jobSourceColumns, jobRuntimeColumns...), jobInputColumns...), jobGenerationColumns...)...)
 
 // CaptureSourceExpectation 在派发前原子保存一次源身份和目标 Agent，不允许重新绑定或重复排队
 func (r *JobRunRepo) CaptureSourceExpectation(ctx context.Context, pipelineID, runID, jobID, agentID string, binding *sourceprovenance.Binding) error {
@@ -45,15 +45,28 @@ func (r *JobRunRepo) captureDispatchExpectation(ctx context.Context, pipelineID,
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ?", jobID).First(&current).Error; err != nil {
 			return err
 		}
-		if !emptyJobGeneration(&current) || !emptyJobInputs(&current) || !emptyRuntime(&current) || current.JobRunID != jobID || current.PipelineID != pipelineID || current.PipelineRunID != runID || current.ClaimID != "" || current.CancellationClaimID != "" || current.TerminalReportDigest != "" || (current.Status != 1 && current.Status != 2) || current.SourceExpectationCaptured || current.SourceBindingDigest != "" || current.SourceType != "" || current.SourceRepository != "" || current.SourceRef != "" || current.SourceResolvedCommit != "" || (current.SourceProvenanceState != "" && current.SourceProvenanceState != "unknown") || (current.AgentID != "" && current.AgentID != agentID) {
+		if !emptyRetryApproval(&current) || !emptyJobGeneration(&current) || !emptyJobInputs(&current) || !emptyRuntime(&current) || current.JobRunID != jobID || current.PipelineID != pipelineID || current.PipelineRunID != runID || current.ClaimID != "" || current.CancellationClaimID != "" || current.TerminalReportDigest != "" || (current.Status != 1 && current.Status != 2) || current.SourceExpectationCaptured || current.SourceBindingDigest != "" || current.SourceType != "" || current.SourceRepository != "" || current.SourceRef != "" || current.SourceResolvedCommit != "" || (current.SourceProvenanceState != "" && current.SourceProvenanceState != "unknown") || (current.AgentID != "" && current.AgentID != agentID) {
 			return fmt.Errorf("source expectation requires an unclaimed uncaptured job")
+		}
+		gate, err := retryApprovalContextForCapture(ctx, tx, &current)
+		if err != nil {
+			return err
+		}
+		required := gate != nil && gate.RequiresJob(current.JobName)
+		if required && (plan == nil || runtime == nil || inputs == nil) {
+			return fmt.Errorf("gated retry requires complete immutable dispatch")
+		}
+		if plan != nil {
+			if plan.RetryApprovalRequired != required || (required && plan.RetryApprovalTimeoutSeconds != gate.Policy.TimeoutSeconds) {
+				return fmt.Errorf("retry plan approval marker or budget differs from trusted run")
+			}
 		}
 		if inputs != nil {
 			if err := validateRegisteredInputArtifacts(ctx, tx, &current, inputs); err != nil {
 				return err
 			}
 		}
-		updates := map[string]any{"source_expectation_captured": true, "source_provenance_state": "unknown", "agent_id": agentID, "status": model.JobRunStatusQueued, "updated_at": time.Now()}
+		updates := map[string]any{"source_expectation_captured": true, "source_provenance_state": "unknown", "agent_id": agentID, "status": model.JobRunStatusQueued, "updated_at": time.Now(), "retry_approval_required": required}
 		if inputs != nil {
 			encoded, err := inputs.Canonical()
 			if err != nil {
@@ -114,14 +127,17 @@ func jobSourceEqual(a, b *model.JobRun) bool {
 	return a.SourceExpectationCaptured == b.SourceExpectationCaptured && a.SourceType == b.SourceType && a.SourceRepository == b.SourceRepository && a.SourceRef == b.SourceRef && a.SourceBindingDigest == b.SourceBindingDigest && a.SourceResolvedCommit == b.SourceResolvedCommit && a.SourceProvenanceState == b.SourceProvenanceState
 }
 func jobSnapshotEqual(a, b *model.JobRun) bool {
-	return a.JobRunID == b.JobRunID && a.PipelineID == b.PipelineID && a.PipelineRunID == b.PipelineRunID && a.AgentID == b.AgentID && a.ClaimID == b.ClaimID && a.Status == b.Status && a.CancellationClaimID == b.CancellationClaimID && a.TerminalReportDigest == b.TerminalReportDigest && jobSourceEqual(a, b) && jobRuntimeEqual(a, b) && jobInputsEqual(a, b) && jobGenerationEqual(a, b)
+	return a.JobName == b.JobName && a.JobRunID == b.JobRunID && a.PipelineID == b.PipelineID && a.PipelineRunID == b.PipelineRunID && a.AgentID == b.AgentID && a.ClaimID == b.ClaimID && a.Status == b.Status && a.CancellationClaimID == b.CancellationClaimID && a.TerminalReportDigest == b.TerminalReportDigest && jobSourceEqual(a, b) && jobRuntimeEqual(a, b) && jobInputsEqual(a, b) && jobGenerationEqual(a, b) && retryApprovalEqual(a, b)
 }
 func sourceField(key string) bool {
 	return strings.HasPrefix(strings.ReplaceAll(strings.ToLower(key), "_", ""), "source")
 }
 func rejectSourceUpdates(updates map[string]any) error {
 	for key := range updates {
-		if sourceField(key) || runtimeField(key) || inputField(key) || generationField(key) {
+		if strings.ReplaceAll(strings.ToLower(key), "_", "") == "jobname" {
+			return fmt.Errorf("job name is immutable")
+		}
+		if sourceField(key) || runtimeField(key) || inputField(key) || generationField(key) || retryApprovalField(key) {
 			return fmt.Errorf("source and runtime expectations require a dedicated atomic operation")
 		}
 	}
@@ -141,7 +157,7 @@ func validateSourceReportUpdates(expected *model.JobRun, updates map[string]any,
 		return err
 	}
 	for key := range updates {
-		if runtimeField(key) || inputField(key) || generationField(key) {
+		if runtimeField(key) || inputField(key) || generationField(key) || retryApprovalField(key) {
 			return fmt.Errorf("runtime expectation is immutable")
 		}
 	}
@@ -185,7 +201,7 @@ func validateJobReportIdentityUpdates(expected *model.JobRun, updates map[string
 	for key, value := range updates {
 		normalized := strings.ReplaceAll(strings.ToLower(key), "_", "")
 		switch normalized {
-		case "jobrunid", "pipelineid", "pipelinerunid", "agentid", "cancellationclaimid":
+		case "jobrunid", "jobname", "pipelineid", "pipelinerunid", "agentid", "cancellationclaimid":
 			return fmt.Errorf("job report cannot change execution identity")
 		case "claimid":
 			claim, ok := value.(string)

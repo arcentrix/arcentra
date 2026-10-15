@@ -20,6 +20,9 @@ import (
 func validateGenerationStep(ctx context.Context, tx *gorm.DB, job *model.JobRun, step *model.StepRun, next int) error {
 	proof := agentidentity.GenerationReportFromContext(ctx)
 	if job.RetryPlan == "" {
+		if job.RetryApprovalRequired || job.RetryApprovalID != "" || job.RetryApprovalEvidenceHash != "" {
+			return fmt.Errorf("required approval retry plan is missing")
+		}
 		if proof.ID != "" || proof.BindingDigest != "" {
 			return fmt.Errorf("non-generation step cannot acquire generation authority")
 		}
@@ -82,6 +85,9 @@ func validateGenerationStep(ctx context.Context, tx *gorm.DB, job *model.JobRun,
 		if err := validateGenerationInputs(job, digest, false); err != nil {
 			return err
 		}
+		if err := validateRetryApprovalExecution(ctx, tx, job, true); err != nil {
+			return err
+		}
 		if time.Now().UnixMilli() < g.NotBeforeUnixMilli {
 			return fmt.Errorf("generation delay has not elapsed")
 		}
@@ -134,12 +140,29 @@ func activateClaimedGeneration(ctx context.Context, tx *gorm.DB, next int) error
 	if next != model.JobRunStatusRunning || proof.ID == "" {
 		return nil
 	}
-	return tx.WithContext(ctx).Model(&model.JobRunGeneration{}).Where("generation_id = ? AND state = ?", proof.ID, "preparing").Updates(map[string]any{"state": "active", "updated_at": time.Now()}).Error
+	var record model.JobRunGeneration
+	if err := tx.WithContext(ctx).Select("job_run_id").Where("generation_id = ?", proof.ID).First(&record).Error; err != nil {
+		return err
+	}
+	var job model.JobRun
+	if err := tx.WithContext(ctx).Select(jobSnapshotColumns).Where("job_run_id = ?", record.JobRunID).First(&job).Error; err != nil {
+		return err
+	}
+	if err := validateRetryApprovalCommit(ctx, tx, &job, next); err != nil {
+		return err
+	}
+	if err := tx.WithContext(ctx).Model(&model.JobRunGeneration{}).Where("generation_id = ? AND state = ?", proof.ID, "preparing").Updates(map[string]any{"state": "active", "updated_at": time.Now()}).Error; err != nil {
+		return err
+	}
+	return validateRetryApprovalCommit(ctx, tx, &job, next)
 }
 
 func validateGenerationJobReport(ctx context.Context, tx *gorm.DB, job *model.JobRun, next int) error {
 	proof := agentidentity.GenerationReportFromContext(ctx)
 	if job.RetryPlan == "" {
+		if job.RetryApprovalRequired || job.RetryApprovalID != "" || job.RetryApprovalEvidenceHash != "" {
+			return fmt.Errorf("required approval retry plan is missing")
+		}
 		if proof.ID != "" || proof.BindingDigest != "" {
 			return fmt.Errorf("non-generation job cannot acquire generation authority")
 		}
@@ -147,6 +170,11 @@ func validateGenerationJobReport(ctx context.Context, tx *gorm.DB, job *model.Jo
 	}
 	if _, err := retryPlanForJob(job); err != nil {
 		return err
+	}
+	if model.IsJobRunTerminal(next) && next != model.JobRunStatusSuccess {
+		if err := cancelPendingRetryApproval(ctx, tx, job, "job execution ended"); err != nil {
+			return err
+		}
 	}
 	if job.CurrentGenerationID == "" {
 		if proof.ID != "" || proof.BindingDigest != "" || next == model.JobRunStatusSuccess {
@@ -168,6 +196,9 @@ func validateGenerationJobReport(ctx context.Context, tx *gorm.DB, job *model.Jo
 		return err
 	}
 	if next == model.JobRunStatusSuccess {
+		if err := validateRetryApprovalExecution(ctx, tx, job, true); err != nil {
+			return err
+		}
 		digest := g.InputManifestDigest
 		if g.Number == 1 && digest == "" {
 			digest = job.InputManifestDigest
@@ -195,6 +226,9 @@ func rejectStepGenerationUpdates(updates map[string]any) error {
 
 func validateGenerationArtifact(ctx context.Context, tx *gorm.DB, job *model.JobRun, stepID string) error {
 	if job.RetryPlan == "" {
+		if job.RetryApprovalRequired || job.RetryApprovalID != "" || job.RetryApprovalEvidenceHash != "" {
+			return fmt.Errorf("required approval retry plan is missing")
+		}
 		return nil
 	}
 	proof := agentidentity.GenerationReportFromContext(ctx)
@@ -234,7 +268,7 @@ func generationArtifactPublication(ctx context.Context) bool {
 }
 
 func rejectGenerationArtifactShortcut(expected *model.JobRun, updates map[string]any) error {
-	if expected == nil || expected.RetryPlan == "" {
+	if expected == nil || (expected.RetryPlan == "" && emptyRetryApproval(expected)) {
 		return nil
 	}
 	for key := range updates {

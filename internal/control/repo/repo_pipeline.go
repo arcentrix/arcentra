@@ -144,7 +144,7 @@ func (r *PipelineRepo) List(ctx context.Context, query *PipelineQuery) ([]*model
 
 // CreateRun creates a pipeline run.
 func (r *PipelineRepo) CreateRun(ctx context.Context, run *model.PipelineRun) error {
-	if run == nil {
+	if run == nil || run.RetryApprovalContext != "" || run.RetryApprovalContextDigest != "" {
 		return gorm.ErrInvalidData
 	}
 	if err := normalizeJSONFields(map[string]*string{"env": &run.Env}, pipelineRunJSONDefaults); err != nil {
@@ -166,6 +166,9 @@ func (r *PipelineRepo) GetRun(ctx context.Context, runID string) (*model.Pipelin
 
 // UpdateRun updates a pipeline run by runID.
 func (r *PipelineRepo) UpdateRun(ctx context.Context, runID string, updates map[string]any) error {
+	if err := rejectRetryApprovalRunUpdates(updates); err != nil {
+		return err
+	}
 	var err error
 	updates, err = normalizeJSONUpdates(updates, pipelineRunJSONDefaults)
 	if err != nil {
@@ -253,6 +256,9 @@ func (r *PipelineRepo) RecordRunResult(ctx context.Context, pipelineID string, s
 
 // UpdateRunIfStatus 仅当当前状态匹配时推进运行状态，防止暂停操作覆盖终态
 func (r *PipelineRepo) UpdateRunIfStatus(ctx context.Context, runID string, status int, updates map[string]any) error {
+	if err := rejectRetryApprovalRunUpdates(updates); err != nil {
+		return err
+	}
 	var err error
 	updates, err = normalizeJSONUpdates(updates, pipelineRunJSONDefaults)
 	if err != nil {

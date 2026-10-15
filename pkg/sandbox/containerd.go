@@ -148,7 +148,8 @@ func NewContainerdSandbox(config *ContainerdConfig, _ log.Logger) (*Containerd, 
 	if runtime.GOOS != "linux" {
 		return nil, fmt.Errorf("containerd sandbox requires Linux")
 	}
-	client, err := containerd.New(cfg.UnixSocket, containerd.WithTimeout(5*time.Second))
+	options := append([]containerd.ClientOpt{containerd.WithTimeout(5 * time.Second)}, acceptanceContainerdClientOptions()...)
+	client, err := containerd.New(cfg.UnixSocket, options...)
 	if err != nil {
 		return nil, fmt.Errorf("connect to containerd: %w", err)
 	}

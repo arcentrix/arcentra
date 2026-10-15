@@ -27,6 +27,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/shared/deployment"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/validation"
 	"github.com/arcentrix/arcentra/internal/shared/retry"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/nova"
@@ -200,7 +201,7 @@ func (tf *TaskFramework) create(ctx context.Context, task *Task) error {
 	}
 
 	// Handle approval if required
-	if task.Job.Approval != nil && task.Job.Approval.Required && !(deployment.IsPipelineDeploymentApproval(task.Job.Approval) && tf.execCtx.RunDeployment != nil && len(task.Job.Steps) == 1 && task.Job.Steps[0].Uses == "builtin:kubernetes") {
+	if task.Job.Approval != nil && task.Job.Approval.Required && !(tf.execCtx.Runtime != nil && tf.execCtx.Runtime.Type == taskqueue.RuntimeContainerdOfflineV1 && validation.IsDurableRetryApproval(task.Job, tf.execCtx.RuntimePolicy)) && !(deployment.IsPipelineDeploymentApproval(task.Job.Approval) && tf.execCtx.RunDeployment != nil && len(task.Job.Steps) == 1 && task.Job.Steps[0].Uses == "builtin:kubernetes") {
 		if err := tf.handleApproval(ctx, task); err != nil {
 			return fmt.Errorf("approval failed: %w", err)
 		}
@@ -294,6 +295,10 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 		Env: tf.execCtx.ResolveStepEnv(task.Job, nil), Variables: tf.execCtx.Pipeline.Variables,
 		Timeout: task.Job.Timeout, ArtifactURIs: artifactURIs, ArtifactReferences: artifactReferences}
 	payload.Source = source
+	payload.RetryApprovalRequired = validation.IsDurableRetryApproval(task.Job, tf.execCtx.RuntimePolicy)
+	if payload.RetryApprovalRequired {
+		payload.RetryApprovalTimeoutSeconds = tf.execCtx.RetryApprovalTimeoutSeconds
+	}
 	if tf.execCtx.Runtime != nil {
 		runtime := *tf.execCtx.Runtime
 		runtime.BindingDigest, err = taskqueue.RuntimeBindingDigest(payload.PipelineID, payload.PipelineRunID, payload.JobRunID, payload.AgentID, &runtime)
@@ -315,7 +320,17 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 		if err := taskqueue.ValidateJobRuntime(payload, tf.execCtx.RuntimePolicy); err != nil {
 			return err
 		}
-		if payload.Retry != nil {
+		if payload.RetryApprovalRequired {
+			capture, ok := tf.getJobRunStore().(interface {
+				CaptureRuntimeRetryApprovalExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest, map[string]string, map[string]taskqueue.ArtifactReference, *taskqueue.JobRetryPlan) error
+			})
+			if !ok {
+				return fmt.Errorf("atomic retry approval capture unavailable")
+			}
+			if err := capture.CaptureRuntimeRetryApprovalExpectation(ctx, payload.PipelineID, payload.PipelineRunID, payload.JobRunID, agentID, binding, payload.Runtime, payload.ArtifactURIs, payload.ArtifactReferences, payload.RetryPlan); err != nil {
+				return err
+			}
+		} else if payload.Retry != nil {
 			capture, ok := tf.getJobRunStore().(interface {
 				CaptureRuntimeRetryExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest, map[string]string, map[string]taskqueue.ArtifactReference, *taskqueue.JobRetryPlan) error
 			})

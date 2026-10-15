@@ -60,11 +60,12 @@ func (r *RuntimeRequest) UnmarshalJSON(data []byte) error {
 
 // OfflineRuntimePolicy 保存操作者配置，不得由流水线或队列请求扩大
 type OfflineRuntimePolicy struct {
-	Enabled            bool     `json:"enabled" mapstructure:"enabled"`
-	AllowWholeJobRetry bool     `json:"allowWholeJobRetry" mapstructure:"allowWholeJobRetry"`
-	AllowedImages      []string `json:"allowedImages" mapstructure:"allowedImages"`
-	MaxCPU             string   `json:"maxCpu" mapstructure:"maxCpu"`
-	MaxMemory          string   `json:"maxMemory" mapstructure:"maxMemory"`
+	Enabled                    bool     `json:"enabled" mapstructure:"enabled"`
+	AllowWholeJobRetryApproval bool     `json:"allowWholeJobRetryApproval" mapstructure:"allowWholeJobRetryApproval"`
+	AllowWholeJobRetry         bool     `json:"allowWholeJobRetry" mapstructure:"allowWholeJobRetry"`
+	AllowedImages              []string `json:"allowedImages" mapstructure:"allowedImages"`
+	MaxCPU                     string   `json:"maxCpu" mapstructure:"maxCpu"`
+	MaxMemory                  string   `json:"maxMemory" mapstructure:"maxMemory"`
 }
 
 // Clone 返回独立策略快照
@@ -222,6 +223,12 @@ func RuntimeBindingDigest(pipelineID, runID, jobID, agentID string, request *Run
 func ValidateJobRuntime(payload *JobRunTaskPayload, policy OfflineRuntimePolicy) error {
 	if payload == nil {
 		return fmt.Errorf("job payload is required")
+	}
+	if !payload.RetryApprovalRequired && payload.RetryApprovalTimeoutSeconds != 0 {
+		return fmt.Errorf("ungated job cannot carry retry approval budget")
+	}
+	if payload.RetryApprovalRequired && (payload.Runtime == nil || payload.Retry == nil || !policy.AllowWholeJobRetryApproval || payload.RetryApprovalTimeoutSeconds < 1 || payload.RetryApprovalTimeoutSeconds > 3600) {
+		return fmt.Errorf("durable retry approval requires enabled offline whole_job policy")
 	}
 	if payload.Runtime == nil {
 		return nil

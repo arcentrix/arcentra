@@ -23,6 +23,7 @@ option go_package = "github.com/arcentrix/arcentra/api/agent/v1;agentv1";
 
 // AgentService - Main interface for communication between Agent and Server
 service AgentService {
+  rpc ReconcileJobRetryApproval(ReconcileJobRetryApprovalRequest) returns (ReconcileJobRetryApprovalResponse);
   // Bounded authenticated generation admission/advance; inspect never authorizes execution.
   rpc ReconcileJobGeneration(ReconcileJobGenerationRequest) returns (ReconcileJobGenerationResponse) {}
   // Get before checkout; record once before staging. Never starts or retries execution.
@@ -139,6 +140,7 @@ enum AgentStatus {
 // Heartbeat request
 // RuntimeCapabilities reports authenticated Agent readiness, independently of editable labels.
 message RuntimeCapabilities {
+  bool containerd_retry_approval_v1 = 4; // Durable exact-content retry approval protocol readiness
   bool containerd_offline_v1 = 1;
   string execution_mode = 2; // baremetal or containerd-offline-v1, independent of readiness
   bool containerd_whole_job_retry_v1 = 3; // Explicit operator permission and ready generation controller
@@ -453,4 +455,13 @@ message ReconcileJobGenerationRequest {
 }
 message ReconcileJobGenerationResponse {
   string generation_json = 1;
+}
+
+// Exact canonical observe/admit requests; observe never grants execution.
+message ReconcileJobRetryApprovalRequest {
+ string agent_id = 1;
+ string request_json = 2;
+}
+message ReconcileJobRetryApprovalResponse {
+ string response_json = 1;
 }
