@@ -1862,7 +1862,7 @@ func containerAcceptanceStepQueueDrained(t *testing.T, f *controllerWorkerFixtur
 	}
 }
 
-// containerAcceptanceFailedStepApproval 只在原隔离环境中组装关闭门禁的新组合
+// containerAcceptanceFailedStepApproval 在原隔离环境通过普通生产入口验收已接受组合
 func containerAcceptanceFailedStepApproval(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, publisher executor.LogPublisher, retained map[string]string, services *controlservice.Services, approvalPolicy *retryapproval.Policy, lifecycle *containerApprovalLifecycle) {
 	containerAcceptanceDrainWithAudit(t, f, retained)
 	if err := f.worker.Stop(); err != nil {
@@ -1873,8 +1873,15 @@ func containerAcceptanceFailedStepApproval(t *testing.T, f *controllerWorkerFixt
 	policy.AllowFailedStepRetry = true
 	policy.AllowFailedStepRetryApproval = true
 	f.conf.Agent.Sandbox.Containerd.Policy = policy
-	if taskpayload.FailedStepRetryApprovalAccepted || policy.ValidateProduction() == nil || ValidateExecutionConfig(f.conf) == nil {
-		t.Fatal("combination production gate must remain closed")
+	if taskpayload.FailedStepRetryApprovalAccepted {
+		if err := policy.ValidateProduction(); err != nil {
+			t.Fatal(err)
+		}
+		if err := ValidateExecutionConfig(f.conf); err != nil {
+			t.Fatal(err)
+		}
+	} else if policy.ValidateProduction() == nil || ValidateExecutionConfig(f.conf) == nil {
+		t.Fatal("unaccepted combination escaped production gate")
 	}
 	// 使用独立合成审批人，旧夹具的真实授权记录保留到其清理阶段
 	previousPolicy := approvalPolicy
@@ -1893,10 +1900,15 @@ func containerAcceptanceFailedStepApproval(t *testing.T, f *controllerWorkerFixt
 	}()
 	recording := &controllerWorkerRecordingQueue{TaskQueue: f.producer, fixture: f}
 	processConfig := &controlconfig.AppConfig{Pipeline: controlconfig.PipelineConfig{RetryApproval: approvalPolicy}}
+	if taskpayload.FailedStepRetryApprovalAccepted {
+		processConfig.Pipeline.OfflineRuntime = policy
+	}
 	f.engine = process.NewProcess(f.repos, nil, recording, nil, &log.Logger{SugaredLogger: zap.NewNop().Sugar()}, processConfig, nil)
 	t.Cleanup(f.engine.Stop)
-	if err := f.engine.ConfigureContainerAcceptancePolicy(policy); err != nil {
-		t.Fatal(err)
+	if !taskpayload.FailedStepRetryApprovalAccepted {
+		if err := f.engine.ConfigureContainerAcceptancePolicy(policy); err != nil {
+			t.Fatal(err)
+		}
 	}
 	events := &containerAcceptanceStepRuntimeEvents{}
 	manager := executor.NewExecutorManager()
@@ -1907,8 +1919,11 @@ func containerAcceptanceFailedStepApproval(t *testing.T, f *controllerWorkerFixt
 		t.Fatal(err)
 	}
 	f.worker = queue.(*workerQueues)
-	if !f.worker.OfflineRuntimeReady() || taskpayload.FailedStepRetryApprovalAccepted {
-		t.Fatal("closed candidate readiness widened production advertisement")
+	if !f.worker.OfflineRuntimeReady() || (taskpayload.FailedStepRetryApprovalAccepted && !f.worker.FailedStepRetryReady()) {
+		t.Fatal("approved live step production runtime is not ready")
+	}
+	if taskpayload.FailedStepRetryApprovalAccepted {
+		t.Log("failed-step approval gate-on: ordinary NewProcess and StartWorker; actual worker readiness; candidate adapters unused")
 	}
 	containerAcceptanceRetryApproval(t, f, cfg, store, retained, services, approvalPolicy, lifecycle, events)
 	containerAcceptanceDrainWithAudit(t, f, retained)

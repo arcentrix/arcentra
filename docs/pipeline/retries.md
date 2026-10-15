@@ -141,7 +141,11 @@ and destination-specific checks, and require explicit
 and both Control `pipeline.offlineRuntime.allowFailedStepRetry` and Agent
 `agent.sandbox.containerd.policy.allowFailedStepRetry`. Both flags default off.
 Only explicit idempotent policies with 2–5 attempts and a distinct 1–125 exit-code
-allowlist qualify. `continueOnError` and approval-bearing `failed_step` plans are
-rejected; whole-job exact approval does not cover this combination. There is no
+allowlist qualify. `continueOnError` remains rejected. Approval-bearing plans
+require the separate [exact failed-step approval contract](failed-step-retry-approval.md),
+both default-off `allowFailedStepRetryApproval` permissions in addition to both
+parent `allowFailedStepRetry` permissions, and its matching capability. That
+gate-enabled candidate's ordinary entry is pending this candidate's CI;
+whole-job exact approval does not cover the combination. There is no
 restart continuation or post-terminal resume. See the [full contract and exact
 evidence](failed-step-retry.md), including the separate frontend fixture and actual-backend browser scopes. Backend PR 61 and frontend PR 11 were draft when this evidence was recorded on 2026-10-15.

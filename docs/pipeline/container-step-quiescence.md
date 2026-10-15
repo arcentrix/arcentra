@@ -76,6 +76,8 @@ Whole-job generation numbers must not be reused as step-attempt numbers.
 Current whole-job retry and its limitations are documented in [retries.md](retries.md).
 V17 now supports [exact-content `whole_job` approval](retry-approval.md), which
 binds the pinned full source commit, cumulative artifact inputs and entire finite
-retry plan. Approval-bearing `failed_step` remains rejected; that combination
-requires a separate implementation. No production cluster, credential, or model
+retry plan. The separate [V19 failed-step approval candidate](failed-step-retry-approval.md)
+adds the exact combination contract; the quiescence proof itself grants no
+approval or step admission. V19's gate-enabled ordinary-entry CI is pending,
+and both approval and parent failed-step permissions remain default off on both sides. No production cluster, credential, or model
 connection is configured by this proof.

@@ -103,7 +103,7 @@ func startContainerAcceptanceWorkerObserved(ctx context.Context, conf *config.Ag
 		}
 		ctx = context.WithValue(ctx, acceptanceWorkerObserverKey{}, delivery)
 	}
-	if !conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetryApproval && taskpayload.OfflineRuntimeAccepted && (!conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry || taskpayload.FailedStepRuntimeAccepted) {
+	if (!conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetryApproval || taskpayload.FailedStepRetryApprovalAccepted) && taskpayload.OfflineRuntimeAccepted && (!conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry || taskpayload.FailedStepRuntimeAccepted) {
 		queue, err := StartWorker(ctx, conf, client, manager)
 		if err != nil || observer == nil {
 			return queue, err
@@ -197,7 +197,7 @@ func startContainerAcceptanceWorkerObserved(ctx context.Context, conf *config.Ag
 		return nil, fmt.Errorf("real runtime recovery did not become ready")
 	}
 	var executionRuntime offlineJobRuntime = offline
-	if cfg.Policy.AllowFailedStepRetry && (!taskpayload.FailedStepRuntimeAccepted || cfg.Policy.AllowFailedStepRetryApproval) {
+	if cfg.Policy.AllowFailedStepRetry && (!taskpayload.FailedStepRuntimeAccepted || (cfg.Policy.AllowFailedStepRetryApproval && !taskpayload.FailedStepRetryApprovalAccepted)) {
 		executionRuntime = &containerAcceptanceStepRuntime{durableOfflineRuntime: offline}
 	}
 	workerCtx := withOfflineJobRuntime(ctx, executionRuntime)

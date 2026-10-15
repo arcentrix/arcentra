@@ -145,5 +145,7 @@ model is configured by these tests. The exact whole-job approval implementation
 passed at merged backend commit `bda78247222a48ac1a0425e64769fda73e2ba129`:
 [ordinary/actual-browser CI](https://github.com/arcentrix/arcentra/actions/runs/38673170855)
 and [dedicated runtime CI](https://github.com/arcentrix/arcentra/actions/runs/38673170856).
-These results do not authorize approval-bearing `failed_step` plans, which remain
-rejected pending their separate implementation and acceptance.
+These V17 results do not authorize approval-bearing `failed_step` plans. The
+separate [V19 failed-step approval contract](failed-step-retry-approval.md) records
+its own closed-gate implementation evidence and pending gate-enabled ordinary-entry
+acceptance. Whole-job approval remains a distinct kind and capability.

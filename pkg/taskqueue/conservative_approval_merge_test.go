@@ -56,8 +56,8 @@ func TestFailedStepApprovalRequiresIndependentPolicyAndBoundedPlan(t *testing.T)
 		if err := ValidateJobRuntime(p, policy); err != nil {
 			t.Fatal(err)
 		}
-		if policy.ValidateProduction() == nil {
-			t.Fatal("closed acceptance gate bypassed")
+		if got := policy.ValidateProduction() == nil; got != FailedStepRetryApprovalAccepted {
+			t.Fatalf("production policy acceptance=%t want=%t", got, FailedStepRetryApprovalAccepted)
 		}
 		canonical, err := plan.Canonical()
 		if err != nil {
@@ -72,8 +72,8 @@ func TestFailedStepApprovalRequiresIndependentPolicyAndBoundedPlan(t *testing.T)
 			t.Fatal("dropped approval marker retained authority")
 		}
 	}
-	if FailedStepRetryApprovalAccepted || (OfflineRuntimePolicy{}).AllowFailedStepRetryApproval {
-		t.Fatal("new capability must remain default off")
+	if (OfflineRuntimePolicy{}).AllowFailedStepRetryApproval {
+		t.Fatal("new operator permission must remain default off")
 	}
 	p, _ := conservativeMergePayload(t, "failed_step", false)
 	p.RetryApprovalTimeoutSeconds = 300

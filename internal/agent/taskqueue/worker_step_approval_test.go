@@ -181,13 +181,37 @@ func TestFailedStepApprovalWorkerFreshAuthority(t *testing.T) {
 	}
 }
 
-func TestFailedStepApprovalOrdinaryEntryStaysClosed(t *testing.T) {
-	conf, p, r, c := fakeStepRetryFixture(t, 1)
-	conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetryApproval = true
+// TestFailedStepApprovalOrdinaryEntryRequiresIndependentPolicy 验证生产入口保留独立许可与运行时就绪要求
+func TestFailedStepApprovalOrdinaryEntryRequiresIndependentPolicy(t *testing.T) {
+	conf, p, r, _ := fakeStepRetryFixture(t, 1)
 	p.RetryApprovalRequired = true
 	p.RetryApprovalTimeoutSeconds = 60
 	bindFakeGenerationPlan(t, p)
-	if err := runFakeStepRetry(context.Background(), conf, p, r, c); err == nil || r.allocations != 0 {
-		t.Fatalf("closed approval gate allocated runtime: err=%v allocations=%d", err, r.allocations)
+	ctx := withOfflineJobRuntime(context.Background(), r)
+	for _, tc := range []struct {
+		name                  string
+		base, approval, ready bool
+		want                  bool
+	}{
+		{"both-flags", true, true, true, taskpayload.FailedStepRetryApprovalAccepted},
+		{"missing-approval", true, false, true, false},
+		{"missing-base", false, true, true, false},
+		{"not-ready", true, true, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry = tc.base
+			conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetryApproval = tc.approval
+			r.ready = tc.ready
+			local, structural := offlineJobValidation(ctx, conf, p)
+			if structural != nil && tc.ready {
+				t.Fatal(structural)
+			}
+			if (local == nil && structural == nil) != tc.want {
+				t.Fatalf("ordinary entry allowed=%t want=%t err=%v", local == nil, tc.want, local)
+			}
+			if r.allocations != 0 {
+				t.Fatal("validation allocated runtime")
+			}
+		})
 	}
 }

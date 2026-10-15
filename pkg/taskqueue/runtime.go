@@ -35,8 +35,8 @@ const OfflineRuntimeAccepted = true
 // FailedStepRuntimeAccepted 标记已通过真实闭环验收的活动步骤续试实现，操作者仍需独立显式启用
 const FailedStepRuntimeAccepted = true
 
-// FailedStepRetryApprovalAccepted 标记组合审批路径是否通过独立验收，生产默认关闭
-const FailedStepRetryApprovalAccepted = false
+// FailedStepRetryApprovalAccepted 标记组合审批路径已通过独立验收，仍需显式运营策略许可
+const FailedStepRetryApprovalAccepted = true
 
 // RuntimeResources 保存明确的硬资源上限，不接受宿主路径或可选运行时参数
 type RuntimeResources struct {

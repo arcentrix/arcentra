@@ -97,7 +97,10 @@ This candidate acceptance is not a main release or production deployment.
 Both `allowFailedStepRetry` policies default off; no migration, capability or
 compiled gate implicitly enables them. Follow the [failed-step contract and
 prerequisites](pipeline/failed-step-retry.md). V17 exact-content approval supports
-`whole_job` retry separately; combining approval with `failed_step` remains rejected.
+`whole_job` retry separately. The V18 revision above rejected the combination
+with `failed_step`; the separate [V19 approval contract](pipeline/failed-step-retry-approval.md)
+records its closed-gate evidence and the gate-enabled candidate's pending ordinary
+entry CI. The V18 evidence here is not approval-combination acceptance.
 
 The earlier closed-gate runtime run 38682739091 and ordinary CI 38682739082 passed
 at remote `ffc843a3`, tree `d3512066883a3df4d93c50559e94d415fd850867`.
@@ -117,7 +120,7 @@ section; they do not substitute for the later ordinary-entry acceptance above.
 - Trusted host Git checkout before the container runs; trusted host artifact
   publication only after every container process is sealed. Host Git, object-store
   and image operations may use network access. Container commands cannot.
-- Explicit bounded `whole_job` retry requires a separate default-off operator permission and fresh journaled generation per round. Live `failed_step` has separate exact-candidate implementation and ordinary gate-on entry acceptance; it keeps the original session/workspace and partial file changes. Background/zombie processes, approval-bearing failed-step plans and `continueOnError` are rejected. Neither mode resumes or takes over work after a crash. Recovery removes only exact journaled resources and reconciles original authenticated facts; interrupted work needs an explicitly requested fresh run.
+- Explicit bounded `whole_job` retry requires a separate default-off operator permission and fresh journaled generation per round. Live `failed_step` has separate exact-candidate implementation and ordinary gate-on entry acceptance; it keeps the original session/workspace and partial file changes. Background/zombie processes and `continueOnError` are rejected. Approval-bearing failed-step plans require the independent [V19 exact contract](pipeline/failed-step-retry-approval.md); its gate-enabled ordinary entry remains pending CI, and both approval permissions plus both parent failed-step permissions remain default off. Neither mode resumes or takes over work after a crash. Recovery removes only exact journaled resources and reconciles original authenticated facts; interrupted work needs an explicitly requested fresh run.
 - Multiple jobs must form one explicit dependency chain: one root, at most one
   predecessor and successor per job, and all jobs reachable from that root.
   Disconnected roots, branches, joins, cycles and mixed host/deployment execution
@@ -208,7 +211,7 @@ jobs:
           script: test "$(cat dist/result.txt)" = "offline artifact"
 ```
 
-Container `whole_job` retries use the separate opt-in [fresh-generation contract](pipeline/retries.md#offline-container-whole-job-generations), including the separately enabled V17 [exact-content approval](pipeline/retry-approval.md). Live `failed_step` uses an independent [same-session contract](pipeline/failed-step-retry.md), with independent ordinary gate-on entry acceptance for the exact candidate above; approval-bearing failed-step plans remain rejected before dispatch. Existing trusted-baremetal retry modes are unchanged. Branches, joins and disconnected roots remain outside this linear-chain profile.
+Container `whole_job` retries use the separate opt-in [fresh-generation contract](pipeline/retries.md#offline-container-whole-job-generations), including the separately enabled V17 [exact-content approval](pipeline/retry-approval.md). Live `failed_step` uses an independent [same-session contract](pipeline/failed-step-retry.md), with independent ordinary gate-on entry acceptance for the exact candidate above; approval-bearing failed-step plans require the separate [V19 exact contract and acceptance](pipeline/failed-step-retry-approval.md), not the V18 results above. Existing trusted-baremetal retry modes are unchanged. Branches, joins and disconnected roots remain outside this linear-chain profile.
 
 ## Immutable source and artifact inputs
 
@@ -377,14 +380,18 @@ build-tool compatibility.
 
 For optional retry modes, apply the additional explicit migration prerequisites
 above and verify matching Agent capabilities before changing either retry policy.
-`allowWholeJobRetry`, `allowWholeJobRetryApproval` and `allowFailedStepRetry` are
+`allowWholeJobRetry`, `allowWholeJobRetryApproval`, `allowFailedStepRetry` and
+`allowFailedStepRetryApproval` are
 separate, default-off choices on both Control and Agent. Use the failed-step
 candidate's own exact ordinary `NewProcess`/`StartWorker` evidence above, rather
 than the older base-runtime result, when reviewing a build for step 3. The PRs
 were draft when this evidence was recorded on 2026-10-15, and destination-specific activation is a separate operator step.
 Explicit idempotent 2–5-attempt plans and a distinct 1–125 shell exit-code allowlist are mandatory. Failed-step retries
 retain partial files and prior successful effects, reject any background/zombie
-process, approval or `continueOnError`, and cannot continue after Agent restart.
+process or `continueOnError`, and cannot continue after Agent restart. For
+approval-bearing failed-step work, follow the separate [V19 contract](pipeline/failed-step-retry-approval.md):
+its new approval opt-in and parent failed-step opt-in are both required on each
+side, and ordinary gate-enabled entry evidence is still pending this candidate's CI.
 
 Keep policy off if any prerequisite or result is uncertain. No test, migration,
 example, or successful cleanup authorizes a production rollout by itself.

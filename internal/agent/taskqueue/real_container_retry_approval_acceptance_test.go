@@ -400,7 +400,31 @@ func submitContainerApproval(t *testing.T, f *controllerWorkerFixture, cfg *real
 			failedStep = true
 		}
 	}
-	response, err := f.client.AgentClient.Heartbeat(ctx, &agentv1.HeartbeatRequest{AgentId: f.conf.Agent.ID, Status: agentv1.AgentStatus_AGENT_STATUS_IDLE, Timestamp: time.Now().Unix(), RuntimeCapabilities: &agentv1.RuntimeCapabilities{ContainerdOfflineV1: f.worker.OfflineRuntimeReady(), ContainerdWholeJobRetryV1: true, ContainerdRetryApprovalV1: true, ContainerdFailedStepRetryV1: failedStep, ContainerdFailedStepRetryApprovalV1: failedStep, ExecutionMode: taskpayload.RuntimeContainerdOfflineV1}})
+	// 与服务广告相同的门槛；就绪来自当前普通 StartWorker 的真实后端
+	runtimePolicy := f.conf.Agent.Sandbox.Containerd.Policy
+	ready := f.worker.OfflineRuntimeReady()
+	wholeReady := ready && runtimePolicy.AllowWholeJobRetry
+	stepReady := taskpayload.FailedStepRuntimeAccepted && ready && runtimePolicy.AllowFailedStepRetry && f.worker.FailedStepRetryReady()
+	capabilities := &agentv1.RuntimeCapabilities{
+		ExecutionMode:                       taskpayload.RuntimeContainerdOfflineV1,
+		ContainerdOfflineV1:                 ready,
+		ContainerdWholeJobRetryV1:           wholeReady,
+		ContainerdRetryApprovalV1:           wholeReady && runtimePolicy.AllowWholeJobRetryApproval,
+		ContainerdFailedStepRetryV1:         stepReady,
+		ContainerdFailedStepRetryApprovalV1: taskpayload.FailedStepRetryApprovalAccepted && stepReady && runtimePolicy.AllowFailedStepRetryApproval,
+	}
+	if failedStep && taskpayload.FailedStepRetryApprovalAccepted && !capabilities.ContainerdFailedStepRetryApprovalV1 {
+		t.Fatal("actual production worker did not advertise approved live-step readiness")
+	}
+	if failedStep && !taskpayload.FailedStepRetryApprovalAccepted {
+		// 仅关闭门禁的专用候选组装可以注入能力；已接受路径必须使用真实运行时就绪
+		runtimePolicy := f.conf.Agent.Sandbox.Containerd.Policy
+		if !capabilities.ContainerdOfflineV1 || !runtimePolicy.AllowFailedStepRetry || !runtimePolicy.AllowFailedStepRetryApproval || os.Getenv("ARCENTRA_CONTAINERD_ACCEPTANCE") != "1" || os.Getenv("ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE") != "1" {
+			t.Fatal("candidate approval capability requires exact dedicated assembly")
+		}
+		capabilities.ContainerdFailedStepRetryV1, capabilities.ContainerdFailedStepRetryApprovalV1 = true, true
+	}
+	response, err := f.client.AgentClient.Heartbeat(ctx, &agentv1.HeartbeatRequest{AgentId: f.conf.Agent.ID, Status: agentv1.AgentStatus_AGENT_STATUS_IDLE, Timestamp: time.Now().Unix(), RuntimeCapabilities: capabilities})
 	cancel()
 	if err != nil || response == nil || !response.Success {
 		t.Fatalf("authenticated approval capability: %v", err)
