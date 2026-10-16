@@ -255,7 +255,9 @@ func containerAcceptanceFailedStepRetry(t *testing.T, f *controllerWorkerFixture
 	if taskpayload.FailedStepRuntimeAccepted {
 		t.Log("failed-step gate-on: ordinary NewProcess and StartWorker; capability from actual worker readiness; closed-gate adapters unused")
 	}
-	if !t.Run("same-live-session-immutable-inputs-ack-loss", func(t *testing.T) { containerAcceptanceStepRetrySuccess(t, f, cfg, store, events, retained, delivery) }) {
+	if !t.Run("same-live-session-immutable-inputs-ack-loss", func(t *testing.T) {
+		containerAcceptanceStepRetrySuccess(t, f, cfg, store, events, retained, delivery, publisher)
+	}) {
 		return
 	}
 	for _, scenario := range []string{"earlier-background-refused", "adopted-zombie-refused", "cancel-before-successor", "uncertain-resume-cleans"} {
@@ -666,7 +668,7 @@ func containerAcceptanceStepRuntimeDiagnostic(t *testing.T, events *containerAcc
 	t.Logf("failed-step actual SDK counts=%v", counts)
 }
 
-func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, events *containerAcceptanceStepRuntimeEvents, retained map[string]string, delivery *workerDeliveryObserver) {
+func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, events *containerAcceptanceStepRuntimeEvents, retained map[string]string, delivery *workerDeliveryObserver, publisher executor.LogPublisher) {
 	t.Helper()
 	o := &containerAcceptanceStepObservation{uploads: map[string]containerAcceptanceJournal{}, downloads: map[string]int{}}
 	sourceURL, initialCommit, changedCommit, advanceBranch := containerAcceptanceMutableRetrySource(t, f.ctx)
@@ -1105,6 +1107,7 @@ func containerAcceptanceStepRetrySuccess(t *testing.T, f *controllerWorkerFixtur
 		}
 		return complete, nil
 	}); err != nil {
+		containerAcceptanceStepLogDiagnostic(t, f, steps, publisher, wantedMarkers)
 		t.Fatalf("exact synthetic command log counts: %v", err)
 	}
 	rows, total, err := f.repos.Artifact.List(f.ctx, repo.ArtifactQuery{ProjectID: f.projectID, RunID: run.RunID, Limit: 20})

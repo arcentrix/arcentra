@@ -9,6 +9,7 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/pkg/sandbox"
@@ -111,12 +112,12 @@ func (s *Session) execute(ctx context.Context, req *executor.ExecutionRequest, a
 		opts.Timeout = req.Options.Timeout
 	}
 	var outputMu sync.Mutex
-	var bytes int64
+	var bytes atomic.Int64
 	write := func(stream string) outputWriter {
 		return func(p []byte) (int, error) {
 			outputMu.Lock()
 			defer outputMu.Unlock()
-			bytes += int64(len(p))
+			bytes.Add(int64(len(p)))
 			if req.OutputHandler != nil {
 				req.OutputHandler(stream, string(p))
 			}
@@ -170,7 +171,7 @@ func (s *Session) execute(ctx context.Context, req *executor.ExecutionRequest, a
 	} else {
 		result.Complete(false, 1, err)
 	}
-	result.WithMetadata("outputBytes", bytes)
+	result.WithMetadata("outputBytes", bytes.Load())
 	if req.OutputHandler != nil {
 		result.WithMetadata("logsStreamed", true)
 	}

@@ -172,9 +172,13 @@ fmt-check: ## check Go code formatting
 	@UNFMT=$$(gofmt -l $$(find . -name '*.go' ! -name '*.pb.go' ! -name 'wire_gen.go' ! -path '*/queries/*.go')); \
 	if [ -n "$$UNFMT" ]; then echo "Unformatted files:"; echo "$$UNFMT"; exit 1; fi
 
+.PHONY: test-git-env
+test-git-env: ## verify test Git environment isolation
+	bash scripts/with-clean-git-env.sh python3 scripts/test_clean_git_env.py
+
 .PHONY: test
-test: ## run tests
-	go test -race -count=1 ./...
+test: test-git-env ## run tests
+	bash scripts/with-clean-git-env.sh go test -race -count=1 ./...
 
 # -----------------------------------------------------------------------------
 # Build
