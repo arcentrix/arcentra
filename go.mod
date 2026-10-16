@@ -115,7 +115,7 @@ require (
 	github.com/containerd/containerd/api v1.10.0
 	github.com/containerd/continuity v0.4.5 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
-	github.com/containerd/fifo v1.1.0 // indirect
+	github.com/containerd/fifo v1.1.0
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/platforms v1.0.0-rc.4 // indirect
 	github.com/containerd/ttrpc v1.2.8 // indirect
