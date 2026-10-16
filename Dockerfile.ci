@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# CI-only Dockerfile — copies pre-built static binaries instead of building
+# Release packaging Dockerfile — copies pre-built CGO binaries instead of building
 # from source. Used by the release workflow for multi-arch image publishing.
 #
 # Expected layout (prepared by the CI "docker" job):
@@ -20,7 +20,7 @@
 #   dist/linux/arm64/{arcentra,arcentra-agent,arcentra-cli,conf.d/}
 
 # ── arcentra (control-plane) ─────────────────────────────────────────
-FROM debian:bookworm-slim AS arcentra
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS arcentra
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git bash && rm -rf /var/lib/apt/lists/*
 
@@ -34,7 +34,7 @@ EXPOSE 8080 9090
 ENTRYPOINT ["/arcentra", "-conf", "/conf.d/config.toml", "-plugin-conf", "/conf.d/plugins.toml"]
 
 # ── arcentra-agent ───────────────────────────────────────────────────
-FROM debian:bookworm-slim AS arcentra-agent
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS arcentra-agent
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git bash && rm -rf /var/lib/apt/lists/*
 
