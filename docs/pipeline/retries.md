@@ -145,7 +145,7 @@ allowlist qualify. `continueOnError` remains rejected. Approval-bearing plans
 require the separate [exact failed-step approval contract](failed-step-retry-approval.md),
 both default-off `allowFailedStepRetryApproval` permissions in addition to both
 parent `allowFailedStepRetry` permissions, and its matching capability. That
-gate-enabled candidate's ordinary entry is pending this candidate's CI;
+gate-enabled candidate's ordinary entry passed the exact linked V19 acceptance;
 whole-job exact approval does not cover the combination. There is no
 restart continuation or post-terminal resume. See the [full contract and exact
 evidence](failed-step-retry.md), including the separate frontend fixture and actual-backend browser scopes. Backend PR 61 and frontend PR 11 were draft when this evidence was recorded on 2026-10-15.

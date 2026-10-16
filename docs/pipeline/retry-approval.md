@@ -147,5 +147,5 @@ passed at merged backend commit `bda78247222a48ac1a0425e64769fda73e2ba129`:
 and [dedicated runtime CI](https://github.com/arcentrix/arcentra/actions/runs/38673170856).
 These V17 results do not authorize approval-bearing `failed_step` plans. The
 separate [V19 failed-step approval contract](failed-step-retry-approval.md) records
-its own closed-gate implementation evidence and pending gate-enabled ordinary-entry
-acceptance. Whole-job approval remains a distinct kind and capability.
+its own closed-gate implementation evidence and successful exact gate-enabled
+ordinary-entry acceptance. Whole-job approval remains a distinct kind and capability.

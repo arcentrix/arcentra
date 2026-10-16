@@ -1,12 +1,11 @@
-# Approval-gated live failed-step retry: gate-enabled candidate
+# Approval-gated live failed-step retry: exact gate-on acceptance
 
-This candidate enables the independent compiled
-`taskqueue.FailedStepRetryApprovalAccepted` gate. Its ordinary production
-`NewProcess`/`StartWorker` entry acceptance is **pending this candidate's CI**.
-The earlier closed-gate results below establish implementation-level evidence,
-not acceptance of the newly enabled entry or a production rollout. Keep the
-operator policies disabled until the exact gate-enabled build and its evidence
-have been reviewed separately.
+The independent compiled `taskqueue.FailedStepRetryApprovalAccepted` gate is
+enabled in the accepted candidate. Its ordinary production `NewProcess`/
+`StartWorker` entries passed the exact hosted acceptance recorded below.
+The earlier closed-gate results remain separate implementation-level evidence.
+Neither result is a production rollout. Operator policies remain disabled by
+default and require explicit destination-specific review and configuration.
 
 The runtime fixture derives its authenticated heartbeat capabilities from the
 started worker’s readiness and explicit policy flags. It constructs that heartbeat
@@ -87,7 +86,48 @@ acceptance adapter, not ordinary gate-enabled startup, exercised the new path.
   at that frontend head. These fixtures cover review identity and interaction;
   they are separate from both real-MySQL authorization and real container effects.
 
-These results do not certify a different tree, the pending gate-enabled ordinary
+These closed-gate results do not certify a different tree, a gate-enabled ordinary
 entry, release OCI startup, production deployment, live Kubernetes rollout or
 external model integration. V18's ungated failed-step evidence remains separately
 recorded in [the original failed-step contract](failed-step-retry.md#acceptance-status).
+
+## Gate-enabled ordinary-entry evidence (2026-10-15)
+
+The accepted backend head is
+`eba238c0e5fdfcfced1d12961c03aa70cc347d3b`, tree
+`902210dab751d6e002e96f0a0f7e3f28cfb6252f`. Both workflows tested merge
+`75b9454e8f336988cffa601f7a34f93d98fbf010`, whose tree matches that head,
+and completed successfully:
+
+- [Runtime run 38702766733](https://github.com/arcentrix/arcentra/actions/runs/38702766733)
+  exercised ordinary `NewProcess`/`StartWorker` entry, the five approved-live-step
+  scenarios and earlier runtime regressions. These cover a finite approved plan,
+  cancellation while pending, revocation before a successor, revocation after
+  committed admission before RUNNING, and lost admission ACK followed by revocation.
+  Historical receipt replay preserves factual ACKs without authorizing fresh execution.
+  The [cleanup artifact 11957845189](https://github.com/arcentrix/arcentra/actions/runs/38702766733/artifacts/11957845189)
+  was independently inspected with `passed: true`, `leaksBeforeFallback: []`
+  and `cleanupErrors: []`. Archive SHA-256:
+  `62b6c5c36537b7cc38dba005a5e7b453d0725895f515193ab6e7a8aac30d11ee`.
+- [Ordinary CI 38702766680](https://github.com/arcentrix/arcentra/actions/runs/38702766680)
+  passed formatting, vet, race tests, command builds, real MySQL admission and
+  authorization-contention checks, and the existing real broker/S3/Agent/browser
+  journey. The frontend pin was
+  `ccf4519bbf2e09171fcb733ea19d8e3fa2ba606f`.
+  The actual browser evidence covers installation, execution, logs and artifact
+  downloads; it does **not** establish browser approval-to-retry container execution.
+  [Browser artifact 11956889283](https://github.com/arcentrix/arcentra/actions/runs/38702766680/artifacts/11956889283)
+  archive SHA-256:
+  `9954dae6c6f81128c0d08a8d934dd07066071a7ff86c3dde23cec0881e5df45f`.
+  Approval-editor interaction remains separately covered by the simulated-API
+  [frontend run 38691081433](https://github.com/arcentrix/arcentra-web/actions/runs/38691081433).
+
+This evidence note was reconstructed on 2026-10-16 from the published candidate,
+GitHub workflow/artifact metadata and the previously completed independent receipt
+review. It is a new documentation change, not restoration of the unavailable
+local final-document commit or its tree. At reconstruction, backend PR 62 and
+frontend PR 12 remained draft and unmerged. Final-document CI, merge and exact
+main verification must be tracked separately; these results do not certify any
+later tree, packaged release startup, production rollout, live Kubernetes target
+or external model integration. All operator permissions described above remain
+off by default.
