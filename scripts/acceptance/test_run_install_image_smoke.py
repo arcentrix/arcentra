@@ -110,6 +110,37 @@ class SubprocessFixtureTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.runner = smoke.Smoke(self.root, VERSION, ENV)
 
+    def test_elf_uses_bounded_headers_and_private_version_references(self):
+        # Real objdump -p layout; noise outside its actual sections is ignored.
+        headers = "[Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]"
+        private = """binary: file format elf64-x86-64
+GLIBC_999.0
+Dynamic Section:
+  NEEDED               libm.so.6
+  NEEDED               libc.so.6
+  NEEDED               ld-linux-x86-64.so.2
+  VERNEEDNUM           0x0000000000000003
+
+Version References:
+  required from ld-linux-x86-64.so.2:
+    0x0d696913 0x00 15 GLIBC_2.3
+  required from libm.so.6:
+    0x06969189 0x00 14 GLIBC_2.29
+    0x09691a75 0x00 09 GLIBC_2.2.5
+  required from libc.so.6:
+    0x069691b4 0x00 07 GLIBC_2.34
+    0x09691a75 0x00 02 GLIBC_2.2.5
+"""
+        source = Path("/tmp/fixture/arcentra-agent")
+        results = [subprocess.CompletedProcess([], 0, headers), subprocess.CompletedProcess([], 0, private)]
+        with patch.object(self.runner, "command", side_effect=results) as command:
+            facts = smoke.inspect_elf(self.runner, source)
+        self.assertEqual([c.args[0] for c in command.call_args_list], [
+            ["readelf", "--program-headers", str(source)], ["objdump", "-p", str(source)]])
+        self.assertEqual(facts["needed_libraries"], ["ld-linux-x86-64.so.2", "libc.so.6", "libm.so.6"])
+        self.assertEqual(facts["required_glibc_versions"], ["GLIBC_2.2.5", "GLIBC_2.29", "GLIBC_2.3", "GLIBC_2.34"])
+        self.assertEqual(facts["elf_interpreter"], ["/lib64/ld-linux-x86-64.so.2"])
+
     def test_startup_uses_real_image_entrypoint_no_host_mounts(self):
         calls = []
         def fixture(args, **kwargs):

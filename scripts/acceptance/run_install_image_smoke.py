@@ -288,6 +288,31 @@ class Smoke:
         return failures
 
 
+def inspect_elf(smoke, source):
+    """Collect program headers and version requirements without the symbol table."""
+    headers = smoke.command(["readelf", "--program-headers", str(source)]).stdout
+    private = smoke.command(["objdump", "-p", str(source)]).stdout
+    needed, versions = set(), set()
+    section = None
+    for line in private.splitlines():
+        if line == "Dynamic Section:":
+            section = "dynamic"
+        elif line == "Version References:":
+            section = "versions"
+        elif line and not line[0].isspace():
+            section = None
+        elif section == "dynamic":
+            match = re.fullmatch(r"\s+NEEDED\s+([A-Za-z0-9_.+-]{1,200})\s*", line)
+            if match:
+                needed.add(match[1])
+        elif section == "versions":
+            match = re.fullmatch(r"\s+0x[0-9a-fA-F]+\s+0x[0-9a-fA-F]+\s+[0-9]+\s+(GLIBC_[0-9.]+)\s*", line)
+            if match:
+                versions.add(match[1])
+    return {"needed_libraries": sorted(needed), "required_glibc_versions": sorted(versions),
+            "elf_interpreter": re.findall(r"Requesting program interpreter: ([^\]]{1,200})", headers)}
+
+
 def prepare(smoke, context):
     if smoke.command(["git", "rev-parse", "HEAD"]).stdout.strip() != smoke.sha:
         raise ValueError("checkout differs from current CI SHA")
@@ -306,11 +331,10 @@ def prepare(smoke, context):
             raise ValueError(f"artifact is not Linux x86-64 ELF: {name}")
         build = smoke.command(["go", "version", "-m", str(source)]).stdout
         build_facts = validate_build_metadata(build, smoke.sha)
-        elf = smoke.command(["readelf", "--program-headers", "--version-info", str(source)]).stdout
+        elf_facts = inspect_elf(smoke, source)
         metadata[name] = {"sha256": hashlib.sha256(raw).hexdigest(), "expected_version": smoke.version,
                           "application_runtime_version_verified": False, "platform": "linux/amd64", "go_build_metadata_checked": True, **build_facts,
-                          "required_glibc_versions": sorted(set(re.findall(r"GLIBC_[0-9.]+", elf))),
-                          "elf_interpreter": re.findall(r"Requesting program interpreter: ([^\]]{1,200})", elf)}
+                          **elf_facts}
         shutil.copy2(source, destination / name)
     (destination / "conf.d").mkdir()
     for source in sorted((ROOT / "conf.d").glob("*.toml")):

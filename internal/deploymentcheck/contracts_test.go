@@ -3,8 +3,10 @@
 package deploymentcheck
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -22,9 +24,61 @@ func source(t *testing.T, name string) string {
 	return string(raw)
 }
 
+func publishedImageStage(text, target string) (string, error) {
+	base := regexp.MustCompile(`^debian:bookworm-slim(?:@sha256:[a-f0-9]{64})?$`)
+	stages := make(map[string]string)
+	current := ""
+	for _, line := range strings.Split(text, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && strings.EqualFold(fields[0], "FROM") {
+			if len(fields) != 4 || !base.MatchString(fields[1]) || !strings.EqualFold(fields[2], "AS") {
+				return "", fmt.Errorf("invalid release image stage: %s", line)
+			}
+			current = fields[3]
+			if _, exists := stages[current]; exists {
+				return "", fmt.Errorf("duplicate release image stage %s", current)
+			}
+			stages[current] = ""
+			continue
+		}
+		if current != "" {
+			stages[current] += line + "\n"
+		}
+	}
+	stage, found := stages[target]
+	if !found {
+		return "", fmt.Errorf("missing release image stage %s", target)
+	}
+	return stage, nil
+}
+
+func TestPublishedImageStageParsing(t *testing.T) {
+	pin := "@sha256:" + strings.Repeat("a", 64)
+	for _, suffix := range []string{"", pin} {
+		text := "FROM debian:bookworm-slim" + suffix + " AS arcentra\nCONTROL\nFROM debian:bookworm-slim" + suffix + " AS arcentra-agent\nAGENT\n"
+		stage, err := publishedImageStage(text, "arcentra")
+		if err != nil || stage != "CONTROL\n" {
+			t.Fatalf("wrong control stage: %q, %v", stage, err)
+		}
+	}
+	for _, text := range []string{
+		"", "FROM", "FROM debian:bookworm-slim AS other",
+		"FROM debian:bookworm-slim@sha256:short AS arcentra",
+		"FROM unknown:latest AS arcentra",
+		"FROM debian:bookworm-slim AS arcentra\nFROM debian:bookworm-slim AS arcentra",
+	} {
+		if _, err := publishedImageStage(text, "arcentra"); err == nil {
+			t.Errorf("malformed or missing stage accepted: %q", text)
+		}
+	}
+}
+
 func TestPublishedImageContainsOperatorCLIAndPersistentWorkingDirectory(t *testing.T) {
 	text := source(t, "Dockerfile.ci")
-	stage := strings.Split(strings.Split(text, "FROM debian:bookworm-slim AS arcentra\n")[1], "FROM debian:bookworm-slim AS arcentra-agent")[0]
+	stage, err := publishedImageStage(text, "arcentra")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, required := range []string{"COPY dist/linux/${TARGETARCH}/arcentra-cli /usr/local/bin/arcentra-cli", "WORKDIR /var/lib/arcentra", `"-plugin-conf", "/conf.d/plugins.toml"`} {
 		if !strings.Contains(stage, required) {
 			t.Errorf("missing control image contract: %s", required)

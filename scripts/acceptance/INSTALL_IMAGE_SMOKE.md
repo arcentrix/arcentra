@@ -81,8 +81,11 @@ ENTRYPOINT or mounting a host executable:
    linux/amd64 JSON metadata. These CLI overrides are not startup evidence.
 
 Separate diagnostic containers collect runtime libc/ldd information, while host
-`readelf --program-headers --version-info` records artifact interpreter and ABI
-requirements. Diagnostics cannot substitute for actual application execution.
+`readelf --program-headers` records the artifact interpreter and `objdump -p`
+records needed libraries and GLIBC requirements from its Dynamic Section and
+Version References. This avoids `readelf --version-info` dumping the Agent
+binary’s large version-symbol table; no generic output limit is raised and no
+requirements are truncated. Diagnostics cannot substitute for actual application execution.
 This intentionally exposes, rather than repairs or masks, a potential newer
 Ubuntu CGO builder versus Debian bookworm runtime GLIBC incompatibility.
 
@@ -128,7 +131,7 @@ resource manifests, build contexts or TOML files:
 - `artifacts.json`: binary SHA256/expected-version/platform, observed Git revision/dirty state,
   explicit unverified per-binary runtime version, toolchain/CGO/trimpath facts,
   metadata-check flag, and bounded
-  readelf GLIBC requirements/interpreter
+  ELF needed libraries, GLIBC requirements and interpreter
 - `summary.json`: overall pass/fail and explicit limited coverage
 - `cleanup-summary.json`: independent cleanup outcome
 
