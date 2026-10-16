@@ -146,6 +146,8 @@ type fakeProcess struct {
 func newFakeProcess(complete bool) *fakeProcess {
 	return &fakeProcess{status: containerd.Created, completeOnStart: complete, started: make(chan struct{})}
 }
+func (p *fakeProcess) waitOutput(ctx context.Context) error { return ctx.Err() }
+
 func (p *fakeProcess) Start(ctx context.Context) error {
 	if p.startContextHook != nil {
 		if err := p.startContextHook(ctx); err != nil {

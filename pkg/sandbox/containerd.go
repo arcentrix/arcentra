@@ -515,6 +515,13 @@ func (s *Containerd) execute(ctx context.Context, id string, cmd []string, opts 
 		}
 		exitObserved = true
 		result.ExitCode = int32(code)
+		// An exit event does not imply FIFO EOF. Delete cancels SDK readers,
+		// so drain both streams first without extending the execution deadline.
+		drain, drainCancel := context.WithTimeout(runCtx, cleanupTimeout)
+		defer drainCancel()
+		if err := process.waitOutput(drain); err != nil {
+			return result, fmt.Errorf("drain exec output: %w", normalizeExecutionContextError(err))
+		}
 		return result, nil
 	}
 }
@@ -714,8 +721,19 @@ func (s *Containerd) removeStateLocked(cleanup context.Context, id string, state
 	}
 	state.container = container
 	if !resources.ContainerExists && !resources.SnapshotExists && !resources.TaskExists {
-		// Runtime metadata can be gone while a crashed client's owned FIFOs
-		// remain. Preserve retry state until exact-owned filesystem cleanup succeeds.
+		// Runtime absence does not prove that local FIFO readers or caller
+		// sinks finished. Retain their handles until bounded teardown succeeds.
+		if err := deleteStateProcesses(cleanup, state); err != nil {
+			return err
+		}
+		if state.task != nil {
+			if _, err := state.task.Delete(cleanup); err != nil && !errdefs.IsNotFound(err) {
+				return fmt.Errorf("delete absent task IO: %w", err)
+			}
+			state.task = nil
+		}
+		// Owned FIFOs can outlive runtime metadata. Preserve retry state until
+		// exact-owned filesystem cleanup also succeeds.
 		if state.container != nil {
 			if err := state.container.remove(cleanup); err != nil {
 				return fmt.Errorf("remove remaining container resources: %w", err)
@@ -732,17 +750,11 @@ func (s *Containerd) removeStateLocked(cleanup context.Context, id string, state
 			return err
 		}
 		state.stopped = true
-		var cleanupErr error
-		for execID, process := range state.processes {
-			if _, err := process.Delete(cleanup); err != nil && !errdefs.IsNotFound(err) {
-				cleanupErr = errors.Join(cleanupErr, err)
-			} else {
-				delete(state.processes, execID)
-			}
-		}
-		if cleanupErr != nil {
-			return fmt.Errorf("remove exec processes: %w", cleanupErr)
-		}
+	}
+	if err := deleteStateProcesses(cleanup, state); err != nil {
+		return err
+	}
+	if state.task != nil {
 		if _, err := state.task.Delete(cleanup); err != nil {
 			if state.quiescence != nil || !errdefs.IsNotFound(err) {
 				return fmt.Errorf("delete task: %w", err)
@@ -765,6 +777,23 @@ func (s *Containerd) removeStateLocked(cleanup context.Context, id string, state
 		return fmt.Errorf("resource removal was not confirmed")
 	}
 	s.forgetRemoved(id, state)
+	return nil
+}
+
+// A missing init task does not release locally retained exec IO. Every adapter
+// must finish its bounded pre-Delete output wait before NotFound is accepted.
+func deleteStateProcesses(ctx context.Context, state *containerState) error {
+	var cleanupErr error
+	for execID, process := range state.processes {
+		if _, err := process.Delete(ctx); err != nil && !errdefs.IsNotFound(err) {
+			cleanupErr = errors.Join(cleanupErr, err)
+		} else {
+			delete(state.processes, execID)
+		}
+	}
+	if cleanupErr != nil {
+		return fmt.Errorf("remove exec processes: %w", cleanupErr)
+	}
 	return nil
 }
 
@@ -903,28 +932,37 @@ func (s *containerState) reconcileTask(ctx context.Context) error {
 
 // 保留输出订阅者错误，但继续排空管道，防止日志接收失败阻塞容器
 type outputStream struct {
-	mu            sync.Mutex
+	writeMu       sync.Mutex
+	errorMu       sync.Mutex
 	capture, logs *boundedBuffer
 	sink          io.Writer
 	err           error
 }
 
 func (w *outputStream) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+	w.writeMu.Lock()
+	defer w.writeMu.Unlock()
 	_, _ = w.capture.Write(p)
 	if w.logs != nil {
 		_, _ = w.logs.Write(p)
 	}
-	if w.sink != nil && w.err == nil {
+	if w.sink != nil && w.Error() == nil {
 		n, err := w.sink.Write(p)
 		if err == nil && n != len(p) {
 			err = io.ErrShortWrite
 		}
 		if err != nil {
+			w.errorMu.Lock()
 			w.err = fmt.Errorf("output stream: %w", err)
+			w.errorMu.Unlock()
 		}
 	}
 	return len(p), nil
 }
-func (w *outputStream) Error() error { w.mu.Lock(); defer w.mu.Unlock(); return w.err }
+
+// Error 返回独立错误快照，不等待调用方输出流解除阻塞
+func (w *outputStream) Error() error {
+	w.errorMu.Lock()
+	defer w.errorMu.Unlock()
+	return w.err
+}

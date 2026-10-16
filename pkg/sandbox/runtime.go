@@ -19,12 +19,15 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"syscall"
 
+	"github.com/arcentrix/arcentra/pkg/safe"
 	"github.com/bytedance/sonic"
 	"github.com/containerd/containerd"
 	tasks "github.com/containerd/containerd/api/services/tasks/v1"
 	runcoptions "github.com/containerd/containerd/api/types/runc/options"
+	"github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/containers"
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/defaults"
@@ -53,6 +56,7 @@ type runtimeContainer interface {
 }
 
 type runtimeProcess interface {
+	waitOutput(context.Context) error
 	Start(context.Context) error
 	Wait(context.Context) (<-chan containerd.ExitStatus, error)
 	Kill(context.Context, syscall.Signal, ...containerd.KillOpts) error
@@ -308,10 +312,87 @@ func (b *containerdBackend) inspectOwned(ctx context.Context, ref ResourceRef) (
 
 type containerdTask struct {
 	containerd.Task
+	output  runtimeOutput
 	fifoDir string
 	ref     ResourceRef
 }
 
 func (t *containerdTask) exec(ctx context.Context, id string, process *specs.Process, stdin io.Reader, stdout, stderr io.Writer) (runtimeProcess, error) {
-	return t.Task.Exec(ctx, id, process, newRuntimeIO(ctx, t.fifoDir, t.ref, stdin, stdout, stderr))
+	p, err := t.Task.Exec(ctx, id, process, newRuntimeIO(ctx, t.fifoDir, t.ref, stdin, stdout, stderr))
+	if p == nil {
+		return nil, err
+	}
+	return &containerdProcess{Process: p}, err
+}
+
+// Wait observes process exit, not completion of the independent FIFO readers.
+// Cache one waiter per SDK IO so failed cleanup retries cannot accumulate waiters.
+// cio.Wait covers stdout/stderr, not the caller-owned stdin reader.
+type runtimeOutput struct {
+	once sync.Once
+	done chan struct{}
+}
+
+func (o *runtimeOutput) wait(ctx context.Context, stream cio.IO) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if stream == nil {
+		return nil
+	}
+	o.once.Do(func() {
+		o.done = make(chan struct{})
+		safe.Go(func() {
+			stream.Wait()
+			close(o.done)
+		})
+	})
+	select {
+	case <-o.done:
+		return ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (t *containerdTask) waitOutput(ctx context.Context) error {
+	return t.output.wait(ctx, t.Task.IO())
+}
+
+// Delete 在进入 SDK 前以调用方期限确认任务输出已停止
+func (t *containerdTask) Delete(ctx context.Context, opts ...containerd.ProcessDeleteOpts) (*containerd.ExitStatus, error) {
+	if err := t.output.cancelAndWait(ctx, t.Task.IO()); err != nil {
+		return nil, err
+	}
+	return t.Task.Delete(ctx, opts...)
+}
+
+type containerdProcess struct {
+	containerd.Process
+	output runtimeOutput
+}
+
+func (p *containerdProcess) waitOutput(ctx context.Context) error {
+	return p.output.wait(ctx, p.Process.IO())
+}
+
+// Delete 在进入 SDK 前以调用方期限确认执行输出已停止
+func (p *containerdProcess) Delete(ctx context.Context, opts ...containerd.ProcessDeleteOpts) (*containerd.ExitStatus, error) {
+	if err := p.output.cancelAndWait(ctx, p.Process.IO()); err != nil {
+		return nil, err
+	}
+	return p.Process.Delete(ctx, opts...)
+}
+
+// The SDK Delete implementations contain an unconditional, context-free IO.Wait.
+// Cancel only at cleanup, then establish completion before entering SDK Delete.
+// A writer that remains blocked retains the process handle and owned resources.
+func (o *runtimeOutput) cancelAndWait(ctx context.Context, stream cio.IO) error {
+	if stream != nil {
+		stream.Cancel()
+	}
+	if err := o.wait(ctx, stream); err != nil {
+		return fmt.Errorf("cancel and drain process output before delete: %w", err)
+	}
+	return nil
 }

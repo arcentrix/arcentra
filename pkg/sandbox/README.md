@@ -56,12 +56,13 @@ The paths above must already be provisioned by the operator; the FIFO directory 
 - Cancellation, timeout or uncertain exec RPC failure kills the entire container, including descendants. It cannot be reused for later steps
 - Stop waits for exit after TERM, then escalates to KILL. An exited init does not prove quiescence: Stop/Seal/Remove verify the complete runtime PID list and kill remaining descendants, including after a successful exec. Created init tasks with a nonzero PID are also killed before deletion
 - SealOwned irreversibly stops execution and verifies zero runtime PIDs without deleting the task, container, snapshot, or mounted workspace. Transfer artifacts only after SealOwned succeeds
-- Cleanup uses a bounded context detached from the canceled execution context, preserving the containerd namespace
+- After a normally observed exec exit, stdout and stderr copy loops must finish before process deletion without first canceling the readers. This drain honors the execution deadline/cancellation and is capped by the existing 20-second cleanup bound. A healthy FIFO reaches EOF; SDK completion alone cannot certify read-error-free or remotely durable output. Missing EOF or drain cancellation is an infrastructure failure, including after exit code zero; it never creates a failed-step retry boundary
+- Cleanup uses a bounded context detached from the canceled execution context, preserving the containerd namespace. The drain and cleanup each have their own 20-second maximum, so an observed exit can take up to 40 seconds when the execution deadline permits; live-session callers retain their separate existing removal budget. SDK IO is canceled and its completion checked before SDK Delete; a blocked output writer leaves the process/resource handles tracked and cleanup fails instead of claiming removal
 - Uncertain container creation returns a recovery handle internally. Create attempts cleanup and, if that cleanup fails, returns the recoverable container ID with the error
 - Uncertain init-task creation is reconciled by container ID during Stop/Remove. Failed cleanup remains tracked and can be retried with Remove, Cleanup or Close
 - Close stops new creation and waits for in-flight creates. Cleanup failure is returned; the runtime client stays available so Close can be retried
 - Per-container operations are serialized. Stop/Remove cancel active execution. Cleanup snapshots currently tracked containers; callers should stop new submissions first or use Close
-- Output writers are caller-owned and must not block indefinitely. Writer errors are returned while remaining output continues to drain
+- Output writers are caller-owned and must not block indefinitely. Writer errors are returned while remaining output continues to drain. The observed-exit drain and pre-Delete IO waits are bounded; this is not a universal bound on Execute or its callers. The current containerd SDK Start/Exec RPC-error paths can wait internally for IO before returning, and upstream output callbacks must still obey their nonblocking contract. The adapter never closes caller-owned streams
 
 ## Exact restart recovery
 
