@@ -3,6 +3,7 @@
 import base64
 import copy
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -10,9 +11,148 @@ import subprocess
 import tempfile
 import tomllib
 import unittest
+import urllib.error
+import urllib.parse
 from unittest import mock
 
 import run_actual_app as app
+
+
+class FixtureResponse(io.BytesIO):
+    def __init__(self, body, code=200):
+        super().__init__(json.dumps(body).encode())
+        self.code = code
+
+
+class SyntheticSessionHTTP:
+    """Offline transport model of the existing one-active-token-per-user contract.
+
+    This checks fixture request sequencing only. The actual-app harness runs the
+    same session/denial assertions against real Control and Redis in approved CI.
+    """
+    def __init__(self):
+        self.sessions = {app.USERNAME: "synthetic-admin-0"}
+        self.issued = {"synthetic-admin-0": app.USERNAME}
+        self.calls = []
+        self.sequence = 0
+        self.permissions = []
+        self.role_override = {}
+
+    @staticmethod
+    def reply(request, code, detail=None, http_status=200):
+        body = {"code": code, "detail": detail}
+        if http_status >= 400:
+            raise urllib.error.HTTPError(request.full_url, http_status, "synthetic response", {}, FixtureResponse(body))
+        return FixtureResponse(body, http_status)
+
+    def open(self, request, timeout):
+        path = urllib.parse.urlsplit(request.full_url).path.removeprefix("/api/v1")
+        method = request.get_method()
+        payload = None if request.data is None else json.loads(request.data)
+        self.calls.append((method, path, payload))
+        if path == "/users/login":
+            username = payload["username"]
+            assert username in (app.USERNAME, app.OBSERVER_USERNAME)
+            assert payload["password"] == app.encoded(app.PASSWORD)
+            self.sequence += 1
+            token = f"synthetic-session-{self.sequence}"
+            self.sessions[username] = token
+            self.issued[token] = username
+            return self.reply(request, 200, {"token": {"accessToken": token, "refreshToken": "synthetic-refresh"}})
+        token = request.get_header("Authorization", "").removeprefix("Bearer ")
+        username = self.issued.get(token)
+        if not username or self.sessions.get(username) != token:
+            return self.reply(request, 4405, http_status=401)
+        if path == "/users/fetch":
+            return self.reply(request, 200, {"userId": "admin-id" if username == app.USERNAME else "observer-id",
+                                             "username": username})
+        if username == app.OBSERVER_USERNAME:
+            if path.endswith("/trigger"):
+                return self.reply(request, 4030)
+            if path == "/users/":
+                return self.reply(request, 403, http_status=403)
+            return self.reply(request, 200, {"readBy": username})
+        if path == "/role" and method == "POST":
+            assert payload["permissions"] == [] and payload["roleId"] == app.OBSERVER_ROLE
+            return self.reply(request, 200, {})
+        if path == "/users/invite":
+            assert payload["role"] == app.OBSERVER_ROLE
+            return self.reply(request, 200, {"userId": "observer-id", **payload})
+        if path == "/users/observer-id/password":
+            assert payload == {"newPassword": app.encoded(app.PASSWORD)}
+            return self.reply(request, 200, {})
+        if path == f"/role/{app.OBSERVER_ROLE}/permissions":
+            self.permissions = payload["permissions"]
+            return self.reply(request, 200, {})
+        if path == f"/role/{app.OBSERVER_ROLE}":
+            return self.reply(request, 200, {"roleId": app.OBSERVER_ROLE, "scope": "platform", "isEnabled": 1,
+                                             "isBuiltin": 0, "permissions": self.permissions} | self.role_override)
+        raise AssertionError(f"unexpected synthetic route {method} {path}")
+
+
+class ObserverSessionTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.fixture = app.Fixture(mock.Mock(), Path(self.directory.name))
+        self.fixture.http = SyntheticSessionHTTP()
+        self.fixture.token = "synthetic-admin-0"
+
+    def configure(self):
+        with mock.patch.object(app.time, "sleep") as sleep:
+            self.fixture.configure_observer()
+            sleep.assert_called_once_with(1.1)
+
+    def test_observer_uses_only_read_permission_without_second_admin_bootstrap(self):
+        with mock.patch.object(self.fixture, "run") as run:
+            self.configure()
+            run.assert_not_called()
+        self.assertEqual(self.fixture.observer_id, "observer-id")
+        self.assertEqual(self.fixture.http.permissions, ["pipeline:read"])
+        calls = self.fixture.http.calls
+        invite = next(i for i, call in enumerate(calls) if call[1] == "/users/invite")
+        permissions = next(i for i, call in enumerate(calls) if call[1].endswith("/permissions"))
+        self.assertLess(invite, permissions, "policy reload must include the newly granted observer")
+        logins = [call[2]["username"] for call in calls if call[1] == "/users/login"]
+        self.assertEqual(logins, [app.OBSERVER_USERNAME, app.OBSERVER_USERNAME])
+        self.assertFalse(any("token" in key.lower() for key in self.fixture.env))
+        self.assertEqual(list(self.fixture.coordination.iterdir()), [])
+
+    def test_browser_admin_relogin_leaves_observer_valid_and_single_user_old_token_invalid(self):
+        self.configure()
+        observer_token = self.fixture.token
+        browser_request = urllib.request.Request(app.BACKEND_URL + "/api/v1/users/login", method="POST",
+                                                 data=json.dumps({"username": app.USERNAME,
+                                                                  "password": app.encoded(app.PASSWORD)}).encode())
+        self.fixture.http.open(browser_request, timeout=10).close()
+        self.fixture.require_observer_session()
+        self.assertEqual(self.fixture.token, observer_token)
+        self.fixture.expect_rejected("/users/fetch", 401, 4405, token="synthetic-admin-0")
+        self.fixture.expect_rejected("/pipelines/real-fixture-pipeline/trigger", 200, 4030, {}, "POST")
+        self.assertEqual(self.fixture.token, observer_token)
+
+    def test_observer_role_cannot_silently_expand_permissions_or_be_builtin(self):
+        for override in ({"permissions": ["pipeline:read", "pipeline:trigger"]}, {"isBuiltin": 1}, {"scope": "project"}):
+            self.fixture.http.role_override = override
+            with self.subTest(override=override), self.assertRaisesRegex(RuntimeError, "exactly"):
+                self.configure()
+            self.assertEqual(self.fixture.token, "synthetic-admin-0")
+
+    def test_independent_verification_refuses_missing_or_wrong_observer_identity(self):
+        with self.assertRaisesRegex(RuntimeError, "read-only"):
+            self.fixture.require_observer_session()
+        self.fixture.observer_id = "observer-id"
+        with self.assertRaisesRegex(RuntimeError, "observer identity"):
+            self.fixture.require_observer_session()
+
+    def test_denial_checks_reject_success_other_codes_and_session_failures_without_leaking_tokens(self):
+        for status, code in ((200, 200), (200, 4031), (401, 4405), (500, 5000)):
+            self.fixture.http = mock.Mock()
+            self.fixture.http.open.return_value = FixtureResponse({"code": code, "detail": "private-response-secret"}, status)
+            with self.subTest(status=status, code=code), self.assertRaises(RuntimeError) as raised:
+                self.fixture.expect_rejected("/pipelines/fixture/trigger", 200, 4030, {}, "POST", "private-token-secret")
+            self.assertNotIn("private-token-secret", str(raised.exception))
+            self.assertNotIn("private-response-secret", str(raised.exception))
 
 
 class ActualAppFixtureTests(unittest.TestCase):

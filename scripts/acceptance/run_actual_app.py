@@ -31,6 +31,8 @@ AGENT_URL = "http://127.0.0.1:18081"
 REPO_URL = "git://127.0.0.1:19418/acceptance.git"
 USERNAME = "ci-admin"
 PASSWORD = "Ci-Only-Password-123!"
+OBSERVER_USERNAME = "ci-build-observer"
+OBSERVER_ROLE = "ci-build-observer-read"
 BUILD_CONTRACT = "stdlib-build-v1"
 GO_VERSION = "go1.25.6"
 ARTIFACT_NAME = "stdlib-demo"
@@ -82,9 +84,10 @@ class Fixture:
         self.root = root
         self.children = []
         self.logs = []
-        self.redactions = [PASSWORD, DEPENDENCIES["ARCENTRA_TEST_S3_SECRET_KEY"],
+        self.redactions = [PASSWORD, encoded(PASSWORD), DEPENDENCIES["ARCENTRA_TEST_S3_SECRET_KEY"],
                            "ci-only-mysql-password"]
         self.token = ""
+        self.observer_id = ""
         self.steps = []
         self.agent_id = ""
         self.commit = ""
@@ -140,14 +143,15 @@ class Fixture:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=10)
 
-    def request(self, path, payload=None, method="GET", authenticated=True):
+    def request(self, path, payload=None, method="GET", authenticated=True, token=None):
         url = BACKEND_URL + "/api/v1" + path
         validate_http_url(url)
         headers = {"Content-Type": "application/json"}
         if authenticated:
-            if not self.token:
+            active_token = self.token if token is None else token
+            if not active_token:
                 raise RuntimeError("authenticated fixture request has no login token")
-            headers["Authorization"] = "Bearer " + self.token
+            headers["Authorization"] = "Bearer " + active_token
         data = None if payload is None else json.dumps(payload).encode()
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         with self.http.open(req, timeout=10) as response:
@@ -157,6 +161,27 @@ class Fixture:
             # into CI output, exceptions or saved receipts.
             raise RuntimeError(f"{method} {path} failed with application code {body.get('code')}")
         return body.get("detail")
+
+    def expect_rejected(self, path, http_status, code, payload=None, method="GET", token=None):
+        """Require the exact real denial, not an arbitrary error or a stale session."""
+        url = BACKEND_URL + "/api/v1" + path
+        validate_http_url(url)
+        active_token = self.token if token is None else token
+        if not active_token:
+            raise RuntimeError("denial check requires an authenticated fixture token")
+        request = urllib.request.Request(url, method=method,
+                                         data=None if payload is None else json.dumps(payload).encode(),
+                                         headers={"Authorization": "Bearer " + active_token,
+                                                  "Content-Type": "application/json"})
+        try:
+            response = self.http.open(request, timeout=10)
+        except urllib.error.HTTPError as exc:
+            response = exc
+        with response:
+            status, body = response.code, json.load(response)
+        if status != http_status or body.get("code") != code:
+            # Do not include returned bodies, request headers or token values.
+            raise RuntimeError(f"{method} {path} did not return the required authorization denial")
 
     def probe(self, url):
         validate_http_url(url)
@@ -185,11 +210,64 @@ class Fixture:
         self.wait_until("Control readiness", lambda: self.probe(BACKEND_URL + "/ready") == 200, process)
         return process
 
-    def login(self):
-        detail = self.request("/users/login", {"username": USERNAME, "password": encoded(PASSWORD)},
+    def login(self, username=USERNAME):
+        detail = self.request("/users/login", {"username": username, "password": encoded(PASSWORD)},
                               "POST", authenticated=False)
         self.token = detail["token"]["accessToken"]
         self.redactions.extend(detail["token"].values())
+
+    def configure_observer(self):
+        """Create a read-only synthetic session through existing authorized APIs.
+
+        Login replaces the one active token per user. The browser alone owns the
+        administrator session; independent snapshots/downloads use this separate
+        disposable identity. No second administrator or database seeding is used.
+        """
+        admin_token = self.token
+        admin = self.request("/users/fetch")
+        if admin.get("username") != USERNAME:
+            raise RuntimeError("observer setup requires the synthetic fixture administrator")
+        self.request("/role", {"roleId": OBSERVER_ROLE, "name": OBSERVER_ROLE,
+                               "description": "Disposable actual-build read-only observer",
+                               "scope": "platform", "isEnabled": 1, "permissions": []}, "POST")
+        email = OBSERVER_USERNAME + "@example.invalid"
+        invited = self.request("/users/invite", {"email": email, "role": OBSERVER_ROLE}, "POST")
+        observer_id = safe_identifier(invited.get("userId"))
+        if invited.get("email") != email or invited.get("role") != OBSERVER_ROLE or observer_id == admin.get("userId"):
+            raise RuntimeError("observer invitation did not create the intended distinct fixture identity")
+        # This endpoint initializes only the newly invited, empty-database test
+        # account's synthetic password. It never targets a real user credential.
+        self.request(f"/users/{observer_id}/password", {"newPassword": encoded(PASSWORD)}, "PUT")
+        # Invite grants do not synchronously reload Casbin. Applying this exact
+        # sole permission after the grant uses the existing API reload path.
+        self.request(f"/role/{OBSERVER_ROLE}/permissions", {"permissions": ["pipeline:read"]}, "PUT")
+        role = self.request(f"/role/{OBSERVER_ROLE}")
+        if (role.get("roleId") != OBSERVER_ROLE or role.get("permissions") != ["pipeline:read"]
+                or role.get("scope") != "platform" or role.get("isEnabled") != 1 or role.get("isBuiltin") != 0):
+            raise RuntimeError("observer must have exactly the non-administrator pipeline-read role")
+        self.observer_id = observer_id
+        self.login(OBSERVER_USERNAME)
+        self.require_observer_session()
+        old_observer_token = self.token
+        # JWT issue/expiry timestamps have second precision; a same-second login
+        # can reproduce the same token. This bounded pause makes revocation real.
+        time.sleep(1.1)
+        self.login(OBSERVER_USERNAME)
+        if self.token == old_observer_token:
+            raise RuntimeError("observer relogin did not rotate its synthetic session")
+        self.expect_rejected("/users/fetch", 401, 4405, token=old_observer_token)
+        self.require_observer_session()
+        self.expect_rejected("/users/?pageNum=1&pageSize=1", 403, 403)
+        if self.request("/users/fetch", token=admin_token) != admin:
+            raise RuntimeError("observer login interfered with the administrator session")
+        self.note("Separate synthetic pipeline-read observer verified; relogin revokes only its own prior session")
+
+    def require_observer_session(self):
+        if not self.observer_id:
+            raise RuntimeError("independent build verification requires its read-only fixture observer")
+        profile = self.request("/users/fetch")
+        if profile.get("userId") != self.observer_id or profile.get("username") != OBSERVER_USERNAME:
+            raise RuntimeError("independent build verification is not using the fixture observer identity")
 
     def create_tls(self):
         self.run("tls-ca", ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
@@ -238,6 +316,7 @@ class Fixture:
     def run_snapshot(self, receipt, successful):
         """Independently read scoped API evidence; never trust browser status claims."""
         validate_run_receipt(receipt, self.commit)
+        self.require_observer_session()
         base = f"/pipelines/{receipt['pipelineId']}/runs/{receipt['runId']}"
         run = self.request(base)
         jobs = self.request(base + "/jobs")
@@ -258,6 +337,9 @@ class Fixture:
     def fix_repository_after_failed_run(self):
         receipt = read_private_json(self.coordination / "failed-run.json")
         self.run_snapshot(receipt, successful=False)
+        # The current observer can read the real run but cannot trigger even this
+        # synthetic pipeline. Legacy permission middleware uses HTTP 200/4030.
+        self.expect_rejected(f"/pipelines/{receipt['pipelineId']}/trigger", 200, 4030, {}, "POST")
         self.failed_run = receipt
         self.note("Actual Agent compiler failure persisted with failed test step and zero run artifacts")
         source = self.root / "source"
@@ -393,6 +475,7 @@ class Fixture:
                 or hashlib.sha256(identity_path.read_bytes()).digest() != identity_digest):
             raise RuntimeError("approved Agent did not resume exactly the saved authenticated identity")
         self.note("TLS enrollment remained pending, was explicitly approved and resumed the same persisted identity")
+        self.configure_observer()
         self.create_repository()
         browser_env = self.env | {
             "ARCENTRA_REAL_STACK": "1", "ARCENTRA_ACCEPTANCE_BACKEND_URL": BACKEND_URL,

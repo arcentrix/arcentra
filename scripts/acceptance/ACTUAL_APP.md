@@ -74,6 +74,24 @@ The lifecycle under test is:
     the reviewed synthetic program, never arbitrary user artifacts. Browser code
     never executes a downloaded binary.
 
+The browser alone owns the `ci-admin` session. Before it starts, the fixture uses
+the existing administrator APIs to create a separate `ci-build-observer` identity
+and a custom role with **only `pipeline:read`**. The invitation API grants this at
+platform scope; this deliberately applies only to the fresh disposable synthetic
+database, not a production observer or a general service account. Its initial
+test password is set through the authorized user API. It is not bootstrapped as
+another administrator. Tokens stay in memory and are redacted from diagnostics;
+none are written to coordination files, browser environment or uploaded evidence.
+
+This separation preserves the product's one-active-token-per-user behavior:
+relogin must reject the same observer's old token while leaving the administrator
+session valid. Real API assertions require observer management access to return
+HTTP 403, pipeline triggering to return the existing HTTP 200/application 4030
+denial, and observer reads to remain authenticated after browser login/logout.
+The fixture never repairs a failed read by logging the administrator in again or
+weakening authorization. Offline transport tests check these assertion sequences;
+actual Control/Redis session behavior still requires the real CI journey.
+
 ## Versioned browser and binary contract
 
 `ARCENTRA_ACCEPTANCE_CONTRACT=stdlib-build-v1` requires the matching frontend
