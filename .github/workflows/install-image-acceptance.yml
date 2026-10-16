@@ -1,0 +1,92 @@
+name: Install image acceptance
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image-entrypoints:
+    name: No-push Linux amd64 install images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CGO_ENABLED: "1"
+      GOTOOLCHAIN: local
+      PYTHONDONTWRITEBYTECODE: "1"
+      ARCENTRA_INSTALL_IMAGE_SMOKE: "1"
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pinned project Go toolchain
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.mod
+            go.sum
+            Makefile
+
+      - name: Verify smoke safety contracts
+        run: python3 scripts/acceptance/test_run_install_image_smoke.py
+
+      - name: Build release-compatible application payload
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          make codegen
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          PAYLOAD="$(mktemp -d "$RUNNER_TEMP/arcentra-install-payload.XXXXXX")"
+          trap 'rm -rf "$PAYLOAD"' EXIT
+          VERSION=26.0.0.0
+          COMMIT="$GITHUB_SHA"
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LDFLAGS="-s -w -X github.com/arcentrix/arcentra/pkg/version.Version=$VERSION -X github.com/arcentrix/arcentra/pkg/version.GitCommit=$COMMIT -X github.com/arcentrix/arcentra/pkg/version.BuildTime=$BUILD_TIME"
+          for target in arcentra arcentra-agent cli; do
+            output="$target"
+            if [ "$target" = cli ]; then output=arcentra-cli; fi
+            go build -trimpath -ldflags "$LDFLAGS" -o "$PAYLOAD/$output" "./cmd/$target"
+          done
+          mkdir -p dist/linux/amd64
+          cp "$PAYLOAD"/* dist/linux/amd64/
+          cp -a conf.d dist/linux/amd64/conf.d
+
+      - name: Exercise actual packaged image entrypoints
+        timeout-minutes: 7
+        run: |
+          python3 scripts/acceptance/run_install_image_smoke.py \
+            --evidence-dir .acceptance/install-image-evidence \
+            --expected-version 26.0.0.0
+
+      - name: Remove only owned smoke resources
+        if: always()
+        timeout-minutes: 3
+        run: |
+          python3 scripts/acceptance/run_install_image_smoke.py \
+            --cleanup-only --evidence-dir .acceptance/install-image-evidence
+
+      - name: Preserve bounded install image evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: install-images-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .acceptance/install-image-evidence/evidence.json
+            .acceptance/install-image-evidence/summary.json
+            .acceptance/install-image-evidence/cleanup-summary.json
+            .acceptance/install-image-evidence/artifacts.json
+          if-no-files-found: ignore
+          retention-days: 7
