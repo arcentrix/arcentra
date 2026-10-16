@@ -106,7 +106,8 @@ class Builder:
         self.records = []
         self.context_owned = False
         self.env = {'PATH': '/usr/bin:/bin', 'HOME': str(self.context / 'client-home'), 'LANG': 'C.UTF-8',
-                    'DOCKER_BUILDKIT': '1'}
+                    'DOCKER_BUILDKIT': '1', 'GOTELEMETRY': 'off',
+                    'GOTOOLCHAIN': 'local', 'GOENV': 'off'}
 
     def labels(self, role):
         return {LABEL: 'v1', LABEL + '.owner': OWNER, LABEL + '.run': self.run,
@@ -115,6 +116,12 @@ class Builder:
     def command(self, args, cleanup=False):
         if self.blocked and not cleanup:
             raise RuntimeError('new build admission stopped')
+        home = self.context / 'client-home'
+        if (not self.context_owned or not self.context.is_dir() or self.context.is_symlink()
+                or self.context.resolve() != self.context.absolute()
+                or not home.is_dir() or home.is_symlink()):
+            self.blocked = True
+            raise RuntimeError('owned client HOME must exist before any subprocess')
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
             self.blocked = True
@@ -146,9 +153,18 @@ class Builder:
             raise ValueError('requires existing exact run-owned Compose default bridge')
         return value['Id']
 
-    def prepare(self, payload):
-        if self.ownership.exists() or self.manifest.exists() or self.context.exists() or self.context.is_symlink():
+    def initialize(self):
+        # Even read-only Docker/Git/Go clients may create HOME state. Establish
+        # private ownership before admitting any subprocess, never adopt a path.
+        if any(p.exists() or p.is_symlink() for p in (self.ownership, self.manifest, self.context)):
             raise ValueError('fresh ownership, manifest and context paths required')
+        self.save()  # Persist uncertain creation intent before mkdir.
+        self.context.mkdir(mode=0o700)
+        (self.context / 'client-home').mkdir(mode=0o700)
+        self.context_owned = True
+        self.save()  # Only durable completed initialization permits clients.
+
+    def prepare(self, payload):
         if self.command(['git', 'rev-parse', 'HEAD']).strip() != self.sha:
             raise ValueError('checkout does not match source SHA')
         payload = Path(payload)
@@ -162,11 +178,6 @@ class Builder:
             if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_PAYLOAD:
                 raise ValueError('requires bounded regular application payload')
             validate_build_metadata(self.command([go, 'version', '-m', str(path)]), self.sha)
-        self.save()  # Persist intent before creating context or calling build.
-        self.context.mkdir(mode=0o700)
-        self.context_owned = True
-        self.save()
-        (self.context / 'client-home').mkdir(mode=0o700)
         # Docker/buildx may write client metadata under HOME. Never send it.
         (self.context / '.dockerignore').write_text('**\n!Dockerfile.ci\n!image-agent.Dockerfile\n!dist/\n!dist/**\n')
         dist = self.context / 'dist/linux/amd64'
@@ -229,6 +240,7 @@ class Builder:
 
     def build(self, payload):
         try:
+            self.initialize()
             network = self.network()
             self.prepare(payload)
             self.build_one('control')
@@ -299,7 +311,9 @@ class Builder:
                 failures.append(record['role'] + ' image cleanup unverified')
         if not self.context_owned and (self.context.exists() or self.context.is_symlink()):
             failures.append('context creation completion uncertain')
-        if self.context_owned:
+        # Retain HOME while any image/build state is unresolved. A retry must
+        # never cause Docker to recreate a context that cleanup just removed.
+        if self.context_owned and not failures:
             try:
                 if self.context.is_symlink() or self.context.resolve() != self.context.absolute():
                     raise ValueError('context path changed')

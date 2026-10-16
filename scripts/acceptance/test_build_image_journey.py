@@ -29,10 +29,18 @@ class Fake:
         self.bad_labels = False
         self.foreign_network = False
         self.bad_metadata = False
+        self.touch_home = False
 
     def __call__(self, command, **kwargs):
         self.calls.append((command, kwargs))
         b = self.builder
+        if self.touch_home:
+            # Real Go/Docker clients can create HOME parents even for reads.
+            home = Path(kwargs['env']['HOME'])
+            home.mkdir(parents=True, exist_ok=True)
+            (home / 'client-state').write_text('fixture')
+            assert b.ownership.exists(), 'client ran before ownership intent'
+            assert json.loads(b.ownership.read_text())['contextOwned'] is True
         if command[:3] == ['git', 'rev-parse', 'HEAD']:
             return SHA
         if command[:2] == ['git', 'ls-tree']:
@@ -114,13 +122,15 @@ class BuilderTests(unittest.TestCase):
     def test_no_ambient_credentials_or_docker_endpoint(self):
         self.builder.build(self.payload)
         for command, kwargs in self.fake.calls:
-            self.assertEqual(set(kwargs['env']), {'PATH', 'HOME', 'LANG', 'DOCKER_BUILDKIT'})
+            self.assertEqual(set(kwargs['env']), {'PATH', 'HOME', 'LANG', 'DOCKER_BUILDKIT', 'GOTELEMETRY', 'GOTOOLCHAIN', 'GOENV'})
             self.assertLessEqual(kwargs['timeout'], 600)
 
-    def test_bad_metadata_stops_before_context_or_mutation(self):
+    def test_bad_metadata_stops_before_image_mutation(self):
         self.fake.bad_metadata = True
         with self.assertRaises(ValueError):
             self.builder.build(self.payload)
+        self.assertTrue(self.builder.context.is_dir())
+        self.builder.cleanup()
         self.assertFalse(self.builder.context.exists())
         self.assertFalse(any(c[:2] == ['docker', 'build'] for c, _ in self.fake.calls))
 
@@ -134,7 +144,10 @@ class BuilderTests(unittest.TestCase):
         self.fake.foreign_network = True
         with self.assertRaises(ValueError):
             self.builder.build(self.payload)
-        self.assertFalse(self.builder.ownership.exists())
+        self.assertTrue(self.builder.ownership.exists())
+        self.assertTrue(self.builder.context_owned)
+        self.builder.cleanup()
+        self.assertFalse(self.builder.context.exists())
 
     def test_bad_layer_prefix_no_manifest(self):
         self.fake.bad_prefix = True
@@ -160,7 +173,7 @@ class BuilderTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'daemon build completion'):
             self.builder.cleanup()
         self.assertFalse(self.builder.manifest.exists())
-        self.assertFalse(self.builder.context.exists())
+        self.assertTrue(self.builder.context.is_dir())
         # Retrying cleanup must not erase its uncertainty.
         with self.assertRaisesRegex(RuntimeError, 'daemon build completion'):
             self.builder.cleanup()
@@ -203,7 +216,7 @@ class BuilderTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.builder.context)
         self.builder.context.symlink_to(self.payload, target_is_directory=True)
-        with self.assertRaisesRegex(RuntimeError, 'context cleanup'):
+        with self.assertRaisesRegex(RuntimeError, 'cleanup unverified'):
             self.builder.cleanup()
         self.assertTrue((self.payload / 'arcentra').exists())
 
@@ -218,6 +231,146 @@ class BuilderTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.builder.build(self.payload)
         self.assertFalse(self.fake.calls)
+
+    def test_home_touching_client_runs_only_after_durable_initialization(self):
+        self.fake.touch_home = True
+        self.builder.build(self.payload)
+        self.assertEqual(self.fake.calls[0][0][:3], ['docker', 'network', 'inspect'])
+        self.assertTrue((self.builder.context / 'client-home/client-state').is_file())
+        self.assertEqual(self.builder.env['GOTELEMETRY'], 'off')
+        self.assertEqual(self.builder.env['GOTOOLCHAIN'], 'local')
+        self.assertEqual(self.builder.env['GOENV'], 'off')
+
+    def test_existing_context_never_adopted_or_subprocess_admitted(self):
+        self.builder.context.mkdir()
+        marker = self.builder.context / 'foreign'
+        marker.write_text('retain')
+        with self.assertRaisesRegex(ValueError, 'fresh ownership'):
+            self.builder.build(self.payload)
+        self.assertFalse(self.fake.calls)
+        self.assertFalse(self.builder.ownership.exists())
+        self.assertEqual(marker.read_text(), 'retain')
+
+    def test_network_failure_has_owned_home_and_clean_replay(self):
+        self.fake.touch_home = True
+        self.fake.foreign_network = True
+        with self.assertRaises(ValueError):
+            self.builder.build(self.payload)
+        fresh = build.Builder(ENV, self.builder.ownership, self.builder.manifest, self.fake)
+        fresh.load()
+        fresh.cleanup()
+        self.assertFalse(fresh.context.exists())
+        count = len(self.fake.calls)
+        replay = build.Builder(ENV, self.builder.ownership, self.builder.manifest, self.fake)
+        replay.load()
+        replay.cleanup()
+        self.assertEqual(len(self.fake.calls), count)
+        self.assertFalse(replay.context.exists())
+
+    def test_initial_context_mkdir_failure_stops_all_clients(self):
+        with patch.object(Path, 'mkdir', side_effect=OSError('mkdir failed')):
+            with self.assertRaises(OSError):
+                self.builder.build(self.payload)
+        self.assertFalse(self.fake.calls)
+        self.assertFalse(json.loads(self.builder.ownership.read_text())['contextOwned'])
+        fresh = build.Builder(ENV, self.builder.ownership, self.builder.manifest, self.fake)
+        fresh.load()
+        fresh.cleanup()
+        self.assertFalse(self.fake.calls)
+
+    def test_initial_intent_save_failure_creates_no_context_or_clients(self):
+        with patch.object(self.builder, 'save', side_effect=OSError('intent save failed')):
+            with self.assertRaises(OSError):
+                self.builder.build(self.payload)
+        self.assertFalse(self.fake.calls)
+        self.assertFalse(self.builder.context.exists())
+
+    def test_failed_image_cleanup_retains_home_for_successful_retry(self):
+        self.fake.touch_home = True
+        self.builder.build(self.payload)
+        target = self.fake.images['arcentra-image-123-2-control:local']
+        target['Config']['Labels'][build.LABEL + '.run'] = 'foreign'
+        inode = self.builder.context.stat().st_ino
+        with self.assertRaisesRegex(RuntimeError, 'cleanup unverified'):
+            self.builder.cleanup()
+        self.assertEqual(self.builder.context.stat().st_ino, inode)
+        self.assertTrue(json.loads(self.builder.ownership.read_text())['contextOwned'])
+        target['Config']['Labels'][build.LABEL + '.run'] = ENV['GITHUB_RUN_ID']
+        fresh = build.Builder(ENV, self.builder.ownership, self.builder.manifest, self.fake)
+        fresh.load()
+        fresh.cleanup()
+        self.assertFalse(fresh.context.exists())
+
+    def test_home_mkdir_failure_keeps_uncertain_context(self):
+        original = Path.mkdir
+        def mkdir(path, *args, **kwargs):
+            if path.name == 'client-home':
+                raise OSError('home mkdir failed')
+            return original(path, *args, **kwargs)
+        with patch.object(Path, 'mkdir', mkdir):
+            with self.assertRaises(OSError):
+                self.builder.build(self.payload)
+        self.assertFalse(self.fake.calls)
+        fresh = build.Builder(ENV, self.builder.ownership, self.builder.manifest, self.fake)
+        fresh.load()
+        with self.assertRaisesRegex(RuntimeError, 'creation completion uncertain'):
+            fresh.cleanup()
+        self.assertTrue(fresh.context.is_dir())
+        self.assertFalse(fresh.context_owned)
+
+    def test_initialization_save_failure_keeps_uncertainty_durable(self):
+        original = self.builder.save
+        calls = []
+        def save():
+            calls.append(1)
+            if len(calls) == 2:
+                raise OSError('save failed')
+            original()
+        with patch.object(self.builder, 'save', side_effect=save):
+            with self.assertRaises(OSError):
+                self.builder.build(self.payload)
+        self.assertFalse(self.fake.calls)
+        fresh = build.Builder(ENV, self.builder.ownership, self.builder.manifest, self.fake)
+        fresh.load()
+        with self.assertRaisesRegex(RuntimeError, 'creation completion uncertain'):
+            fresh.cleanup()
+        self.assertTrue((fresh.context / 'client-home').is_dir())
+
+    def test_pending_cleanup_replay_retains_home_without_recreating(self):
+        self.fake.touch_home = True
+        self.fake.fail_build = True
+        with self.assertRaises(RuntimeError):
+            self.builder.build(self.payload)
+        inode = self.builder.context.stat().st_ino
+        for _ in range(2):
+            fresh = build.Builder(ENV, self.builder.ownership, self.builder.manifest, self.fake)
+            fresh.load()
+            with self.assertRaisesRegex(RuntimeError, 'daemon build completion'):
+                fresh.cleanup()
+            self.assertEqual(fresh.context.stat().st_ino, inode)
+            self.assertTrue(json.loads(fresh.ownership.read_text())['contextOwned'])
+
+    def test_successful_cleanup_replay_has_no_clients_or_home_recreation(self):
+        self.fake.touch_home = True
+        self.builder.build(self.payload)
+        self.builder.cleanup()
+        count = len(self.fake.calls)
+        fresh = build.Builder(ENV, self.builder.ownership, self.builder.manifest, self.fake)
+        fresh.load()
+        fresh.cleanup()
+        self.assertEqual(len(self.fake.calls), count)
+        self.assertFalse(fresh.context.exists())
+
+    def test_missing_home_blocks_clients_during_cleanup(self):
+        self.builder.build(self.payload)
+        import shutil
+        shutil.rmtree(self.builder.context)
+        count = len(self.fake.calls)
+        with self.assertRaisesRegex(RuntimeError, 'cleanup unverified'):
+            self.builder.cleanup()
+        self.assertEqual(len(self.fake.calls), count)
+        self.assertFalse(self.builder.context.exists())
+
 
     def test_dockerfile_preserves_application_defaults(self):
         source = Path(build.__file__).with_name('image-agent.Dockerfile').read_text()
