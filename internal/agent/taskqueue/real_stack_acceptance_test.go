@@ -161,7 +161,7 @@ func TestRealStackAcceptance(t *testing.T) {
 	f.mu.Lock()
 	f.loseStepTerminalACK = true
 	f.mu.Unlock()
-	run := f.submit(
+	run, webhook := realStackSubmitSignedWebhook(t, f,
 		&spec.Job{Name: "build", Steps: []*spec.Step{
 			controllerWorkerShell("produce", `printf x >> executions; mkdir -p dist; printf '%s' "$ROUNDTRIP_VALUE" > dist/result.txt; printf 'acceptance-build-stdout\n'; printf 'acceptance-build-stderr\n' >&2`),
 			{Name: "publish", Uses: "builtin:artifacts", Action: "upload", RunOnAgent: true, Args: spec.MapAsStruct(map[string]any{"paths": []any{"dist"}, "expireIn": "7d"})},
@@ -273,6 +273,26 @@ func TestRealStackAcceptance(t *testing.T) {
 	assertControllerQueueCommitted(t, f, 4)
 	realStackAssertOnce(t, f, run.RunID, build.JobRunID)
 	f.wait("all real-stack terminal receipts acknowledged", func() bool {
+		f.worker.reports.mu.Lock()
+		defer f.worker.reports.mu.Unlock()
+		return len(f.worker.reports.entries) == 0
+	})
+	t.Run("signed_webhook_terminal_redelivery", func(t *testing.T) {
+		realStackAssertWebhookTerminalReplay(t, webhook, run.RunID)
+	})
+	t.Run("signed_webhook_schema_rejection", func(t *testing.T) {
+		realStackAssertWebhookRejected(t, webhook)
+	})
+	t.Run("automatic_mysql_accept_before_reject", func(t *testing.T) {
+		realStackAssertAutomaticContention(t, f, settings, run.DefinitionCommitSha, true, false)
+	})
+	t.Run("automatic_mysql_reject_before_accept", func(t *testing.T) {
+		realStackAssertAutomaticContention(t, f, settings, run.DefinitionCommitSha, false, true)
+	})
+	t.Run("automatic_mysql_accept_before_accept", func(t *testing.T) {
+		realStackAssertAutomaticContention(t, f, settings, run.DefinitionCommitSha, true, true)
+	})
+	f.wait("automatic admission terminal receipts acknowledged", func() bool {
 		f.worker.reports.mu.Lock()
 		defer f.worker.reports.mu.Unlock()
 		return len(f.worker.reports.entries) == 0

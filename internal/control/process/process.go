@@ -16,17 +16,20 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/config"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/admission"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/validation"
 	"github.com/arcentrix/arcentra/internal/shared/storage"
@@ -120,40 +123,61 @@ func (e *Process) SubmitVerified(ctx context.Context, run *model.PipelineRun, pa
 }
 
 func (e *Process) submit(triggerCtx context.Context, run *model.PipelineRun, parsedSpec *spec.Pipeline) error {
+	// 重复提交必须先于验证检查：已接收但等待并发名额的运行仍可能是 PENDING
+	// 同一锁覆盖验证、拒绝持久化和协调器注册，避免拒绝覆盖已经接收的运行
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if run != nil {
+		if _, exists := e.runs.Load(run.RunID); exists {
+			return fmt.Errorf("run %s is already submitted", run.RunID)
+		}
+	}
 	if run == nil || parsedSpec == nil {
-		return fmt.Errorf("run and spec must not be nil")
+		return e.rejectSubmission(run, fmt.Errorf("run and spec must not be nil"))
 	}
 
 	if err := validation.NewSchemaValidatorWithRuntimePolicy(e.offlineRuntimePolicy).Validate(parsedSpec); err != nil {
-		return err
+		return e.rejectSubmission(run, err)
 	}
 	isDeployment, err := e.validateDeploymentRun(run, parsedSpec)
 	if err != nil {
-		return err
+		return e.rejectSubmission(run, err)
 	}
 	isRetryApproval, err := e.validateRetryApprovalRun(run, parsedSpec)
 	if err != nil {
-		return err
+		return e.rejectSubmission(run, err)
 	}
 	if isRetryApproval && (service.VerifiedPipelineActor(triggerCtx) == "" || service.VerifiedPipelineActor(triggerCtx) != run.TriggeredBy) {
-		return fmt.Errorf("retry approval requires verified manual submission context")
+		return e.rejectSubmission(run, fmt.Errorf("retry approval requires verified manual submission context"))
 	}
 	runCopy := *run
 	run = &runCopy
 	parsedSpec = proto.Clone(parsedSpec).(*spec.Pipeline)
 	if _, _, err := pipeline.BuildDAG(parsedSpec.Jobs); err != nil {
-		return fmt.Errorf("invalid pipeline DAG: %w", err)
+		return e.rejectSubmission(run, fmt.Errorf("invalid pipeline DAG: %w", err))
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 	if e.logInitErr != nil {
-		return fmt.Errorf("initialize durable build logs: %w", e.logInitErr)
+		return e.rejectSubmission(run, fmt.Errorf("initialize durable build logs: %w", e.logInitErr))
 	}
 	if e.stopped {
-		return fmt.Errorf("process is shutting down")
+		return e.rejectSubmission(run, fmt.Errorf("process is shutting down"))
 	}
-	if _, exists := e.runs.Load(run.RunID); exists {
-		return fmt.Errorf("run %s is already submitted", run.RunID)
+	automatic := run.TriggerType == int(pipelinev1.TriggerType_TRIGGER_TYPE_CRON) || run.TriggerType == int(pipelinev1.TriggerType_TRIGGER_TYPE_EVENT)
+	if !automatic {
+		// 调用方不得将持久化自动运行改称人工运行，以绕过自动入口的认领与终态保护
+		// 此读取不更改人工运行状态，也不替代后续审批上下文验证
+		if e.repos == nil || e.repos.Pipeline == nil {
+			return fmt.Errorf("durable pipeline identity is unavailable")
+		}
+		checkCtx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
+		defer cancel()
+		stored, err := e.repos.Pipeline.GetRun(checkCtx, run.RunID)
+		if err != nil {
+			return fmt.Errorf("read pipeline admission identity: %w", err)
+		}
+		if stored == nil || stored.RunID != run.RunID || stored.PipelineID != run.PipelineID || stored.TriggerType != run.TriggerType {
+			return fmt.Errorf("pipeline admission identity does not match persisted run")
+		}
 	}
 	if isDeployment || isRetryApproval {
 		starter, ok := e.repos.Pipeline.(interface {
@@ -180,6 +204,26 @@ func (e *Process) submit(triggerCtx context.Context, run *model.PipelineRun, par
 		}
 		if err := starter.StartRunIfPending(checkCtx, run.RunID); err != nil {
 			return err
+		}
+	}
+	if automatic {
+		if e.repos == nil || e.repos.Pipeline == nil {
+			return fmt.Errorf("durable automatic scheduling is unavailable")
+		}
+		starter, ok := e.repos.Pipeline.(interface {
+			StartAutomaticRunIfPending(context.Context, *model.PipelineRun) (bool, error)
+		})
+		if !ok {
+			return fmt.Errorf("durable automatic scheduling is unavailable")
+		}
+		checkCtx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
+		defer cancel()
+		claimed, err := starter.StartAutomaticRunIfPending(checkCtx, run)
+		if err != nil {
+			return fmt.Errorf("claim automatic pipeline run: %w", err)
+		}
+		if !claimed {
+			return fmt.Errorf("automatic run is no longer eligible for scheduling")
 		}
 	}
 	runCtx, runCancel := context.WithCancel(e.ctx)
@@ -212,6 +256,31 @@ func (e *Process) submit(triggerCtx context.Context, run *model.PipelineRun, par
 	})
 
 	return nil
+}
+
+// rejectSubmission 仅在持有入场锁且尚未认领调度时调用，保留人工提交的持久化行为
+func (e *Process) rejectSubmission(run *model.PipelineRun, cause error) error {
+	rejection := &admission.RejectionError{Cause: cause}
+	if !repo.IsAutomaticPipelineRun(run) {
+		return rejection
+	}
+	var persistenceErr error
+	if e.repos == nil || e.repos.Pipeline == nil {
+		persistenceErr = fmt.Errorf("automatic rejection persistence unavailable")
+	} else if rejector, ok := e.repos.Pipeline.(interface {
+		RejectPendingAutomaticRun(context.Context, *model.PipelineRun) (bool, error)
+	}); ok {
+		// 关闭和取消不应丢弃尚未接收运行的最终状态写入
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, persistenceErr = rejector.RejectPendingAutomaticRun(ctx, run)
+	} else {
+		persistenceErr = fmt.Errorf("automatic rejection persistence unavailable")
+	}
+	if persistenceErr != nil {
+		return errors.Join(rejection, fmt.Errorf("persist automatic submission rejection: %w", persistenceErr))
+	}
+	return rejection
 }
 
 // CancelRun cancels a running pipeline run and propagates cancellation

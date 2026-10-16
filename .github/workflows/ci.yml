@@ -163,7 +163,14 @@ jobs:
             schema="arcentra_acceptance_realstack_$attempt"
             docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create "$schema"
             ARCENTRA_TEST_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
-              go test -race -count=1 -timeout=8m -run '^TestRealStackAcceptance$' ./internal/agent/taskqueue | tee ".acceptance/evidence/real-stack-$attempt.log"
+              go test -race -count=1 -timeout=8m -v -run '^TestRealStackAcceptance$' ./internal/agent/taskqueue | tee ".acceptance/evidence/real-stack-$attempt.log"
+            python3 scripts/acceptance/verify_containerd_test_log.py ".acceptance/evidence/real-stack-$attempt.log" 1 \
+              TestRealStackAcceptance \
+              TestRealStackAcceptance/signed_webhook_terminal_redelivery \
+              TestRealStackAcceptance/signed_webhook_schema_rejection \
+              TestRealStackAcceptance/automatic_mysql_accept_before_reject \
+              TestRealStackAcceptance/automatic_mysql_reject_before_accept \
+              TestRealStackAcceptance/automatic_mysql_accept_before_accept
           done
           go test -race -count=1 -timeout=2m -run '^TestRegisterLoginWithRealRedis$' ./internal/control/service
 

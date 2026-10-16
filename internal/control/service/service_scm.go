@@ -25,6 +25,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/shared/deployment"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/admission"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	tmpl "github.com/arcentrix/arcentra/internal/shared/pipeline/template"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/trigger"
@@ -122,7 +123,7 @@ func (s *ScmService) matchAndTriggerPipelines(ctx context.Context, projectID str
 
 	for _, ev := range events {
 		for _, p := range pipelines {
-			if p.IsEnabled != 1 {
+			if p == nil || p.IsEnabled != 1 || p.IsDeleted != 0 {
 				continue
 			}
 			s.tryTriggerPipeline(ctx, p, ev)
@@ -133,6 +134,9 @@ func (s *ScmService) matchAndTriggerPipelines(ctx context.Context, projectID str
 // tryTriggerPipeline loads a pipeline's spec and checks if any event trigger
 // matches the given SCM event. On match it creates a run and submits.
 func (s *ScmService) tryTriggerPipeline(ctx context.Context, p *model.Pipeline, ev scm.Event) {
+	if p == nil || p.IsEnabled != 1 || p.IsDeleted != 0 {
+		return
+	}
 	if s.engine == nil {
 		log.Infow("webhook event skipped (process not available)",
 			"pipelineId", p.PipelineID, "eventType", ev.EventType, "ref", ev.Ref)
@@ -140,20 +144,20 @@ func (s *ScmService) tryTriggerPipeline(ctx context.Context, p *model.Pipeline, 
 	}
 
 	project, err := s.projectRepo.Get(ctx, p.ProjectID)
-	if err != nil || project == nil {
+	if err != nil || project == nil || project.IsEnabled != 1 || project.Status != model.ProjectStatusActive {
 		return
 	}
 
 	content, headSha, err := LoadPipelineDefinition(ctx, p, project)
 	if err != nil {
-		log.Debugw("webhook trigger: load definition failed", "pipelineId", p.PipelineID, "error", err)
+		log.Debugw("webhook trigger: load definition failed", "pipelineId", p.PipelineID)
 		return
 	}
 
 	if s.templateResolver != nil {
 		expanded, inclErr := tmpl.ResolveIncludes(ctx, content, s.templateResolver, model.TemplateScopeProject, p.ProjectID)
 		if inclErr != nil {
-			log.Debugw("webhook trigger: resolve includes failed", "pipelineId", p.PipelineID, "error", inclErr)
+			log.Debugw("webhook trigger: resolve includes failed", "pipelineId", p.PipelineID)
 			return
 		}
 		content = expanded
@@ -161,7 +165,7 @@ func (s *ScmService) tryTriggerPipeline(ctx context.Context, p *model.Pipeline, 
 
 	parsedSpec, err := spec.ParseContentToProto(content, pipelinev1.SpecFormat_SPEC_FORMAT_UNSPECIFIED)
 	if err != nil {
-		log.Debugw("webhook trigger: parse spec failed", "pipelineId", p.PipelineID, "error", err)
+		log.Debugw("webhook trigger: parse spec failed", "pipelineId", p.PipelineID)
 		return
 	}
 
@@ -182,7 +186,11 @@ func (s *ScmService) tryTriggerPipeline(ctx context.Context, p *model.Pipeline, 
 	requestID := fmt.Sprintf("event:%s:%s:%s:%d",
 		p.PipelineID, ev.EventType, ev.CommitID, ev.OccurredAt.Unix())
 
-	existing, _ := s.pipelineRepo.GetRunByRequestID(ctx, p.PipelineID, requestID)
+	existing, err := s.pipelineRepo.GetRunByRequestID(ctx, p.PipelineID, requestID)
+	if err != nil {
+		log.Warnw("webhook trigger: request lookup failed", "pipelineId", p.PipelineID)
+		return
+	}
 	if existing != nil {
 		return
 	}
@@ -201,13 +209,17 @@ func (s *ScmService) tryTriggerPipeline(ctx context.Context, p *model.Pipeline, 
 		TriggeredBy:         "webhook",
 	}
 	if err := s.pipelineRepo.CreateRun(ctx, run); err != nil {
-		log.Warnw("webhook trigger: create run failed", "pipelineId", p.PipelineID, "error", err)
+		log.Warnw("webhook trigger: create run failed", "pipelineId", p.PipelineID)
 		return
 	}
 
 	if err := s.engine.Submit(run, parsedSpec); err != nil {
+		outcome := "unknown"
+		if admission.IsRejected(err) {
+			outcome = "rejected-before-claim"
+		}
 		log.Warnw("webhook trigger: process submit failed",
-			"pipelineId", p.PipelineID, "runId", run.RunID, "error", err)
+			"pipelineId", p.PipelineID, "runId", run.RunID, "outcome", outcome)
 		return
 	}
 
