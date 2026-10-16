@@ -18,16 +18,20 @@ import (
 )
 
 func (rt *Router) deploymentRouter(r fiber.Router, authMW, subjectMW fiber.Handler) {
-	group := r.Group("/projects/:projectID", deploymentHTTPStatus, authMW, subjectMW, rt.deploymentAccess())
-	group.Get("/environments", rt.listDeploymentEnvironments)
-	group.Post("/environments", rt.createDeploymentEnvironment)
-	group.Get("/releases", rt.listDeploymentReleases)
-	group.Post("/releases", rt.createDeploymentRelease)
-	group.Get("/releases/:releaseID", rt.getDeploymentRelease)
-	group.Post("/releases/:releaseID/advance", rt.advanceDeploymentRelease)
-	group.Get("/releases/:releaseID/inspect", rt.inspectDeploymentRelease)
-	group.Post("/releases/:releaseID/recover", rt.recoverDeploymentRelease)
-	group.Post("/releases/:releaseID/cancel", rt.cancelDeploymentRelease)
+	// Fiber Group middleware is prefix-scoped and also runs for later sibling
+	// routes. Keep deployment authentication/response handling on deployment
+	// resources, never the shared project prefix (Copilot and artifacts own it too).
+	environments := r.Group("/projects/:projectID/environments", deploymentHTTPStatus, authMW, subjectMW, rt.deploymentAccess())
+	environments.Get("/", rt.listDeploymentEnvironments)
+	environments.Post("/", rt.createDeploymentEnvironment)
+	releases := r.Group("/projects/:projectID/releases", deploymentHTTPStatus, authMW, subjectMW, rt.deploymentAccess())
+	releases.Get("/", rt.listDeploymentReleases)
+	releases.Post("/", rt.createDeploymentRelease)
+	releases.Get("/:releaseID", rt.getDeploymentRelease)
+	releases.Post("/:releaseID/advance", rt.advanceDeploymentRelease)
+	releases.Get("/:releaseID/inspect", rt.inspectDeploymentRelease)
+	releases.Post("/:releaseID/recover", rt.recoverDeploymentRelease)
+	releases.Post("/:releaseID/cancel", rt.cancelDeploymentRelease)
 }
 func deploymentHTTPStatus(c *fiber.Ctx) error {
 	c.Set(fiber.HeaderCacheControl, "private, no-store")
