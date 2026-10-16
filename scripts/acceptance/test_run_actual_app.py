@@ -1,13 +1,19 @@
-"""Offline fixture checks only: no services, sockets or browser are started."""
+"""Offline by default; explicit CI opt-in enables bounded loopback reset tests."""
 
 import base64
 import copy
 import hashlib
+import http.client
 import io
 import json
 import os
 from pathlib import Path
 import subprocess
+import socket
+import socketserver
+import struct
+import threading
+import time
 import tempfile
 import tomllib
 import unittest
@@ -762,6 +768,106 @@ class BuildContractTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 app.write_build_verification(path, None, True, failed, self.receipt, self.manifest | {"token": "secret"})
             self.assertFalse(path.exists())
+
+
+
+
+class ReadinessProbeTransportTests(unittest.TestCase):
+    def fixture(self):
+        fixture = object.__new__(app.Fixture)
+        fixture.http = mock.Mock()
+        fixture.token = 'synthetic-test-token'
+        return fixture
+
+    def test_transient_reset_and_disconnect_then_readiness(self):
+        fixture = self.fixture()
+        response = mock.MagicMock()
+        response.__enter__.return_value.status = 200
+        fixture.http.open.side_effect = [ConnectionResetError(104, 'reset'), http.client.RemoteDisconnected(), response]
+        process = mock.Mock(returncode=None)
+        process.poll.return_value = None
+        with mock.patch.object(app.time, 'sleep'):
+            self.assertTrue(fixture.wait_until('readiness', lambda: fixture.probe(app.BACKEND_URL + '/ready') == 200,
+                                               process, timeout=1))
+        self.assertEqual(fixture.http.open.call_count, 3)
+        self.assertEqual(process.poll.call_count, 3)
+
+    def test_persistent_reset_remains_bounded(self):
+        fixture = self.fixture()
+        fixture.http.open.side_effect = ConnectionResetError(104, 'reset')
+        process = mock.Mock(returncode=None)
+        process.poll.return_value = None
+        with mock.patch.object(app.time, 'monotonic', side_effect=[0, 0, 0.5, 1]), mock.patch.object(app.time, 'sleep'):
+            with self.assertRaisesRegex(RuntimeError, 'timed out waiting'):
+                fixture.wait_until('readiness', lambda: fixture.probe(app.BACKEND_URL + '/ready') == 200, process, timeout=1)
+        self.assertEqual(fixture.http.open.call_count, 2)
+
+    def test_exited_process_fails_before_probe(self):
+        fixture = self.fixture()
+        process = mock.Mock(returncode=1)
+        process.poll.return_value = 1
+        with self.assertRaisesRegex(RuntimeError, 'process exited 1'):
+            fixture.wait_until('readiness', lambda: fixture.probe(app.BACKEND_URL + '/ready'), process)
+        fixture.http.open.assert_not_called()
+
+    def test_mutation_reset_is_never_retried_or_suppressed(self):
+        fixture = self.fixture()
+        fixture.http.open.side_effect = ConnectionResetError(104, 'reset')
+        with self.assertRaises(ConnectionResetError):
+            fixture.request('/users/register', {'username': 'synthetic'}, 'POST', authenticated=False)
+        self.assertEqual(fixture.http.open.call_count, 1)
+
+
+@unittest.skipUnless(os.environ.get('ARCENTRA_TEST_LOOPBACK_PROBES') == '1',
+                     'real loopback TCP tests require explicit authorized CI opt-in')
+class LoopbackReadinessProbeTests(unittest.TestCase):
+    def exercise_server(self, always_reset):
+        counts = []
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self):
+                self.request.settimeout(1)
+                self.request.recv(4096)
+                counts.append(1)
+                if always_reset or len(counts) == 1:
+                    self.request.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+                    return
+                self.request.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+        server = socketserver.TCPServer(('127.0.0.1', 0), Handler)
+        server.timeout = 1
+        thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(lambda: thread.join(timeout=2))
+        self.addCleanup(server.shutdown)
+        opener = app.urllib.request.build_opener(app.urllib.request.ProxyHandler({}), app.NoRedirects())
+        fixture = object.__new__(app.Fixture)
+        # Keep the production guard on its exact fixed URL, and adapt only the
+        # test transport to an exclusively owned ephemeral loopback listener.
+        class Transport:
+            def open(self, url, timeout):
+                self_url = app.BACKEND_URL + '/ready'
+                if url != self_url:
+                    raise AssertionError('unexpected test request')
+                return opener.open('http://127.0.0.1:%d/ready' % server.server_address[1], timeout=timeout)
+        fixture.http = Transport()
+        process = mock.Mock(returncode=None)
+        process.poll.return_value = None
+        started = time.monotonic()
+        if always_reset:
+            with self.assertRaisesRegex(RuntimeError, 'timed out waiting'):
+                fixture.wait_until('real reset readiness', lambda: fixture.probe(app.BACKEND_URL + '/ready') == 200,
+                                   process, timeout=0.1)
+            self.assertLess(time.monotonic() - started, 2)
+        else:
+            self.assertTrue(fixture.wait_until('real reset then ready', lambda: fixture.probe(app.BACKEND_URL + '/ready') == 200,
+                                               process, timeout=3))
+            self.assertGreaterEqual(len(counts), 2)
+
+    def test_actual_tcp_reset_then_ready(self):
+        self.exercise_server(False)
+
+    def test_actual_tcp_persistent_reset_bounded(self):
+        self.exercise_server(True)
 
 
 if __name__ == "__main__":

@@ -123,6 +123,7 @@ level = "INFO"
     def start_control(self, name):
         handle = self.runtime.create('control', config=self.config('control'), state=self.state('control'))
         self.wait_until('image Control readiness', lambda: self.probe(actual.BACKEND_URL + '/ready') == 200, handle)
+        self.note('Image Control readiness GET passed')
         return handle
 
     def start_agent(self, name):

@@ -76,6 +76,7 @@ jobs:
             go build -trimpath -ldflags "$LDFLAGS" -o "$PAYLOAD/$output" "./cmd/$target"
           done
           python3 -m unittest discover -s scripts/acceptance -p 'test_*image*.py'
+          ARCENTRA_TEST_LOOPBACK_PROBES=1 PYTHONPATH=scripts/acceptance python3 -m unittest test_run_actual_app.ReadinessProbeTransportTests test_run_actual_app.LoopbackReadinessProbeTests
           IMAGE_WORK
 
       - name: Check ordinary work budget before external action

@@ -9,6 +9,7 @@ The caller starts the loopback dependency services and creates the S3 bucket.
 import argparse
 import base64
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -202,7 +203,7 @@ class Fixture:
                 return response.status
         except urllib.error.HTTPError as exc:
             return exc.code
-        except (urllib.error.URLError, TimeoutError):
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.RemoteDisconnected):
             return None
 
     def wait_until(self, description, predicate, process=None, timeout=90):
