@@ -42,12 +42,19 @@ EXPECTED_OUTPUT = '{"message":"HELLO, ARCENTRA!","length":8}\n'
 FIXTURE_SOURCE = Path(__file__).resolve().parent / "fixtures/stdlib-build"
 COMPILE_ERROR = "\nvar _ = acceptanceCompileError\n"
 MAX_BINARY_BYTES = 32 * 1024 * 1024
-FIRST_BUILD_JOURNEY = "two-phase-separate-browser-contexts"
+FIRST_BUILD_JOURNEY = "three-phase-separate-browser-contexts"
 FIRST_BUILD_PREFLIGHT_STEPS = [
     "preflight-login-via-real-api",
     "preflight-missing-configuration-no-agent-no-scope-manual-scope-allowed",
     "preflight-explicit-status-refresh",
     "preflight-no-product-mutations",
+]
+FIRST_BUILD_STORAGE_STEPS = [
+    "storage-login-via-real-api",
+    "storage-create-via-ui-redacted-response",
+    "storage-edit-metadata-preserves-blank-credentials",
+    "storage-explicit-default-and-reload",
+    "storage-no-secret-in-page-or-diagnostics",
 ]
 FIRST_BUILD_CONFIGURED_STEPS = [
     "configured-persisted-storage-and-signing-recent-agent",
@@ -109,8 +116,12 @@ class Fixture:
         self.artifact_evidence = None
         self.build_verified = False
         self.preflight_verified = False
+        self.storage_setup_verified = False
         self.coordination = root / "coordination"
         self.coordination.mkdir(mode=0o700)
+        self.redactions.extend([DEPENDENCIES["ARCENTRA_TEST_S3_ACCESS_KEY"],
+                                encoded(DEPENDENCIES["ARCENTRA_TEST_S3_ACCESS_KEY"]),
+                                encoded(DEPENDENCIES["ARCENTRA_TEST_S3_SECRET_KEY"])])
         self.env = child_environment(os.environ, root)
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirects())
 
@@ -319,6 +330,7 @@ class Fixture:
         self.expect_rejected("/users/fetch", 401, 4405, token=old_observer_token)
         self.require_observer_session()
         self.expect_rejected("/users/?pageNum=1&pageSize=1", 403, 403)
+        self.expect_rejected("/storage/configs", 403, 403)
         validate_restricted_first_build(self.request("/me/first-build"))
         self.note("Read-only observer first-build guidance omits configuration and Agent state")
         if self.request("/users/fetch", token=admin_token) != admin:
@@ -488,16 +500,13 @@ class Fixture:
         control = self.start_control("control-after-bootstrap")
         self.login()
         self.note("HTTP registration, explicit CLI administrator bootstrap and fresh login completed")
-        # The same real, intentionally broken Git source supplies both browser
+        # The same real, intentionally broken Git source supplies all browser
         # phases. It is not built or changed until the original full journey.
         self.create_repository()
         self.run_preflight_browser(control)
         if self.request("/storage/configs"):
             raise RuntimeError("fresh-install fixture found pre-existing storage configuration")
-        storage = self.storage_configuration()
-        self.request("/storage/configs", {"storageId": "acceptance", "name": "Acceptance MinIO",
-                                          "storageType": "minio", "isDefault": 1,
-                                          "config": encoded(json.dumps(storage))}, "POST")
+        self.run_storage_setup_browser(control)
         salt, agent_secret = secrets.token_hex(16), secrets.token_hex(32)
         self.redactions.extend([salt, agent_secret])
         self.request("/settings/AGENT_SECRET_KEY", {"name": "AGENT_SECRET_KEY",
@@ -545,7 +554,7 @@ class Fixture:
         self.run_build_browser(control, agent)
 
     def browser_environment(self, phase):
-        if phase not in ("preflight", "build"):
+        if phase not in ("preflight", "storage-setup", "build"):
             raise ValueError("unknown actual-browser acceptance phase")
         return self.env | {
             "ARCENTRA_ACCEPTANCE_PHASE": phase,
@@ -580,13 +589,31 @@ class Fixture:
         self.login()
         self.note("Read-only unconfigured first-build browser preflight passed; fresh administrator API session restored")
 
+    def run_storage_setup_browser(self, control):
+        if self.preflight_verified is not True:
+            raise RuntimeError("storage setup requires the verified read-only first-use preflight")
+        browser = self.start("browser-storage-setup", self.args.browser_command, self.args.browser_cwd,
+                             self.browser_environment("storage-setup"))
+        self.wait_until("browser storage configuration", lambda: browser.poll() is not None, timeout=150)
+        if browser.returncode != 0:
+            raise RuntimeError(f"browser storage setup exited {browser.returncode}; see sanitized evidence")
+        if control.poll() is not None:
+            raise RuntimeError("Control exited during browser storage setup")
+        self.require_browser_summary("storage-setup")
+        # The new browser login invalidates the fixture's prior administrator
+        # token. Reauthenticate before reading persisted state or writing signing.
+        self.login()
+        validate_persisted_storage(self.request("/storage/configs"), self.storage_configuration())
+        self.storage_setup_verified = True
+        self.note("Browser storage create, metadata edit with credentials preserved, explicit default and redacted reload passed; administrator API session restored")
+
     def require_browser_summary(self, phase):
         path = self.args.evidence_dir / "browser/summary.json"
         validate_first_build_summary(read_private_json(path), phase, self.failed_commit)
 
     def run_build_browser(self, control, agent):
-        if self.preflight_verified is not True:
-            raise RuntimeError("full build browser requires the verified read-only first-use preflight")
+        if self.preflight_verified is not True or self.storage_setup_verified is not True:
+            raise RuntimeError("full build browser requires verified read-only preflight and browser storage setup")
         browser_env = self.browser_environment("build")
         browser = self.start("browser", self.args.browser_command, self.args.browser_cwd, browser_env)
         def browser_complete():
@@ -603,6 +630,7 @@ class Fixture:
         self.note("Browser create-project → create-pipeline → run → logs → artifact journey completed")
 
     def cleanup(self, error):
+        error = redact_diagnostics(error, self.redactions) if error else error
         self.cleanup_runtime()
         for _, handle in self.logs:
             handle.close()
@@ -614,9 +642,7 @@ class Fixture:
             # Save diagnostic logs only. Configs, CA private keys, identity store,
             # response credentials, workspace and raw logs die with TemporaryDirectory.
             content = path.read_text(errors="replace")
-            for secret in sorted(self.redactions, key=len, reverse=True):
-                if secret:
-                    content = content.replace(secret, "[REDACTED]")
+            content = redact_diagnostics(content, self.redactions)
             content = re.sub(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", "[REDACTED-JWT]", content)
             content = re.sub(r"art_[A-Za-z0-9_-]+", "[REDACTED-ENROLLMENT]", content)
             (self.args.evidence_dir / path.name).write_text(content)
@@ -625,6 +651,7 @@ class Fixture:
             "error": error, "agentId": self.agent_id, "sourceCommit": self.commit,
             "contract": BUILD_CONTRACT, "failedSourceCommit": self.failed_commit,
             "firstBuildJourney": FIRST_BUILD_JOURNEY, "firstBuildPreflightVerified": self.preflight_verified,
+            "storageSetupVerified": self.storage_setup_verified,
             "failedRun": self.failed_run, "successfulRun": self.successful_run,
             "verifiedArtifact": self.artifact_evidence,
             "backend": BACKEND_URL, "repository": self.repository_url(),
@@ -636,6 +663,24 @@ class Fixture:
         (self.args.evidence_dir / "actual-app-result.json").write_text(json.dumps(result, indent=2) + "\n")
 
 
+def redact_diagnostics(content, values):
+    """Redact synthetic credentials even inside reordered base64 JSON bodies."""
+    secrets_to_remove = sorted((value for value in values if value), key=len, reverse=True)
+    def redact_encoded(match):
+        candidate = match.group(0)
+        if len(candidate) > 65536:
+            return "[REDACTED-LARGE-ENCODED-VALUE]"
+        try:
+            decoded = base64.b64decode(candidate + "=" * (-len(candidate) % 4)).decode("utf8", errors="replace")
+        except ValueError:
+            return candidate
+        return "[REDACTED]" if any(secret in decoded for secret in secrets_to_remove) else candidate
+    content = re.sub(r"[A-Za-z0-9+/]{32,}={0,2}", redact_encoded, content)
+    for secret in secrets_to_remove:
+        content = content.replace(secret, "[REDACTED]")
+    return content
+
+
 def validate_restricted_first_build(detail):
     expected = {"scopeOptions": [], "scopeOptionsTruncated": False, "canEnterScope": False,
                 "configuration": {"access": "restricted"}, "agent": {"access": "restricted"}}
@@ -644,16 +689,38 @@ def validate_restricted_first_build(detail):
 
 
 def validate_first_build_summary(summary, phase, source_commit):
-    if phase not in ("preflight", "build"):
+    if phase not in ("preflight", "storage-setup", "build"):
         raise ValueError("unknown actual-browser acceptance phase")
-    steps = FIRST_BUILD_PREFLIGHT_STEPS + (FIRST_BUILD_CONFIGURED_STEPS if phase == "build" else [])
+    steps = (FIRST_BUILD_PREFLIGHT_STEPS + (FIRST_BUILD_STORAGE_STEPS if phase != "preflight" else [])
+             + (FIRST_BUILD_CONFIGURED_STEPS if phase == "build" else []))
     expected = {"journey": FIRST_BUILD_JOURNEY, "phase": phase, "sourceCommit": source_commit, "steps": steps}
     if (not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", source_commit)
             or not isinstance(summary, dict) or summary.get("kind") != "actual-backend"
             or summary.get("status") != "passed"
-            or summary.get("stage") != ("preflight-complete" if phase == "preflight" else "journey-complete")
+            or summary.get("stage") != ({"preflight": "preflight-complete", "storage-setup": "storage-setup-complete", "build": "journey-complete"}[phase])
             or summary.get("firstBuildReadiness") != expected):
         raise RuntimeError("browser phase lacks the exact successful first-build guidance evidence")
+
+
+def validate_persisted_storage(detail, configuration):
+    """Independently verify redacted persisted UI setup, without exposing its data."""
+    public = {key: value for key, value in configuration.items() if key not in ("accessKey", "secretKey")}
+    if not isinstance(detail, list) or len(detail) != 1 or not isinstance(detail[0], dict):
+        raise RuntimeError("browser storage setup must persist exactly one configuration")
+    item = detail[0]
+    if (item.get("storageId") != "acceptance" or item.get("storageType") != "minio"
+            or item.get("name") != "Acceptance MinIO reviewed"
+            or item.get("description") != "Synthetic CI artifact storage, metadata reviewed"
+            or type(item.get("isEnabled")) is not int or type(item.get("isDefault")) is not int
+            or item.get("isEnabled") != 1 or item.get("isDefault") != 1
+            or item.get("config") != public
+            or sorted(item.get("configuredFields", [])) != ["accessKey", "secretKey"]):
+        raise RuntimeError("browser storage setup did not preserve the expected redacted synthetic configuration")
+    serialized = json.dumps(item)
+    values = [configuration["accessKey"], configuration["secretKey"],
+              encoded(configuration["accessKey"]), encoded(configuration["secretKey"])]
+    if redact_diagnostics(serialized, values) != serialized:
+        raise RuntimeError("browser storage response exposed a synthetic credential")
 
 
 def encoded(value):
@@ -1041,7 +1108,7 @@ def main():
         try:
             fixture.exercise()
         except (Exception, KeyboardInterrupt) as exc:
-            error = str(exc) or "acceptance interrupted"
+            error = redact_diagnostics(str(exc) or "acceptance interrupted", fixture.redactions)
             print(f"[actual-app] FAILED: {error}", file=sys.stderr)
         finally:
             fixture.cleanup(error)

@@ -162,7 +162,7 @@ func TestSensitiveAdminCredentialsAreWriteOnlyAndBlankUpdatesPreserve(t *testing
 		require.Equal(t, 200, status)
 		require.NotContains(t, raw, "canary")
 	}
-	config = base64.StdEncoding.EncodeToString([]byte(`{"secretKey":"","accessKey":null,"bucket":"changed"}`))
+	config = base64.StdEncoding.EncodeToString([]byte(`{"secretKey":"","accessKey":null}`))
 	status, _, raw = f.request(t, "admin", "PUT", "/storage/configs/test", `{"config":"`+config+`","isEnabled":1}`)
 	require.Equal(t, 200, status)
 	require.NotContains(t, raw, "canary")
@@ -170,7 +170,7 @@ func TestSensitiveAdminCredentialsAreWriteOnlyAndBlankUpdatesPreserve(t *testing
 	require.NoError(t, err)
 	require.Contains(t, string(stored.Config), "storage-canary")
 	require.Contains(t, string(stored.Config), "access-canary")
-	require.Contains(t, string(stored.Config), "changed")
+	require.Contains(t, string(stored.Config), `"bucket":"test"`)
 }
 
 func TestSensitiveLiveRevocationDoesNotReuseCachedAuthority(t *testing.T) {
