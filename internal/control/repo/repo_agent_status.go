@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"gorm.io/gorm"
 )
 
@@ -92,7 +93,21 @@ func (r *StepRunRepo) PatchReportedStatus(ctx context.Context, expected *model.S
 		if err := reportedStatusResult(result); err != nil {
 			return err
 		}
-		return activateClaimedGeneration(ctx, tx, next)
+		if err := activateClaimedGeneration(ctx, tx, next); err != nil {
+			return err
+		}
+		if next == model.JobRunStatusRunning && expected.AttemptAdmission != "" {
+			admission, err := taskqueue.ParseStepAttemptAdmission(expected.AttemptAdmission)
+			if err != nil {
+				return err
+			}
+			var job model.JobRun
+			if err := tx.WithContext(ctx).Select(jobSnapshotColumns).Where("job_run_id = ?", expected.JobRunID).First(&job).Error; err != nil {
+				return err
+			}
+			return validateStepAttemptCommit(ctx, tx, &job, admission, nil)
+		}
+		return nil
 	})
 }
 

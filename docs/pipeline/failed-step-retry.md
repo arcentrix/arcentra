@@ -44,10 +44,12 @@ preserved between shell invocations.
 
 Only explicit idempotent plans with 2–5 attempts and a distinct 1–125 shell exit
 code allowlist are eligible. Input/source pinning and registered artifact
-integrity remain required. `failed_step` plans with any approval or `continueOnError` are
-rejected in this profile. V17 supports the separately default-off
-[exact-content approval for `whole_job`](retry-approval.md); that approval does
-not authorize live failed-step retry. Download remains before shell execution;
+integrity remain required. `continueOnError` remains rejected. The V18 profile
+recorded below did not support approval-bearing failed-step plans. The separate
+[V19 exact-content failed-step approval candidate](failed-step-retry-approval.md)
+adds only its exact kind/plan tuple and independent default-off permissions;
+its exact gate-enabled ordinary entry passed the linked V19 acceptance. V17
+[whole-job approval](retry-approval.md) does not authorize that combination. Download remains before shell execution;
 output upload remains after final sealing. Networking, OCI builds, branching,
 parallel jobs and host-executor fallback are not added.
 

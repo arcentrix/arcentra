@@ -89,8 +89,8 @@ func retryPlanForJob(job *model.JobRun) (*taskqueue.JobRetryPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	if plan.Policy.Mode == "failed_step" && !emptyRetryApproval(job) {
-		return nil, fmt.Errorf("approval-bearing failed_step execution is not supported")
+	if plan.RetryApprovalRequired != job.RetryApprovalRequired || (!plan.RetryApprovalRequired && !emptyRetryApproval(job)) {
+		return nil, fmt.Errorf("retry approval requirement differs from immutable plan")
 	}
 	digest, err := plan.Digest(job.PipelineID, job.PipelineRunID, job.JobRunID, job.AgentID, job.RuntimeBindingDigest)
 	if err != nil || digest != job.RetryPlanDigest {
@@ -139,8 +139,17 @@ func validateGenerationLive(ctx context.Context, tx *gorm.DB, job *model.JobRun,
 	return nil
 }
 func loadGeneration(ctx context.Context, tx *gorm.DB, id string) (*model.JobRunGeneration, *taskqueue.JobGeneration, error) {
+	return loadGenerationRead(ctx, tx, id, true)
+}
+
+// 非锁定读取仅用于已锁定终态父作业的不可执行历史证据
+func loadGenerationRead(ctx context.Context, tx *gorm.DB, id string, lock bool) (*model.JobRunGeneration, *taskqueue.JobGeneration, error) {
 	var record model.JobRunGeneration
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(generationColumns).Where("generation_id = ?", id).First(&record).Error; err != nil {
+	query := tx.WithContext(ctx)
+	if lock {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.Select(generationColumns).Where("generation_id = ?", id).First(&record).Error; err != nil {
 		return nil, nil, err
 	}
 	descriptor, err := taskqueue.ParseJobGeneration(record.GenerationJSON)
@@ -192,10 +201,16 @@ func (r *JobRunRepo) ReconcileJobGeneration(ctx context.Context, request taskque
 			response = g
 			return nil
 		}
-		required, err := retryApprovalRequired(ctx, tx, &job)
+		terminal := model.IsJobRunTerminal(job.Status)
+		if terminal && request.Operation != "advance" {
+			return fmt.Errorf("terminal job cannot admit a generation")
+		}
+		// 终态 whole_job 仅可返回已提交的准确 advance 回执，不锁共享 run
+		approvalContext, err := retryApprovalContextRead(ctx, tx, &job, !terminal)
 		if err != nil {
 			return err
 		}
+		required := approvalContext != nil
 		// 已提交的清理/后继转换 ACK 可在失效后重放，但不能恢复执行权限
 		if required && request.Operation == "advance" {
 			prior, old, err := loadGeneration(ctx, tx, request.PreviousGenerationID)
@@ -218,7 +233,7 @@ func (r *JobRunRepo) ReconcileJobGeneration(ctx context.Context, request taskque
 				}
 				g.ExecutionAllowed = false
 				g.PreparationOnly = next.State == "preparing"
-				if job.CurrentGenerationID == g.GenerationID && validateRetryApprovalExecution(ctx, tx, &job, false) == nil {
+				if !terminal && job.CurrentGenerationID == g.GenerationID && validateRetryApprovalExecution(ctx, tx, &job, false) == nil {
 					g.ExecutionAllowed = true
 				}
 				response = g

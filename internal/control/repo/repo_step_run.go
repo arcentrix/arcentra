@@ -70,7 +70,19 @@ func (r *StepRunRepo) Create(ctx context.Context, stepRun *model.StepRun) error 
 	if err := normalizeJSONFields(map[string]*string{"retry_policy": &stepRun.RetryPolicy, "args": &stepRun.Args, "env": &stepRun.Env, "secrets": &stepRun.Secrets, "label_selector": &stepRun.LabelSelector}, stepRunJSONDefaults); err != nil {
 		return err
 	}
-	return r.Database().WithContext(ctx).Table(stepRun.TableName()).Create(stepRun).Error
+	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if stepRun.JobRunID != "" {
+			var parent model.JobRun
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id", "retry_plan", "retry_plan_digest").Where("job_run_id = ?", stepRun.JobRunID).First(&parent).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err == nil && (parent.JobRunID != stepRun.JobRunID || parent.RetryPlan != "" || parent.RetryPlanDigest != "") {
+				return fmt.Errorf("captured retry plan cannot acquire new step allocations")
+			}
+		}
+		return tx.Table(stepRun.TableName()).Create(stepRun).Error
+	})
 }
 
 // GetByStepRunID returns step run by business ID.

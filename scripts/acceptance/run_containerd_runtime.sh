@@ -122,4 +122,9 @@ run_test taskqueue '^TestRealContainerJobAcceptance$' 8m full-job 1 TestRealCont
   TestRealContainerJobAcceptance/failed-step/earlier-background-refused \
   TestRealContainerJobAcceptance/failed-step/adopted-zombie-refused \
   TestRealContainerJobAcceptance/failed-step/cancel-before-successor \
-  TestRealContainerJobAcceptance/failed-step/uncertain-resume-cleans
+  TestRealContainerJobAcceptance/failed-step/uncertain-resume-cleans \
+  TestRealContainerJobAcceptance/failed-step-approval/durable-retry-approval-approved-finite-plan \
+  TestRealContainerJobAcceptance/failed-step-approval/durable-retry-approval-cancel-pending \
+  TestRealContainerJobAcceptance/failed-step-approval/durable-retry-approval-revoke-before-successor \
+  TestRealContainerJobAcceptance/failed-step-approval/durable-retry-approval-revoke-after-CAS-before-RUNNING \
+  TestRealContainerJobAcceptance/failed-step-approval/durable-retry-approval-lost-CAS-ACK-then-revoke

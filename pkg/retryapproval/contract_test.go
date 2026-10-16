@@ -108,3 +108,59 @@ func TestWholeJobApprovalCannotRelabelFailedStepPlan(t *testing.T) {
 		t.Fatal("whole-job evidence accepted failed-step plan")
 	}
 }
+
+func failedStepEvidence(t *testing.T) *Evidence {
+	e := fixture(t)
+	e.Kind = FailedStepKind
+	e.RetryPlan.Version = 2
+	e.RetryPlan.Policy.Mode = "failed_step"
+	var err error
+	e.RetryPlanDigest, err = e.RetryPlan.Digest(e.Identity.PipelineID, e.Identity.PipelineRunID, e.Identity.JobRunID, e.Identity.AgentID, e.Runtime.BindingDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+func TestFailedStepApprovalExactTupleAndCompleteEvidence(t *testing.T) {
+	e := failedStepEvidence(t)
+	body, err := e.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseEvidence(body); err != nil {
+		t.Fatal(err)
+	}
+	kind, err := KindForPlan(&e.RetryPlan)
+	if err != nil || kind != FailedStepKind {
+		t.Fatal(kind, err)
+	}
+	for name, mutate := range map[string]func(*Evidence){
+		"whole kind":   func(e *Evidence) { e.Kind = Kind },
+		"unknown kind": func(e *Evidence) { e.Kind = "retry_failed_step_v2" },
+		"old version":  func(e *Evidence) { e.RetryPlan.Version = 1 },
+		"whole mode":   func(e *Evidence) { e.RetryPlan.Policy.Mode = "whole_job" },
+		"no gate": func(e *Evidence) {
+			e.RetryPlan.RetryApprovalRequired = false
+			e.RetryPlan.RetryApprovalTimeoutSeconds = 0
+		},
+		"no timeout":         func(e *Evidence) { e.RetryPlan.RetryApprovalTimeoutSeconds = 0 },
+		"changed step":       func(e *Evidence) { e.RetryPlan.Steps[0].AttemptRunIDs[1] = "replacement" },
+		"missing attempt":    func(e *Evidence) { e.RetryPlan.Steps[0].AttemptRunIDs = e.RetryPlan.Steps[0].AttemptRunIDs[:1] },
+		"duplicate attempt":  func(e *Evidence) { e.RetryPlan.Steps[0].AttemptRunIDs[1] = e.RetryPlan.Steps[0].AttemptRunIDs[0] },
+		"changed definition": func(e *Evidence) { e.RetryPlan.Steps[0].DefinitionDigest = "v1:" + strings.Repeat("f", 64) },
+		"continue":           func(e *Evidence) { e.RetryPlan.Steps[0].ContinueOnError = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := failedStepEvidence(t)
+			mutate(e)
+			if _, err := e.Canonical(); err == nil {
+				t.Fatal("forged evidence accepted")
+			}
+		})
+	}
+	whole := fixture(t)
+	whole.Kind = FailedStepKind
+	if _, err := whole.Canonical(); err == nil {
+		t.Fatal("new kind accepted whole job tuple")
+	}
+}

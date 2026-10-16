@@ -446,6 +446,11 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	}) {
 		return
 	}
+	if !t.Run("failed-step-approval", func(t *testing.T) {
+		containerAcceptanceFailedStepApproval(t, f, settings, observedStore, publisher, retainedAudit, approvalServices, approvalPolicy, lifecycleAudit)
+	}) {
+		return
+	}
 	if !containerAcceptanceAuditMatches(retainedAudit, controllerTerminalRecords(f)) {
 		t.Fatal("completed acceptance changed retained timeout audit or left new terminal receipts")
 	}

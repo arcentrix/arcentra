@@ -19,6 +19,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	controlservice "github.com/arcentrix/arcentra/internal/control/service"
+	"github.com/arcentrix/arcentra/internal/shared/agentidentity"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/validation"
 	"github.com/arcentrix/arcentra/pkg/id"
@@ -31,13 +32,18 @@ import (
 	"gorm.io/gorm"
 )
 
-func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, retained map[string]string, services *controlservice.Services, policy *retryapproval.Policy, lifecycle *containerApprovalLifecycle) {
+func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, store *containerAcceptanceStorage, retained map[string]string, services *controlservice.Services, policy *retryapproval.Policy, lifecycle *containerApprovalLifecycle, stepEvents ...*containerAcceptanceStepRuntimeEvents) {
 	t.Helper()
 	containerAcceptanceDrainWithAudit(t, f, retained)
 	actor := "requester-" + id.GetUild()
 	grantIDs := seedContainerApprovalActors(t, f, actor, policy.Candidates)
 	// Only the disposable fixture is configured. No real user identity or credential is created.
-	for _, scenario := range []string{"approved-finite-plan", "cancel-pending", "revoke-before-successor"} {
+	failedStep := len(stepEvents) > 0
+	scenarios := []string{"approved-finite-plan", "cancel-pending", "revoke-before-successor"}
+	if failedStep {
+		scenarios = append(scenarios, "revoke-after-CAS-before-RUNNING", "lost-CAS-ACK-then-revoke")
+	}
+	for _, scenario := range scenarios {
 		t.Run("durable-retry-approval-"+scenario, func(t *testing.T) {
 			containerAcceptanceDrainWithAudit(t, f, retained)
 			for _, grant := range grantIDs {
@@ -51,6 +57,21 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 			jobs := []*spec.Job{
 				{Name: "approval-a", Steps: []*spec.Step{controllerWorkerShell("produce", "mkdir seed; printf approval-input > seed/input.txt"), containerAcceptanceArtifactStep("seed", "upload", map[string]any{"paths": []any{"seed/input.txt"}, "expireIn": "7d"})}},
 				{Name: "approval-b", DependsOn: []string{"approval-a"}, Source: &spec.Source{Type: "git", Repo: source, Branch: "main"}, Retry: &spec.Retry{Mode: "whole_job", MaxAttempts: 2, Idempotent: true, AllowedExitCodes: []int32{23}, Delay: "1s"}, Approval: &spec.Approval{Required: true, Type: "manual", Plugin: retryapproval.Plugin}, Steps: []*spec.Step{containerAcceptanceArtifactStep("fetch", "download", map[string]any{"job": "approval-a", "paths": []any{"seed/*"}}), controllerWorkerShell("approval-command", command), containerAcceptanceArtifactStep("publish", "upload", map[string]any{"paths": []any{"proof/result.txt"}, "expireIn": "7d"})}},
+			}
+			if failedStep {
+				jobs[1].Retry.Mode = "failed_step"
+				command = `set -eu; test "$(cat source.txt)" = 'initial checkout'; test "$(cat seed/input.txt)" = 'approval-input'; printf 'step-retry-enter\n'; printf approved > approval-command-marker; if [ ! -e failed-once ]; then touch failed-once; printf 'step-failed-first\n'; exit 23; fi; printf 'step-failed-second\n'; mkdir -p proof; printf approved-result > proof/result.txt`
+				jobs[1].Steps[1] = controllerWorkerShell("approval-command", command)
+				jobs[1].Steps = append(jobs[1].Steps[:1], append([]*spec.Step{controllerWorkerShell("earlier", "printf 'step-earlier-once\\n'")}, jobs[1].Steps[1:]...)...)
+			}
+			if failedStep && scenario == "revoke-before-successor" {
+				delivery := stepEvents[0].approvalDelivery
+				if delivery == nil {
+					t.Fatal("missing transparent denial observer")
+				}
+				delivery.mu.Lock()
+				delivery.targetName = "approval-b"
+				delivery.mu.Unlock()
 			}
 			run := submitContainerApproval(t, f, cfg, actor, policy, jobs)
 			var approval *model.ApprovalRequest
@@ -106,6 +127,12 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 			}
 			containerApprovalPending(t, f, jobID)
 			lifecycle.requireNone(t, pendingRecord.Record.Resource.ID)
+			store.mu.Lock()
+			uploadsBefore := store.sealedUploads
+			store.mu.Unlock()
+			f.mu.Lock()
+			initialLostACKs := f.lostACKs
+			f.mu.Unlock()
 			var mu sync.Mutex
 			var admissionBodies []string
 			lost := false
@@ -155,11 +182,86 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 						return
 					}
 					revoked = true
+					if failedStep {
+						f.mu.Lock()
+						f.loseStepTerminalACK = true
+						f.mu.Unlock()
+					}
 					revokeErr = f.db.WithContext(ctx).Model(&model.RoleGrant{}).Where("grant_id = ?", grantIDs[1]).Update("is_enabled", 0).Error
 				}
 			}
+			var stepBodies []string
+			var stepRequests []string
+			var liveScope *taskpayload.StepAttemptIdentity
+			if failedStep {
+				f.afterStepAttempt = func(ctx context.Context, req *agentv1.ReconcileStepAttemptRequest, resp *agentv1.ReconcileStepAttemptResponse, callErr error) error {
+					if callErr != nil || resp == nil {
+						return nil
+					}
+					tr, err := taskpayload.ParseStepAttemptTransition(req.TransitionJson)
+					if err != nil {
+						return err
+					}
+					if tr.Scope.Identity.JobRunID != jobID {
+						return nil
+					}
+					row, err := f.repos.StepRun.GetByStepRunID(ctx, tr.Scope.StepRunID)
+					if err != nil {
+						return err
+					}
+					// 历史重放保留精确描述，独立检查当前不可执行权限
+					structural := proto.Clone(resp).(*agentv1.ReconcileStepAttemptResponse)
+					structural.ExecutionAllowed = true
+					if err := containerAcceptanceStepCommittedAdmission(row, req, structural); err != nil {
+						return err
+					}
+					current, err := f.repos.JobRun.GetByJobRunID(ctx, jobID)
+					if err != nil {
+						return err
+					}
+					if err := containerAcceptanceStepPinnedInputs(current, tr.Scope, initial); err != nil {
+						return err
+					}
+					mu.Lock()
+					if liveScope == nil {
+						scope := tr.Scope
+						liveScope = &scope
+					}
+					sameSession := liveScope.Session == tr.Scope.Session && liveScope.GenerationID == tr.Scope.GenerationID && liveScope.GenerationBindingDigest == tr.Scope.GenerationBindingDigest && liveScope.RuntimeClaimID == tr.Scope.RuntimeClaimID && liveScope.InputManifestDigest == tr.Scope.InputManifestDigest
+					mu.Unlock()
+					if !sameSession {
+						return status.Error(codes.FailedPrecondition, "approved step replaced pinned live session/input")
+					}
+					if tr.Operation != "advance" {
+						return nil
+					}
+					mu.Lock()
+					defer mu.Unlock()
+					stepBodies = append(stepBodies, resp.AdmissionJson)
+					stepRequests = append(stepRequests, req.TransitionJson)
+					if scenario == "revoke-after-CAS-before-RUNNING" || scenario == "lost-CAS-ACK-then-revoke" {
+						if !revoked {
+							revoked = true
+							revokeErr = f.db.WithContext(ctx).Model(&model.RoleGrant{}).Where("grant_id = ?", grantIDs[1]).Update("is_enabled", 0).Error
+						}
+					}
+					if len(stepBodies) == 1 && (scenario == "approved-finite-plan" || scenario == "lost-CAS-ACK-then-revoke") {
+						return status.Error(codes.Unavailable, "synthetic committed step admission ACK loss")
+					}
+					if scenario == "lost-CAS-ACK-then-revoke" && resp.ExecutionAllowed {
+						return status.Error(codes.FailedPrecondition, "historical ACK renewed permission")
+					}
+					return nil
+				}
+			}
 			f.mu.Unlock()
-			defer func() { f.mu.Lock(); f.afterRetryApproval = nil; f.observeTerminal = nil; f.mu.Unlock() }()
+			defer func() {
+				f.mu.Lock()
+				f.afterRetryApproval = nil
+				f.observeTerminal = nil
+				f.afterStepAttempt = nil
+				f.mu.Unlock()
+			}()
 			// The final vote releases only the existing bounded wait; it does not dispatch a job.
 			if _, err := services.Approval.Decide(f.ctx, approval.ApprovalID, policy.Candidates[1], model.ApprovalDecisionApprove, "synthetic exact plan review"); err != nil {
 				t.Fatal(err)
@@ -168,13 +270,14 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 				t.Fatalf("same committed vote replay: %v", err)
 			}
 			wanted := model.PipelineStatusSuccess
-			if scenario == "revoke-before-successor" {
+			if strings.HasPrefix(scenario, "revoke-") || scenario == "lost-CAS-ACK-then-revoke" {
 				wanted = model.PipelineStatusFailed
 			}
 			f.waitRun(run.RunID, wanted)
 			f.mu.Lock()
 			f.afterRetryApproval = nil
 			f.observeTerminal = nil
+			f.afterStepAttempt = nil
 			f.mu.Unlock()
 			containerAcceptanceDrainWithAudit(t, f, retained)
 			lifecycle.requireStarted(t, pendingRecord.Record.Resource.ID)
@@ -185,7 +288,7 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 			if job.SourceResolvedCommit != initial || job.RetryApprovalID != approval.ApprovalID || job.RetryApprovalEvidenceHash != review.EvidenceHash {
 				t.Fatal("final job lost exact approved binding")
 			}
-			if scenario == "approved-finite-plan" && job.CurrentGeneration != 2 {
+			if !failedStep && scenario == "approved-finite-plan" && job.CurrentGeneration != 2 {
 				t.Fatal("approved finite plan did not execute exactly two generations")
 			}
 			if scenario == "revoke-before-successor" && job.CurrentGeneration != 1 {
@@ -202,6 +305,106 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 			var votes int64
 			if err := f.db.Model(&model.ApprovalDecision{}).Where("approval_id = ?", approval.ApprovalID).Count(&votes).Error; err != nil || votes != 2 {
 				t.Fatalf("duplicate vote count=%d: %v", votes, err)
+			}
+			if failedStep {
+				if job.CurrentGeneration != 1 {
+					t.Fatal("approval failed-step advanced generation")
+				}
+				counts, pid, err := stepEvents[0].counts(pendingRecord.Record.Resource)
+				expectedExec, expectedResume := 2, 0
+				if scenario == "approved-finite-plan" {
+					expectedExec, expectedResume = 3, 1
+				}
+				if err != nil || pid == 0 || counts["create"] != 1 || counts["task-start"] != 1 || counts["exec-create"] != expectedExec || counts["exec-start"] != expectedExec || counts["resume"] != expectedResume {
+					t.Fatalf("approval runtime effects %v pid=%d err=%v", counts, pid, err)
+				}
+				var outputs int64
+				if err := f.db.Model(&model.ProjectArtifact{}).Where("job_run_id = ?", jobID).Count(&outputs).Error; err != nil {
+					t.Fatal(err)
+				}
+				wantOutputs := int64(0)
+				if scenario == "approved-finite-plan" {
+					wantOutputs = 1
+				}
+				if outputs != wantOutputs {
+					t.Fatalf("registered publications=%d want=%d", outputs, wantOutputs)
+				}
+				mu.Lock()
+				if (scenario == "approved-finite-plan" || scenario == "lost-CAS-ACK-then-revoke") && (len(stepBodies) != 2 || stepBodies[0] != stepBodies[1] || stepRequests[0] != stepRequests[1]) {
+					t.Errorf("step admission synchronous ACK replay changed: responses=%d requests=%d; one injected committed ACK loss requires exactly two same-request calls", len(stepBodies), len(stepRequests))
+				}
+				if scenario == "revoke-before-successor" && len(stepBodies) != 0 {
+					t.Error("revoked failure created successor CAS")
+				}
+				if strings.HasPrefix(scenario, "revoke-") || scenario == "lost-CAS-ACK-then-revoke" {
+					if !revoked || revokeErr != nil {
+						t.Errorf("step revocation hook: %v", revokeErr)
+					}
+				}
+				mu.Unlock()
+				store.mu.Lock()
+				uploaded := store.sealedUploads - uploadsBefore
+				store.mu.Unlock()
+				if int64(uploaded) != wantOutputs {
+					t.Fatalf("actual S3 uploads=%d want=%d", uploaded, wantOutputs)
+				}
+				steps, err := containerApprovalPersistedSteps(f.ctx, f.db, jobID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var ids []string
+				for _, step := range steps {
+					ids = append(ids, step.StepRunID)
+					if scenario == "revoke-before-successor" && step.Name == "approval-command" && step.Attempt == 1 {
+						f.wait("original revoked handler completion", func() bool {
+							snapshot := stepEvents[0].approvalDelivery.snapshot()
+							return len(snapshot.invocations) == 1 && snapshot.invocations[0].end != 0
+						})
+						snapshot := stepEvents[0].approvalDelivery.snapshot()
+						f.mu.Lock()
+						receipts := append([]controllerWorkerReceipt(nil), f.receipts["step/"+step.StepRunID]...)
+						lostACKs := f.lostACKs - initialLostACKs
+						f.mu.Unlock()
+						admission, err := taskpayload.ParseStepAttemptAdmission(step.AttemptAdmission)
+						t.Logf("revoked failed terminal delivery: %s committed=%d injectedLosses=%d persistedDigest=%s", snapshot.summary(), len(receipts), lostACKs, step.TerminalReportDigest)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if step.Status != model.JobRunStatusFailed || !step.RetryableShellExit || step.ExitCode == nil || *step.ExitCode != 23 || step.GenerationID != admission.Scope.GenerationID || step.GenerationBindingDigest != admission.Scope.GenerationBindingDigest || step.ClaimID != admission.Scope.StepClaimID {
+							t.Fatal("persisted failure/status/exit/claim/generation differs from immutable admission")
+						}
+						for index, call := range snapshot.stepCalls {
+							computed, computeErr := agentidentity.TerminalReceiptDigest(call.message, call.claim, admission.Scope.Identity.PipelineID, admission.Scope.Identity.PipelineRunID, admission.Scope.Identity.JobRunID)
+							payloadSHA := sha256.Sum256(call.payload)
+							t.Logf("revoked failed terminal RPC%d source=%s callback=%d result=%s accepted=%t payloadSHA256=%x claimMatches=%t digest=%s digestMatches=%t digestError=%v", index+1, call.origin, call.invocation, call.code, call.success, payloadSHA, call.claim == step.ClaimID, computed, computed == step.TerminalReportDigest, computeErr)
+						}
+						if err := snapshot.validateDeniedStep(receipts, *admission, step.TerminalReportDigest, lostACKs); err != nil {
+							t.Fatalf("revoked failed terminal receipt proof: %v", err)
+						}
+					}
+				}
+				wantMarkers := map[string]int{"step-earlier-once": 1, "step-failed-first": 1, "step-retry-enter": 1}
+				if scenario == "approved-finite-plan" {
+					wantMarkers["step-failed-second"] = 1
+					wantMarkers["step-retry-enter"] = 2
+				}
+				f.wait("exact approved live command counts", func() bool {
+					logs, err := f.repos.Log.ListByStepRunIDs(f.ctx, ids, 0, 1000)
+					if err != nil {
+						return false
+					}
+					markers, err := containerAcceptanceStepMarkerCounts(logs, f.conf.Agent.ID)
+					if err != nil {
+						return false
+					}
+					for marker, want := range wantMarkers {
+						if markers[marker] != want {
+							return false
+						}
+					}
+					return markers["step-failed-second"] == wantMarkers["step-failed-second"]
+				})
+				containerAcceptanceRemoved(t, f, pendingRecord)
 			}
 			final, err := services.Approval.RetryReview(f.ctx, approval)
 			if err != nil {
@@ -222,7 +425,37 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 func submitContainerApproval(t *testing.T, f *controllerWorkerFixture, cfg *realContainerSettings, actor string, policy *retryapproval.Policy, jobs []*spec.Job) *model.PipelineRun {
 	t.Helper()
 	ctx, cancel := f.client.WithTimeoutAndAuth(f.ctx)
-	response, err := f.client.AgentClient.Heartbeat(ctx, &agentv1.HeartbeatRequest{AgentId: f.conf.Agent.ID, Status: agentv1.AgentStatus_AGENT_STATUS_IDLE, Timestamp: time.Now().Unix(), RuntimeCapabilities: &agentv1.RuntimeCapabilities{ContainerdOfflineV1: f.worker.OfflineRuntimeReady(), ContainerdWholeJobRetryV1: true, ContainerdRetryApprovalV1: true, ExecutionMode: taskpayload.RuntimeContainerdOfflineV1}})
+	failedStep := false
+	for _, job := range jobs {
+		if job.Retry != nil && job.Retry.Mode == "failed_step" {
+			failedStep = true
+		}
+	}
+	// 与服务广告相同的门槛；就绪来自当前普通 StartWorker 的真实后端
+	runtimePolicy := f.conf.Agent.Sandbox.Containerd.Policy
+	ready := f.worker.OfflineRuntimeReady()
+	wholeReady := ready && runtimePolicy.AllowWholeJobRetry
+	stepReady := taskpayload.FailedStepRuntimeAccepted && ready && runtimePolicy.AllowFailedStepRetry && f.worker.FailedStepRetryReady()
+	capabilities := &agentv1.RuntimeCapabilities{
+		ExecutionMode:                       taskpayload.RuntimeContainerdOfflineV1,
+		ContainerdOfflineV1:                 ready,
+		ContainerdWholeJobRetryV1:           wholeReady,
+		ContainerdRetryApprovalV1:           wholeReady && runtimePolicy.AllowWholeJobRetryApproval,
+		ContainerdFailedStepRetryV1:         stepReady,
+		ContainerdFailedStepRetryApprovalV1: taskpayload.FailedStepRetryApprovalAccepted && stepReady && runtimePolicy.AllowFailedStepRetryApproval,
+	}
+	if failedStep && taskpayload.FailedStepRetryApprovalAccepted && !capabilities.ContainerdFailedStepRetryApprovalV1 {
+		t.Fatal("actual production worker did not advertise approved live-step readiness")
+	}
+	if failedStep && !taskpayload.FailedStepRetryApprovalAccepted {
+		// 仅关闭门禁的专用候选组装可以注入能力；已接受路径必须使用真实运行时就绪
+		runtimePolicy := f.conf.Agent.Sandbox.Containerd.Policy
+		if !capabilities.ContainerdOfflineV1 || !runtimePolicy.AllowFailedStepRetry || !runtimePolicy.AllowFailedStepRetryApproval || os.Getenv("ARCENTRA_CONTAINERD_ACCEPTANCE") != "1" || os.Getenv("ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE") != "1" {
+			t.Fatal("candidate approval capability requires exact dedicated assembly")
+		}
+		capabilities.ContainerdFailedStepRetryV1, capabilities.ContainerdFailedStepRetryApprovalV1 = true, true
+	}
+	response, err := f.client.AgentClient.Heartbeat(ctx, &agentv1.HeartbeatRequest{AgentId: f.conf.Agent.ID, Status: agentv1.AgentStatus_AGENT_STATUS_IDLE, Timestamp: time.Now().Unix(), RuntimeCapabilities: capabilities})
 	cancel()
 	if err != nil || response == nil || !response.Success {
 		t.Fatalf("authenticated approval capability: %v", err)
@@ -291,7 +524,7 @@ func containerApprovalPending(t *testing.T, f *controllerWorkerFixture, jobID st
 		t.Fatal("pending approval has no persisted steps")
 	}
 	for _, step := range steps {
-		if int(step.Status) != 1 && int(step.Status) != 2 {
+		if step.AttemptAdmission != "" || step.AttemptAdmissionRequest != "" || (int(step.Status) != 1 && int(step.Status) != 2) {
 			t.Fatalf("pending approval executed a step: %+v", step)
 		}
 	}

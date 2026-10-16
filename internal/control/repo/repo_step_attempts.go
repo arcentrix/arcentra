@@ -53,12 +53,44 @@ func loadStepAttemptLedger(ctx context.Context, tx *gorm.DB, job *model.JobRun, 
 	if plan.Policy.Mode != "failed_step" || plan.Version != 2 || g.Number != 1 || job.CurrentGeneration != 1 || job.CurrentGenerationID != g.GenerationID || !generationMatchesJob(g, job) {
 		return nil, fmt.Errorf("failed_step requires its fixed initial generation")
 	}
-	var all []model.StepRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(stepAttemptColumns).Where("job_run_id = ?", job.JobRunID).Order("step_index ASC").Order("attempt ASC").Find(&all).Error; err != nil {
+	// 父 job 锁串行化本作业的所有合法账本变更；非锁定枚举仅检查额外/缺失分配
+	// job_run_id 没有专用索引，禁止用此条件 FOR UPDATE 扫描并锁住别的作业步骤
+	var allocated []model.StepRun
+	if err := tx.WithContext(ctx).Select(stepAttemptColumns).Where("job_run_id = ?", job.JobRunID).Find(&allocated).Error; err != nil {
 		return nil, err
 	}
-	if len(all) != len(plan.Steps)*int(plan.Policy.MaxAttempts) {
+	if len(allocated) != len(plan.Steps)*int(plan.Policy.MaxAttempts) {
 		return nil, fmt.Errorf("complete immutable step allocation is required")
+	}
+	expectedIDs := make(map[string]bool, len(allocated))
+	for _, planned := range plan.Steps {
+		for _, id := range planned.AttemptRunIDs {
+			expectedIDs[id] = true
+		}
+	}
+	for _, row := range allocated {
+		if !expectedIDs[row.StepRunID] {
+			return nil, fmt.Errorf("step allocation contains unexpected or duplicate identity")
+		}
+		delete(expectedIDs, row.StepRunID)
+	}
+	if len(expectedIDs) != 0 {
+		return nil, fmt.Errorf("step allocation is missing immutable identity")
+	}
+	// 每次只按唯一业务键锁定冻结计划中的一行，顺序固定为逻辑步骤/尝试号
+	// 不使用 IN 或依赖优化器选择范围扫描，避免消费者与成功生产者形成跨作业锁环
+	all := allocated
+	if !model.IsJobRunTerminal(job.Status) {
+		all = make([]model.StepRun, 0, len(allocated))
+		for _, planned := range plan.Steps {
+			for _, id := range planned.AttemptRunIDs {
+				var row model.StepRun
+				if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(stepAttemptColumns).Where("step_run_id = ?", id).First(&row).Error; err != nil {
+					return nil, err
+				}
+				all = append(all, row)
+			}
+		}
 	}
 	byID := map[string]model.StepRun{}
 	for _, row := range all {
@@ -195,6 +227,9 @@ func validateStepAttemptLive(ctx context.Context, tx *gorm.DB, job *model.JobRun
 	if err := validateGenerationInputs(job, admission.Scope.InputManifestDigest, false); err != nil {
 		return err
 	}
+	if err := validateRetryApprovalExecution(ctx, tx, job, true); err != nil {
+		return err
+	}
 	now := time.Now().UnixMilli()
 	if now >= admission.ExpiresUnixMilli || (requireDelay && now < admission.NotBeforeUnixMilli) {
 		return fmt.Errorf("step admission is expired or delayed")
@@ -225,7 +260,10 @@ func (r *JobRunRepo) ReconcileStepAttempt(ctx context.Context, request taskqueue
 		if plan.Policy.Mode != "failed_step" || plan.Version != 2 || job.CurrentGenerationID == "" {
 			return fmt.Errorf("step attempts require failed_step generation admission")
 		}
-		record, g, err := loadGeneration(ctx, tx, job.CurrentGenerationID)
+		// 先验证不可变账本；历史/inspect 路径绝不获取共享 run/agent 锁
+		// 消费者可能正持有共享 run 并等待本终态生产者的 job 锁
+		// 只有下面真正申请执行的路径才在父 job 锁内验证当前 run/agent
+		record, g, err := loadGenerationRead(ctx, tx, job.CurrentGenerationID, !model.IsJobRunTerminal(job.Status))
 		if err != nil {
 			return err
 		}
@@ -265,7 +303,7 @@ func (r *JobRunRepo) ReconcileStepAttempt(ctx context.Context, request taskqueue
 			if request.Operation != "inspect" && (row.AttemptAdmissionRequest != encoded || row.AttemptAdmissionRequestDigest != request.RequestDigest) {
 				return fmt.Errorf("step admission request was already committed differently")
 			}
-			allowed := request.Operation != "inspect" && ai == chain.current && !model.IsJobRunTerminal(row.Status) && validateStepAttemptLive(ctx, tx, &job, record, g, admission, false) == nil
+			allowed := request.Operation != "inspect" && ai == chain.current && !model.IsJobRunTerminal(row.Status) && !model.IsJobRunTerminal(job.Status) && validateStepAttemptLive(ctx, tx, &job, record, g, admission, false) == nil && validateStepAttemptCommit(ctx, tx, &job, admission, request.Boundary) == nil
 			for later := ci + 1; later < len(chains); later++ {
 				if chains[later].current >= 0 {
 					allowed = false
@@ -281,6 +319,9 @@ func (r *JobRunRepo) ReconcileStepAttempt(ctx context.Context, request taskqueue
 			return err
 		}
 		if err := validateGenerationInputs(&job, request.Scope.InputManifestDigest, false); err != nil {
+			return err
+		}
+		if err := validateRetryApprovalExecution(ctx, tx, &job, true); err != nil {
 			return err
 		}
 		if record.State != "active" && record.State != "preparing" {
@@ -333,6 +374,13 @@ func (r *JobRunRepo) ReconcileStepAttempt(ctx context.Context, request taskqueue
 		if deadline > 0 && expires > deadline {
 			expires = deadline
 		}
+		approval, _, err := validateRetryApprovalBinding(ctx, tx, &job)
+		if err != nil {
+			return err
+		}
+		if approval != nil && expires > approval.ExpiresAt.UnixMilli() {
+			expires = approval.ExpiresAt.UnixMilli()
+		}
 		if expires <= notBefore {
 			return fmt.Errorf("original deadline or boundary expires before retry can begin")
 		}
@@ -346,6 +394,9 @@ func (r *JobRunRepo) ReconcileStepAttempt(ctx context.Context, request taskqueue
 			return err
 		}
 		if err := reportedStatusResult(tx.Model(&model.StepRun{}).Where("step_run_id = ? AND job_run_id = ? AND status = ? AND claim_id = ? AND terminal_report_digest = ? AND cancellation_claim_id = ?", row.StepRunID, job.JobRunID, row.Status, "", "", "").Where("attempt_admission_request = ? AND attempt_admission_request_digest = ? AND attempt_admission = ?", "", "", "").Updates(map[string]any{"attempt_admission_request": encoded, "attempt_admission_request_digest": request.RequestDigest, "attempt_admission": body, "updated_at": time.Now()})); err != nil {
+			return err
+		}
+		if err := validateStepAttemptCommit(ctx, tx, &job, admission, request.Boundary); err != nil {
 			return err
 		}
 		result = &taskqueue.StepAttemptResult{Admission: admission, ExecutionAllowed: true}
@@ -511,6 +562,25 @@ func validateFailedStepArtifact(ctx context.Context, tx *gorm.DB, job *model.Job
 	admission := chain.admissions[ai]
 	if admission == nil || row.Status != model.JobRunStatusSuccess || artifactutil.Digest(row.TerminalReportDigest) != nil || row.ClaimID != admission.Scope.StepClaimID || row.GenerationID != g.GenerationID || row.GenerationBindingDigest != g.BindingDigest || row.Uses != "builtin:artifacts" || row.Action != "upload" {
 		return fmt.Errorf("artifact requires exact successful admitted upload receipt")
+	}
+	return nil
+}
+
+// 写入之后重新检查不可续期的启动界限，过期必须回滚而不是留下可重放的新准入
+func validateStepAttemptCommit(ctx context.Context, tx *gorm.DB, job *model.JobRun, admission *taskqueue.StepAttemptAdmission, boundary *taskqueue.PausedStepBoundary) error {
+	if err := validateRetryApprovalCommit(ctx, tx, job, model.JobRunStatusRunning); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	now := time.Now().UnixMilli()
+	deadline, err := stepAttemptDeadline(job)
+	if err != nil {
+		return err
+	}
+	if admission == nil || now >= admission.ExpiresUnixMilli || (deadline > 0 && now >= deadline) || (boundary != nil && now >= boundary.ExpiresUnixMilli) {
+		return fmt.Errorf("step admission start bound expired during commit")
 	}
 	return nil
 }

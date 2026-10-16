@@ -82,8 +82,8 @@ func NewJobRetryPlan(payload *JobRunTaskPayload) (*JobRetryPlan, error) {
 		return nil, fmt.Errorf("runtime retry payload is required")
 	}
 	if payload.RetryApprovalRequired {
-		if payload.Retry == nil || payload.Retry.Mode != "whole_job" {
-			return nil, fmt.Errorf("durable approval supports only whole_job retry")
+		if ValidateContainerRetryPolicy(payload.Retry) != nil {
+			return nil, fmt.Errorf("durable approval requires an exact supported retry mode")
 		}
 		if payload.RetryApprovalTimeoutSeconds < 1 || payload.RetryApprovalTimeoutSeconds > 3600 {
 			return nil, fmt.Errorf("retry approval requires a bounded trusted timeout")
@@ -143,8 +143,8 @@ func (p *JobRetryPlan) Canonical() (string, error) {
 		return "", fmt.Errorf("invalid retry plan")
 	}
 	if p.RetryApprovalRequired {
-		if p.Version != 1 || p.Policy == nil || p.Policy.Mode != "whole_job" {
-			return "", fmt.Errorf("durable approval supports only whole_job v1 plan")
+		if p.Policy == nil || (p.Version != 1 || p.Policy.Mode != "whole_job") && (p.Version != 2 || p.Policy.Mode != "failed_step") {
+			return "", fmt.Errorf("durable approval requires an exact version and mode tuple")
 		}
 		if p.RetryApprovalTimeoutSeconds < 1 || p.RetryApprovalTimeoutSeconds > 3600 {
 			return "", fmt.Errorf("retry approval plan requires bounded timeout")

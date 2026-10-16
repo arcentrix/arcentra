@@ -89,8 +89,8 @@ func (s *ApprovalService) validateDeploymentDecision(ctx context.Context, value 
 	if value == nil {
 		return repo.ErrApprovalInvalid
 	}
-	if value.BindingKind == retryapproval.Kind || value.RetryJobRunID != nil || value.Plugin == retryapproval.Plugin {
-		if value.BindingKind != retryapproval.Kind || value.RetryJobRunID == nil || value.DeploymentReleaseID != nil || value.Plugin != retryapproval.Plugin {
+	if (value.BindingKind == retryapproval.Kind || value.BindingKind == retryapproval.FailedStepKind) || value.RetryJobRunID != nil || value.Plugin == retryapproval.Plugin {
+		if (value.BindingKind != retryapproval.Kind && value.BindingKind != retryapproval.FailedStepKind) || value.RetryJobRunID == nil || value.DeploymentReleaseID != nil || value.Plugin != retryapproval.Plugin {
 			return repo.ErrApprovalInvalid
 		}
 		return s.validateRetryDecision(ctx, value, actor, decision)

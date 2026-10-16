@@ -97,7 +97,7 @@ func offlineJobValidation(ctx context.Context, conf *config.AgentConfig, payload
 		return nil, nil
 	}
 	request := payload.Runtime
-	structuralPolicy := taskpayload.OfflineRuntimePolicy{Enabled: true, AllowWholeJobRetry: true, AllowWholeJobRetryApproval: true, AllowFailedStepRetry: true, AllowedImages: []string{request.Image}, MaxCPU: request.Resources.CPU, MaxMemory: request.Resources.Memory}
+	structuralPolicy := taskpayload.OfflineRuntimePolicy{Enabled: true, AllowWholeJobRetry: true, AllowWholeJobRetryApproval: true, AllowFailedStepRetry: true, AllowFailedStepRetryApproval: true, AllowedImages: []string{request.Image}, MaxCPU: request.Resources.CPU, MaxMemory: request.Resources.Memory}
 	if err := taskpayload.ValidateJobRuntime(payload, structuralPolicy); err != nil {
 		return nil, err
 	}
@@ -114,8 +114,11 @@ func offlineJobValidation(ctx context.Context, conf *config.AgentConfig, payload
 	if err := taskpayload.ValidateRuntimeRetry(payload.Retry, conf.Agent.Sandbox.Containerd.Policy); err != nil {
 		return fmt.Errorf("offline runtime retry denied by current Agent policy"), nil
 	}
-	if payload.RetryApprovalRequired && !conf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetryApproval {
+	if payload.RetryApprovalRequired && !taskpayload.AllowsRetryApproval(payload.Retry, conf.Agent.Sandbox.Containerd.Policy) {
 		return fmt.Errorf("retry approval denied by current Agent policy"), nil
+	}
+	if payload.RetryApprovalRequired && payload.Retry != nil && payload.Retry.Mode == "failed_step" && !failedStepApprovalExecutionReady(ctx, conf, payload) {
+		return fmt.Errorf("failed-step retry approval has not passed acceptance"), nil
 	}
 	return nil, nil
 }

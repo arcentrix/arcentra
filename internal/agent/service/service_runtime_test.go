@@ -2,6 +2,7 @@ package service
 
 import (
 	"github.com/arcentrix/arcentra/internal/agent/config"
+	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"testing"
 )
 
@@ -82,5 +83,37 @@ func TestFailedStepCapabilityRequiresOperatorAndBothReadinessProbes(t *testing.T
 	conf.Agent.Mode = "baremetal"
 	if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryV1 {
 		t.Fatal("baremetal mode advertised live container retry")
+	}
+}
+
+func TestFailedStepApprovalCapabilityRemainsBehindIndependentAcceptance(t *testing.T) {
+	conf := &config.AgentConfig{Agent: config.AgentInfo{Mode: "sandbox"}}
+	service := NewAgentServiceImpl(conf, nil, nil)
+	service.SetOfflineRuntimeReadiness(func() bool { return true })
+	service.SetFailedStepRetryReadiness(func() bool { return true })
+	conf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetry = true
+	conf.Agent.Sandbox.Containerd.Policy.AllowWholeJobRetryApproval = true
+	conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry = true
+	if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryApprovalV1 {
+		t.Fatal("conjunction of old flags advertised new capability")
+	}
+	conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetryApproval = true
+	if got := service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryApprovalV1; got != taskpayload.FailedStepRetryApprovalAccepted {
+		t.Fatalf("combination acceptance readiness=%t", got)
+	}
+	for _, missing := range []string{"offline", "live-step", "base-policy", "approval-policy", "baremetal"} {
+		t.Run(missing, func(t *testing.T) {
+			service.SetOfflineRuntimeReadiness(func() bool { return missing != "offline" })
+			service.SetFailedStepRetryReadiness(func() bool { return missing != "live-step" })
+			conf.Agent.Mode = "sandbox"
+			conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetry = missing != "base-policy"
+			conf.Agent.Sandbox.Containerd.Policy.AllowFailedStepRetryApproval = missing != "approval-policy"
+			if missing == "baremetal" {
+				conf.Agent.Mode = "baremetal"
+			}
+			if service.runtimeCapabilitiesLocked().ContainerdFailedStepRetryApprovalV1 {
+				t.Fatal("missing prerequisite advertised approval capability")
+			}
+		})
 	}
 }

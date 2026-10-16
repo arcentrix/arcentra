@@ -19,7 +19,8 @@ func (e *Process) ConfigureContainerAcceptancePolicy(policy taskqueue.OfflineRun
 	if os.Getenv("ARCENTRA_CONTAINERD_ACCEPTANCE") != "1" || os.Getenv("ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE") != "1" {
 		return fmt.Errorf("explicit dedicated container acceptance authorization is required")
 	}
-	if (taskqueue.OfflineRuntimeAccepted && (!policy.AllowFailedStepRetry || taskqueue.FailedStepRuntimeAccepted)) || !policy.Enabled || len(policy.AllowedImages) != 1 || policy.AllowedImages[0] != os.Getenv("ARCENTRA_SANDBOX_TEST_IMAGE") {
+	candidateRequired := !taskqueue.OfflineRuntimeAccepted || (policy.AllowFailedStepRetry && !taskqueue.FailedStepRuntimeAccepted) || (policy.AllowFailedStepRetry && policy.AllowFailedStepRetryApproval && !taskqueue.FailedStepRetryApprovalAccepted)
+	if !candidateRequired || !policy.Enabled || len(policy.AllowedImages) != 1 || policy.AllowedImages[0] != os.Getenv("ARCENTRA_SANDBOX_TEST_IMAGE") {
 		return fmt.Errorf("acceptance injection is restricted to the gated single-image test profile")
 	}
 	if err := policy.Validate(); err != nil {

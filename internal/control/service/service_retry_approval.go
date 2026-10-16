@@ -63,7 +63,7 @@ func (s *ApprovalService) RetryReview(ctx context.Context, value *model.Approval
 	if value.BindingKind == "" && value.RetryJobRunID == nil && value.Plugin != retryapproval.Plugin {
 		return nil, nil
 	}
-	if value.BindingKind != retryapproval.Kind || value.RetryJobRunID == nil || value.DeploymentReleaseID != nil || value.Plugin != retryapproval.Plugin {
+	if (value.BindingKind != retryapproval.Kind && value.BindingKind != retryapproval.FailedStepKind) || value.RetryJobRunID == nil || value.DeploymentReleaseID != nil || value.Plugin != retryapproval.Plugin {
 		return nil, repo.ErrApprovalInvalid
 	}
 	reader, ok := s.approvalRepo.(interface {
@@ -72,5 +72,12 @@ func (s *ApprovalService) RetryReview(ctx context.Context, value *model.Approval
 	if !ok {
 		return nil, fmt.Errorf("retry review unavailable")
 	}
-	return reader.ReadRetryApproval(ctx, value.ApprovalID)
+	review, err := reader.ReadRetryApproval(ctx, value.ApprovalID)
+	if err != nil {
+		return nil, err
+	}
+	if review == nil || review.Evidence == nil || review.ApprovalID != value.ApprovalID || review.RetryJobRunID != *value.RetryJobRunID || review.EvidenceHash != value.EvidenceHash || review.Evidence.Kind != value.BindingKind || retryapproval.ValidateKindPlan(value.BindingKind, &review.Evidence.RetryPlan) != nil {
+		return nil, repo.ErrApprovalInvalid
+	}
+	return review, nil
 }

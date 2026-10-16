@@ -3,8 +3,6 @@ package taskqueue
 import (
 	"strings"
 	"testing"
-
-	"github.com/bytedance/sonic"
 )
 
 func conservativeMergePayload(t *testing.T, mode string, gated bool) (*JobRunTaskPayload, OfflineRuntimePolicy) {
@@ -31,44 +29,56 @@ func conservativeMergePayload(t *testing.T, mode string, gated bool) (*JobRunTas
 	return p, policy
 }
 
-func TestConservativeMergeRejectsApprovalBearingFailedStepContracts(t *testing.T) {
+func TestFailedStepApprovalRequiresIndependentPolicyAndBoundedPlan(t *testing.T) {
 	for _, budget := range []int64{0, 1, 300, 3600, 3601} {
 		p, policy := conservativeMergePayload(t, "failed_step", false)
 		p.RetryApprovalRequired = true
 		p.RetryApprovalTimeoutSeconds = budget
-		if _, err := NewJobRetryPlan(p); err == nil {
-			t.Fatalf("constructor accepted approval-bearing failed_step with budget %d", budget)
+		plan, err := NewJobRetryPlan(p)
+		if budget < 1 || budget > 3600 {
+			if err == nil {
+				t.Fatal("unbounded approval plan")
+			}
+			continue
 		}
-		if err := ValidateJobRuntime(p, policy); err == nil {
-			t.Fatalf("runtime accepted approval-bearing failed_step with budget %d", budget)
-		}
-		if err := ValidateJobRetryPlan(p); err == nil {
-			t.Fatalf("full plan validation accepted approval-bearing failed_step with budget %d", budget)
-		}
-		p.RetryPlan.RetryApprovalRequired = true
-		p.RetryPlan.RetryApprovalTimeoutSeconds = budget
-		if _, err := p.RetryPlan.Canonical(); err == nil {
-			t.Fatalf("canonical plan accepted approval-bearing failed_step with budget %d", budget)
-		}
-		encoded, err := sonic.MarshalString(p.RetryPlan)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := ParseJobRetryPlan(encoded); err == nil {
-			t.Fatalf("parser accepted approval-bearing failed_step with budget %d", budget)
+		p.RetryPlan = plan
+		p.RetryPlanDigest, err = plan.Digest(p.PipelineID, p.PipelineRunID, p.JobRunID, p.AgentID, p.Runtime.BindingDigest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ValidateJobRuntime(p, policy) == nil {
+			t.Fatal("old flags granted new approval mode")
+		}
+		policy.AllowFailedStepRetryApproval = true
+		if err := ValidateJobRuntime(p, policy); err != nil {
+			t.Fatal(err)
+		}
+		if got := policy.ValidateProduction() == nil; got != FailedStepRetryApprovalAccepted {
+			t.Fatalf("production policy acceptance=%t want=%t", got, FailedStepRetryApprovalAccepted)
+		}
+		canonical, err := plan.Canonical()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ParseJobRetryPlan(canonical); err != nil {
+			t.Fatal(err)
+		}
+		p.RetryApprovalRequired = false
+		p.RetryApprovalTimeoutSeconds = 0
+		if ValidateJobRuntime(p, policy) == nil {
+			t.Fatal("dropped approval marker retained authority")
 		}
 	}
-	p, policy := conservativeMergePayload(t, "failed_step", false)
+	if (OfflineRuntimePolicy{}).AllowFailedStepRetryApproval {
+		t.Fatal("new operator permission must remain default off")
+	}
+	p, _ := conservativeMergePayload(t, "failed_step", false)
 	p.RetryApprovalTimeoutSeconds = 300
-	p.RetryPlan.RetryApprovalTimeoutSeconds = 300
 	if _, err := NewJobRetryPlan(p); err == nil {
-		t.Fatal("ungated failed_step accepted orphan approval budget")
-	}
-	if _, err := p.RetryPlan.Canonical(); err == nil {
-		t.Fatal("ungated failed_step plan accepted orphan approval budget")
-	}
-	if err := ValidateJobRuntime(p, policy); err == nil {
-		t.Fatal("ungated failed_step runtime accepted orphan approval budget")
+		t.Fatal("orphan approval budget")
 	}
 }
 

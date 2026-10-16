@@ -62,6 +62,11 @@ func retryApprovalAuthorizer(tx *gorm.DB) (RetryApprovalAuthorizer, error) {
 }
 
 // 执行锁始终先锁 job，再锁 run/agent/generation 和 approval
+// failed_step CAS 在 job/generation 后按 step_index/attempt 锁定完整账本
+// 历史或 inspect 回执不取共享 run/agent 锁；仅活动执行路径随后锁 run/agent/approval
+// 输入生产者校验先取 pipeline/project，再取注册制品、生产者 job/step 锁
+// 共享 run/agent 与生产者 job 的跨作业反向等待仍可能触发数据库死锁回滚
+// 因此这里仅保证同作业线性化及当前读取，不宣称整个授权图具有全局无环锁序
 // 权限锁固定为 pipeline -> project -> 排序的全部用户 -> 全部成员关系 -> 团队
 // 此后才进入统一的 permission -> binding -> role -> grant 当前读取
 // 决策与取消必须先锁 job；部署审批仍保留独立的 release-first 路径
@@ -244,6 +249,9 @@ func (r *retryApprovalRoles) BatchGet(ctx context.Context, ids []string) ([]mode
 }
 
 func retryApprovalContext(ctx context.Context, tx *gorm.DB, job *model.JobRun) (*retryapproval.RunContext, error) {
+	return retryApprovalContextRead(ctx, tx, job, true)
+}
+func retryApprovalContextRead(ctx context.Context, tx *gorm.DB, job *model.JobRun, lockRun bool) (*retryapproval.RunContext, error) {
 	var plan *taskqueue.JobRetryPlan
 	if job.RetryPlan != "" || job.RetryPlanDigest != "" {
 		var err error
@@ -258,7 +266,11 @@ func retryApprovalContext(ctx context.Context, tx *gorm.DB, job *model.JobRun) (
 		return nil, fmt.Errorf("required retry approval plan is missing")
 	}
 	var run model.PipelineRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("run_id", "pipeline_id", "triggered_by", "definition_commit_sha", "definition_path", "retry_approval_context", "retry_approval_context_digest").Where("run_id = ?", job.PipelineRunID).First(&run).Error; err != nil {
+	query := tx.WithContext(ctx)
+	if lockRun {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.Select("run_id", "pipeline_id", "triggered_by", "definition_commit_sha", "definition_path", "retry_approval_context", "retry_approval_context_digest").Where("run_id = ?", job.PipelineRunID).First(&run).Error; err != nil {
 		return nil, err
 	}
 	if run.RunID != job.PipelineRunID || run.PipelineID != job.PipelineID {
@@ -298,7 +310,12 @@ func retryApprovalRequired(ctx context.Context, tx *gorm.DB, job *model.JobRun) 
 }
 
 func validateRetryApprovalBinding(ctx context.Context, tx *gorm.DB, job *model.JobRun) (*model.ApprovalRequest, *retryapproval.Evidence, error) {
-	c, err := retryApprovalContext(ctx, tx, job)
+	return validateRetryApprovalBindingRead(ctx, tx, job, true)
+}
+
+// lockRun=false 仅用于不可执行的证据查看或已锁定终态投票回执
+func validateRetryApprovalBindingRead(ctx context.Context, tx *gorm.DB, job *model.JobRun, lockRun bool) (*model.ApprovalRequest, *retryapproval.Evidence, error) {
+	c, err := retryApprovalContextRead(ctx, tx, job, lockRun)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -312,12 +329,15 @@ func validateRetryApprovalBinding(ctx context.Context, tx *gorm.DB, job *model.J
 	if err != nil {
 		return nil, nil, err
 	}
-	if a.Version < 1 || a.BindingKind != retryapproval.Kind || a.RetryJobRunID == nil || *a.RetryJobRunID != job.JobRunID || a.DeploymentReleaseID != nil || a.ApprovalID != job.RetryApprovalID || a.EvidenceHash != job.RetryApprovalEvidenceHash || a.PipelineRunID != job.PipelineRunID || a.JobName != job.JobName || a.RequestedBy != c.ActorID || a.Plugin != retryapproval.Plugin || a.ExpiresAt == nil || a.StepName != "" || a.Environment != "" || a.CallbackURL != "" {
+	if a.Version < 1 || (a.BindingKind != retryapproval.Kind && a.BindingKind != retryapproval.FailedStepKind) || a.RetryJobRunID == nil || *a.RetryJobRunID != job.JobRunID || a.DeploymentReleaseID != nil || a.ApprovalID != job.RetryApprovalID || a.EvidenceHash != job.RetryApprovalEvidenceHash || a.PipelineRunID != job.PipelineRunID || a.JobName != job.JobName || a.RequestedBy != c.ActorID || a.Plugin != retryapproval.Plugin || a.ExpiresAt == nil || a.StepName != "" || a.Environment != "" || a.CallbackURL != "" {
 		return nil, nil, fmt.Errorf("retry approval backlinks changed")
 	}
 	e, err := retryapproval.ParseEvidence(a.EvidenceJSON)
 	if err != nil {
 		return nil, nil, err
+	}
+	if e.Kind != a.BindingKind || retryapproval.ValidateKindPlan(a.BindingKind, &e.RetryPlan) != nil {
+		return nil, nil, fmt.Errorf("retry approval kind and plan changed")
 	}
 	hash, err := e.Digest()
 	if err != nil || hash != a.EvidenceHash || e.ApprovalID != a.ApprovalID || e.Identity != generationIdentity(job) || e.JobName != job.JobName || e.RetryPlanDigest != job.RetryPlanDigest || e.InputManifestDigest != job.InputManifestDigest || e.ExpiresAtUnixMilli != a.ExpiresAt.UnixMilli() {
@@ -508,6 +528,11 @@ func (r *JobRunRepo) ReconcileJobRetryApproval(ctx context.Context, request retr
 		if err := validateGenerationInputs(&job, request.InputManifestDigest, false); err != nil {
 			return err
 		}
+		// 终态生产者的迟到审批 RPC 不能在持有 job 锁时等待共享 run
+		// 此协议不把已有启动回执作为新的执行权，终态直接拒绝
+		if model.IsJobRunTerminal(job.Status) {
+			return fmt.Errorf("terminal job cannot request retry approval startup")
+		}
 		if _, err := retryApprovalRequired(ctx, tx, &job); err != nil {
 			return err
 		}
@@ -670,7 +695,7 @@ func validateRetryApprovalCommit(ctx context.Context, tx *gorm.DB, job *model.Jo
 }
 
 func lockRetryApprovalJob(ctx context.Context, tx *gorm.DB, initial *model.ApprovalRequest) (*model.JobRun, error) {
-	if initial == nil || initial.BindingKind != retryapproval.Kind || initial.RetryJobRunID == nil || *initial.RetryJobRunID == "" || initial.DeploymentReleaseID != nil {
+	if initial == nil || (initial.BindingKind != retryapproval.Kind && initial.BindingKind != retryapproval.FailedStepKind) || initial.RetryJobRunID == nil || *initial.RetryJobRunID == "" || initial.DeploymentReleaseID != nil {
 		return nil, ErrApprovalInvalid
 	}
 	var job model.JobRun
@@ -695,7 +720,7 @@ func (r *ApprovalRepo) ReadRetryApproval(ctx context.Context, id string) (*retry
 		if err != nil {
 			return err
 		}
-		a, e, err := validateRetryApprovalBinding(ctx, tx, job)
+		a, e, err := validateRetryApprovalBindingRead(ctx, tx, job, false)
 		if err != nil {
 			return err
 		}
@@ -758,6 +783,11 @@ func (r *ApprovalRepo) ValidateRetryApprovalDecision(ctx context.Context, id, ac
 		if err != nil {
 			return err
 		}
+		historical, handled, err := retryApprovalTerminalVote(ctx, tx, job, initial, actor, decision)
+		if handled || err != nil {
+			_ = historical
+			return err
+		}
 		a, e, err := validateRetryApprovalBinding(ctx, tx, job)
 		if err != nil {
 			return err
@@ -778,6 +808,11 @@ func (r *ApprovalRepo) decideRetryApproval(ctx context.Context, initial *model.A
 	err := r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		job, err := lockRetryApprovalJob(ctx, tx, initial)
 		if err != nil {
+			return err
+		}
+		historical, handled, err := retryApprovalTerminalVote(ctx, tx, job, initial, actor, decision)
+		if handled || err != nil {
+			result = historical
 			return err
 		}
 		a, e, err := validateRetryApprovalBinding(ctx, tx, job)
@@ -864,4 +899,30 @@ func checkRetryApprovalAuthorizationExpiry(ctx context.Context, tx *gorm.DB) err
 		}
 	}
 	return nil
+}
+
+// 先锁定持久化终态再选择历史分支，任何请求字段均不能将新决策降级为回执
+func retryApprovalTerminalVote(ctx context.Context, tx *gorm.DB, job *model.JobRun, initial *model.ApprovalRequest, actor, decision string) (*model.ApprovalRequest, bool, error) {
+	a, err := lockApproval(tx.WithContext(ctx), initial.ApprovalID)
+	if err != nil {
+		return nil, true, err
+	}
+	if a.Status == model.ApprovalStatusPending {
+		return nil, false, nil
+	}
+	a, _, err = validateRetryApprovalBindingRead(ctx, tx, job, false)
+	if err != nil {
+		return nil, true, err
+	}
+	if a == nil {
+		return nil, true, ErrApprovalInvalid
+	}
+	replay, err := retryApprovalVoteReplay(ctx, tx, a, actor, decision)
+	if err != nil || replay {
+		return a, true, err
+	}
+	if a.Status == model.ApprovalStatusExpired || approvalDeadlinePassed(a) {
+		return a, true, ErrApprovalExpired
+	}
+	return a, true, ErrApprovalConflict
 }

@@ -227,3 +227,24 @@ func TestFailedStepCapabilityPreservesIndependentRuntimeReadiness(t *testing.T) 
 		}
 	}
 }
+
+func TestFailedStepApprovalCapabilityPersistenceRequiresLiveReadiness(t *testing.T) {
+	for _, live := range []bool{false, true} {
+		c := &agentv1.RuntimeCapabilities{ExecutionMode: taskqueue.RuntimeContainerdOfflineV1, ContainerdOfflineV1: true, ContainerdFailedStepRetryV1: live, ContainerdFailedStepRetryApprovalV1: true}
+		var got taskqueue.AgentRuntimeCapabilities
+		if err := sonic.Unmarshal(agentRuntimeCapabilities(c, "linux"), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.ContainerdFailedStepRetryApprovalV1 != live {
+			t.Fatal("combination readiness detached from live-step readiness")
+		}
+		// Reinitialize because omitempty absent fields do not clear an existing struct.
+		got = taskqueue.AgentRuntimeCapabilities{}
+		if err := sonic.Unmarshal(agentRuntimeCapabilities(c, "windows"), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.ContainerdFailedStepRetryApprovalV1 {
+			t.Fatal("non-linux advertised combination")
+		}
+	}
+}
