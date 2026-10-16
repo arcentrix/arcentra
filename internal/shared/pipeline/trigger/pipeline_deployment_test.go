@@ -24,7 +24,7 @@ func (r *deploymentCronPipelineRepo) CreateRun(context.Context, *model.PipelineR
 type deploymentCronProjectRepo struct{ repo.IProjectRepository }
 
 func (*deploymentCronProjectRepo) Get(context.Context, string) (*model.Project, error) {
-	return &model.Project{ProjectID: "project"}, nil
+	return &model.Project{ProjectID: "project", IsEnabled: 1, Status: model.ProjectStatusActive}, nil
 }
 func TestCronRefusesDeploymentBeforeCreatingPendingRun(t *testing.T) {
 	for _, triggers := range []string{`[]`, `[{"type":"cron","options":{"expression":"* * * * *"}}]`} {

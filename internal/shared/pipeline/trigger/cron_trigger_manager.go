@@ -24,10 +24,12 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/shared/deployment"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/admission"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/cron"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
+	"github.com/arcentrix/arcentra/pkg/retryapproval"
 )
 
 // IPipelineEngine abstracts the process to avoid circular imports.
@@ -80,14 +82,14 @@ func (m *CronTriggerManager) SyncAll(ctx context.Context) {
 		PageSize: 500,
 	})
 	if err != nil {
-		log.Warnw("cron trigger sync: failed to list pipelines", "error", err)
+		log.Warnw("cron trigger sync: failed to list pipelines")
 		return
 	}
 
 	wanted := make(map[string]string) // pipelineID -> expression
 
 	for _, p := range pipelines {
-		if p == nil || p.IsEnabled != 1 {
+		if p == nil || p.IsEnabled != 1 || p.IsDeleted != 0 {
 			continue
 		}
 		expr := m.extractCronExpression(ctx, p)
@@ -117,7 +119,7 @@ func (m *CronTriggerManager) Register(pipelineID, expression string) error {
 		return fmt.Errorf("register cron for pipeline %s: %w", pipelineID, err)
 	}
 	m.registered[pipelineID] = expression
-	log.Infow("registered pipeline cron trigger", "pipelineId", pipelineID, "expression", expression)
+	log.Infow("registered pipeline cron trigger", "pipelineId", pipelineID)
 	return nil
 }
 
@@ -157,14 +159,14 @@ func (m *CronTriggerManager) reconcile(wanted map[string]string) {
 			_ = m.scheduler.Remove(cronEntryName(pid))
 		}
 		if err := m.scheduler.AddFunc(expr, m.makeTriggerFunc(pid), cronEntryName(pid)); err != nil {
-			log.Warnw("cron trigger register failed", "pipelineId", pid, "expression", expr, "error", err)
+			log.Warnw("cron trigger register failed", "pipelineId", pid)
 			continue
 		}
 		m.registered[pid] = expr
 		if ok {
-			log.Infow("cron trigger updated", "pipelineId", pid, "expression", expr)
+			log.Infow("cron trigger updated", "pipelineId", pid)
 		} else {
-			log.Infow("cron trigger registered", "pipelineId", pid, "expression", expr)
+			log.Infow("cron trigger registered", "pipelineId", pid)
 		}
 	}
 }
@@ -177,29 +179,33 @@ func (m *CronTriggerManager) makeTriggerFunc(pipelineID string) func() {
 		defer cancel()
 
 		pipeline, err := m.pipelineRepo.Get(ctx, pipelineID)
-		if err != nil || pipeline == nil || pipeline.IsEnabled != 1 {
-			log.Warnw("cron trigger: pipeline unavailable", "pipelineId", pipelineID, "error", err)
+		if err != nil || pipeline == nil || pipeline.IsEnabled != 1 || pipeline.IsDeleted != 0 {
+			log.Warnw("cron trigger: pipeline unavailable", "pipelineId", pipelineID)
 			return
 		}
 
 		project, err := m.projectRepo.Get(ctx, pipeline.ProjectID)
-		if err != nil || project == nil {
-			log.Warnw("cron trigger: project unavailable", "pipelineId", pipelineID, "error", err)
+		if err != nil || project == nil || project.IsEnabled != 1 || project.Status != model.ProjectStatusActive {
+			log.Warnw("cron trigger: project unavailable", "pipelineId", pipelineID)
 			return
 		}
 
 		content, headSha, err := m.loader(ctx, pipeline, project)
 		if err != nil {
-			log.Warnw("cron trigger: load definition failed", "pipelineId", pipelineID, "error", err)
+			log.Warnw("cron trigger: load definition failed", "pipelineId", pipelineID)
 			return
 		}
 
 		parsedSpec, err := spec.ParseContentToProto(content, pipelinev1.SpecFormat_SPEC_FORMAT_UNSPECIFIED)
 		if err != nil {
-			log.Warnw("cron trigger: parse spec failed", "pipelineId", pipelineID, "error", err)
+			log.Warnw("cron trigger: parse spec failed", "pipelineId", pipelineID)
 			return
 		}
 
+		if requiresRetryApproval(parsedSpec) {
+			log.Warnw("cron trigger refused: retry approval requires verified manual requester", "pipelineId", pipelineID)
+			return
+		}
 		if plan, err := deployment.DecodePipelinePlan(parsedSpec); err != nil || plan != nil {
 			log.Warnw("cron trigger refused: deployment-bearing pipelines require verified manual consent", "pipelineId", pipelineID)
 			return
@@ -207,7 +213,11 @@ func (m *CronTriggerManager) makeTriggerFunc(pipelineID string) func() {
 		fireTS := time.Now().UTC().Truncate(time.Minute).Format("200601021504")
 		requestID := fmt.Sprintf("cron:%s:%s", pipelineID, fireTS)
 
-		existing, _ := m.pipelineRepo.GetRunByRequestID(ctx, pipelineID, requestID)
+		existing, err := m.pipelineRepo.GetRunByRequestID(ctx, pipelineID, requestID)
+		if err != nil {
+			log.Warnw("cron trigger: request lookup failed", "pipelineId", pipelineID)
+			return
+		}
 		if existing != nil {
 			return
 		}
@@ -225,12 +235,16 @@ func (m *CronTriggerManager) makeTriggerFunc(pipelineID string) func() {
 			TriggeredBy:         "cron",
 		}
 		if err := m.pipelineRepo.CreateRun(ctx, run); err != nil {
-			log.Warnw("cron trigger: create run failed", "pipelineId", pipelineID, "error", err)
+			log.Warnw("cron trigger: create run failed", "pipelineId", pipelineID)
 			return
 		}
 
 		if err := m.engine.Submit(run, parsedSpec); err != nil {
-			log.Warnw("cron trigger: process submit failed", "pipelineId", pipelineID, "runId", run.RunID, "error", err)
+			outcome := "unknown"
+			if admission.IsRejected(err) {
+				outcome = "rejected-before-claim"
+			}
+			log.Warnw("cron trigger: process submit failed", "pipelineId", pipelineID, "runId", run.RunID, "outcome", outcome)
 			return
 		}
 
@@ -242,22 +256,25 @@ func (m *CronTriggerManager) makeTriggerFunc(pipelineID string) func() {
 // cron expression found in its pipeline-level triggers.
 func (m *CronTriggerManager) extractCronExpression(ctx context.Context, p *model.Pipeline) string {
 	project, err := m.projectRepo.Get(ctx, p.ProjectID)
-	if err != nil || project == nil {
+	if err != nil || project == nil || project.IsEnabled != 1 || project.Status != model.ProjectStatusActive {
 		return ""
 	}
 
 	content, _, err := m.loader(ctx, p, project)
 	if err != nil {
-		log.Debugw("cron trigger: skip pipeline (load failed)", "pipelineId", p.PipelineID, "error", err)
+		log.Debugw("cron trigger: skip pipeline (load failed)", "pipelineId", p.PipelineID)
 		return ""
 	}
 
 	parsed, err := spec.ParseContentToProto(content, pipelinev1.SpecFormat_SPEC_FORMAT_UNSPECIFIED)
 	if err != nil {
-		log.Debugw("cron trigger: skip pipeline (parse failed)", "pipelineId", p.PipelineID, "error", err)
+		log.Debugw("cron trigger: skip pipeline (parse failed)", "pipelineId", p.PipelineID)
 		return ""
 	}
 
+	if requiresRetryApproval(parsed) {
+		return ""
+	}
 	if plan, err := deployment.DecodePipelinePlan(parsed); err != nil || plan != nil {
 		return ""
 	}
@@ -270,4 +287,13 @@ func (m *CronTriggerManager) extractCronExpression(ctx context.Context, p *model
 
 func cronEntryName(pipelineID string) string {
 	return "pipeline-cron:" + pipelineID
+}
+
+func requiresRetryApproval(parsed *spec.Pipeline) bool {
+	for _, job := range parsed.Jobs {
+		if job != nil && job.Approval != nil && job.Approval.Plugin == retryapproval.Plugin {
+			return true
+		}
+	}
+	return false
 }

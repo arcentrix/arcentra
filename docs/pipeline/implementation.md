@@ -129,6 +129,8 @@ The commands above are instructions, not a passing result for the current offlin
 - Delay-queue scheduling outside the immediate pipeline path has not been comprehensively validated under broker/process failure.
 - The frontend work covers the requested project/pipeline/build/agent integration. Other product areas that were already prototypes are not certified complete by this change.
 
+See [automatic-trigger admission](automatic-trigger-admission.md) for cron/webhook rejection, durable acceptance and unresolved-outcome boundaries. SCM polling dispatch remains a separate incomplete path.
+
 ## Interrupted execution recovery (explicit, offline only)
 
 The safe baseline is to fail interrupted work explicitly and start a new manual run. It is not transparent resumption or an exactly-once guarantee. Persisted claim IDs make a lost RUNNING RPC response retryable within the same Agent process; they do not authorize another process to take over a running attempt.
