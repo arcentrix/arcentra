@@ -75,6 +75,8 @@ All containers run as the non-root runner UID/GID with readonly rootfs, cap-drop
 ALL, no-new-privileges, no restart policy, bounded local logs, and private bounded
 /tmp. Control: 512 MiB/1 CPU/128 PIDs; Agent: 1536 MiB/2 CPU/256 PIDs; helpers:
 256 MiB/0.5 CPU/64 PIDs. At least 3 GiB available runner memory is required.
+Local logs explicitly use `max-size=8m`, `max-file=1`, and `compress=false`;
+Docker's local driver cannot combine its default compression with one retained file.
 Agent home/cache/tmp and build workspaces use its private state; Go module downloads
 are disabled. This is trusted baremetal execution **inside an application Agent
 container**, not containerd job isolation. The stock Agent image is not claimed to
@@ -127,10 +129,21 @@ unit-test pass is not proof of a healthy service or completed image-backed build
 The public `image-runtime-summary.json` is written beside the ownership file on
 normal completion, cleanup failure, and independent cleanup. It includes only exact
 run/attempt/SHA, stock-versus-test-derived image IDs, container roles/immutable IDs,
-and confirmed/unknown removal status. It contains no paths, arbitrary errors,
-configuration or credentials. Cleanup/evidence failure removes the successful build
+and confirmed/unknown removal status. First failures add validated static operation,
+phase, role, return-code and reason fields. Only the credential-free toolchain
+probe's start failure may include bounded fixed-vocabulary projections of daemon
+errors plus its hardcoded create contract; unknown text is redacted, and keyword
+features are diagnostic hints rather than a root-cause verdict. No raw daemon
+errors, private paths, configuration or credentials are included. Cleanup/evidence failure removes the successful build
 verification receipt and writes a failed overall result; browser success alone cannot
 stand in for confirmed runtime cleanup.
+
+Readiness GET probes tolerate transient connection resets/disconnects within the
+existing deadline, while checking container liveness before each probe. Only HTTP
+200 passes. Persistent transport failure or process exit fails; registration and
+other mutation requests are never retried by this handling. Two real loopback TCP
+regressions run only with the hosted workflow's explicit
+`ARCENTRA_TEST_LOOPBACK_PROBES=1` opt-in; ordinary local tests skip them.
 
 ## Hosted workflow budget and evidence
 
