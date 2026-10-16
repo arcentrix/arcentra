@@ -1,0 +1,39 @@
+namespace: stdlib-demo
+version: 1.0.0
+jobs:
+  - name: build
+    source:
+      type: git
+      repo: https://REPLACE-WITH-YOUR-APPROVED-REPOSITORY.invalid/stdlib-demo.git
+      branch: main
+    steps:
+      - name: toolchain
+        uses: shell
+        runOnAgent: true
+        timeout: 120s
+        args:
+          run: sh build.sh toolchain
+      - name: test
+        uses: shell
+        runOnAgent: true
+        timeout: 120s
+        args:
+          run: sh build.sh test
+      - name: build
+        uses: shell
+        runOnAgent: true
+        timeout: 120s
+        args:
+          run: sh build.sh build
+      - name: verify
+        uses: shell
+        runOnAgent: true
+        timeout: 120s
+        args:
+          run: sh build.sh verify
+      - name: publish
+        uses: builtin:artifacts
+        action: upload
+        runOnAgent: true
+        args:
+          paths: [stdlib-demo, manifest.json]

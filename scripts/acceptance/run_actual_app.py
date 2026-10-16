@@ -16,6 +16,7 @@ import re
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -30,8 +31,16 @@ AGENT_URL = "http://127.0.0.1:18081"
 REPO_URL = "git://127.0.0.1:19418/acceptance.git"
 USERNAME = "ci-admin"
 PASSWORD = "Ci-Only-Password-123!"
-ARTIFACT_NAME = "acceptance.txt"
-ARTIFACT_CONTENT = "arcentra-real-stack-acceptance\n"
+BUILD_CONTRACT = "stdlib-build-v1"
+GO_VERSION = "go1.25.6"
+ARTIFACT_NAME = "stdlib-demo"
+MANIFEST_NAME = "manifest.json"
+EXPECTED_OUTPUT = '{"message":"HELLO, ARCENTRA!","length":8}\n'
+FIXTURE_SOURCE = Path(__file__).resolve().parent / "fixtures/stdlib-build"
+COMPILE_ERROR = "\nvar _ = acceptanceCompileError\n"
+MAX_BINARY_BYTES = 32 * 1024 * 1024
+GO_ENV = {"GOTOOLCHAIN": "local", "GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off",
+          "GOENV": "off", "CGO_ENABLED": "0", "GOTELEMETRY": "off", "GOMAXPROCS": "2"}
 DEPENDENCIES = {
     "ARCENTRA_TEST_MYSQL_DSN": "root:ci-only-mysql-password@tcp(127.0.0.1:13306)/arcentra_acceptance?charset=utf8mb4&parseTime=True&loc=UTC",
     "ARCENTRA_TEST_KAFKA_BROKERS": "127.0.0.1:19092",
@@ -79,6 +88,13 @@ class Fixture:
         self.steps = []
         self.agent_id = ""
         self.commit = ""
+        self.failed_commit = ""
+        self.failed_run = None
+        self.successful_run = None
+        self.artifact_evidence = None
+        self.build_verified = False
+        self.coordination = root / "coordination"
+        self.coordination.mkdir(mode=0o700)
         self.env = child_environment(os.environ, root)
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirects())
 
@@ -194,17 +210,19 @@ class Fixture:
 
     def create_repository(self):
         source = self.root / "source"
+        copy_fixture_source(source)
         (source / ".arcentra").mkdir(parents=True)
-        (source / "acceptance-marker").write_text("trusted disposable acceptance fixture\n")
+        (source / "main.go").write_text((source / "main.go").read_text() + COMPILE_ERROR)
         (source / ".arcentra/pipeline.yaml").write_text(json.dumps(pipeline_spec(), indent=2) + "\n")
         self.run("git-init", ["git", "init", "--initial-branch=main", str(source)])
         self.run("git-add", ["git", "add", "."], source)
         self.run("git-commit", ["git", "-c", "user.name=Acceptance Fixture", "-c",
                                 "user.email=acceptance@example.invalid", "commit", "-m",
-                                "Trusted synthetic acceptance pipeline"], source)
+                                "Synthetic project with intentional compiler failure"], source)
         result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=source, env=self.env,
                                 capture_output=True, text=True, check=True, timeout=10)
         self.commit = result.stdout.strip()
+        self.failed_commit = self.commit
         repositories = self.root / "repositories"
         repositories.mkdir()
         self.run("git-bare", ["git", "clone", "--bare", str(source), str(repositories / "acceptance.git")])
@@ -217,12 +235,100 @@ class Fixture:
         self.wait_until("loopback Git source", reachable, daemon, timeout=20)
         self.note("Synthetic Git source is served read-only on loopback")
 
+    def run_snapshot(self, receipt, successful):
+        """Independently read scoped API evidence; never trust browser status claims."""
+        validate_run_receipt(receipt, self.commit)
+        base = f"/pipelines/{receipt['pipelineId']}/runs/{receipt['runId']}"
+        run = self.request(base)
+        jobs = self.request(base + "/jobs")
+        artifacts = self.request(f"/projects/{receipt['projectId']}/artifacts?" +
+                                 urllib.parse.urlencode({"runId": receipt["runId"], "pageSize": 100}))
+        validate_run_snapshot(receipt, run, jobs, artifacts, successful, self.agent_id)
+        logs = self.request(base + "/logs?limit=1000")
+        messages = "\n".join(entry.get("message", "") for entry in logs.get("entries", []))
+        expected = ["ACTUAL_PROJECT_TOOLCHAIN go1.25.6", "ACTUAL_PROJECT_TEST"]
+        if successful:
+            expected.extend(["ACTUAL_PROJECT_BUILD", "ACTUAL_PROJECT_BEHAVIOR", EXPECTED_OUTPUT.strip()])
+        else:
+            expected.append("undefined: acceptanceCompileError")
+        if any(marker not in messages for marker in expected):
+            raise RuntimeError("actual Agent logs lack required compiler/behavior evidence")
+        return artifacts["list"]
+
+    def fix_repository_after_failed_run(self):
+        receipt = read_private_json(self.coordination / "failed-run.json")
+        self.run_snapshot(receipt, successful=False)
+        self.failed_run = receipt
+        self.note("Actual Agent compiler failure persisted with failed test step and zero run artifacts")
+        source = self.root / "source"
+        (source / "main.go").write_bytes((FIXTURE_SOURCE / "main.go").read_bytes())
+        self.run("git-fix-add", ["git", "add", "main.go"], source)
+        self.run("git-fix-commit", ["git", "-c", "user.name=Acceptance Fixture", "-c",
+                                    "user.email=acceptance@example.invalid", "commit", "-m",
+                                    "Fix compiler error in synthetic project"], source)
+        result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=source, env=self.env,
+                                capture_output=True, text=True, check=True, timeout=10)
+        self.commit = result.stdout.strip()
+        if self.commit == self.failed_commit:
+            raise RuntimeError("source fix must create a distinct Git commit")
+        # This writes only the disposable local bare repository; the Git daemon
+        # remains read-only. No GitHub or other external remote is involved.
+        self.run("git-publish-fix", ["git", "push", str(self.root / "repositories/acceptance.git"),
+                                     "HEAD:refs/heads/main"], source)
+        atomic_json(self.coordination / "fixed-source.json", {"schemaVersion": 1, "sourceCommit": self.commit})
+        self.note("Corrected source committed after the failed run; browser must review the new full revision")
+
+    def verify_downloads(self):
+        receipt = read_private_json(self.coordination / "successful-run.json")
+        if not self.failed_run or any(receipt.get(key) != self.failed_run[key]
+                                      for key in ("projectId", "pipelineId")):
+            raise RuntimeError("successful run must use the original project and pipeline")
+        if receipt.get("runId") == self.failed_run["runId"]:
+            raise RuntimeError("source fix requires a new run, not mutation of the failed run")
+        artifacts = self.run_snapshot(receipt, successful=True)
+        downloads = self.coordination / "downloads"
+        info = downloads.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o077:
+            raise RuntimeError("browser downloads must be in the private fixture directory")
+        binary = read_private_bytes(downloads / ARTIFACT_NAME, MAX_BINARY_BYTES)
+        manifest_bytes = read_private_bytes(downloads / MANIFEST_NAME, 4096)
+        manifest = validate_manifest(manifest_bytes, binary, self.commit)
+        expected = {ARTIFACT_NAME: binary, MANIFEST_NAME: manifest_bytes}
+        for artifact in artifacts:
+            if artifact.get("sizeKnown") is not True or artifact.get("size") != len(expected[artifact["name"]]):
+                raise RuntimeError("artifact byte length differs from its persisted metadata")
+            artifact_id = safe_identifier(artifact.get("artifactId"))
+            url = BACKEND_URL + f"/api/v1/projects/{receipt['projectId']}/artifacts/{artifact_id}/download"
+            validate_http_url(url)
+            request = urllib.request.Request(url, headers={"Authorization": "Bearer " + self.token})
+            with self.http.open(request, timeout=30) as response:
+                data = response.read(MAX_BINARY_BYTES + 1)
+                if response.status != 200 or data != expected[artifact["name"]]:
+                    raise RuntimeError("browser bytes differ from independent authenticated artifact download")
+        # Only this reviewed, synthetic, current-run binary is executable. Never
+        # execute an arbitrary project artifact or a pathname supplied by an API.
+        verify_downloaded_program(binary, self.root, self.env)
+        # Re-read the original failed run after success, so a later publication
+        # cannot masquerade as a clean failure or contaminate the artifact filter.
+        current = self.commit
+        self.commit = self.failed_commit
+        try:
+            self.run_snapshot(self.failed_run, successful=False)
+        finally:
+            self.commit = current
+        self.successful_run = receipt
+        self.artifact_evidence = manifest
+        self.build_verified = True
+        self.note("Browser-downloaded binary independently matched API bytes, manifest, fixed commit and program behavior")
+
     def exercise(self):
+        verify_toolchain(self.env)
+        self.note("Preinstalled Go 1.25.6 verified in the actual sanitized Agent child environment")
         self.create_tls()
         jwt_secret = secrets.token_hex(32)
         self.redactions.append(jwt_secret)
         self.write_private("control.toml", control_config(self.root, jwt_secret))
-        self.write_private("plugins.toml", '[builtins.shell]\nshell = "/bin/sh"\ntimeout = 60\n'
+        self.write_private("plugins.toml", '[builtins.shell]\nshell = "/bin/sh"\ntimeout = 120\n'
                            '[plugins.git]\ngitPath = "git"\ntimeout = 60\nshallow = false\n')
         self.run("migrate", [self.args.cli_bin, "migrate", "--conf", str(self.root / "control.toml")])
         self.note("Real CLI migration completed; no account or product data seeded")
@@ -291,8 +397,12 @@ class Fixture:
         browser_env = self.env | {
             "ARCENTRA_REAL_STACK": "1", "ARCENTRA_ACCEPTANCE_BACKEND_URL": BACKEND_URL,
             "ARCENTRA_ACCEPTANCE_REPO_URL": REPO_URL, "ARCENTRA_ACCEPTANCE_ORG_ID": "ci-acceptance-org",
+            "ARCENTRA_ACCEPTANCE_CONTRACT": BUILD_CONTRACT,
             "ARCENTRA_ACCEPTANCE_ARTIFACT_NAME": ARTIFACT_NAME,
-            "ARCENTRA_ACCEPTANCE_ARTIFACT_CONTENT": ARTIFACT_CONTENT,
+            "ARCENTRA_ACCEPTANCE_MANIFEST_NAME": MANIFEST_NAME,
+            "ARCENTRA_ACCEPTANCE_GO_VERSION": GO_VERSION,
+            "ARCENTRA_ACCEPTANCE_EXPECTED_OUTPUT": EXPECTED_OUTPUT,
+            "ARCENTRA_ACCEPTANCE_COORDINATION_DIR": str(self.coordination),
             "ARCENTRA_ACCEPTANCE_BRANCH": "main",
             "ARCENTRA_ACCEPTANCE_DEFINITION_PATH": ".arcentra/pipeline.yaml",
             "ARCENTRA_ACCEPTANCE_COMMIT": self.commit,
@@ -300,12 +410,16 @@ class Fixture:
             "UI_TEST_OUTPUT_DIR": str(self.args.evidence_dir / "browser"),
         }
         browser = self.start("browser", self.args.browser_command, self.args.browser_cwd, browser_env)
-        self.wait_until("browser acceptance completion", lambda: browser.poll() is not None,
-                        timeout=360)
+        def browser_complete():
+            if not self.failed_run and (self.coordination / "failed-run.json").exists():
+                self.fix_repository_after_failed_run()
+            return browser.poll() is not None
+        self.wait_until("browser acceptance completion", browser_complete, timeout=600)
         if browser.returncode != 0:
             raise RuntimeError(f"browser acceptance exited {browser.returncode}; see sanitized evidence")
         if control.poll() is not None or agent.poll() is not None:
             raise RuntimeError("Control or Agent exited during browser acceptance")
+        self.verify_downloads()
         self.note("Browser create-project → create-pipeline → run → logs → artifact journey completed")
 
     def cleanup(self, error):
@@ -314,6 +428,9 @@ class Fixture:
         for _, handle in self.logs:
             handle.close()
         self.args.evidence_dir.mkdir(parents=True, exist_ok=True)
+        write_build_verification(self.args.evidence_dir / "browser/project-build-verification.json",
+                                 error, self.build_verified, self.failed_run, self.successful_run,
+                                 self.artifact_evidence)
         for path, _ in self.logs:
             # Save diagnostic logs only. Configs, CA private keys, identity store,
             # response credentials, workspace and raw logs die with TemporaryDirectory.
@@ -327,14 +444,226 @@ class Fixture:
         (self.args.evidence_dir / "actual-app-result.json").write_text(json.dumps({
             "status": "failed" if error else "passed", "steps": self.steps,
             "error": error, "agentId": self.agent_id, "sourceCommit": self.commit,
+            "contract": BUILD_CONTRACT, "failedSourceCommit": self.failed_commit,
+            "failedRun": self.failed_run, "successfulRun": self.successful_run,
+            "verifiedArtifact": self.artifact_evidence,
             "backend": BACKEND_URL, "repository": REPO_URL,
             "limitations": ["Organization creation is not implemented; current admin project API accepts a synthetic orgId.",
-                            "Trusted baremetal commands run with Agent host permissions on a disposable runner."],
+                            "Trusted baremetal commands run with Agent host permissions on a disposable runner.",
+                            "Module downloads are disabled; this does not prove host network isolation or container builds.",
+                            "Manifest is an unsigned integrity record, not a provenance attestation."],
         }, indent=2) + "\n")
 
 
 def encoded(value):
     return base64.b64encode(value.encode()).decode()
+
+
+def copy_fixture_source(destination):
+    """Copy an explicit source allowlist, never a locally cached build output."""
+    destination.mkdir(parents=True)
+    for name in ("go.mod", "main.go", "main_test.go", "build.sh", "verify.py", ".gitignore"):
+        (destination / name).write_bytes((FIXTURE_SOURCE / name).read_bytes())
+
+
+def verify_toolchain(env):
+    executable = shutil.which("go", path=env.get("PATH", ""))
+    if not executable:
+        raise RuntimeError("Go 1.25.6 must already be installed on the sanitized Agent PATH; no download is attempted")
+    result = subprocess.run([executable, "version"], env=env, capture_output=True, text=True, timeout=10, check=False)
+    if result.returncode != 0 or not re.fullmatch(r"go version go1\.25\.6 linux/(amd64|arm64)\n?", result.stdout):
+        raise RuntimeError("sanitized Agent environment requires the preinstalled Linux Go 1.25.6 toolchain")
+
+
+def atomic_json(path, value):
+    temporary = path.with_name(path.name + ".harness-tmp")
+    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w") as handle:
+        handle.write(json.dumps(value, indent=2) + "\n")
+    temporary.replace(path)
+
+
+def verify_downloaded_program(binary, root, env):
+    # Execute an exclusive private copy of the exact verified download bytes,
+    # never reopen a browser-writable download path after checking its digest.
+    # This is restricted to this reviewed fixture, not arbitrary user binaries.
+    with tempfile.TemporaryDirectory(prefix="verified-program-", dir=root) as directory:
+        executable = Path(directory) / ARTIFACT_NAME
+        descriptor = os.open(executable, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o500)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(binary)
+        result = subprocess.run([str(executable), "arcentra"], cwd=directory, env=env,
+                                capture_output=True, timeout=5, check=False)
+        invalid = subprocess.run([str(executable), "agent1"], cwd=directory, env=env,
+                                 capture_output=True, timeout=5, check=False)
+        if (result.returncode != 0 or result.stdout != EXPECTED_OUTPUT.encode() or result.stderr
+                or invalid.returncode != 2 or invalid.stdout or not invalid.stderr):
+            raise RuntimeError("browser-downloaded compiled program failed independent behavior verification")
+
+
+def public_build_verification(failed, success, manifest, verified):
+    """An explicit public evidence allowlist; never serialize arbitrary diagnostics."""
+    if verified is not True or not isinstance(manifest, dict):
+        raise ValueError("build verification has not completed")
+    for receipt in (failed, success):
+        if not isinstance(receipt, dict):
+            raise ValueError("both reviewed run receipts are required")
+        validate_run_receipt(receipt, receipt.get("sourceCommit", ""))
+    if (failed["sourceCommit"] == success["sourceCommit"] or failed["runId"] == success["runId"]
+            or any(failed[key] != success[key] for key in ("projectId", "pipelineId"))):
+        raise ValueError("build verification requires separate failed and fixed runs on the same pipeline")
+    expected_behavior = {"args": ["arcentra"], "stdout": EXPECTED_OUTPUT,
+                         "stdoutSha256": hashlib.sha256(EXPECTED_OUTPUT.encode()).hexdigest()}
+    binary = manifest.get("binary")
+    if (set(manifest) != {"schemaVersion", "sourceCommit", "goVersion", "binary", "behavior"}
+            or type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 1
+            or manifest["sourceCommit"] != success["sourceCommit"] or manifest["goVersion"] != GO_VERSION
+            or manifest["behavior"] != expected_behavior or not isinstance(binary, dict)
+            or set(binary) != {"name", "sizeBytes", "sha256"} or binary["name"] != ARTIFACT_NAME
+            or type(binary["sizeBytes"]) is not int or not 4 < binary["sizeBytes"] <= MAX_BINARY_BYTES
+            or not isinstance(binary["sha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", binary["sha256"])):
+        raise ValueError("public build evidence must match the fixed schema and expected fixture values")
+    return {
+        "contract": BUILD_CONTRACT, "status": "passed",
+        "sourceCommits": {"failed": failed["sourceCommit"], "fixed": success["sourceCommit"]},
+        "runs": {"failed": failed["runId"], "successful": success["runId"]},
+        "goVersion": GO_VERSION,
+        "binary": {key: binary[key] for key in ("name", "sizeBytes", "sha256")},
+        "behavior": expected_behavior,
+        "checks": {name: True for name in ("compilerFailure", "failedRunHasNoArtifacts", "newFixedCommit",
+                                            "agentTestAndBuild", "browserDownloadsMatchAPI",
+                                            "manifestMatchesDownload", "downloadedProgramBehavior")},
+    }
+
+
+def write_build_verification(path, error, verified, failed, success, manifest):
+    # A failed attempt must not leave a stale success record in a reused evidence
+    # directory. This exact generated filename is the only CI upload addition.
+    path.unlink(missing_ok=True)
+    if error or verified is not True:
+        return False
+    value = public_build_verification(failed, success, manifest, verified)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_json(path, value)
+    return True
+
+
+def read_private_bytes(path, limit):
+    # Fixed private fixture paths only. Reject symlinks/devices and unexpectedly
+    # large files before reading or granting execute permission to the binary.
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_mode & 0o077
+                or not 0 < info.st_size <= limit):
+            raise ValueError("expected a bounded private regular fixture file")
+    except BaseException:
+        os.close(descriptor)
+        raise
+    with os.fdopen(descriptor, "rb") as handle:
+        data = handle.read(limit + 1)
+        if len(data) != info.st_size:
+            raise ValueError("fixture file changed while reading")
+        return data
+
+
+def no_duplicate_keys(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON key in fixture evidence")
+        value[key] = item
+    return value
+
+
+def read_private_json(path):
+    return json.loads(read_private_bytes(path, 4096), object_pairs_hook=no_duplicate_keys)
+
+
+def safe_identifier(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
+        raise ValueError("invalid fixture API identifier")
+    return value
+
+
+def validate_run_receipt(receipt, expected_commit):
+    if not isinstance(receipt, dict) or set(receipt) != {
+            "schemaVersion", "projectId", "pipelineId", "runId", "sourceCommit"}:
+        raise ValueError("invalid browser run receipt fields")
+    if type(receipt["schemaVersion"]) is not int or receipt["schemaVersion"] != 1:
+        raise ValueError("unsupported browser run receipt version")
+    if not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", expected_commit) or receipt["sourceCommit"] != expected_commit:
+        raise ValueError("browser run receipt has the wrong full source commit")
+    for key in ("projectId", "pipelineId", "runId"):
+        safe_identifier(receipt[key])
+
+
+def validate_manifest(manifest_bytes, binary, expected_commit):
+    manifest = json.loads(manifest_bytes, object_pairs_hook=no_duplicate_keys)
+    expected = {
+        "schemaVersion": 1, "sourceCommit": expected_commit, "goVersion": GO_VERSION,
+        "binary": {"name": ARTIFACT_NAME, "sizeBytes": len(binary), "sha256": hashlib.sha256(binary).hexdigest()},
+        "behavior": {"args": ["arcentra"], "stdout": EXPECTED_OUTPUT,
+                     "stdoutSha256": hashlib.sha256(EXPECTED_OUTPUT.encode()).hexdigest()},
+    }
+    if (not isinstance(manifest, dict) or manifest != expected
+            or type(manifest.get("schemaVersion")) is not int
+            or not isinstance(manifest.get("binary"), dict)
+            or type(manifest["binary"].get("sizeBytes")) is not int
+            or not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", expected_commit)
+            or not 4 < len(binary) <= MAX_BINARY_BYTES or not binary.startswith(b"\x7fELF")):
+        raise ValueError("downloaded build manifest/binary does not match the independent fixture contract")
+    return manifest
+
+
+def validate_run_snapshot(receipt, run, jobs, artifacts, successful, agent_id):
+    commit = receipt["sourceCommit"]
+    expected_status = (3, "3", "success", "PIPELINE_STATUS_SUCCESS") if successful else (
+        4, "4", "failed", "PIPELINE_STATUS_FAILED")
+    if (run.get("runId") != receipt["runId"] or run.get("pipelineId") != receipt["pipelineId"]
+            or run.get("status") not in expected_status or run.get("commitSha") != commit
+            or run.get("definitionCommitSha") != commit or run.get("allowDeployments", False)):
+        raise ValueError("scoped actual run has wrong identity, status, revision or deployment permission")
+    if jobs.get("total") != 1 or not isinstance(jobs.get("list"), list) or len(jobs["list"]) != 1:
+        raise ValueError("expected exactly one actual Agent job")
+    job = jobs["list"][0]
+    if (job.get("pipelineId") != receipt["pipelineId"] or job.get("pipelineRunId") != receipt["runId"]
+            or job.get("agentId") != agent_id or job.get("status") != (4 if successful else 5)
+            or job.get("sourceExpectationCaptured") is not True
+            or job.get("sourceType") != "git" or job.get("sourceRepository") != REPO_URL
+            or job.get("sourceResolvedCommit") != commit or job.get("sourceProvenanceState") != "reported"):
+        raise ValueError("actual Agent job has wrong status or checkout evidence")
+    safe_identifier(job.get("jobRunId"))
+    steps = job.get("steps", [])
+    names = [step.get("name") for step in steps]
+    if names != ["toolchain", "test", "build", "verify", "publish"]:
+        raise ValueError("actual Agent job must report every expected build step in order")
+    for step in steps:
+        safe_identifier(step.get("stepRunId"))
+        if step.get("jobRunId") != job["jobRunId"] or step.get("retryMode") != "":
+            raise ValueError("build steps must belong to this new job without retry recovery")
+    if successful:
+        if any(step.get("status") != 4 for step in steps):
+            raise ValueError("actual build requires all steps to succeed")
+    elif (steps[0].get("status") != 4 or steps[1].get("status") != 5
+          or not isinstance(steps[1].get("exitCode"), int) or steps[1]["exitCode"] <= 0
+          or any(step.get("status") != 8 for step in steps[2:])):
+        raise ValueError("compiler failure must fail the test step and skip build/verify/publication")
+    values = artifacts.get("list")
+    if not isinstance(values, list) or artifacts.get("total") != len(values):
+        raise ValueError("artifact evidence must be a complete exact-run result")
+    if not successful:
+        if values:
+            raise ValueError("compiler-failed run must have zero artifacts")
+        return
+    if len(values) != 2 or {value.get("name") for value in values} != {ARTIFACT_NAME, MANIFEST_NAME}:
+        raise ValueError("successful build must publish only the binary and manifest")
+    for value in values:
+        if (value.get("projectId") != receipt["projectId"] or value.get("pipelineId") != receipt["pipelineId"]
+                or value.get("pipelineRunId") != receipt["runId"] or value.get("status") != "available"
+                or value.get("jobRunId") != job["jobRunId"] or value.get("stepRunId") != steps[-1]["stepRunId"]
+                or value.get("downloadAvailable") is not True):
+            raise ValueError("artifact scope or availability differs from the successful run")
 
 
 def child_environment(parent, root):
@@ -349,6 +678,7 @@ def child_environment(parent, root):
                 "AWS_EC2_METADATA_DISABLED": "true", "AWS_CONFIG_FILE": "/dev/null",
                 "AWS_SHARED_CREDENTIALS_FILE": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
                 "GIT_TERMINAL_PROMPT": "0"})
+    env.update(GO_ENV)
     # Honor the location where CI installed the browser without using its HOME
     # as the child HOME. CI should preferably set this variable explicitly.
     if "PLAYWRIGHT_BROWSERS_PATH" not in env:
@@ -440,7 +770,7 @@ id = ""
 name = "ci-acceptance-agent"
 interval = 5
 maxConcurrentJobs = 1
-jobTimeout = 120
+jobTimeout = 240
 workspaceDir = {json.dumps(str(root / 'workspaces'))}
 tempDir = {json.dumps(str(root / 'tmp'))}
 [agent.identityPersistence]
@@ -461,10 +791,10 @@ def pipeline_spec():
     return {"namespace": "acceptance", "version": "1.0.0", "jobs": [{
         "name": "build", "source": {"type": "git", "repo": REPO_URL, "branch": "main"},
         "steps": [
-            {"name": "produce", "uses": "shell", "runOnAgent": True,
-             "args": {"run": "test -f acceptance-marker; printf 'arcentra-real-stack-acceptance\\n' > acceptance.txt; printf 'arcentra-real-stack-acceptance\\n'"}},
+            *[{"name": stage, "uses": "shell", "runOnAgent": True, "timeout": "120s",
+               "args": {"run": f"sh build.sh {stage}"}} for stage in ("toolchain", "test", "build", "verify")],
             {"name": "publish", "uses": "builtin:artifacts", "action": "upload", "runOnAgent": True,
-             "args": {"paths": [ARTIFACT_NAME]}},
+             "args": {"paths": [ARTIFACT_NAME, MANIFEST_NAME]}},
         ],
     }]}
 
