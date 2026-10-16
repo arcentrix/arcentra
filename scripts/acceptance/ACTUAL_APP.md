@@ -143,12 +143,37 @@ Browser failure, process failure, timeout or an unmet contract produces a failed
 Implemented acceptance is not evidence that the real stack has passed; that claim
 requires the corresponding GitHub-hosted run and its successful receipt.
 
-At this candidate's implementation stage the workflow still pins the older
-frontend client. The new combination cannot pass until the reviewed frontend
-change is published and that immutable cross-repository SHA is updated through
-the authorized release process. No new actual-stack CI or browser result is
-claimed by the local tests below. See [the operator first-build runbook](FIRST_BUILD.md)
-for the bounded setup path; full organization onboarding is still separate.
+## Exact hosted project-build acceptance
+
+The candidate backend `4a9ff80ded3298209b1bd47e8213b7c24254b460`
+(tree `d91e4ba4509afe4cd8fec8aada30c26052e8cf85`) passed
+[ordinary CI 38892507952](https://github.com/arcentrix/arcentra/actions/runs/38892507952)
+with frontend pinned to `b3f303763998388856da5005d93424cc7a92d5be`.
+The real journey verified the independent read-only observer session, the actual
+Agent compiler failure with zero artifacts, a corrected full source commit and
+new run, tests/build, seven successful browser downloads, and independent API,
+manifest, digest and controlled execution checks. The original failed run remained
+failed. The actual-backend summary completed with zero recorded errors.
+
+[Artifact 12043780015](https://github.com/arcentrix/arcentra/actions/runs/38892507952/artifacts/12043780015)
+was independently downloaded and inspected (ten screenshots and two JSON files).
+Its archive SHA-256 is
+`ec294831427650b7d82e65b4b283a9786bff1c0ee9e541fd01dbcdc756e40d61`;
+`project-build-verification.json` SHA-256 is
+`5542ddea79ed4cc556f51c4450f6416e7319390529009b1041b236e98c275153`.
+No downloaded binary or authentication data was included in that public artifact.
+[Runtime regression 38892508155](https://github.com/arcentrix/arcentra/actions/runs/38892508155)
+also completed with 44 PASS records (including repetitions and subtests),
+with clean cleanup evidence.
+
+These are exact candidate results, recorded before final-document merge and main
+verification. They do not certify another tree, production rollout, containerized
+Go compilation, live Kubernetes release or external model calls. The Go build
+journey uses trusted baremetal execution with module downloads disabled; this is
+not host network isolation. Existing offline-container permissions remain off by
+default. Local tests below remain separate evidence. See
+[the operator first-build runbook](FIRST_BUILD.md) for setup; full organization
+onboarding is still separate.
 
 ## Offline checks
 
