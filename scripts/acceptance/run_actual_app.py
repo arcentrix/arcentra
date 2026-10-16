@@ -41,6 +41,17 @@ EXPECTED_OUTPUT = '{"message":"HELLO, ARCENTRA!","length":8}\n'
 FIXTURE_SOURCE = Path(__file__).resolve().parent / "fixtures/stdlib-build"
 COMPILE_ERROR = "\nvar _ = acceptanceCompileError\n"
 MAX_BINARY_BYTES = 32 * 1024 * 1024
+FIRST_BUILD_JOURNEY = "two-phase-separate-browser-contexts"
+FIRST_BUILD_PREFLIGHT_STEPS = [
+    "preflight-login-via-real-api",
+    "preflight-missing-configuration-no-agent-no-scope-manual-scope-allowed",
+    "preflight-explicit-status-refresh",
+    "preflight-no-product-mutations",
+]
+FIRST_BUILD_CONFIGURED_STEPS = [
+    "configured-persisted-storage-and-signing-recent-agent",
+    "configured-explicit-status-refresh",
+]
 GO_ENV = {"GOTOOLCHAIN": "local", "GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off",
           "GOENV": "off", "CGO_ENABLED": "0", "GOTELEMETRY": "off", "GOMAXPROCS": "2"}
 DEPENDENCIES = {
@@ -96,6 +107,7 @@ class Fixture:
         self.successful_run = None
         self.artifact_evidence = None
         self.build_verified = False
+        self.preflight_verified = False
         self.coordination = root / "coordination"
         self.coordination.mkdir(mode=0o700)
         self.env = child_environment(os.environ, root)
@@ -258,6 +270,8 @@ class Fixture:
         self.expect_rejected("/users/fetch", 401, 4405, token=old_observer_token)
         self.require_observer_session()
         self.expect_rejected("/users/?pageNum=1&pageSize=1", 403, 403)
+        validate_restricted_first_build(self.request("/me/first-build"))
+        self.note("Read-only observer first-build guidance omits configuration and Agent state")
         if self.request("/users/fetch", token=admin_token) != admin:
             raise RuntimeError("observer login interfered with the administrator session")
         self.note("Separate synthetic pipeline-read observer verified; relogin revokes only its own prior session")
@@ -424,6 +438,10 @@ class Fixture:
         control = self.start_control("control-after-bootstrap")
         self.login()
         self.note("HTTP registration, explicit CLI administrator bootstrap and fresh login completed")
+        # The same real, intentionally broken Git source supplies both browser
+        # phases. It is not built or changed until the original full journey.
+        self.create_repository()
+        self.run_preflight_browser(control)
         if self.request("/storage/configs"):
             raise RuntimeError("fresh-install fixture found pre-existing storage configuration")
         storage = {"endpoint": "127.0.0.1:19000", "accessKey": DEPENDENCIES["ARCENTRA_TEST_S3_ACCESS_KEY"],
@@ -476,8 +494,13 @@ class Fixture:
             raise RuntimeError("approved Agent did not resume exactly the saved authenticated identity")
         self.note("TLS enrollment remained pending, was explicitly approved and resumed the same persisted identity")
         self.configure_observer()
-        self.create_repository()
-        browser_env = self.env | {
+        self.run_build_browser(control, agent)
+
+    def browser_environment(self, phase):
+        if phase not in ("preflight", "build"):
+            raise ValueError("unknown actual-browser acceptance phase")
+        return self.env | {
+            "ARCENTRA_ACCEPTANCE_PHASE": phase,
             "ARCENTRA_REAL_STACK": "1", "ARCENTRA_ACCEPTANCE_BACKEND_URL": BACKEND_URL,
             "ARCENTRA_ACCEPTANCE_REPO_URL": REPO_URL, "ARCENTRA_ACCEPTANCE_ORG_ID": "ci-acceptance-org",
             "ARCENTRA_ACCEPTANCE_CONTRACT": BUILD_CONTRACT,
@@ -492,6 +515,31 @@ class Fixture:
             "ARCENTRA_ACCEPTANCE_EVIDENCE_DIR": str(self.args.evidence_dir / "browser"),
             "UI_TEST_OUTPUT_DIR": str(self.args.evidence_dir / "browser"),
         }
+
+    def run_preflight_browser(self, control):
+        browser = self.start("browser-preflight", self.args.browser_command, self.args.browser_cwd,
+                             self.browser_environment("preflight"))
+        self.wait_until("read-only first-build browser preflight", lambda: browser.poll() is not None, timeout=120)
+        if browser.returncode != 0:
+            raise RuntimeError(f"browser preflight exited {browser.returncode}; see sanitized evidence")
+        if control.poll() is not None:
+            raise RuntimeError("Control exited during first-build browser preflight")
+        self.require_browser_summary("preflight")
+        self.preflight_verified = True
+        # Each browser owns its own administrator session. A successful browser
+        # login invalidates this Python caller's previous token for that user.
+        # Refresh it before any configuration writes; observers do not yet exist.
+        self.login()
+        self.note("Read-only unconfigured first-build browser preflight passed; fresh administrator API session restored")
+
+    def require_browser_summary(self, phase):
+        path = self.args.evidence_dir / "browser/summary.json"
+        validate_first_build_summary(read_private_json(path), phase, self.failed_commit)
+
+    def run_build_browser(self, control, agent):
+        if self.preflight_verified is not True:
+            raise RuntimeError("full build browser requires the verified read-only first-use preflight")
+        browser_env = self.browser_environment("build")
         browser = self.start("browser", self.args.browser_command, self.args.browser_cwd, browser_env)
         def browser_complete():
             if not self.failed_run and (self.coordination / "failed-run.json").exists():
@@ -502,6 +550,7 @@ class Fixture:
             raise RuntimeError(f"browser acceptance exited {browser.returncode}; see sanitized evidence")
         if control.poll() is not None or agent.poll() is not None:
             raise RuntimeError("Control or Agent exited during browser acceptance")
+        self.require_browser_summary("build")
         self.verify_downloads()
         self.note("Browser create-project → create-pipeline → run → logs → artifact journey completed")
 
@@ -528,6 +577,7 @@ class Fixture:
             "status": "failed" if error else "passed", "steps": self.steps,
             "error": error, "agentId": self.agent_id, "sourceCommit": self.commit,
             "contract": BUILD_CONTRACT, "failedSourceCommit": self.failed_commit,
+            "firstBuildJourney": FIRST_BUILD_JOURNEY, "firstBuildPreflightVerified": self.preflight_verified,
             "failedRun": self.failed_run, "successfulRun": self.successful_run,
             "verifiedArtifact": self.artifact_evidence,
             "backend": BACKEND_URL, "repository": REPO_URL,
@@ -536,6 +586,26 @@ class Fixture:
                             "Module downloads are disabled; this does not prove host network isolation or container builds.",
                             "Manifest is an unsigned integrity record, not a provenance attestation."],
         }, indent=2) + "\n")
+
+
+def validate_restricted_first_build(detail):
+    expected = {"scopeOptions": [], "scopeOptionsTruncated": False, "canEnterScope": False,
+                "configuration": {"access": "restricted"}, "agent": {"access": "restricted"}}
+    if not isinstance(detail, dict) or json.dumps(detail, sort_keys=True) != json.dumps(expected, sort_keys=True):
+        raise RuntimeError("read-only observer first-build response must contain only the restricted fields")
+
+
+def validate_first_build_summary(summary, phase, source_commit):
+    if phase not in ("preflight", "build"):
+        raise ValueError("unknown actual-browser acceptance phase")
+    steps = FIRST_BUILD_PREFLIGHT_STEPS + (FIRST_BUILD_CONFIGURED_STEPS if phase == "build" else [])
+    expected = {"journey": FIRST_BUILD_JOURNEY, "phase": phase, "sourceCommit": source_commit, "steps": steps}
+    if (not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", source_commit)
+            or not isinstance(summary, dict) or summary.get("kind") != "actual-backend"
+            or summary.get("status") != "passed"
+            or summary.get("stage") != ("preflight-complete" if phase == "preflight" else "journey-complete")
+            or summary.get("firstBuildReadiness") != expected):
+        raise RuntimeError("browser phase lacks the exact successful first-build guidance evidence")
 
 
 def encoded(value):

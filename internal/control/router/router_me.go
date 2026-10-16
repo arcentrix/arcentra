@@ -23,6 +23,7 @@ import (
 func (rt *Router) meRouter(r fiber.Router, authMW fiber.Handler, subjectMW fiber.Handler) {
 	g := r.Group("/me")
 	{
+		g.Get("/first-build", sensitiveHTTPStatus, authMW, rt.firstBuildLiveUser(false), rt.getMyFirstBuild)
 		g.Get("/menus", authMW, subjectMW, rt.getMyMenus)
 		g.Get("/routes", authMW, subjectMW, rt.getMyRoutes)
 		g.Get("/effective-actions", authMW, subjectMW, rt.getMyEffectiveActions)

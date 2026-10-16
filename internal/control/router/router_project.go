@@ -33,8 +33,8 @@ func (rt *Router) projectRouter(r fiber.Router, authMW fiber.Handler, subjectMW 
 	projectGroup := r.Group("/project")
 	{
 		// 创建项目
-		projectGroup.Post("/", authMW, subjectMW,
-			rt.permission("org:create_project", resolveCreateProjectScope()),
+		projectGroup.Post("/", sensitiveHTTPStatus, authMW, rt.firstBuildLiveUser(true),
+			rt.liveCreateProjectAccess(),
 			rt.createProject)
 
 		// 更新项目
