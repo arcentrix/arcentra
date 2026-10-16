@@ -37,6 +37,7 @@ class SyntheticSessionHTTP:
         self.sequence = 0
         self.permissions = []
         self.role_override = {}
+        self.first_build_override = {}
 
     @staticmethod
     def reply(request, code, detail=None, http_status=200):
@@ -67,6 +68,10 @@ class SyntheticSessionHTTP:
             return self.reply(request, 200, {"userId": "admin-id" if username == app.USERNAME else "observer-id",
                                              "username": username})
         if username == app.OBSERVER_USERNAME:
+            if path == "/me/first-build":
+                return self.reply(request, 200, {"scopeOptions": [], "scopeOptionsTruncated": False,
+                                                "canEnterScope": False, "configuration": {"access": "restricted"},
+                                                "agent": {"access": "restricted"}} | self.first_build_override)
             if path.endswith("/trigger"):
                 return self.reply(request, 4030)
             if path == "/users/":
@@ -117,6 +122,7 @@ class ObserverSessionTests(unittest.TestCase):
         self.assertEqual(logins, [app.OBSERVER_USERNAME, app.OBSERVER_USERNAME])
         self.assertFalse(any("token" in key.lower() for key in self.fixture.env))
         self.assertEqual(list(self.fixture.coordination.iterdir()), [])
+        self.assertIn(("GET", "/me/first-build", None), calls)
 
     def test_browser_admin_relogin_leaves_observer_valid_and_single_user_old_token_invalid(self):
         self.configure()
@@ -138,6 +144,23 @@ class ObserverSessionTests(unittest.TestCase):
                 self.configure()
             self.assertEqual(self.fixture.token, "synthetic-admin-0")
 
+    def test_observer_readiness_rejects_visible_leaked_or_missing_fields(self):
+        for patch in (
+            {"configuration": {"access": "restricted", "defaultStorageConfigured": True}},
+            {"configuration": {"access": "visible", "agentSigningConfigured": True}},
+            {"agent": {"access": "restricted", "enabledRecentlySeen": False}},
+            {"agent": {"access": "visible"}},
+            {"canEnterScope": True}, {"canEnterScope": 0},
+            {"scopeOptions": [{"scopeId": "other-org", "source": "role_grant"}]},
+            {"scopeOptionsTruncated": True}, {"secret": "private-response-secret"},
+        ):
+            self.fixture.http = SyntheticSessionHTTP()
+            self.fixture.token = "synthetic-admin-0"
+            self.fixture.http.first_build_override = patch
+            with self.subTest(patch=patch), self.assertRaisesRegex(RuntimeError, "restricted fields") as raised:
+                self.configure()
+            self.assertNotIn("private-response-secret", str(raised.exception))
+
     def test_independent_verification_refuses_missing_or_wrong_observer_identity(self):
         with self.assertRaisesRegex(RuntimeError, "read-only"):
             self.fixture.require_observer_session()
@@ -153,6 +176,207 @@ class ObserverSessionTests(unittest.TestCase):
                 self.fixture.expect_rejected("/pipelines/fixture/trigger", 200, 4030, {}, "POST", "private-token-secret")
             self.assertNotIn("private-token-secret", str(raised.exception))
             self.assertNotIn("private-response-secret", str(raised.exception))
+
+
+class FirstUseBrowserSequenceTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.args = mock.Mock(browser_command=["node", "tests/actual-backend-acceptance.mjs"],
+                              browser_cwd=self.root / "web", evidence_dir=self.root / "evidence")
+        self.fixture = app.Fixture(self.args, self.root)
+        self.fixture.commit = self.fixture.failed_commit = "a" * 40
+        self.fixture.http = SyntheticSessionHTTP()
+        self.fixture.token = "synthetic-admin-0"
+        self.control = mock.Mock()
+        self.control.poll.return_value = None
+        self.agent = mock.Mock()
+        self.agent.poll.return_value = None
+        self.browser = mock.Mock(returncode=0)
+        self.browser.poll.return_value = 0
+        self.summary_path = self.args.evidence_dir / "browser/summary.json"
+        self.summary_path.parent.mkdir(parents=True)
+
+    def summary(self, phase="preflight"):
+        return {"kind": "actual-backend", "status": "passed",
+                "stage": "preflight-complete" if phase == "preflight" else "journey-complete",
+                "firstBuildReadiness": {"journey": app.FIRST_BUILD_JOURNEY, "phase": phase,
+                    "sourceCommit": self.fixture.failed_commit,
+                    "steps": app.FIRST_BUILD_PREFLIGHT_STEPS + (app.FIRST_BUILD_CONFIGURED_STEPS if phase == "build" else [])}}
+
+    def test_preflight_uses_same_command_then_refreshes_invalidated_admin_session(self):
+        app.atomic_json(self.summary_path, self.summary())
+        def start(name, command, cwd, env):
+            self.assertEqual((name, command, cwd), ("browser-preflight", self.args.browser_command, self.args.browser_cwd))
+            self.assertEqual(env["ARCENTRA_ACCEPTANCE_PHASE"], "preflight")
+            self.assertEqual(env["ARCENTRA_ACCEPTANCE_COMMIT"], self.fixture.failed_commit)
+            self.assertEqual(self.fixture.observer_id, "")
+            request = urllib.request.Request(app.BACKEND_URL + "/api/v1/users/login", method="POST",
+                data=json.dumps({"username": app.USERNAME, "password": app.encoded(app.PASSWORD)}).encode())
+            self.fixture.http.open(request, timeout=10).close()
+            self.fixture.expect_rejected("/users/fetch", 401, 4405, token="synthetic-admin-0")
+            return self.browser
+        with mock.patch.object(self.fixture, "start", side_effect=start):
+            self.fixture.run_preflight_browser(self.control)
+        self.assertTrue(self.fixture.preflight_verified)
+        self.assertEqual(self.fixture.request("/users/fetch")["username"], app.USERNAME)
+        logins = [call for call in self.fixture.http.calls if call[1] == "/users/login"]
+        self.assertEqual(len(logins), 2, "browser login must be followed by a fresh Python administrator login")
+        self.assertFalse(self.fixture.build_verified)
+        self.assertFalse((self.fixture.coordination / "successful-run.json").exists())
+
+    def test_preflight_failure_does_not_refresh_session_or_claim_verification(self):
+        for browser_status, control_status, summary in (
+            (1, None, self.summary()), (0, 2, self.summary()),
+            (0, None, self.summary() | {"status": "failed"}),
+            (0, None, self.summary("build")),
+        ):
+            self.browser.returncode = browser_status
+            self.browser.poll.return_value = browser_status
+            self.control.poll.return_value = control_status
+            app.atomic_json(self.summary_path, summary)
+            with self.subTest(browser_status=browser_status, control_status=control_status), \
+                    mock.patch.object(self.fixture, "start", return_value=self.browser), \
+                    mock.patch.object(self.fixture, "login") as login, self.assertRaises(RuntimeError):
+                self.fixture.run_preflight_browser(self.control)
+            login.assert_not_called()
+            self.assertFalse(self.fixture.preflight_verified)
+
+    def test_full_browser_is_mandatory_and_always_uses_build_phase(self):
+        with mock.patch.object(self.fixture, "start") as start, self.assertRaisesRegex(RuntimeError, "requires"):
+            self.fixture.run_build_browser(self.control, self.agent)
+        start.assert_not_called()
+        self.fixture.preflight_verified = True
+        app.atomic_json(self.summary_path, self.summary("build"))
+        with mock.patch.object(self.fixture, "start", return_value=self.browser) as start, \
+                mock.patch.object(self.fixture, "verify_downloads") as verify:
+            self.fixture.run_build_browser(self.control, self.agent)
+        self.assertEqual(start.call_args.args[0], "browser")
+        self.assertEqual(start.call_args.args[1], self.args.browser_command)
+        self.assertEqual(start.call_args.args[3]["ARCENTRA_ACCEPTANCE_PHASE"], "build")
+        verify.assert_called_once_with()
+
+    def test_preflight_summary_cannot_substitute_for_full_build_completion(self):
+        self.fixture.preflight_verified = True
+        app.atomic_json(self.summary_path, self.summary())
+        with mock.patch.object(self.fixture, "start", return_value=self.browser), \
+                mock.patch.object(self.fixture, "verify_downloads") as verify, \
+                self.assertRaisesRegex(RuntimeError, "exact successful"):
+            self.fixture.run_build_browser(self.control, self.agent)
+        verify.assert_not_called()
+
+    def test_phase_configuration_rejects_unknown_values_and_does_not_inherit_parent_mode(self):
+        for phase in ("", "skip", "preflight-only", None):
+            with self.subTest(phase=phase), self.assertRaises(ValueError):
+                self.fixture.browser_environment(phase)
+        self.fixture.env["ARCENTRA_ACCEPTANCE_PHASE"] = "preflight"
+        self.assertEqual(self.fixture.browser_environment("build")["ARCENTRA_ACCEPTANCE_PHASE"], "build")
+
+    def test_summary_requires_exact_same_source_completed_steps_without_extra_claims(self):
+        for phase in ("preflight", "build"):
+            summary = self.summary(phase)
+            app.validate_first_build_summary(summary, phase, self.fixture.failed_commit)
+            for key, bad in (("phase", "other"), ("sourceCommit", "b" * 40), ("journey", "continuous-session"),
+                             ("steps", []), ("steps", summary["firstBuildReadiness"]["steps"] + ["private-token-secret"]),
+                             ("token", "private-token-secret")):
+                changed = copy.deepcopy(summary)
+                changed["firstBuildReadiness"][key] = bad
+                with self.subTest(phase=phase, key=key), self.assertRaises(RuntimeError) as raised:
+                    app.validate_first_build_summary(changed, phase, self.fixture.failed_commit)
+                self.assertNotIn("private-token-secret", str(raised.exception))
+
+    def test_exercise_orders_real_preflight_relogin_setup_observer_and_full_build(self):
+        events = []
+        app.atomic_json(self.summary_path, self.summary())
+        identity = self.root / "identity/identity.json"
+        identity.parent.mkdir()
+        identity.write_text("synthetic durable identity")
+        agent_reads = 0
+        approved = False
+        def request(path, payload=None, method="GET", **options):
+            nonlocal agent_reads, approved
+            events.append((method, path))
+            if path == "/storage/configs" and method == "GET":
+                return []
+            if path == "/agent?pageNum=1&pageSize=100":
+                agent_reads += 1
+                if agent_reads == 1:
+                    return {"count": 0, "agents": []}
+                return {"count": 1, "agents": [{"agentId": "synthetic-agent", "isEnabled": int(approved),
+                                                "lastHeartbeat": "synthetic-heartbeat" if approved else None}]}
+            if path == "/registration-tokens":
+                return {"token": "art_synthetic"}
+            if path == "/agent/synthetic-agent/approve":
+                approved = True
+            return {}
+        def start(name, *args):
+            events.append(name)
+            return self.browser if name == "browser-preflight" else self.agent
+        def probe(url):
+            return 503 if url.endswith("/ready") and not approved else 200
+        with mock.patch.object(app, "verify_toolchain"), mock.patch.object(self.fixture, "create_tls"), \
+                mock.patch.object(self.fixture, "run"), mock.patch.object(self.fixture, "stop"), \
+                mock.patch.object(self.fixture, "start_control", return_value=self.control), \
+                mock.patch.object(self.fixture, "login", side_effect=lambda: events.append("admin-login")), \
+                mock.patch.object(self.fixture, "create_repository", side_effect=lambda: events.append("repository")) as source, \
+                mock.patch.object(self.fixture, "start", side_effect=start), \
+                mock.patch.object(self.fixture, "request", side_effect=request), \
+                mock.patch.object(self.fixture, "probe", side_effect=probe), \
+                mock.patch.object(self.fixture, "configure_observer", side_effect=lambda: events.append("observer")) as observer, \
+                mock.patch.object(self.fixture, "run_build_browser", side_effect=lambda *args: events.append("full-build")) as build:
+            self.fixture.exercise()
+        source.assert_called_once_with()
+        observer.assert_called_once_with()
+        build.assert_called_once_with(self.control, self.agent)
+        self.assertEqual(events.count("admin-login"), 3)
+        first_write = events.index(("POST", "/storage/configs"))
+        preflight = events.index("browser-preflight")
+        self.assertLess(events.index("repository"), preflight)
+        self.assertLess(preflight, events.index("admin-login", preflight))
+        self.assertLess(events.index("admin-login", preflight), first_write)
+        self.assertLess(first_write, events.index(("PUT", "/settings/AGENT_SECRET_KEY")))
+        self.assertLess(events.index("agent-approved"), events.index("observer"))
+        self.assertLess(events.index("observer"), events.index("full-build"))
+        self.assertTrue(self.fixture.preflight_verified)
+
+    def test_preflight_reauthentication_failure_stops_before_configuration(self):
+        app.atomic_json(self.summary_path, self.summary())
+        with mock.patch.object(self.fixture, "start", return_value=self.browser), \
+                mock.patch.object(self.fixture, "login", side_effect=RuntimeError("login rejected")), \
+                self.assertRaisesRegex(RuntimeError, "login rejected"):
+            self.fixture.run_preflight_browser(self.control)
+        self.assertEqual(self.fixture.http.calls, [], "no configuration API may follow rejected reauthentication")
+        self.assertFalse(self.fixture.build_verified)
+
+    def test_full_browser_error_does_not_verify_downloads(self):
+        self.fixture.preflight_verified = True
+        app.atomic_json(self.summary_path, self.summary("build"))
+        self.browser.returncode = 1
+        self.browser.poll.return_value = 1
+        with mock.patch.object(self.fixture, "start", return_value=self.browser), \
+                mock.patch.object(self.fixture, "verify_downloads") as verify, \
+                self.assertRaisesRegex(RuntimeError, "browser acceptance exited"):
+            self.fixture.run_build_browser(self.control, self.agent)
+        verify.assert_not_called()
+
+    def test_exercise_cannot_configure_or_enroll_after_preflight_error(self):
+        events = []
+        self.fixture.request = mock.Mock(return_value={})
+        with mock.patch.object(app, "verify_toolchain"), mock.patch.object(self.fixture, "create_tls"), \
+                mock.patch.object(self.fixture, "run"), mock.patch.object(self.fixture, "stop"), \
+                mock.patch.object(self.fixture, "start_control", return_value=self.control), \
+                mock.patch.object(self.fixture, "login"), \
+                mock.patch.object(self.fixture, "create_repository", side_effect=lambda: events.append("repository")), \
+                mock.patch.object(self.fixture, "run_preflight_browser", side_effect=RuntimeError("preflight failed")), \
+                mock.patch.object(self.fixture, "configure_observer") as observer, \
+                mock.patch.object(self.fixture, "run_build_browser") as build, \
+                self.assertRaisesRegex(RuntimeError, "preflight failed"):
+            self.fixture.exercise()
+        self.assertEqual(events, ["repository"])
+        self.assertEqual([call.args[0] for call in self.fixture.request.call_args_list], ["/users/register"])
+        observer.assert_not_called()
+        build.assert_not_called()
 
 
 class ActualAppFixtureTests(unittest.TestCase):

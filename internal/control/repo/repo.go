@@ -23,6 +23,7 @@ import (
 // Repositories 统一管理所有 repository
 type Repositories struct {
 	database             database.IDatabase
+	FirstBuild           IFirstBuildRepository
 	Deployment           IDeploymentRepository
 	Artifact             IArtifactRepository
 	Log                  ILogRepository
@@ -58,6 +59,7 @@ type Repositories struct {
 func NewRepositories(db database.IDatabase, ch cache.ICache) *Repositories {
 	return &Repositories{
 		database:             db,
+		FirstBuild:           NewFirstBuildRepo(db),
 		Deployment:           NewDeploymentRepo(db),
 		Artifact:             NewArtifactRepo(db),
 		Log:                  NewLogRepository(db.Database()),

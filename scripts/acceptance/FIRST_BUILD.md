@@ -32,7 +32,17 @@ network policy or privileges.
    Use a stable scope chosen for this installation and authorized for the account;
    creating a project still requires `org:create_project`. Do not copy the
    acceptance-only `ci-acceptance-org` value as an implied organization or grant.
-   Full organization lifecycle/selection is outside this path.
+   The **First build setup** panel can show saved configuration presence and a
+   recently seen Agent only when your existing platform permissions allow it.
+   Refresh explicitly after setup or permission changes. These observations do
+   not prove connectivity, runtime capability, available capacity or eligibility
+   for a particular pipeline. Restricted observations mean your account cannot
+   inspect that information, not that the installation is unconfigured.
+   **Authorized organization scopes** lists current role-grant scope IDs, not
+   organization records or membership. A newly bootstrapped administrator may
+   have no choices yet and can still explicitly enter an approved scope. The
+   list is bounded; an omitted scope is not evidence of absent permission.
+   Organization creation and membership administration remain outside this path.
 6. Commit the [stdlib fixture source](fixtures/stdlib-build/) and its adapted
    `.arcentra/pipeline.yaml` to a repository already approved and reachable by
    Control and Agent. Private Git authentication remains an operator prerequisite;
@@ -42,6 +52,10 @@ network policy or privileges.
    and inspect the toolchain, test, build, verify and publication steps. A Go
    version error means the pinned compiler is missing or not on the Agent PATH;
    fix the approved installation explicitly, rather than enabling auto-download.
+   Project creation permission alone does not grant `pipeline:create` or
+   `pipeline:trigger`; existing organization roles may lack them. Ask the
+   installation administrator to review the necessary existing permissions if
+   those actions are unavailable. This guide and the setup panel grant none.
 8. Filter project artifacts by this run ID. Download `stdlib-demo` and
    `manifest.json`; verify full source revision, Go version, length, digest and
    expected output contract. Refresh and sign back in to confirm the stored run

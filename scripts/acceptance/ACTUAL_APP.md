@@ -2,9 +2,9 @@
 
 `run_actual_app.py` runs the **built CLI, Control and Agent processes** against the
 disposable MySQL, Redis, Kafka and MinIO services in `compose.yml`. It then invokes
-the frontend's actual-backend browser journey. No HTTP responses, broker messages,
-repository, object store, database tables or Agent records are mocked or seeded by
-this fixture.
+the frontend's two-phase actual-backend browser journey. No HTTP responses, broker
+messages, repository, object store, database tables or Agent records are mocked or
+seeded by this fixture.
 
 This stage is implemented for a fresh GitHub-hosted Linux runner. It refuses to run
 without `ARCENTRA_REAL_STACK=1`, `GITHUB_ACTIONS=true` and
@@ -35,23 +35,37 @@ python3 scripts/acceptance/run_actual_app.py \
 
 The lifecycle under test is:
 
-1. Run `arcentra-cli migrate` on the empty MySQL database.
+1. Verify the preinstalled Go toolchain, generate a private short-lived CA/server
+   certificate with official OpenSSL, and run `arcentra-cli migrate` on the empty
+   MySQL database.
 2. Start Control without preconfigured storage and register `ci-admin` through the
    public HTTP endpoint using the normal single-base64 password wire contract.
 3. Stop Control, explicitly run `bootstrap-admin`, restart and sign in again.
-4. Configure MinIO and a generated disposable Agent signing secret through the
-   authenticated APIs, then restart Control to reload startup-bound storage.
-5. Generate a private short-lived CA/server certificate with official OpenSSL.
-   Enroll the actual Agent over verified TLS using an API-generated enrollment
-   token and identity persistence. Assert pending approval gives liveness 200,
-   readiness 503, no heartbeat and exactly one Agent record.
-6. Approve through the authenticated API, stop Agent, remove the enrollment token
-   from its private configuration, and restart. Require the exact saved identity,
-   unchanged identity file, one Agent record, authenticated heartbeat and readiness.
-7. Copy the committed [stdlib Go fixture](fixtures/stdlib-build/) into the synthetic
+4. Copy the committed [stdlib Go fixture](fixtures/stdlib-build/) into the synthetic
    repository, append an actual compiler error, and commit that failing revision.
-   The browser signs in, creates one project and pipeline, reviews and starts the
-   run, then requires the actual compiler error, failed test step and zero artifacts.
+   Run the browser in explicit `preflight` mode: sign in, open **Projects → First
+   build setup**, assert the real API and visible UI show missing storage/signing,
+   no recently seen enabled Agent, no authorized scope options and permitted manual
+   scope entry, then explicitly refresh and check again. The phase must create no
+   project or other product state. It exits without running or claiming a build.
+5. Sign in again through the Python harness to restore its administrator session
+   after the preflight browser login. Configure MinIO and a generated disposable
+   Agent signing secret through authenticated APIs, then restart Control to reload
+   startup-bound storage.
+6. Enroll the actual Agent over verified TLS using an API-generated enrollment
+   token and identity persistence. Assert pending approval gives liveness 200,
+   readiness 503, no heartbeat and exactly one Agent record. Approve through the
+   authenticated API, stop Agent, remove the enrollment token from its private
+   configuration, and restart. Require the exact saved identity, unchanged identity
+   file, one Agent record, authenticated heartbeat and readiness.
+7. Create and verify the separate read-only observer described below. Invoke the
+   same browser command in explicit `build` mode with a **new browser context**.
+   It requires the successful same-source preflight summary, signs in, checks
+   configured persisted storage/signing and a recently seen Agent in the real API
+   and setup panel, and explicitly refreshes. These are saved-state observations,
+   not a build-readiness guarantee. It then creates one project and pipeline,
+   reviews the unchanged failing source revision and starts the run, requiring the
+   actual compiler error, failed test step and zero artifacts.
 8. Independently read that run, its Agent checkout/step evidence, compiler logs and
    exact-run artifact list through authenticated APIs. Only then fix the source in
    a new Git commit and advance the local bare repository's main branch. The Git
@@ -74,9 +88,12 @@ The lifecycle under test is:
     the reviewed synthetic program, never arbitrary user artifacts. Browser code
     never executes a downloaded binary.
 
-The browser alone owns the `ci-admin` session. Before it starts, the fixture uses
-the existing administrator APIs to create a separate `ci-build-observer` identity
-and a custom role with **only `pipeline:read`**. The invitation API grants this at
+This is a **two-phase journey with separate browser contexts**, not one continuous
+browser session. During each browser phase, that browser alone owns the `ci-admin`
+session. The planned Python administrator relogin between phases occurs before
+configuration and before the observer exists. Before the full-build browser starts,
+the fixture uses the existing administrator APIs to create a separate
+`ci-build-observer` identity and a custom role with **only `pipeline:read`**. The invitation API grants this at
 platform scope; this deliberately applies only to the fresh disposable synthetic
 database, not a production observer or a general service account. Its initial
 test password is set through the authorized user API. It is not bootstrapped as
@@ -88,15 +105,32 @@ relogin must reject the same observer's old token while leaving the administrato
 session valid. Real API assertions require observer management access to return
 HTTP 403, pipeline triggering to return the existing HTTP 200/application 4030
 denial, and observer reads to remain authenticated after browser login/logout.
-The fixture never repairs a failed read by logging the administrator in again or
-weakening authorization. Offline transport tests check these assertion sequences;
-actual Control/Redis session behavior still requires the real CI journey.
+The observer's `/api/v1/me/first-build` response must contain empty scope options,
+`canEnterScope: false`, and restricted configuration/Agent objects with no status
+booleans or private fields. Independent observer verification never repairs a
+failed read by logging in as the administrator or weakening authorization. Offline
+transport tests check these assertion sequences; actual Control/Redis session
+behavior still requires the real CI journey.
 
 ## Versioned browser and binary contract
 
 `ARCENTRA_ACCEPTANCE_CONTRACT=stdlib-build-v1` requires the matching frontend
-acceptance client. The frontend preserves its earlier text-artifact contract for
-older backends; this backend never silently falls back to marker/text acceptance.
+acceptance client. This frontend and Control must be rolled out together: every
+actual-browser payload mode now requires the current authenticated
+`GET /api/v1/me/first-build` endpoint and its exact permission-filtered response.
+The retained text-artifact payload mode is only for a matching current backend;
+it does **not** provide compatibility with older backends missing that endpoint.
+A missing endpoint or failed readiness assertion fails acceptance: there is no
+ignored 404, simulated response, or automatic marker/text fallback.
+
+The fixture invokes `ARCENTRA_ACCEPTANCE_PHASE=preflight` followed by `build`.
+Preflight requires the full `stdlib-build-v1` configuration, including the actual
+initial source commit, and cannot write a successful-build receipt. Omitting the
+phase selects the full build, never preflight; unknown phases are rejected. For
+the stdlib contract, build mode requires the matching successful preflight
+summary and must still complete the original failed-then-fixed build/download
+journey before writing its success receipt.
+
 The existing `ARCENTRA_ACCEPTANCE_COMMIT` now supplies the initial failing full
 source SHA. Additional values are fixed: `ARCENTRA_ACCEPTANCE_ARTIFACT_NAME` is
 `stdlib-demo`, `ARCENTRA_ACCEPTANCE_MANIFEST_NAME` is `manifest.json`,
@@ -133,8 +167,14 @@ Private configuration, TLS keys, persisted identity, workspaces and raw logs are
 removed when the fixture exits. Only sanitized process logs, a status/step receipt
 and browser evidence are written in the requested evidence directory. The public
 CI artifact allowlist adds only `browser/project-build-verification.json` to its
-existing screenshots and browser summary. That success-only file contains fixed
-contract/status fields, failed/fixed full source SHAs, synthetic run IDs, Go
+existing screenshots and browser summary. Preflight screenshots have a distinct
+`preflight-` prefix in the same browser evidence directory. The final
+`browser/summary.json` retains the successful same-source preflight steps alongside
+configured-state/refresh steps in the fixed `firstBuildReadiness` allowlist,
+explicitly labeled `two-phase-separate-browser-contexts`. It carries no API bodies,
+credentials, network traces or arbitrary diagnostic text. That success-only
+project-build verification file contains fixed contract/status fields, failed/fixed
+full source SHAs, synthetic run IDs, Go
 version, binary name/length/digest, expected behavior/digest and passed checks. It
 excludes paths, URLs, credentials, raw logs, arbitrary error strings and executable
 downloads. Failed/incomplete runs do not write it; a stale generated success file
@@ -167,8 +207,11 @@ also completed with 44 PASS records (including repetitions and subtests),
 with clean cleanup evidence.
 
 These are exact candidate results, recorded before final-document merge and main
-verification. They do not certify another tree, production rollout, containerized
-Go compilation, live Kubernetes release or external model calls. The Go build
+verification. They predate the two-phase first-use readiness extension described
+above and do not certify its endpoint, browser preflight or updated tree; those
+require a new matching backend/frontend hosted run and receipts. They do not
+certify production rollout, containerized Go compilation, live Kubernetes release
+or external model calls. The Go build
 journey uses trusted baremetal execution with module downloads disabled; this is
 not host network isolation. Existing offline-container permissions remain off by
 default. Local tests below remain separate evidence. See
