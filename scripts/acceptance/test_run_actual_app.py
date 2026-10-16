@@ -1,13 +1,19 @@
-"""Offline fixture checks only: no services, sockets or browser are started."""
+"""Offline by default; explicit CI opt-in enables bounded loopback reset tests."""
 
 import base64
 import copy
 import hashlib
+import http.client
 import io
 import json
 import os
 from pathlib import Path
 import subprocess
+import socket
+import socketserver
+import struct
+import threading
+import time
 import tempfile
 import tomllib
 import unittest
@@ -379,6 +385,88 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
         build.assert_not_called()
 
 
+class RuntimeHookTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.args = mock.Mock(control_bin="control-bin", agent_bin="agent-bin", cli_bin="cli-bin",
+                              evidence_dir=self.root / "evidence")
+        self.fixture = app.Fixture(self.args, self.root)
+
+    def test_default_runtime_hooks_preserve_host_commands_and_configuration(self):
+        fixture = self.fixture
+        with mock.patch.object(app, "verify_toolchain") as verify:
+            fixture.verify_runtime_toolchain()
+            verify.assert_called_once_with(fixture.env)
+        fixture.write_control_configuration("synthetic-secret")
+        self.assertEqual((self.root / "control.toml").read_text(), app.control_config(self.root, "synthetic-secret"))
+        fixture.write_agent_configuration("art_synthetic")
+        self.assertEqual((self.root / "agent.toml").read_text(), app.agent_config(self.root, "art_synthetic"))
+        for path in ("control.toml", "plugins.toml", "agent.toml"):
+            self.assertEqual((self.root / path).stat().st_mode & 0o777, 0o600)
+        self.assertEqual(fixture.identity_path(), self.root / "identity/identity.json")
+        with mock.patch.object(fixture, "run") as run:
+            fixture.run_cli("migrate", ["migrate"])
+            fixture.run_cli("bootstrap-admin", ["bootstrap-admin", "--username", app.USERNAME])
+            self.assertEqual(run.call_args_list, [
+                mock.call("migrate", ["cli-bin", "migrate", "--conf", str(self.root / "control.toml")]),
+                mock.call("bootstrap-admin", ["cli-bin", "bootstrap-admin", "--conf",
+                                               str(self.root / "control.toml"), "--username", app.USERNAME])])
+        with mock.patch.object(fixture, "start") as start, mock.patch.object(fixture, "stop") as stop:
+            process = fixture.start_agent("agent-pending")
+            start.assert_called_once_with("agent-pending", ["agent-bin", "-conf", str(self.root / "agent.toml")])
+            fixture.stop_application(process)
+            stop.assert_called_once_with(process)
+        self.assertEqual(fixture.repository_url(), app.REPO_URL)
+        self.assertEqual(fixture.storage_configuration()["endpoint"], "127.0.0.1:19000")
+        self.assertEqual(fixture.runtime_evidence(), {})
+        self.assertEqual(fixture.browser_environment("build")["ARCENTRA_ACCEPTANCE_BACKEND_URL"], app.BACKEND_URL)
+        self.assertNotIn("ARCENTRA_ACCEPTANCE_PROFILE", fixture.browser_environment("build"))
+
+    def test_repository_hook_changes_only_source_and_browser_repository(self):
+        fixture = self.fixture
+        fixed_internal_repository = "git://git:9418/acceptance.git"
+        with mock.patch.object(fixture, "repository_url", return_value=fixed_internal_repository), \
+                mock.patch.object(fixture, "run"), mock.patch.object(fixture, "start_git_server") as serve, \
+                mock.patch.object(app.subprocess, "run", return_value=mock.Mock(stdout="a" * 40 + "\n")):
+            fixture.create_repository()
+            spec = json.loads((self.root / "source/.arcentra/pipeline.yaml").read_text())
+            expected = app.pipeline_spec()
+            expected["jobs"][0]["source"]["repo"] = fixed_internal_repository
+            self.assertEqual(spec, expected)
+            serve.assert_called_once_with(self.root / "repositories")
+            env = fixture.browser_environment("build")
+            self.assertEqual(env["ARCENTRA_ACCEPTANCE_REPO_URL"], fixed_internal_repository)
+            self.assertEqual(env["ARCENTRA_ACCEPTANCE_BACKEND_URL"], app.BACKEND_URL)
+        self.assertIn(app.COMPILE_ERROR, (self.root / "source/main.go").read_text())
+        self.assertEqual(fixture.failed_commit, fixture.commit)
+        self.assertEqual(app.pipeline_spec()["jobs"][0]["source"]["repo"], app.REPO_URL)
+
+    def test_default_cleanup_stops_children_in_reverse_before_evidence(self):
+        fixture = self.fixture
+        fixture.children = [mock.Mock(), mock.Mock()]
+        with mock.patch.object(fixture, "stop") as stop:
+            fixture.cleanup("synthetic failure")
+            self.assertEqual(stop.call_args_list, [mock.call(child) for child in reversed(fixture.children)])
+        result = json.loads((self.args.evidence_dir / "actual-app-result.json").read_text())
+        self.assertNotIn("runtime", result)
+        self.assertEqual(result["repository"], app.REPO_URL)
+        self.assertEqual(result["limitations"], fixture.runtime_limitations())
+        self.assertEqual(result["status"], "failed")
+
+    def test_runtime_evidence_cannot_overwrite_shared_failure_verdict(self):
+        fixture = self.fixture
+        with mock.patch.object(fixture, "runtime_evidence", return_value={"status": "passed"}), \
+                mock.patch.object(fixture, "cleanup_runtime") as cleanup:
+            fixture.cleanup("synthetic failure")
+            cleanup.assert_called_once_with()
+        result = json.loads((self.args.evidence_dir / "actual-app-result.json").read_text())
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"], "synthetic failure")
+        self.assertEqual(result["runtime"], {"status": "passed"})
+
+
 class ActualAppFixtureTests(unittest.TestCase):
     def test_requires_explicit_disposable_runner_opt_in(self):
         valid = {"ARCENTRA_REAL_STACK": "1", "GITHUB_ACTIONS": "true",
@@ -514,6 +602,28 @@ class BuildContractTests(unittest.TestCase):
                          "stepRunId": "step-" + name, "retryMode": ""}
                         for name, status, code in (("toolchain", 4, 0), ("test", 5, 1), ("build", 8, None),
                                                    ("verify", 8, None), ("publish", 8, None))]}
+
+    def test_internal_image_repository_is_exact_and_host_validator_stays_host_only(self):
+        internal = "git://git:9418/acceptance.git"
+        job = self.job | {"sourceRepository": internal}
+        jobs = {"total": 1, "list": [job]}
+        artifacts = {"total": 0, "list": []}
+        app._validate_run_snapshot(self.receipt, self.run, jobs, artifacts, False, "agent-id", internal)
+        with self.assertRaises(ValueError):
+            app.validate_run_snapshot(self.receipt, self.run, jobs, artifacts, False, "agent-id")
+        for bad in ("git://git:9418/other.git", "git://example.com/acceptance.git", internal + "/",
+                    "git://127.0.0.1:9418/acceptance.git", "git://git:9419/acceptance.git",
+                    "git://user:token@git:9418/acceptance.git", internal + "?token=synthetic"):
+            jobs["list"] = [self.job | {"sourceRepository": bad}]
+            with self.subTest(repository=bad), self.assertRaisesRegex(ValueError, "fixed"):
+                app._validate_run_snapshot(self.receipt, self.run, jobs, artifacts, False, "agent-id", bad)
+        jobs["list"] = [self.job]
+        with self.assertRaisesRegex(ValueError, "checkout evidence"):
+            app._validate_run_snapshot(self.receipt, self.run, jobs, artifacts, False, "agent-id", internal)
+        jobs["list"] = [job]
+        with self.assertRaisesRegex(ValueError, "zero artifacts"):
+            app._validate_run_snapshot(self.receipt, self.run, jobs, {"total": 1, "list": [{}]},
+                                       False, "agent-id", internal)
 
     def test_manifest_checks_independent_full_commit_binary_and_behavior(self):
         self.assertEqual(app.validate_manifest(json.dumps(self.manifest), self.binary, self.commit), self.manifest)
@@ -658,6 +768,106 @@ class BuildContractTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 app.write_build_verification(path, None, True, failed, self.receipt, self.manifest | {"token": "secret"})
             self.assertFalse(path.exists())
+
+
+
+
+class ReadinessProbeTransportTests(unittest.TestCase):
+    def fixture(self):
+        fixture = object.__new__(app.Fixture)
+        fixture.http = mock.Mock()
+        fixture.token = 'synthetic-test-token'
+        return fixture
+
+    def test_transient_reset_and_disconnect_then_readiness(self):
+        fixture = self.fixture()
+        response = mock.MagicMock()
+        response.__enter__.return_value.status = 200
+        fixture.http.open.side_effect = [ConnectionResetError(104, 'reset'), http.client.RemoteDisconnected(), response]
+        process = mock.Mock(returncode=None)
+        process.poll.return_value = None
+        with mock.patch.object(app.time, 'sleep'):
+            self.assertTrue(fixture.wait_until('readiness', lambda: fixture.probe(app.BACKEND_URL + '/ready') == 200,
+                                               process, timeout=1))
+        self.assertEqual(fixture.http.open.call_count, 3)
+        self.assertEqual(process.poll.call_count, 3)
+
+    def test_persistent_reset_remains_bounded(self):
+        fixture = self.fixture()
+        fixture.http.open.side_effect = ConnectionResetError(104, 'reset')
+        process = mock.Mock(returncode=None)
+        process.poll.return_value = None
+        with mock.patch.object(app.time, 'monotonic', side_effect=[0, 0, 0.5, 1]), mock.patch.object(app.time, 'sleep'):
+            with self.assertRaisesRegex(RuntimeError, 'timed out waiting'):
+                fixture.wait_until('readiness', lambda: fixture.probe(app.BACKEND_URL + '/ready') == 200, process, timeout=1)
+        self.assertEqual(fixture.http.open.call_count, 2)
+
+    def test_exited_process_fails_before_probe(self):
+        fixture = self.fixture()
+        process = mock.Mock(returncode=1)
+        process.poll.return_value = 1
+        with self.assertRaisesRegex(RuntimeError, 'process exited 1'):
+            fixture.wait_until('readiness', lambda: fixture.probe(app.BACKEND_URL + '/ready'), process)
+        fixture.http.open.assert_not_called()
+
+    def test_mutation_reset_is_never_retried_or_suppressed(self):
+        fixture = self.fixture()
+        fixture.http.open.side_effect = ConnectionResetError(104, 'reset')
+        with self.assertRaises(ConnectionResetError):
+            fixture.request('/users/register', {'username': 'synthetic'}, 'POST', authenticated=False)
+        self.assertEqual(fixture.http.open.call_count, 1)
+
+
+@unittest.skipUnless(os.environ.get('ARCENTRA_TEST_LOOPBACK_PROBES') == '1',
+                     'real loopback TCP tests require explicit authorized CI opt-in')
+class LoopbackReadinessProbeTests(unittest.TestCase):
+    def exercise_server(self, always_reset):
+        counts = []
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self):
+                self.request.settimeout(1)
+                self.request.recv(4096)
+                counts.append(1)
+                if always_reset or len(counts) == 1:
+                    self.request.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+                    return
+                self.request.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n')
+        server = socketserver.TCPServer(('127.0.0.1', 0), Handler)
+        server.timeout = 1
+        thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(lambda: thread.join(timeout=2))
+        self.addCleanup(server.shutdown)
+        opener = app.urllib.request.build_opener(app.urllib.request.ProxyHandler({}), app.NoRedirects())
+        fixture = object.__new__(app.Fixture)
+        # Keep the production guard on its exact fixed URL, and adapt only the
+        # test transport to an exclusively owned ephemeral loopback listener.
+        class Transport:
+            def open(self, url, timeout):
+                self_url = app.BACKEND_URL + '/ready'
+                if url != self_url:
+                    raise AssertionError('unexpected test request')
+                return opener.open('http://127.0.0.1:%d/ready' % server.server_address[1], timeout=timeout)
+        fixture.http = Transport()
+        process = mock.Mock(returncode=None)
+        process.poll.return_value = None
+        started = time.monotonic()
+        if always_reset:
+            with self.assertRaisesRegex(RuntimeError, 'timed out waiting'):
+                fixture.wait_until('real reset readiness', lambda: fixture.probe(app.BACKEND_URL + '/ready') == 200,
+                                   process, timeout=0.1)
+            self.assertLess(time.monotonic() - started, 2)
+        else:
+            self.assertTrue(fixture.wait_until('real reset then ready', lambda: fixture.probe(app.BACKEND_URL + '/ready') == 200,
+                                               process, timeout=3))
+            self.assertGreaterEqual(len(counts), 2)
+
+    def test_actual_tcp_reset_then_ready(self):
+        self.exercise_server(False)
+
+    def test_actual_tcp_persistent_reset_bounded(self):
+        self.exercise_server(True)
 
 
 if __name__ == "__main__":

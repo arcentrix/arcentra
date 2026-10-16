@@ -9,6 +9,7 @@ The caller starts the loopback dependency services and creates the S3 bucket.
 import argparse
 import base64
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -202,7 +203,7 @@ class Fixture:
                 return response.status
         except urllib.error.HTTPError as exc:
             return exc.code
-        except (urllib.error.URLError, TimeoutError):
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.RemoteDisconnected):
             return None
 
     def wait_until(self, description, predicate, process=None, timeout=90):
@@ -221,6 +222,54 @@ class Fixture:
                                     "-plugin-conf", str(self.root / "plugins.toml")])
         self.wait_until("Control readiness", lambda: self.probe(BACKEND_URL + "/ready") == 200, process)
         return process
+
+    def verify_runtime_toolchain(self):
+        """Verify the host profile's exact toolchain before any application work."""
+        verify_toolchain(self.env)
+        self.note("Preinstalled Go 1.25.6 verified in the actual sanitized Agent child environment")
+
+    def write_control_configuration(self, jwt_secret):
+        self.write_private("control.toml", control_config(self.root, jwt_secret))
+        self.write_private("plugins.toml", '[builtins.shell]\nshell = "/bin/sh"\ntimeout = 120\n'
+                           '[plugins.git]\ngitPath = "git"\ntimeout = 60\nshallow = false\n')
+
+    def write_agent_configuration(self, registration_token):
+        self.write_private("agent.toml", agent_config(self.root, registration_token))
+
+    def run_cli(self, name, arguments):
+        self.run(name, [self.args.cli_bin, arguments[0], "--conf",
+                        str(self.root / "control.toml"), *arguments[1:]])
+
+    def start_agent(self, name):
+        return self.start(name, [self.args.agent_bin, "-conf", str(self.root / "agent.toml")])
+
+    def stop_application(self, process):
+        self.stop(process)
+
+    def identity_path(self):
+        return self.root / "identity/identity.json"
+
+    def repository_url(self):
+        return REPO_URL
+
+    def storage_configuration(self):
+        return {"endpoint": "127.0.0.1:19000", "accessKey": DEPENDENCIES["ARCENTRA_TEST_S3_ACCESS_KEY"],
+                "secretKey": DEPENDENCIES["ARCENTRA_TEST_S3_SECRET_KEY"], "bucket": "acceptance",
+                "region": "us-east-1", "useTLS": False, "basePath": "actual-app"}
+
+    def runtime_evidence(self):
+        """Additional runtime facts cannot override the shared journey verdict."""
+        return {}
+
+    def runtime_limitations(self):
+        return ["Organization creation is not implemented; current admin project API accepts a synthetic orgId.",
+                "Trusted baremetal commands run with Agent host permissions on a disposable runner.",
+                "Module downloads are disabled; this does not prove host network isolation or container builds.",
+                "Manifest is an unsigned integrity record, not a provenance attestation."]
+
+    def cleanup_runtime(self):
+        for process in reversed(self.children):
+            self.stop(process)
 
     def login(self, username=USERNAME):
         detail = self.request("/users/login", {"username": username, "password": encoded(PASSWORD)},
@@ -305,7 +354,9 @@ class Fixture:
         copy_fixture_source(source)
         (source / ".arcentra").mkdir(parents=True)
         (source / "main.go").write_text((source / "main.go").read_text() + COMPILE_ERROR)
-        (source / ".arcentra/pipeline.yaml").write_text(json.dumps(pipeline_spec(), indent=2) + "\n")
+        spec = pipeline_spec()
+        spec["jobs"][0]["source"]["repo"] = self.repository_url()
+        (source / ".arcentra/pipeline.yaml").write_text(json.dumps(spec, indent=2) + "\n")
         self.run("git-init", ["git", "init", "--initial-branch=main", str(source)])
         self.run("git-add", ["git", "add", "."], source)
         self.run("git-commit", ["git", "-c", "user.name=Acceptance Fixture", "-c",
@@ -318,10 +369,13 @@ class Fixture:
         repositories = self.root / "repositories"
         repositories.mkdir()
         self.run("git-bare", ["git", "clone", "--bare", str(source), str(repositories / "acceptance.git")])
+        self.start_git_server(repositories)
+
+    def start_git_server(self, repositories):
         daemon = self.start("git-daemon", ["git", "daemon", "--listen=127.0.0.1", "--port=19418",
                                            "--export-all", f"--base-path={repositories}", str(repositories)])
         def reachable():
-            result = subprocess.run(["git", "ls-remote", REPO_URL, "refs/heads/main"],
+            result = subprocess.run(["git", "ls-remote", self.repository_url(), "refs/heads/main"],
                                     env=self.env, capture_output=True, text=True, timeout=5)
             return result.returncode == 0 and self.commit in result.stdout
         self.wait_until("loopback Git source", reachable, daemon, timeout=20)
@@ -336,7 +390,7 @@ class Fixture:
         jobs = self.request(base + "/jobs")
         artifacts = self.request(f"/projects/{receipt['projectId']}/artifacts?" +
                                  urllib.parse.urlencode({"runId": receipt["runId"], "pageSize": 100}))
-        validate_run_snapshot(receipt, run, jobs, artifacts, successful, self.agent_id)
+        _validate_run_snapshot(receipt, run, jobs, artifacts, successful, self.agent_id, self.repository_url())
         logs = self.request(base + "/logs?limit=1000")
         messages = "\n".join(entry.get("message", "") for entry in logs.get("entries", []))
         expected = ["ACTUAL_PROJECT_TOOLCHAIN go1.25.6", "ACTUAL_PROJECT_TEST"]
@@ -418,23 +472,19 @@ class Fixture:
         self.note("Browser-downloaded binary independently matched API bytes, manifest, fixed commit and program behavior")
 
     def exercise(self):
-        verify_toolchain(self.env)
-        self.note("Preinstalled Go 1.25.6 verified in the actual sanitized Agent child environment")
+        self.verify_runtime_toolchain()
         self.create_tls()
         jwt_secret = secrets.token_hex(32)
         self.redactions.append(jwt_secret)
-        self.write_private("control.toml", control_config(self.root, jwt_secret))
-        self.write_private("plugins.toml", '[builtins.shell]\nshell = "/bin/sh"\ntimeout = 120\n'
-                           '[plugins.git]\ngitPath = "git"\ntimeout = 60\nshallow = false\n')
-        self.run("migrate", [self.args.cli_bin, "migrate", "--conf", str(self.root / "control.toml")])
+        self.write_control_configuration(jwt_secret)
+        self.run_cli("migrate", ["migrate"])
         self.note("Real CLI migration completed; no account or product data seeded")
         control = self.start_control("control-before-bootstrap")
         self.request("/users/register", {"username": USERNAME, "email": "ci-admin@example.invalid",
                                          "fullName": "Acceptance Administrator", "password": encoded(PASSWORD)},
                      "POST", authenticated=False)
-        self.stop(control)
-        self.run("bootstrap-admin", [self.args.cli_bin, "bootstrap-admin", "--conf",
-                                      str(self.root / "control.toml"), "--username", USERNAME])
+        self.stop_application(control)
+        self.run_cli("bootstrap-admin", ["bootstrap-admin", "--username", USERNAME])
         control = self.start_control("control-after-bootstrap")
         self.login()
         self.note("HTTP registration, explicit CLI administrator bootstrap and fresh login completed")
@@ -444,9 +494,7 @@ class Fixture:
         self.run_preflight_browser(control)
         if self.request("/storage/configs"):
             raise RuntimeError("fresh-install fixture found pre-existing storage configuration")
-        storage = {"endpoint": "127.0.0.1:19000", "accessKey": DEPENDENCIES["ARCENTRA_TEST_S3_ACCESS_KEY"],
-                   "secretKey": DEPENDENCIES["ARCENTRA_TEST_S3_SECRET_KEY"], "bucket": "acceptance",
-                   "region": "us-east-1", "useTLS": False, "basePath": "actual-app"}
+        storage = self.storage_configuration()
         self.request("/storage/configs", {"storageId": "acceptance", "name": "Acceptance MinIO",
                                           "storageType": "minio", "isDefault": 1,
                                           "config": encoded(json.dumps(storage))}, "POST")
@@ -454,7 +502,7 @@ class Fixture:
         self.redactions.extend([salt, agent_secret])
         self.request("/settings/AGENT_SECRET_KEY", {"name": "AGENT_SECRET_KEY",
                      "value": {"salt": salt, "secret_key": agent_secret}}, "PUT")
-        self.stop(control)
+        self.stop_application(control)
         control = self.start_control("control-configured")
         self.login()
         self.note("Authenticated storage and Agent signing configuration saved; Control restarted")
@@ -463,8 +511,8 @@ class Fixture:
         token = self.request("/registration-tokens", {"description": "Disposable acceptance enrollment",
                                                      "maxUses": 0}, "POST")["token"]
         self.redactions.append(token)
-        self.write_private("agent.toml", agent_config(self.root, token))
-        agent = self.start("agent-pending", [self.args.agent_bin, "-conf", str(self.root / "agent.toml")])
+        self.write_agent_configuration(token)
+        agent = self.start_agent("agent-pending")
         def pending_agent():
             detail = self.request("/agent?pageNum=1&pageSize=100")
             if detail["count"] > 1:
@@ -474,18 +522,18 @@ class Fixture:
         self.agent_id = pending["agentId"]
         if pending["isEnabled"] != 0 or pending.get("lastHeartbeat"):
             raise RuntimeError("new Agent did not fail closed pending explicit approval")
-        identity_path = self.root / "identity/identity.json"
+        identity_path = self.identity_path()
         self.wait_until("durable pending Agent identity", identity_path.is_file, agent)
         identity_digest = hashlib.sha256(identity_path.read_bytes()).digest()
         self.wait_until("pending Agent liveness", lambda: self.probe(AGENT_URL + "/live") == 200, agent)
         if self.probe(AGENT_URL + "/ready") != 503 or self.probe(AGENT_URL + "/live") != 200:
             raise RuntimeError("pending Agent readiness/liveness contract failed")
         self.request(f"/agent/{self.agent_id}/approve", {}, "PUT")
-        self.stop(agent)
+        self.stop_application(agent)
         # Remove the one-time enrollment token. The second start must use the
         # durable original identity and verified TLS; no config credential seed.
-        self.write_private("agent.toml", agent_config(self.root, ""))
-        agent = self.start("agent-approved", [self.args.agent_bin, "-conf", str(self.root / "agent.toml")])
+        self.write_agent_configuration("")
+        agent = self.start_agent("agent-approved")
         self.wait_until("approved Agent readiness", lambda: self.probe(AGENT_URL + "/ready") == 200, agent)
         restored = self.request("/agent?pageNum=1&pageSize=100")
         if (restored["count"] != 1 or restored["agents"][0]["agentId"] != self.agent_id
@@ -502,7 +550,7 @@ class Fixture:
         return self.env | {
             "ARCENTRA_ACCEPTANCE_PHASE": phase,
             "ARCENTRA_REAL_STACK": "1", "ARCENTRA_ACCEPTANCE_BACKEND_URL": BACKEND_URL,
-            "ARCENTRA_ACCEPTANCE_REPO_URL": REPO_URL, "ARCENTRA_ACCEPTANCE_ORG_ID": "ci-acceptance-org",
+            "ARCENTRA_ACCEPTANCE_REPO_URL": self.repository_url(), "ARCENTRA_ACCEPTANCE_ORG_ID": "ci-acceptance-org",
             "ARCENTRA_ACCEPTANCE_CONTRACT": BUILD_CONTRACT,
             "ARCENTRA_ACCEPTANCE_ARTIFACT_NAME": ARTIFACT_NAME,
             "ARCENTRA_ACCEPTANCE_MANIFEST_NAME": MANIFEST_NAME,
@@ -555,8 +603,7 @@ class Fixture:
         self.note("Browser create-project → create-pipeline → run → logs → artifact journey completed")
 
     def cleanup(self, error):
-        for process in reversed(self.children):
-            self.stop(process)
+        self.cleanup_runtime()
         for _, handle in self.logs:
             handle.close()
         self.args.evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -573,19 +620,20 @@ class Fixture:
             content = re.sub(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", "[REDACTED-JWT]", content)
             content = re.sub(r"art_[A-Za-z0-9_-]+", "[REDACTED-ENROLLMENT]", content)
             (self.args.evidence_dir / path.name).write_text(content)
-        (self.args.evidence_dir / "actual-app-result.json").write_text(json.dumps({
+        result = {
             "status": "failed" if error else "passed", "steps": self.steps,
             "error": error, "agentId": self.agent_id, "sourceCommit": self.commit,
             "contract": BUILD_CONTRACT, "failedSourceCommit": self.failed_commit,
             "firstBuildJourney": FIRST_BUILD_JOURNEY, "firstBuildPreflightVerified": self.preflight_verified,
             "failedRun": self.failed_run, "successfulRun": self.successful_run,
             "verifiedArtifact": self.artifact_evidence,
-            "backend": BACKEND_URL, "repository": REPO_URL,
-            "limitations": ["Organization creation is not implemented; current admin project API accepts a synthetic orgId.",
-                            "Trusted baremetal commands run with Agent host permissions on a disposable runner.",
-                            "Module downloads are disabled; this does not prove host network isolation or container builds.",
-                            "Manifest is an unsigned integrity record, not a provenance attestation."],
-        }, indent=2) + "\n")
+            "backend": BACKEND_URL, "repository": self.repository_url(),
+            "limitations": self.runtime_limitations(),
+        }
+        runtime = self.runtime_evidence()
+        if runtime:
+            result["runtime"] = runtime
+        (self.args.evidence_dir / "actual-app-result.json").write_text(json.dumps(result, indent=2) + "\n")
 
 
 def validate_restricted_first_build(detail):
@@ -770,6 +818,13 @@ def validate_manifest(manifest_bytes, binary, expected_commit):
 
 
 def validate_run_snapshot(receipt, run, jobs, artifacts, successful, agent_id):
+    """Preserve the host-profile validator API and its fixed repository contract."""
+    return _validate_run_snapshot(receipt, run, jobs, artifacts, successful, agent_id, REPO_URL)
+
+
+def _validate_run_snapshot(receipt, run, jobs, artifacts, successful, agent_id, repository_url):
+    if repository_url not in (REPO_URL, "git://git:9418/acceptance.git"):
+        raise ValueError("unknown fixed actual-build repository profile")
     commit = receipt["sourceCommit"]
     expected_status = (3, "3", "success", "PIPELINE_STATUS_SUCCESS") if successful else (
         4, "4", "failed", "PIPELINE_STATUS_FAILED")
@@ -783,7 +838,7 @@ def validate_run_snapshot(receipt, run, jobs, artifacts, successful, agent_id):
     if (job.get("pipelineId") != receipt["pipelineId"] or job.get("pipelineRunId") != receipt["runId"]
             or job.get("agentId") != agent_id or job.get("status") != (4 if successful else 5)
             or job.get("sourceExpectationCaptured") is not True
-            or job.get("sourceType") != "git" or job.get("sourceRepository") != REPO_URL
+            or job.get("sourceType") != "git" or job.get("sourceRepository") != repository_url
             or job.get("sourceResolvedCommit") != commit or job.get("sourceProvenanceState") != "reported"):
         raise ValueError("actual Agent job has wrong status or checkout evidence")
     safe_identifier(job.get("jobRunId"))

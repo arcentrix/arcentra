@@ -1,0 +1,269 @@
+name: Application image build journey
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image-build:
+    name: Actual Control and provisioned Agent images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CGO_ENABLED: "1"
+      GOTOOLCHAIN: local
+      PYTHONDONTWRITEBYTECODE: "1"
+      ARCENTRA_REAL_STACK: "1"
+      ARCENTRA_IMAGE_JOURNEY: "1"
+      ARCENTRA_TEST_S3_ENDPOINT: "http://127.0.0.1:19000"
+      ARCENTRA_TEST_S3_ACCESS_KEY: ci-only-s3-user
+      ARCENTRA_TEST_S3_SECRET_KEY: ci-only-s3-password
+      COMPOSE_PROJECT_NAME: arcentra-image-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Reserve cleanup time before ordinary work
+        timeout-minutes: 1
+        run: echo "IMAGE_WORK_DEADLINE=$(($(date +%s) + 840))" >> "$GITHUB_ENV"
+
+      - name: Check ordinary work budget before external action
+        timeout-minutes: 1
+        run: test "$(date +%s)" -lt "$IMAGE_WORK_DEADLINE"
+
+      - name: Check out backend under test
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check ordinary work budget before external action
+        timeout-minutes: 1
+        run: test "$(date +%s)" -lt "$IMAGE_WORK_DEADLINE"
+
+      - name: Set up Go
+        timeout-minutes: 2
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            scripts/acceptance/minio.Dockerfile
+
+      - name: Build clean release payload outside the checkout
+        timeout-minutes: 8
+        run: |
+          remaining=$((IMAGE_WORK_DEADLINE - $(date +%s)))
+          if [ "$remaining" -le 0 ]; then echo 'Image journey work budget exhausted; cleanup reserved' >&2; exit 1; fi
+          timeout --signal=TERM --kill-after=15s "${remaining}s" bash -euo pipefail <<'IMAGE_WORK'
+          set -euo pipefail
+          make codegen
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          PAYLOAD="$(mktemp -d "$RUNNER_TEMP/arcentra-image-payload.XXXXXX")"
+          echo "IMAGE_PAYLOAD=$PAYLOAD" >> "$GITHUB_ENV"
+          LDFLAGS="-s -w -X github.com/arcentrix/arcentra/pkg/version.Version=26.0.0.0 -X github.com/arcentrix/arcentra/pkg/version.GitCommit=$GITHUB_SHA -X github.com/arcentrix/arcentra/pkg/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          for target in arcentra arcentra-agent cli; do
+            output="$target"
+            if [ "$target" = cli ]; then output=arcentra-cli; fi
+            go build -trimpath -ldflags "$LDFLAGS" -o "$PAYLOAD/$output" "./cmd/$target"
+          done
+          python3 -m unittest discover -s scripts/acceptance -p 'test_*image*.py'
+          ARCENTRA_TEST_LOOPBACK_PROBES=1 PYTHONPATH=scripts/acceptance python3 -m unittest test_run_actual_app.ReadinessProbeTransportTests test_run_actual_app.LoopbackReadinessProbeTests
+          IMAGE_WORK
+
+      - name: Check ordinary work budget before external action
+        timeout-minutes: 1
+        run: test "$(date +%s)" -lt "$IMAGE_WORK_DEADLINE"
+
+      - name: Check out official source-only MinIO release
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: minio/minio
+          # RELEASE.2025-10-15T17-29-55Z; official source, no registry credentials.
+          ref: 9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+          path: .acceptance/minio-source
+          persist-credentials: false
+
+      - name: Build disposable MinIO image from verified source
+        timeout-minutes: 12
+        run: |
+          remaining=$((IMAGE_WORK_DEADLINE - $(date +%s)))
+          if [ "$remaining" -le 0 ]; then echo 'Image journey work budget exhausted; cleanup reserved' >&2; exit 1; fi
+          timeout --signal=TERM --kill-after=15s "${remaining}s" bash -euo pipefail <<'IMAGE_WORK'
+          test "$(git -C .acceptance/minio-source rev-parse HEAD)" = 9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+          mkdir -p .acceptance/minio-image
+          (cd .acceptance/minio-source && CGO_ENABLED=0 go build -mod=readonly -trimpath -o ../minio-image/minio .)
+          cp .acceptance/minio-source/LICENSE .acceptance/minio-source/NOTICE .acceptance/minio-image/
+          docker build -f scripts/acceptance/minio.Dockerfile -t arcentra-ci-minio:9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a .acceptance/minio-image
+          IMAGE_WORK
+
+      - name: Mask disposable fixture credentials
+        run: |
+          remaining=$((IMAGE_WORK_DEADLINE - $(date +%s)))
+          if [ "$remaining" -le 0 ]; then echo 'Image journey work budget exhausted; cleanup reserved' >&2; exit 1; fi
+          timeout --signal=TERM --kill-after=15s "${remaining}s" bash -euo pipefail <<'IMAGE_WORK'
+          echo "PLAYWRIGHT_BROWSERS_PATH=$RUNNER_TEMP/arcentra-playwright" >> "$GITHUB_ENV"
+          echo "::add-mask::ci-only-mysql-password"
+          echo "::add-mask::ci-only-s3-password"
+          echo "::add-mask::Ci-Only-Password-123!"
+          IMAGE_WORK
+
+      - name: Start disposable loopback dependencies
+        run: |
+          remaining=$((IMAGE_WORK_DEADLINE - $(date +%s)))
+          if [ "$remaining" -le 0 ]; then echo 'Image journey work budget exhausted; cleanup reserved' >&2; exit 1; fi
+          timeout --signal=TERM --kill-after=15s "${remaining}s" bash -euo pipefail <<'IMAGE_WORK'
+          docker compose -f scripts/acceptance/compose.yml up -d --wait --wait-timeout 180
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:19000/minio/health/ready >/dev/null; then break; fi
+            if [ "$attempt" -eq 60 ]; then exit 1; fi
+            sleep 2
+          done
+          go run scripts/acceptance/create_bucket.go
+          IMAGE_WORK
+
+      - name: Check ordinary work budget before external action
+        timeout-minutes: 1
+        run: test "$(date +%s)" -lt "$IMAGE_WORK_DEADLINE"
+
+      - name: Check out pinned frontend acceptance client
+        timeout-minutes: 2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: arcentrix/arcentra-web
+          # Reviewed image/host acceptance client: immutable cross-repository dependency.
+          ref: 278a1cba4d199e57a047dddb36f7c4157a2f8ef0
+          path: .acceptance/frontend
+          persist-credentials: false
+
+      - name: Check ordinary work budget before external action
+        timeout-minutes: 1
+        run: test "$(date +%s)" -lt "$IMAGE_WORK_DEADLINE"
+
+      - name: Set up pnpm
+        timeout-minutes: 2
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10.30.3
+          run_install: false
+
+      - name: Check ordinary work budget before external action
+        timeout-minutes: 1
+        run: test "$(date +%s)" -lt "$IMAGE_WORK_DEADLINE"
+
+      - name: Set up Node.js
+        timeout-minutes: 2
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .acceptance/frontend/.nvmrc
+          cache: pnpm
+          cache-dependency-path: .acceptance/frontend/pnpm-lock.yaml
+
+      - name: Install locked frontend and official Chromium
+        working-directory: .acceptance/frontend
+        run: |
+          remaining=$((IMAGE_WORK_DEADLINE - $(date +%s)))
+          if [ "$remaining" -le 0 ]; then echo 'Image journey work budget exhausted; cleanup reserved' >&2; exit 1; fi
+          timeout --signal=TERM --kill-after=15s "${remaining}s" bash -euo pipefail <<'IMAGE_WORK'
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          IMAGE_WORK
+
+      - name: Build owned stock images and test-toolchain Agent derivative
+        timeout-minutes: 12
+        run: |
+          remaining=$((IMAGE_WORK_DEADLINE - $(date +%s)))
+          if [ "$remaining" -le 0 ]; then echo 'Image journey work budget exhausted; cleanup reserved' >&2; exit 1; fi
+          timeout --signal=TERM --kill-after=15s "${remaining}s" bash -euo pipefail <<'IMAGE_WORK'
+          python3 scripts/acceptance/build_image_journey.py \
+            --payload-dir "$IMAGE_PAYLOAD" \
+            --manifest "$RUNNER_TEMP/arcentra-image-manifest.json" \
+            --ownership-file "$RUNNER_TEMP/arcentra-image-build-ownership.json" \
+            --evidence-dir "$PWD/.acceptance/image-evidence"
+          IMAGE_WORK
+
+      - name: Exercise real image-backed installation and compiled artifact download
+        id: journey
+        timeout-minutes: 9
+        run: |
+          remaining=$((IMAGE_WORK_DEADLINE - $(date +%s)))
+          if [ "$remaining" -le 0 ]; then echo 'Image journey work budget exhausted; cleanup reserved' >&2; exit 1; fi
+          timeout --signal=TERM --kill-after=15s "${remaining}s" bash -euo pipefail <<'IMAGE_WORK'
+          python3 scripts/acceptance/run_image_app.py \
+            --image-manifest "$RUNNER_TEMP/arcentra-image-manifest.json" \
+            --ownership-file "$RUNNER_TEMP/arcentra-image-app-ownership.json" \
+            --evidence-dir "$PWD/.acceptance/image-evidence" \
+            --browser-cwd "$PWD/.acceptance/frontend" \
+            -- node tests/actual-backend-acceptance.mjs
+          IMAGE_WORK
+
+      - name: Clean only this run's application and dependency resources
+        id: cleanup
+        if: always()
+        timeout-minutes: 6
+        run: |
+          status=0
+          if [ -f "$RUNNER_TEMP/arcentra-image-app-ownership.json" ]; then
+            python3 scripts/acceptance/run_image_app.py --cleanup-only \
+              --image-manifest "$RUNNER_TEMP/arcentra-image-manifest.json" \
+              --ownership-file "$RUNNER_TEMP/arcentra-image-app-ownership.json" || status=1
+          fi
+          python3 scripts/acceptance/build_image_journey.py --cleanup-only \
+            --manifest "$RUNNER_TEMP/arcentra-image-manifest.json" \
+            --ownership-file "$RUNNER_TEMP/arcentra-image-build-ownership.json" \
+            --evidence-dir "$PWD/.acceptance/image-evidence" || status=1
+          dependency_status=0
+          timeout --kill-after=5s 30s docker compose -f scripts/acceptance/compose.yml down --volumes --remove-orphans --timeout 15 || dependency_status=1
+          for resource in container network volume; do
+            extra=()
+            if [ "$resource" = container ]; then extra=(--all); fi
+            remaining="$(timeout --kill-after=2s 5s docker "$resource" ls "${extra[@]}" --quiet --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME")" || dependency_status=1
+            if [ -n "$remaining" ]; then dependency_status=1; fi
+          done
+          mkdir -p .acceptance/image-evidence
+          if [ "$dependency_status" -eq 0 ]; then verdict=passed; else verdict=failed; status=1; fi
+          printf '{"schemaVersion":1,"status":"%s","runId":"%s","attempt":"%s","sourceSha":"%s"}\n' "$verdict" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_SHA" > .acceptance/image-evidence/dependency-cleanup-summary.json
+          if [ -n "${IMAGE_PAYLOAD:-}" ]; then
+            case "$IMAGE_PAYLOAD" in
+              "$RUNNER_TEMP"/arcentra-image-payload.*) rm -rf -- "$IMAGE_PAYLOAD" || status=1 ;;
+              *) echo 'Refusing unexpected payload path' >&2; status=1 ;;
+            esac
+          fi
+          exit "$status"
+
+      - name: Invalidate successful build evidence unless execution and cleanup succeeded
+        if: always()
+        timeout-minutes: 1
+        env:
+          JOURNEY_OUTCOME: ${{ steps.journey.outcome }}
+          CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
+        run: |
+          if [ "$JOURNEY_OUTCOME" != success ] || [ "$CLEANUP_OUTCOME" != success ]; then
+            rm -f -- .acceptance/image-evidence/browser/project-build-verification.json
+          fi
+
+      - name: Preserve only sanitized image journey evidence
+        if: always()
+        timeout-minutes: 1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .acceptance/image-evidence/build-summary.json
+            .acceptance/image-evidence/cleanup-summary.json
+            .acceptance/image-evidence/dependency-cleanup-summary.json
+            ${{ runner.temp }}/image-runtime-summary.json
+            .acceptance/image-evidence/browser/*.png
+            .acceptance/image-evidence/browser/summary.json
+            .acceptance/image-evidence/browser/project-build-verification.json
+          if-no-files-found: ignore
+          retention-days: 7
