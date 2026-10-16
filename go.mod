@@ -48,7 +48,7 @@ require (
 	github.com/apache/rocketmq-client-go/v2 v2.1.2
 	github.com/casbin/casbin/v2 v2.135.0
 	github.com/confluentinc/confluent-kafka-go/v2 v2.14.1
-	github.com/containerd/containerd v1.7.31
+	github.com/containerd/containerd v1.7.32
 	github.com/gofiber/contrib/fiberi18n/v2 v2.0.6
 	github.com/hashicorp/go-metrics v0.5.4
 	github.com/opencontainers/runtime-spec v1.1.0
