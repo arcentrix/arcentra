@@ -15,10 +15,14 @@
 package router
 
 import (
+	"errors"
+
 	"github.com/arcentrix/arcentra/internal/control/consts"
+	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
 
 // storageRouter registers storage related routes
@@ -96,20 +100,12 @@ func (rt *Router) createStorageConfig(c *fiber.Ctx) error {
 
 	var req service.CreateStorageConfigRequest
 	if err := c.BodyParser(&req); err != nil {
-		return http.Err(c, http.BadRequest.Code, "invalid request body")
+		return sensitiveError(c, 400, "invalid request body")
 	}
 
-	merged, _, mergeErr := mergeConfigSecrets(nil, req.Config, false)
-	if mergeErr != nil {
-		return sensitiveError(c, 400, mergeErr.Error())
-	}
-	if err := validateStorageEndpoint(merged); err != nil {
-		return sensitiveError(c, 400, err.Error())
-	}
-	req.Config = merged
 	storageConfig, err := storageService.CreateStorageConfig(c.Context(), &req)
 	if err != nil {
-		return http.Err(c, http.Failed.Code, err.Error())
+		return storageConfigError(c, err)
 	}
 
 	return http.Detail(c, publicStorage(storageConfig))
@@ -121,7 +117,7 @@ func (rt *Router) listStorageConfigs(c *fiber.Ctx) error {
 
 	storageConfigs, err := storageService.ListStorageConfigs(c.Context())
 	if err != nil {
-		return http.Err(c, http.Failed.Code, err.Error())
+		return storageConfigError(c, err)
 	}
 
 	views := make([]storageConfigView, 0, len(storageConfigs))
@@ -137,12 +133,12 @@ func (rt *Router) getStorageConfig(c *fiber.Ctx) error {
 
 	storageID := c.Params("id")
 	if storageID == "" {
-		return http.Err(c, http.BadRequest.Code, "storage id is required")
+		return sensitiveError(c, 400, "storage id is required")
 	}
 
 	storageConfig, err := storageService.GetStorageConfig(c.Context(), storageID)
 	if err != nil {
-		return http.Err(c, http.Failed.Code, err.Error())
+		return storageConfigError(c, err)
 	}
 
 	return http.Detail(c, publicStorage(storageConfig))
@@ -154,39 +150,21 @@ func (rt *Router) updateStorageConfig(c *fiber.Ctx) error {
 
 	storageID := c.Params("id")
 	if storageID == "" {
-		return http.Err(c, http.BadRequest.Code, "storage id is required")
+		return sensitiveError(c, 400, "storage id is required")
 	}
 
 	var req service.UpdateStorageConfigRequest
 	if err := c.BodyParser(&req); err != nil {
-		return http.Err(c, http.BadRequest.Code, "invalid request body")
+		return sensitiveError(c, 400, "invalid request body")
 	}
 
-	existing, err := storageService.GetStorageConfig(c.UserContext(), storageID)
-	if err != nil {
-		return sensitiveError(c, 404, "storage configuration not found")
-	}
 	if req.StorageID != "" && req.StorageID != storageID {
 		return sensitiveError(c, 400, "storage id must match the path")
 	}
-	if req.StorageType == "" {
-		req.StorageType = existing.StorageType
-	}
-	if req.StorageType != existing.StorageType {
-		return sensitiveError(c, 400, "create a new configuration to change storage provider")
-	}
-	merged, _, mergeErr := mergeConfigSecrets(existing.Config, req.Config, false)
-	if mergeErr != nil {
-		return sensitiveError(c, 400, mergeErr.Error())
-	}
-	if err := validateStorageEndpoint(merged); err != nil {
-		return sensitiveError(c, 400, err.Error())
-	}
-	req.Config = merged
 	req.StorageID = storageID
 	storageConfig, err := storageService.UpdateStorageConfig(c.Context(), &req)
 	if err != nil {
-		return http.Err(c, http.Failed.Code, err.Error())
+		return storageConfigError(c, err)
 	}
 
 	return http.Detail(c, publicStorage(storageConfig))
@@ -198,12 +176,12 @@ func (rt *Router) deleteStorageConfig(c *fiber.Ctx) error {
 
 	storageID := c.Params("id")
 	if storageID == "" {
-		return http.Err(c, http.BadRequest.Code, "storage id is required")
+		return sensitiveError(c, 400, "storage id is required")
 	}
 
 	err := storageService.DeleteStorageConfig(c.Context(), storageID)
 	if err != nil {
-		return http.Err(c, http.Failed.Code, err.Error())
+		return storageConfigError(c, err)
 	}
 
 	return http.Detail(c, map[string]interface{}{"id": storageID})
@@ -215,12 +193,12 @@ func (rt *Router) setDefaultStorageConfig(c *fiber.Ctx) error {
 
 	storageID := c.Params("id")
 	if storageID == "" {
-		return http.Err(c, http.BadRequest.Code, "storage id is required")
+		return sensitiveError(c, 400, "storage id is required")
 	}
 
 	err := storageService.SetDefaultStorageConfig(c.Context(), storageID)
 	if err != nil {
-		return http.Err(c, http.Failed.Code, err.Error())
+		return storageConfigError(c, err)
 	}
 
 	return http.Detail(c, map[string]interface{}{"id": storageID})
@@ -232,8 +210,28 @@ func (rt *Router) getDefaultStorageConfig(c *fiber.Ctx) error {
 
 	storageConfig, err := storageService.GetDefaultStorageConfig(c.Context())
 	if err != nil {
-		return http.Err(c, http.Failed.Code, err.Error())
+		return storageConfigError(c, err)
 	}
 
 	return http.Detail(c, publicStorage(storageConfig))
+}
+
+// storageConfigError 不把数据库或连接错误中的配置内容返回到管理页面
+func storageConfigError(c *fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, repo.ErrStorageConfigNotFound), errors.Is(err, gorm.ErrRecordNotFound):
+		return sensitiveError(c, 404, "storage configuration not found or disabled")
+	case errors.Is(err, repo.ErrStorageConfigConflict):
+		return sensitiveError(c, 409, "storage configuration id already exists or is ambiguous")
+	case errors.Is(err, repo.ErrStorageTargetImmutable):
+		return sensitiveError(c, 400, "create a new configuration to change the storage target")
+	case errors.Is(err, repo.ErrStorageConfigID):
+		return sensitiveError(c, 400, repo.ErrStorageConfigID.Error())
+	case errors.Is(err, repo.ErrStorageConfigFlags):
+		return sensitiveError(c, 400, repo.ErrStorageConfigFlags.Error())
+	case errors.Is(err, service.ErrInvalidStorageConfig):
+		return sensitiveError(c, 400, "invalid storage configuration; check required fields and use new values for credentials")
+	default:
+		return sensitiveError(c, 500, "storage configuration operation failed")
+	}
 }

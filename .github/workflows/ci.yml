@@ -156,6 +156,27 @@ jobs:
             "$test_name/cancel_before_publication" \
             "$test_name/publication_before_cancel"
 
+      - name: Verify storage configuration transactions with actual MySQL
+        timeout-minutes: 5
+        run: |
+          set -o pipefail
+          for attempt in 1 2; do
+            schema="arcentra_storage_test_$attempt"
+            docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create "$schema"
+            ARCENTRA_REQUIRE_STORAGE_MYSQL=1 \
+            ARCENTRA_STORAGE_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
+              go test -race -v -count=1 -timeout=2m -run '^TestStorageMySQLAcceptance$' ./internal/control/repo | tee ".acceptance/evidence/storage-mysql-$attempt.log"
+            python3 scripts/acceptance/verify_containerd_test_log.py ".acceptance/evidence/storage-mysql-$attempt.log" 1 \
+              TestStorageMySQLAcceptance \
+              TestStorageMySQLAcceptance/concurrent_first_default_creation \
+              TestStorageMySQLAcceptance/concurrent_first_duplicate_creation \
+              TestStorageMySQLAcceptance/concurrent_duplicate_creation \
+              TestStorageMySQLAcceptance/concurrent_existing_default_switches \
+              TestStorageMySQLAcceptance/invalid_target_preserves_default \
+              TestStorageMySQLAcceptance/failed_target_update_rolls_back \
+              TestStorageMySQLAcceptance/concurrent_credential_rotation_and_metadata_edit
+          done
+
       - name: Verify real broker, MySQL, S3 and Agent execution
         run: |
           set -o pipefail
@@ -232,7 +253,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: 278a1cba4d199e57a047dddb36f7c4157a2f8ef0
+          ref: aa81049e409e9a382d69c5b242df8a2229bb145e
           path: .acceptance/frontend
           persist-credentials: false
 

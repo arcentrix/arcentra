@@ -16,11 +16,15 @@ package service
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	artifactutil "github.com/arcentrix/arcentra/pkg/artifact"
+	"github.com/arcentrix/arcentra/pkg/configsecret"
+	"github.com/bytedance/sonic"
 )
 
 type StorageService struct {
@@ -33,62 +37,68 @@ func NewStorageService(storageRepo repo.IStorageRepository) *StorageService {
 	}
 }
 
-// CreateStorageConfig creates storage config.
+// ErrInvalidStorageConfig 表示输入配置或元数据未通过本地格式校验
+var ErrInvalidStorageConfig = errors.New("invalid storage configuration")
+
+// CreateStorageConfig 校验并原子创建配置，不进行远程连通性探测
 func (ss *StorageService) CreateStorageConfig(ctx context.Context, req *CreateStorageConfigRequest) (*model.StorageConfig, error) {
-	if err := ss.validateStorageConfig(req.StorageType, req.Config); err != nil {
-		return nil, fmt.Errorf("invalid storage config: %w", err)
+	if artifactutil.Identity(req.StorageID) != nil || strings.TrimSpace(req.Name) == "" {
+		return nil, fmt.Errorf("%w: storage id must be a valid artifact identity and name is required", ErrInvalidStorageConfig)
 	}
-
+	config, _, err := configsecret.Merge(nil, req.Config, false)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidStorageConfig, err)
+	}
+	if err := configsecret.ValidateStorageEndpoint(config); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidStorageConfig, err)
+	}
+	if err := ss.validateStorageConfig(req.StorageType, config); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidStorageConfig, err)
+	}
 	storageConfig := &model.StorageConfig{
-		StorageID:   req.StorageID,
-		Name:        req.Name,
-		StorageType: req.StorageType,
-		Config:      req.Config,
-		Description: req.Description,
-		IsDefault:   req.IsDefault,
-		IsEnabled:   1,
+		StorageID: req.StorageID, Name: req.Name, StorageType: req.StorageType,
+		Config: config, Description: req.Description, IsDefault: req.IsDefault, IsEnabled: 1,
 	}
-
 	if err := ss.storageRepo.Create(ctx, storageConfig); err != nil {
-		return nil, fmt.Errorf("failed to create storage config: %w", err)
+		return nil, err
 	}
-
-	if req.IsDefault == 1 {
-		if err := ss.storageRepo.SetDefault(ctx, req.StorageID); err != nil {
-			return nil, fmt.Errorf("failed to set as default storage config: %w", err)
-		}
-	}
-
 	return storageConfig, nil
 }
 
-// UpdateStorageConfig updates storage config.
+// UpdateStorageConfig 在事务内合并最新配置，省略字段保持不变而显式零值会持久化
 func (ss *StorageService) UpdateStorageConfig(ctx context.Context, req *UpdateStorageConfigRequest) (*model.StorageConfig, error) {
-	if err := ss.validateStorageConfig(req.StorageType, req.Config); err != nil {
-		return nil, fmt.Errorf("invalid storage config: %w", err)
-	}
-
-	storageConfig := &model.StorageConfig{
-		StorageID:   req.StorageID,
-		Name:        req.Name,
-		StorageType: req.StorageType,
-		Config:      req.Config,
-		Description: req.Description,
-		IsDefault:   req.IsDefault,
-		IsEnabled:   req.IsEnabled,
-	}
-
-	if err := ss.storageRepo.Update(ctx, storageConfig); err != nil {
-		return nil, fmt.Errorf("failed to update storage config: %w", err)
-	}
-
-	if req.IsDefault == 1 {
-		if err := ss.storageRepo.SetDefault(ctx, req.StorageID); err != nil {
-			return nil, fmt.Errorf("failed to set as default storage config: %w", err)
+	return ss.storageRepo.UpdateConfig(ctx, req.StorageID, func(current *model.StorageConfig) error {
+		if req.StorageType != "" && req.StorageType != current.StorageType {
+			return repo.ErrStorageTargetImmutable
 		}
-	}
-
-	return storageConfig, nil
+		merged, _, err := configsecret.Merge(current.Config, req.Config, false)
+		if err != nil {
+			return fmt.Errorf("%w: %s", ErrInvalidStorageConfig, err)
+		}
+		if err := configsecret.ValidateStorageEndpoint(merged); err != nil {
+			return fmt.Errorf("%w: %s", ErrInvalidStorageConfig, err)
+		}
+		if err := ss.validateStorageConfig(current.StorageType, merged); err != nil {
+			return fmt.Errorf("%w: %s", ErrInvalidStorageConfig, err)
+		}
+		current.Config = merged
+		if req.Name != nil {
+			if strings.TrimSpace(*req.Name) == "" {
+				return fmt.Errorf("%w: name is required", ErrInvalidStorageConfig)
+			}
+			current.Name = *req.Name
+		}
+		if req.Description != nil {
+			current.Description = *req.Description
+		}
+		if req.IsDefault != nil {
+			current.IsDefault = *req.IsDefault
+		}
+		if req.IsEnabled != nil {
+			current.IsEnabled = *req.IsEnabled
+		}
+		return nil
+	})
 }
 
 // GetStorageConfig returns storage config by storageId.
@@ -121,36 +131,36 @@ func (ss *StorageService) validateStorageConfig(storageType string, configJSON [
 	switch storageType {
 	case "minio":
 		var config model.MinIOConfig
-		if err := json.Unmarshal(configJSON, &config); err != nil {
-			return fmt.Errorf("invalid MinIO config: %w", err)
+		if err := sonic.Unmarshal(configJSON, &config); err != nil {
+			return fmt.Errorf("invalid MinIO config")
 		}
 		return ss.validateMinIOConfig(&config)
 	case "s3":
 		var config model.S3Config
-		if err := json.Unmarshal(configJSON, &config); err != nil {
-			return fmt.Errorf("invalid S3 config: %w", err)
+		if err := sonic.Unmarshal(configJSON, &config); err != nil {
+			return fmt.Errorf("invalid S3 config")
 		}
 		return ss.validateS3Config(&config)
 	case "oss":
 		var config model.OSSConfig
-		if err := json.Unmarshal(configJSON, &config); err != nil {
-			return fmt.Errorf("invalid OSS config: %w", err)
+		if err := sonic.Unmarshal(configJSON, &config); err != nil {
+			return fmt.Errorf("invalid OSS config")
 		}
 		return ss.validateOSSConfig(&config)
 	case "gcs":
 		var config model.GCSConfig
-		if err := json.Unmarshal(configJSON, &config); err != nil {
-			return fmt.Errorf("invalid GCS config: %w", err)
+		if err := sonic.Unmarshal(configJSON, &config); err != nil {
+			return fmt.Errorf("invalid GCS config")
 		}
 		return ss.validateGCSConfig(&config)
 	case "cos":
 		var config model.COSConfig
-		if err := json.Unmarshal(configJSON, &config); err != nil {
-			return fmt.Errorf("invalid COS config: %w", err)
+		if err := sonic.Unmarshal(configJSON, &config); err != nil {
+			return fmt.Errorf("invalid COS config")
 		}
 		return ss.validateCOSConfig(&config)
 	default:
-		return fmt.Errorf("unsupported storage type: %s", storageType)
+		return fmt.Errorf("unsupported storage type")
 	}
 }
 
@@ -233,6 +243,7 @@ func (ss *StorageService) validateCOSConfig(config *model.COSConfig) error {
 	return nil
 }
 
+// CreateStorageConfigRequest 创建存储配置的输入
 type CreateStorageConfigRequest struct {
 	StorageID   string `json:"storageId" binding:"required"`
 	Name        string `json:"name" binding:"required"`
@@ -242,12 +253,14 @@ type CreateStorageConfigRequest struct {
 	IsDefault   int    `json:"isDefault"`
 }
 
+// UpdateStorageConfigRequest 区分省略字段和显式零值的配置更新
+// Config 使用 JSON 字节的 base64 表示，读取接口仍返回脱敏的 JSON 对象
 type UpdateStorageConfigRequest struct {
-	StorageID   string `json:"storageId" binding:"required"`
-	Name        string `json:"name"`
-	StorageType string `json:"storageType"`
-	Config      []byte `json:"config"`
-	Description string `json:"description"`
-	IsDefault   int    `json:"isDefault"`
-	IsEnabled   int    `json:"isEnabled"`
+	StorageID   string  `json:"storageId"`
+	Name        *string `json:"name"`
+	StorageType string  `json:"storageType"`
+	Config      []byte  `json:"config"`
+	Description *string `json:"description"`
+	IsDefault   *int    `json:"isDefault"`
+	IsEnabled   *int    `json:"isEnabled"`
 }

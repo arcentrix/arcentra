@@ -44,6 +44,7 @@ class SyntheticSessionHTTP:
         self.permissions = []
         self.role_override = {}
         self.first_build_override = {}
+        self.storage = []
 
     @staticmethod
     def reply(request, code, detail=None, http_status=200):
@@ -80,9 +81,11 @@ class SyntheticSessionHTTP:
                                                 "agent": {"access": "restricted"}} | self.first_build_override)
             if path.endswith("/trigger"):
                 return self.reply(request, 4030)
-            if path == "/users/":
+            if path in ("/users/", "/storage/configs"):
                 return self.reply(request, 403, http_status=403)
             return self.reply(request, 200, {"readBy": username})
+        if path == "/storage/configs" and method == "GET":
+            return self.reply(request, 200, self.storage)
         if path == "/role" and method == "POST":
             assert payload["permissions"] == [] and payload["roleId"] == app.OBSERVER_ROLE
             return self.reply(request, 200, {})
@@ -129,6 +132,7 @@ class ObserverSessionTests(unittest.TestCase):
         self.assertFalse(any("token" in key.lower() for key in self.fixture.env))
         self.assertEqual(list(self.fixture.coordination.iterdir()), [])
         self.assertIn(("GET", "/me/first-build", None), calls)
+        self.assertIn(("GET", "/storage/configs", None), calls)
 
     def test_browser_admin_relogin_leaves_observer_valid_and_single_user_old_token_invalid(self):
         self.configure()
@@ -184,6 +188,17 @@ class ObserverSessionTests(unittest.TestCase):
             self.assertNotIn("private-response-secret", str(raised.exception))
 
 
+class StorageDiagnosticRedactionTests(unittest.TestCase):
+    def test_raw_and_reordered_encoded_configuration_are_redacted(self):
+        secret = app.DEPENDENCIES["ARCENTRA_TEST_S3_SECRET_KEY"]
+        access = app.DEPENDENCIES["ARCENTRA_TEST_S3_ACCESS_KEY"]
+        config = {"endpoint": "127.0.0.1:19000", "secretKey": secret, "bucket": "acceptance", "accessKey": access}
+        for candidate in (app.encoded(json.dumps(config)), app.encoded(json.dumps(dict(reversed(list(config.items()))), separators=(",", ":")))):
+            self.assertEqual(app.redact_diagnostics('request config=' + candidate, [access, secret]), 'request config=[REDACTED]')
+        self.assertEqual(app.redact_diagnostics(f'failure {secret}', [access, secret]), 'failure [REDACTED]')
+        self.assertEqual(app.redact_diagnostics('safe failure with no request body', [access, secret]), 'safe failure with no request body')
+
+
 class FirstUseBrowserSequenceTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -206,10 +221,94 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
 
     def summary(self, phase="preflight"):
         return {"kind": "actual-backend", "status": "passed",
-                "stage": "preflight-complete" if phase == "preflight" else "journey-complete",
+                "stage": {"preflight": "preflight-complete", "storage-setup": "storage-setup-complete", "build": "journey-complete"}[phase],
                 "firstBuildReadiness": {"journey": app.FIRST_BUILD_JOURNEY, "phase": phase,
                     "sourceCommit": self.fixture.failed_commit,
-                    "steps": app.FIRST_BUILD_PREFLIGHT_STEPS + (app.FIRST_BUILD_CONFIGURED_STEPS if phase == "build" else [])}}
+                    "steps": (app.FIRST_BUILD_PREFLIGHT_STEPS + (app.FIRST_BUILD_STORAGE_STEPS if phase != "preflight" else [])
+                              + (app.FIRST_BUILD_CONFIGURED_STEPS if phase == "build" else []))}}
+
+    def persisted_storage(self):
+        config = self.fixture.storage_configuration()
+        return [{"storageId": "acceptance", "name": "Acceptance MinIO reviewed", "storageType": "minio",
+                 "description": "Synthetic CI artifact storage, metadata reviewed", "isEnabled": 1, "isDefault": 1,
+                 "config": {key: value for key, value in config.items() if key not in ("accessKey", "secretKey")},
+                 "configuredFields": ["accessKey", "secretKey"]}]
+
+    def test_storage_browser_is_mandatory_and_reauthenticates_before_independent_read(self):
+        with mock.patch.object(self.fixture, "start") as start, self.assertRaisesRegex(RuntimeError, "requires"):
+            self.fixture.run_storage_setup_browser(self.control)
+        start.assert_not_called()
+        self.fixture.preflight_verified = True
+        app.atomic_json(self.summary_path, self.summary("storage-setup"))
+        self.fixture.http.storage = self.persisted_storage()
+        def start(name, command, cwd, env):
+            self.assertEqual(name, "browser-storage-setup")
+            self.assertEqual(env["ARCENTRA_ACCEPTANCE_PHASE"], "storage-setup")
+            self.assertEqual((command, cwd), (self.args.browser_command, self.args.browser_cwd))
+            request = urllib.request.Request(app.BACKEND_URL + "/api/v1/users/login", method="POST",
+                data=json.dumps({"username": app.USERNAME, "password": app.encoded(app.PASSWORD)}).encode())
+            self.fixture.http.open(request, timeout=10).close()
+            self.fixture.expect_rejected("/users/fetch", 401, 4405, token="synthetic-admin-0")
+            return self.browser
+        with mock.patch.object(self.fixture, "start", side_effect=start):
+            self.fixture.run_storage_setup_browser(self.control)
+        self.assertTrue(self.fixture.storage_setup_verified)
+        self.assertEqual(self.fixture.request("/users/fetch")["username"], app.USERNAME)
+        calls = self.fixture.http.calls
+        self.assertEqual([path for _, path, _ in calls].count("/users/login"), 2)
+        self.assertEqual(calls[-2], ("GET", "/storage/configs", None))
+        self.assertFalse(any(method != "GET" and path.startswith("/storage") for method, path, _ in calls))
+        self.assertFalse(self.fixture.build_verified)
+
+    def test_storage_browser_failures_cannot_claim_setup_or_start_full_build(self):
+        self.fixture.preflight_verified = True
+        for browser_status, control_status, summary in (
+            (1, None, self.summary("storage-setup")), (0, 2, self.summary("storage-setup")),
+            (0, None, self.summary()), (0, None, self.summary("build")),
+            (0, None, self.summary("storage-setup") | {"status": "failed"}),
+        ):
+            self.browser.returncode = browser_status
+            self.browser.poll.return_value = browser_status
+            self.control.poll.return_value = control_status
+            app.atomic_json(self.summary_path, summary)
+            with self.subTest(browser_status=browser_status, control_status=control_status), \
+                    mock.patch.object(self.fixture, "start", return_value=self.browser), \
+                    mock.patch.object(self.fixture, "login") as login, self.assertRaises(RuntimeError):
+                self.fixture.run_storage_setup_browser(self.control)
+            login.assert_not_called()
+            self.assertFalse(self.fixture.storage_setup_verified)
+        with mock.patch.object(self.fixture, "start") as start, self.assertRaisesRegex(RuntimeError, "requires"):
+            self.fixture.run_build_browser(self.control, self.agent)
+        start.assert_not_called()
+
+    def test_storage_reauthentication_or_persistence_failure_stops_before_setup_verification(self):
+        self.fixture.preflight_verified = True
+        app.atomic_json(self.summary_path, self.summary("storage-setup"))
+        with mock.patch.object(self.fixture, "start", return_value=self.browser), \
+                mock.patch.object(self.fixture, "login", side_effect=RuntimeError("login rejected")), \
+                self.assertRaisesRegex(RuntimeError, "login rejected"):
+            self.fixture.run_storage_setup_browser(self.control)
+        self.assertEqual(self.fixture.http.calls, [])
+        self.assertFalse(self.fixture.storage_setup_verified)
+        with mock.patch.object(self.fixture, "start", return_value=self.browser), \
+                self.assertRaisesRegex(RuntimeError, "exactly one"):
+            self.fixture.run_storage_setup_browser(self.control)
+        self.assertFalse(self.fixture.storage_setup_verified)
+
+    def test_persisted_storage_checks_exact_target_metadata_default_and_write_only_presence(self):
+        good = self.persisted_storage()
+        config = self.fixture.storage_configuration()
+        app.validate_persisted_storage(good, config)
+        for patch in ({"storageType": "s3"}, {"isDefault": 0}, {"isDefault": True}, {"isEnabled": 0}, {"name": "old metadata"},
+                      {"configuredFields": ["secretKey"]}, {"config": good[0]["config"] | {"endpoint": "minio:9000"}},
+                      {"config": good[0]["config"] | {"secretKey": config["secretKey"]}},
+                      {"unexpected": config["secretKey"]}, {"unexpected": app.encoded(json.dumps(config))}):
+            with self.subTest(patch=patch), self.assertRaises(RuntimeError) as raised:
+                app.validate_persisted_storage([good[0] | patch], config)
+            self.assertNotIn(config["secretKey"], str(raised.exception))
+        for absent in (None, [], [good[0], good[0]], ["secret"]):
+            with self.assertRaises(RuntimeError):
+                app.validate_persisted_storage(absent, config)
 
     def test_preflight_uses_same_command_then_refreshes_invalidated_admin_session(self):
         app.atomic_json(self.summary_path, self.summary())
@@ -254,6 +353,7 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
             self.fixture.run_build_browser(self.control, self.agent)
         start.assert_not_called()
         self.fixture.preflight_verified = True
+        self.fixture.storage_setup_verified = True
         app.atomic_json(self.summary_path, self.summary("build"))
         with mock.patch.object(self.fixture, "start", return_value=self.browser) as start, \
                 mock.patch.object(self.fixture, "verify_downloads") as verify:
@@ -265,6 +365,7 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
 
     def test_preflight_summary_cannot_substitute_for_full_build_completion(self):
         self.fixture.preflight_verified = True
+        self.fixture.storage_setup_verified = True
         app.atomic_json(self.summary_path, self.summary())
         with mock.patch.object(self.fixture, "start", return_value=self.browser), \
                 mock.patch.object(self.fixture, "verify_downloads") as verify, \
@@ -280,7 +381,7 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
         self.assertEqual(self.fixture.browser_environment("build")["ARCENTRA_ACCEPTANCE_PHASE"], "build")
 
     def test_summary_requires_exact_same_source_completed_steps_without_extra_claims(self):
-        for phase in ("preflight", "build"):
+        for phase in ("preflight", "storage-setup", "build"):
             summary = self.summary(phase)
             app.validate_first_build_summary(summary, phase, self.fixture.failed_commit)
             for key, bad in (("phase", "other"), ("sourceCommit", "b" * 40), ("journey", "continuous-session"),
@@ -300,11 +401,12 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
         identity.write_text("synthetic durable identity")
         agent_reads = 0
         approved = False
+        storage_saved = False
         def request(path, payload=None, method="GET", **options):
             nonlocal agent_reads, approved
             events.append((method, path))
             if path == "/storage/configs" and method == "GET":
-                return []
+                return self.persisted_storage() if storage_saved else []
             if path == "/agent?pageNum=1&pageSize=100":
                 agent_reads += 1
                 if agent_reads == 1:
@@ -317,8 +419,12 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
                 approved = True
             return {}
         def start(name, *args):
+            nonlocal storage_saved
             events.append(name)
-            return self.browser if name == "browser-preflight" else self.agent
+            if name == "browser-storage-setup":
+                storage_saved = True
+                app.atomic_json(self.summary_path, self.summary("storage-setup"))
+            return self.browser if name.startswith("browser-") else self.agent
         def probe(url):
             return 503 if url.endswith("/ready") and not approved else 200
         with mock.patch.object(app, "verify_toolchain"), mock.patch.object(self.fixture, "create_tls"), \
@@ -335,13 +441,17 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
         source.assert_called_once_with()
         observer.assert_called_once_with()
         build.assert_called_once_with(self.control, self.agent)
-        self.assertEqual(events.count("admin-login"), 3)
-        first_write = events.index(("POST", "/storage/configs"))
+        self.assertEqual(events.count("admin-login"), 4)
+        storage_setup = events.index("browser-storage-setup")
+        first_write = events.index(("PUT", "/settings/AGENT_SECRET_KEY"))
+        self.assertNotIn(("POST", "/storage/configs"), events)
         preflight = events.index("browser-preflight")
         self.assertLess(events.index("repository"), preflight)
         self.assertLess(preflight, events.index("admin-login", preflight))
-        self.assertLess(events.index("admin-login", preflight), first_write)
-        self.assertLess(first_write, events.index(("PUT", "/settings/AGENT_SECRET_KEY")))
+        self.assertLess(events.index("admin-login", preflight), storage_setup)
+        self.assertLess(storage_setup, events.index("admin-login", storage_setup))
+        self.assertLess(events.index("admin-login", storage_setup), first_write)
+        self.assertTrue(self.fixture.storage_setup_verified)
         self.assertLess(events.index("agent-approved"), events.index("observer"))
         self.assertLess(events.index("observer"), events.index("full-build"))
         self.assertTrue(self.fixture.preflight_verified)
@@ -357,6 +467,7 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
 
     def test_full_browser_error_does_not_verify_downloads(self):
         self.fixture.preflight_verified = True
+        self.fixture.storage_setup_verified = True
         app.atomic_json(self.summary_path, self.summary("build"))
         self.browser.returncode = 1
         self.browser.poll.return_value = 1
