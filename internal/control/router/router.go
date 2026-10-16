@@ -193,6 +193,7 @@ func (rt *Router) routerGroup(r fiber.Router) {
 
 	// project
 	rt.projectRouter(r, auth, subject)
+	rt.pollingRouter(r, auth)
 	rt.artifactRouter(r, auth, subject)
 	rt.deploymentRouter(r, auth, subject)
 	rt.copilotRouter(r, auth, subject)

@@ -22,6 +22,7 @@ import (
 
 // Repositories 统一管理所有 repository
 type Repositories struct {
+	SCMPolling           ISCMPollingRepository
 	database             database.IDatabase
 	FirstBuild           IFirstBuildRepository
 	Deployment           IDeploymentRepository
@@ -59,6 +60,7 @@ type Repositories struct {
 func NewRepositories(db database.IDatabase, ch cache.ICache) *Repositories {
 	return &Repositories{
 		database:             db,
+		SCMPolling:           NewSCMPollingRepo(db),
 		FirstBuild:           NewFirstBuildRepo(db),
 		Deployment:           NewDeploymentRepo(db),
 		Artifact:             NewArtifactRepo(db),

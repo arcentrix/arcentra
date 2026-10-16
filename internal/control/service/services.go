@@ -40,6 +40,7 @@ type Services struct {
 	Setting           *SettingService
 	Project           *ProjectService
 	Scm               *ScmService
+	Polling           *PollingService
 	UserExt           *UserExt
 	Menu              *MenuService
 	Me                *MeService
@@ -114,7 +115,7 @@ func NewServices(
 	}
 	meService := NewMeService(repos.Menu, repos.TeamMember, menuService, authorizer)
 
-	return &Services{
+	services := &Services{
 		Deployment:        NewDeploymentService(repos.Deployment, repos.Pipeline, repos.Artifact, NewArtifactService(repos.Artifact, repos.Storage, ""), repos.Approval, nil),
 		Artifact:          NewArtifactService(repos.Artifact, repos.Storage, ""),
 		User:              userService,
@@ -147,6 +148,9 @@ func NewServices(
 		Authorizer:        authorizer,
 		repos:             repos,
 	}
+	services.Polling = NewPollingService(repos, nil, services.pipelineEngine.load, pipelineTemplateService)
+	scmService.polling = services.Polling
+	return services
 }
 
 // getPassword generates a bcrypt hash for a password

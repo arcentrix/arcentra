@@ -58,16 +58,12 @@ func (r *ProjectRepo) Create(ctx context.Context, p *model.Project) error {
 
 // Update updates project by projectID.
 func (r *ProjectRepo) Update(ctx context.Context, projectID string, updates map[string]interface{}) error {
-	return r.Database().WithContext(ctx).Model(&model.Project{}).
-		Where("project_id = ?", projectID).
-		Updates(updates).Error
+	return updateProjectWithPollingInvalidation(ctx, r.Database(), projectID, updates)
 }
 
 // Delete soft-deletes project by projectID (sets status to disabled).
 func (r *ProjectRepo) Delete(ctx context.Context, projectID string) error {
-	return r.Database().WithContext(ctx).Model(&model.Project{}).
-		Where("project_id = ?", projectID).
-		Update("status", model.ProjectStatusDisabled).Error
+	return r.Update(ctx, projectID, map[string]any{"status": model.ProjectStatusDisabled})
 }
 
 // Get returns project by projectID.
@@ -272,16 +268,12 @@ func (r *ProjectRepo) UpdateStatistics(ctx context.Context, projectID string, st
 
 // Enable enables project by projectID.
 func (r *ProjectRepo) Enable(ctx context.Context, projectID string) error {
-	return r.Database().WithContext(ctx).Model(&model.Project{}).
-		Where("project_id = ?", projectID).
-		Update("is_enabled", 1).Error
+	return r.Update(ctx, projectID, map[string]any{"is_enabled": 1})
 }
 
 // Disable disables project by projectID.
 func (r *ProjectRepo) Disable(ctx context.Context, projectID string) error {
-	return r.Database().WithContext(ctx).Model(&model.Project{}).
-		Where("project_id = ?", projectID).
-		Update("is_enabled", 0).Error
+	return r.Update(ctx, projectID, map[string]any{"is_enabled": 0})
 }
 
 // ConvertJSONToDatatypes 将 map 转换为 datatypes.JSON

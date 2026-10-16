@@ -45,6 +45,7 @@ func schemaModels() []any {
 		&model.Permission{},
 		&model.Pipeline{},
 		&model.PipelineRun{},
+		&model.SCMPollingStream{},
 		&model.PipelineStage{},
 		&model.PipelineTemplate{},
 		&model.PipelineTemplateLibrary{},

@@ -36,6 +36,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/nova"
 	"github.com/arcentrix/arcentra/pkg/plugin"
+	"github.com/arcentrix/arcentra/pkg/polling"
 	"github.com/arcentrix/arcentra/pkg/safe"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"google.golang.org/protobuf/proto"
@@ -136,6 +137,10 @@ func (e *Process) submit(triggerCtx context.Context, run *model.PipelineRun, par
 		return e.rejectSubmission(run, fmt.Errorf("run and spec must not be nil"))
 	}
 
+	isPolling, pollingErr := validatePollingSubmission(run, parsedSpec)
+	if pollingErr != nil {
+		return e.rejectSubmission(run, pollingErr)
+	}
 	if err := validation.NewSchemaValidatorWithRuntimePolicy(e.offlineRuntimePolicy).Validate(parsedSpec); err != nil {
 		return e.rejectSubmission(run, err)
 	}
@@ -206,7 +211,11 @@ func (e *Process) submit(triggerCtx context.Context, run *model.PipelineRun, par
 			return err
 		}
 	}
-	if automatic {
+	if isPolling {
+		if err := e.claimPollingSubmission(run); err != nil {
+			return err
+		}
+	} else if automatic {
 		if e.repos == nil || e.repos.Pipeline == nil {
 			return fmt.Errorf("durable automatic scheduling is unavailable")
 		}
@@ -261,6 +270,21 @@ func (e *Process) submit(triggerCtx context.Context, run *model.PipelineRun, par
 // rejectSubmission 仅在持有入场锁且尚未认领调度时调用，保留人工提交的持久化行为
 func (e *Process) rejectSubmission(run *model.PipelineRun, cause error) error {
 	rejection := &admission.RejectionError{Cause: cause}
+	if repo.IsPollingPipelineRun(run) {
+		if e.repos == nil || e.repos.Pipeline == nil {
+			return errors.Join(rejection, fmt.Errorf("polling rejection persistence unavailable"))
+		}
+		rejector, ok := e.repos.Pipeline.(interface {
+			RejectPendingPollingRun(context.Context, *model.PipelineRun) (polling.AdmissionOutcome, error)
+		})
+		if !ok {
+			return errors.Join(rejection, fmt.Errorf("polling rejection persistence unavailable"))
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, err := rejector.RejectPendingPollingRun(ctx, run)
+		return errors.Join(rejection, err)
+	}
 	if !repo.IsAutomaticPipelineRun(run) {
 		return rejection
 	}

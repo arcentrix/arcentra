@@ -52,6 +52,8 @@ func (Pipeline) TableName() string {
 
 // PipelineRun 流水线执行记录表
 type PipelineRun struct {
+	PollingContext             string `gorm:"column:polling_context;type:mediumtext" json:"-"`
+	PollingContextDigest       string `gorm:"column:polling_context_digest;type:varchar(67);not null;default:''" json:"-"`
 	RetryApprovalContext       string `gorm:"column:retry_approval_context;type:mediumtext" json:"-"`
 	RetryApprovalContextDigest string `gorm:"column:retry_approval_context_digest;type:varchar(67);not null;default:''" json:"-"`
 	BaseModel

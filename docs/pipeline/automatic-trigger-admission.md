@@ -60,9 +60,11 @@ are refreshed by schedule synchronization; this admission boundary does not
 prove that an edited definition still has the same registered cron expression.
 
 
-This admission change does not repair SCM polling dispatch. The old polling
-cursor represents observation, not durable execution. It must not be treated as
-proof that events ran or as authority for automatic historical replay.
+The admission boundary described here is distinct from the newer
+[explicit GitLab polling path](gitlab-polling.md), which has its own durable
+baseline, selected-pipeline authorization and dispatch receipts. Legacy polling
+cursors still represent observation, not proof of execution or authority for
+automatic historical replay.
 
 The existing webhook response reports parsed events; it is not a durable
 execution-acceptance receipt for every matched pipeline. Entry-point dispatch
@@ -72,9 +74,9 @@ part of the separate event-delivery work.
 Webhook request IDs still follow the existing normalized event/time scheme and
 cron IDs use the pipeline plus minute slot. Durable admission prevents repeated
 execution of the same persisted run; it does not establish lossless provider
-history or universal webhook/poll cross-channel deduplication. Stable event
-identity, pagination/completeness, cursor storage and explicit polling cutover
-are separate work.
+history or universal webhook/poll cross-channel deduplication. The GitLab-only polling path has its own stable observation identity, bounded
+inventory checks, durable cursor and explicit cutover; these guarantees do not
+extend to legacy webhooks, other providers or cross-channel deduplication.
 
 ## Verification
 

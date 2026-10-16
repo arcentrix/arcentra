@@ -170,9 +170,35 @@ jobs:
               TestRealStackAcceptance/signed_webhook_schema_rejection \
               TestRealStackAcceptance/automatic_mysql_accept_before_reject \
               TestRealStackAcceptance/automatic_mysql_reject_before_accept \
-              TestRealStackAcceptance/automatic_mysql_accept_before_accept
+              TestRealStackAcceptance/automatic_mysql_accept_before_accept \
+              TestRealStackAcceptance/polling_baseline_enable_changed_observation \
+              TestRealStackAcceptance/polling_duplicate_no_execution \
+              TestRealStackAcceptance/polling_no_eligible_ref_completes \
+              TestRealStackAcceptance/polling_revoke_before_admission
           done
           go test -race -count=1 -timeout=2m -run '^TestRegisterLoginWithRealRedis$' ./internal/control/service
+
+      - name: Verify GitLab polling durable activation with actual MySQL
+        timeout-minutes: 5
+        run: |
+          set -o pipefail
+          for attempt in 1 2; do
+            schema="arcentra_polling_test_ci_$attempt"
+            docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create "$schema"
+            ARCENTRA_REQUIRE_POLLING_MYSQL=1 \
+            ARCENTRA_POLLING_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
+              go test -race -v -count=1 -timeout=2m -run '^TestPollingMySQLAcceptance$' ./internal/control/repo | tee ".acceptance/evidence/polling-mysql-$attempt.log"
+            python3 scripts/acceptance/verify_containerd_test_log.py ".acceptance/evidence/polling-mysql-$attempt.log" 1 \
+              TestPollingMySQLAcceptance \
+              TestPollingMySQLAcceptance/explicit_migration_is_inactive_and_preserves_legacy_data \
+              TestPollingMySQLAcceptance/committed_scope_revocation_defeats_repeatable_read_snapshot \
+              TestPollingMySQLAcceptance/disable_wins_before_admission \
+              TestPollingMySQLAcceptance/project_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/pipeline_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/admission_wins_and_later_disable_preserves_receipt \
+              TestPollingMySQLAcceptance/concurrent_duplicate_creation_has_one_created_now \
+              TestPollingMySQLAcceptance/cursor_cas_failure_replays_without_reclaim
+          done
 
       - name: Verify durable approval with actual MySQL authorization contention
         timeout-minutes: 5
@@ -206,7 +232,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: 68f357f18e1066e53bdff4588f31bdd4e51f9412
+          ref: 47420c0fea126eeee55042cad596bd37e2375ed4
           path: .acceptance/frontend
           persist-credentials: false
 
