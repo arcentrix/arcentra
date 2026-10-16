@@ -19,6 +19,9 @@ The browser command runs in the frontend checkout and owns its Vite server on
 `PLAYWRIGHT_BROWSERS_PATH` explicitly if Chromium was installed outside the normal
 runner cache. Browser and application children use a private HOME and TMPDIR,
 without inherited cloud credentials, proxy settings or SSH agents.
+The Agent child must see preinstalled **Linux Go 1.25.6**, Git, Python 3 and a
+shell on its sanitized PATH. The fixture fails before service startup if Go is
+missing or wrong; it never downloads an alternate toolchain or project dependency.
 
 ```sh
 python3 scripts/acceptance/run_actual_app.py \
@@ -45,9 +48,75 @@ The lifecycle under test is:
 6. Approve through the authenticated API, stop Agent, remove the enrollment token
    from its private configuration, and restart. Require the exact saved identity,
    unchanged identity file, one Agent record, authenticated heartbeat and readiness.
-7. Create a synthetic Git repository containing a checkout marker and two
-   Agent-executed steps. The browser signs in, creates the project and pipeline,
-   triggers execution, checks the real source/logs and downloads the exact artifact.
+7. Copy the committed [stdlib Go fixture](fixtures/stdlib-build/) into the synthetic
+   repository, append an actual compiler error, and commit that failing revision.
+   The browser signs in, creates one project and pipeline, reviews and starts the
+   run, then requires the actual compiler error, failed test step and zero artifacts.
+8. Independently read that run, its Agent checkout/step evidence, compiler logs and
+   exact-run artifact list through authenticated APIs. Only then fix the source in
+   a new Git commit and advance the local bare repository's main branch. The Git
+   daemon itself remains read-only. The browser must review that new full revision
+   and trigger a distinct run on the same pipeline.
+9. The real Agent checks the pinned Go version and effective environment, runs
+   `go test -count=1 ./...`, builds `stdlib-demo`, executes valid/invalid inputs,
+   creates `manifest.json` and publishes only those two files. Each stage must
+   succeed; no marker or prebuilt fixture substitutes for compilation.
+10. The browser checks all real job/step statuses, actual logs and full checkout
+    SHA, downloads both artifacts, and independently validates the manifest,
+    binary length/SHA-256, pinned compiler and fixed expected program output.
+    Existing reload, mobile/small-mobile/desktop controls, repeated downloads and
+    sign-out/sign-in assertions remain. The original failed run must still fail
+    and still have no artifacts after the successful run.
+11. After the browser exits successfully, the Python harness separately verifies
+    the successful API run and checkout, compares browser bytes with fresh
+    authenticated API downloads, and executes an exclusive private copy of exactly
+    those verified download bytes with a five-second timeout. This is limited to
+    the reviewed synthetic program, never arbitrary user artifacts. Browser code
+    never executes a downloaded binary.
+
+The browser alone owns the `ci-admin` session. Before it starts, the fixture uses
+the existing administrator APIs to create a separate `ci-build-observer` identity
+and a custom role with **only `pipeline:read`**. The invitation API grants this at
+platform scope; this deliberately applies only to the fresh disposable synthetic
+database, not a production observer or a general service account. Its initial
+test password is set through the authorized user API. It is not bootstrapped as
+another administrator. Tokens stay in memory and are redacted from diagnostics;
+none are written to coordination files, browser environment or uploaded evidence.
+
+This separation preserves the product's one-active-token-per-user behavior:
+relogin must reject the same observer's old token while leaving the administrator
+session valid. Real API assertions require observer management access to return
+HTTP 403, pipeline triggering to return the existing HTTP 200/application 4030
+denial, and observer reads to remain authenticated after browser login/logout.
+The fixture never repairs a failed read by logging the administrator in again or
+weakening authorization. Offline transport tests check these assertion sequences;
+actual Control/Redis session behavior still requires the real CI journey.
+
+## Versioned browser and binary contract
+
+`ARCENTRA_ACCEPTANCE_CONTRACT=stdlib-build-v1` requires the matching frontend
+acceptance client. The frontend preserves its earlier text-artifact contract for
+older backends; this backend never silently falls back to marker/text acceptance.
+The existing `ARCENTRA_ACCEPTANCE_COMMIT` now supplies the initial failing full
+source SHA. Additional values are fixed: `ARCENTRA_ACCEPTANCE_ARTIFACT_NAME` is
+`stdlib-demo`, `ARCENTRA_ACCEPTANCE_MANIFEST_NAME` is `manifest.json`,
+`ARCENTRA_ACCEPTANCE_GO_VERSION` is `go1.25.6`, and
+`ARCENTRA_ACCEPTANCE_EXPECTED_OUTPUT` is the fixture's documented JSON plus newline.
+
+`ARCENTRA_ACCEPTANCE_COORDINATION_DIR` points to a private mode-0700 directory
+inside the disposable fixture root, outside public evidence. Atomic mode-0600
+`failed-run.json` and `successful-run.json` contain exactly `schemaVersion: 1`,
+`projectId`, `pipelineId`, `runId` and `sourceCommit`. After independent failure
+verification and a new commit, the harness writes `fixed-source.json` with exactly
+`schemaVersion: 1` and `sourceCommit`. Files must be bounded, regular, private and
+non-symlink/non-hardlink. The browser saves downloads under the private
+`downloads/` directory. These files are not uploaded and disappear at cleanup.
+
+The unsigned manifest contains exactly `schemaVersion`, full `sourceCommit`,
+`goVersion`, `binary: {name, sizeBytes, sha256}` and
+`behavior: {args, stdout, stdoutSha256}`. Both harnesses independently know the
+expected output; a producer cannot redefine it through manifest/config fields.
+The manifest is an integrity record, not a provenance signature or attestation.
 
 The Agent is deliberately **trusted baremetal execution**, not sandbox isolation.
 The tiny repository fixture is authored by this test and executes only on the
@@ -55,13 +124,56 @@ disposable runner. No arbitrary remote repository is accepted. Organization
 onboarding remains incomplete in the product: the current administrator project
 API accepts the synthetic `ci-acceptance-org` value without an organization row.
 The fixture explicitly records that limitation rather than seeding a hidden row.
+Go module/toolchain resolution is disabled (`GOTOOLCHAIN=local`, `GOPROXY=off`,
+`GOSUMDB=off`, `GOWORK=off`, `GOENV=off`, `CGO_ENABLED=0`); caches are private to
+the job workspace and only the two exact output files are uploaded. This is not
+host egress isolation, a network-none container build or a new runtime profile.
 
 Private configuration, TLS keys, persisted identity, workspaces and raw logs are
 removed when the fixture exits. Only sanitized process logs, a status/step receipt
-and browser evidence are retained in the requested evidence directory. Browser
-failure, process failure, timeout or an unmet contract produces a failed result.
+and browser evidence are written in the requested evidence directory. The public
+CI artifact allowlist adds only `browser/project-build-verification.json` to its
+existing screenshots and browser summary. That success-only file contains fixed
+contract/status fields, failed/fixed full source SHAs, synthetic run IDs, Go
+version, binary name/length/digest, expected behavior/digest and passed checks. It
+excludes paths, URLs, credentials, raw logs, arbitrary error strings and executable
+downloads. Failed/incomplete runs do not write it; a stale generated success file
+is removed on failure. Other local diagnostic files are not implicitly uploaded.
+Browser failure, process failure, timeout or an unmet contract produces a failed result.
 Implemented acceptance is not evidence that the real stack has passed; that claim
 requires the corresponding GitHub-hosted run and its successful receipt.
+
+## Exact hosted project-build acceptance
+
+The candidate backend `4a9ff80ded3298209b1bd47e8213b7c24254b460`
+(tree `d91e4ba4509afe4cd8fec8aada30c26052e8cf85`) passed
+[ordinary CI 38892507952](https://github.com/arcentrix/arcentra/actions/runs/38892507952)
+with frontend pinned to `b3f303763998388856da5005d93424cc7a92d5be`.
+The real journey verified the independent read-only observer session, the actual
+Agent compiler failure with zero artifacts, a corrected full source commit and
+new run, tests/build, seven successful browser downloads, and independent API,
+manifest, digest and controlled execution checks. The original failed run remained
+failed. The actual-backend summary completed with zero recorded errors.
+
+[Artifact 12043780015](https://github.com/arcentrix/arcentra/actions/runs/38892507952/artifacts/12043780015)
+was independently downloaded and inspected (ten screenshots and two JSON files).
+Its archive SHA-256 is
+`ec294831427650b7d82e65b4b283a9786bff1c0ee9e541fd01dbcdc756e40d61`;
+`project-build-verification.json` SHA-256 is
+`5542ddea79ed4cc556f51c4450f6416e7319390529009b1041b236e98c275153`.
+No downloaded binary or authentication data was included in that public artifact.
+[Runtime regression 38892508155](https://github.com/arcentrix/arcentra/actions/runs/38892508155)
+also completed with 44 PASS records (including repetitions and subtests),
+with clean cleanup evidence.
+
+These are exact candidate results, recorded before final-document merge and main
+verification. They do not certify another tree, production rollout, containerized
+Go compilation, live Kubernetes release or external model calls. The Go build
+journey uses trusted baremetal execution with module downloads disabled; this is
+not host network isolation. Existing offline-container permissions remain off by
+default. Local tests below remain separate evidence. See
+[the operator first-build runbook](FIRST_BUILD.md) for setup; full organization
+onboarding is still separate.
 
 ## Offline checks
 
@@ -71,6 +183,17 @@ container or listener:
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
   -s scripts/acceptance -p 'test_run_actual_app.py' -v
+```
+
+With the already installed pinned Go on PATH, this separate local source test
+actually produces a compiler failure, commits the fix in a disposable local Git
+repository, runs the real tests/build/behavior/manifest checks and verifies the
+download-execution helper. It starts no services, listeners, containers or browser
+and is not actual Agent evidence:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+  -s scripts/acceptance -p 'test_stdlib_fixture_build.py' -v
 ```
 
 `TestRegisterHashesDecodedPasswordForLogin` checks real persisted bcrypt/login

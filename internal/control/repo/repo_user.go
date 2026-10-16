@@ -64,7 +64,17 @@ func NewUserRepo(db database.IDatabase, ch cache.ICache) IUserRepository {
 }
 
 func (ur *UserRepo) AddUser(addUserReq *model.AddUserReq) error {
-	return ur.Database().Create(addUserReq).Error
+	if addUserReq == nil {
+		return errors.New("user request is required")
+	}
+	// Persist the database model, not the request DTO's inferred add_user_reqs table.
+	user := model.User{
+		BaseModel: model.BaseModel{CreatedAt: addUserReq.CreatedAt},
+		UserID:    addUserReq.UserID, Username: addUserReq.Username, FullName: addUserReq.FullName,
+		Password: addUserReq.Password, Avatar: addUserReq.Avatar, Email: addUserReq.Email,
+		Phone: addUserReq.Phone, IsEnabled: addUserReq.IsEnabled,
+	}
+	return ur.Database().WithContext(context.Background()).Create(&user).Error
 }
 
 // GetUserByUserID 根据userID获取用户
