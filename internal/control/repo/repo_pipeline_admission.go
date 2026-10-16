@@ -19,7 +19,7 @@ import (
 
 // IsAutomaticPipelineRun 检查自动入口生成的无审批运行身份，不授予执行或状态修改权限
 func IsAutomaticPipelineRun(run *model.PipelineRun) bool {
-	if run == nil || run.RunID == "" || run.PipelineID == "" || run.AllowDeployments || run.DeploymentActorID != "" || run.DeploymentPlan != "" || run.DeploymentPlanHash != "" || run.DeploymentTargetFingerprint != "" || run.RetryApprovalContext != "" || run.RetryApprovalContextDigest != "" {
+	if run == nil || run.PollingContext != "" || run.PollingContextDigest != "" || run.RunID == "" || run.PipelineID == "" || run.AllowDeployments || run.DeploymentActorID != "" || run.DeploymentPlan != "" || run.DeploymentPlanHash != "" || run.DeploymentTargetFingerprint != "" || run.RetryApprovalContext != "" || run.RetryApprovalContextDigest != "" {
 		return false
 	}
 	switch run.TriggerType {
@@ -52,7 +52,7 @@ func (r *PipelineRepo) transitionPendingAutomaticRun(ctx context.Context, run *m
 		// 正向认领与拒绝采用同一锁顺序；精确比较禁止 MySQL 不区分大小写排序规则扩张身份
 		var stored model.PipelineRun
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("run_id", "pipeline_id", "request_id", "trigger_type", "triggered_by", "definition_commit_sha", "definition_path", "branch", "commit_sha", "env", "status", "start_time", "end_time", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_plan_hash", "deployment_target_fingerprint", "retry_approval_context", "retry_approval_context_digest").
+			Select("run_id", "pipeline_id", "request_id", "trigger_type", "triggered_by", "definition_commit_sha", "definition_path", "branch", "commit_sha", "env", "status", "start_time", "end_time", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_plan_hash", "deployment_target_fingerprint", "retry_approval_context", "retry_approval_context_digest", "polling_context", "polling_context_digest").
 			Where("run_id = ?", run.RunID).First(&stored).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil

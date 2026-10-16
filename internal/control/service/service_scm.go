@@ -41,6 +41,7 @@ const settingsScmKey = "scm"
 
 // ScmService handles SCM webhook events and polling.
 type ScmService struct {
+	polling          *PollingService
 	projectRepo      repo.IProjectRepository
 	pipelineRepo     repo.IPipelineRepository
 	engine           IPipelineEngine
@@ -230,29 +231,12 @@ func (s *ScmService) tryTriggerPipeline(ctx context.Context, p *model.Pipeline, 
 
 // PollOnce polls the scm events
 func (s *ScmService) PollOnce(ctx context.Context) error {
-	query := &model.ProjectQueryReq{PageNum: 1, PageSize: 100}
-	for {
-		projects, total, err := s.projectRepo.List(ctx, query)
-		if err != nil {
-			return err
-		}
-		for _, p := range projects {
-			if p == nil || p.IsEnabled != 1 {
-				continue
-			}
-			if p.TriggerMode&(model.TriggerModeMR|model.TriggerModeTag) == 0 {
-				continue
-			}
-			if err := s.pollProject(ctx, p); err != nil {
-				log.Warnw("poll project scm events failed", "projectID", p.ProjectID, "error", err)
-			}
-		}
-		if int64(query.PageNum*query.PageSize) >= total {
-			break
-		}
-		query.PageNum++
+	// 旧 Settings 仅含观察时间，不能在升级或重启时转换为执行许可
+	// 没有显式 baseline/enable 的流不再隐式访问提供方或覆盖 Settings
+	if s.polling == nil {
+		return nil
 	}
-	return nil
+	return s.polling.PollOnce(ctx)
 }
 
 // pollProject polls the scm events for a project

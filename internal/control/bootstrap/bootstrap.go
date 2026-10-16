@@ -78,6 +78,11 @@ func NewApp(
 	shutdownMgr *shutdown.Manager,
 	pipelineEngine *process.Process,
 ) (*App, func(), error) {
+	if rt.Services != nil && rt.Services.Polling != nil {
+		if err := rt.Services.ConfigurePollingAuthorization(); err != nil {
+			return nil, nil, err
+		}
+	}
 	if appConf != nil && rt.Services != nil {
 		if err := rt.Services.ConfigureRetryApprovalPolicy(appConf.Pipeline.RetryApproval); err != nil {
 			return nil, nil, err
@@ -298,10 +303,10 @@ func runContext(ctx context.Context, app *App, cleanup func(), shutdownTimeout t
 	cron.Start()
 	log.Info("Cron scheduler started.")
 
-	// SCM polling job (webhook is primary, polling is fallback)
+	// Explicit GitLab snapshot polling; service bounds each scan and skips overlapping local cycles
 	if app.Services != nil && app.Services.Scm != nil {
 		_ = cron.AddFunc("*/1 * * * *", func() {
-			ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 			defer cancel()
 			_ = app.Services.Scm.PollOnce(ctx)
 		}, "scm-poll")
