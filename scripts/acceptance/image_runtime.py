@@ -62,6 +62,42 @@ ROLES = {'control': ('512m', '1', '128'), 'agent': ('1536m', '2', '256'),
          'cli': ('256m', '0.5', '64'), 'git': ('256m', '0.5', '64'), 'toolchain': ('256m', '0.5', '64')}
 
 
+DIAGNOSTIC_OPERATIONS = {'network-inspect', 'image-inspect', 'container-create', 'container-inspect',
+                         'container-start', 'container-logs', 'container-ls', 'container-stop', 'container-rm', 'unknown'}
+DIAGNOSTIC_PHASES = {'command', 'inspect', 'wait', 'capture'}
+DIAGNOSTIC_REASONS = {'permission-denied', 'readonly-filesystem', 'missing-executable', 'missing-library',
+                      'missing-path', 'container-missing', 'network-missing', 'resource-limit',
+                      'invalid-argument', 'unsupported-option', 'oci-runtime', 'unknown',
+                      'timeout', 'interrupted', 'client-error', 'output-limit'}
+
+
+def failure_reason(stderr):
+    """Map bounded private diagnostics to static categories; never return input."""
+    lowered = stderr.lower()
+    predicates = (
+        ('permission denied', 'permission-denied'), ('read-only file system', 'readonly-filesystem'),
+        ('executable file not found', 'missing-executable'), ('error while loading shared libraries', 'missing-library'),
+        ('no such container', 'container-missing'), ('network not found', 'network-missing'),
+        ('no such file or directory', 'missing-path'), ('cannot allocate memory', 'resource-limit'),
+        ('resource temporarily unavailable', 'resource-limit'), ('unknown flag', 'unsupported-option'),
+        ('invalid argument', 'invalid-argument'), ('oci runtime', 'oci-runtime'),
+    )
+    return next((reason for text, reason in predicates if text in lowered), 'unknown')
+
+
+def validate_failure(value):
+    if value is None:
+        return None
+    if (not isinstance(value, dict) or set(value) != {'operation', 'phase', 'role', 'returnCode', 'reason'}
+            or not isinstance(value['operation'], str) or value['operation'] not in DIAGNOSTIC_OPERATIONS
+            or not isinstance(value['phase'], str) or value['phase'] not in DIAGNOSTIC_PHASES
+            or (value['role'] is not None and (not isinstance(value['role'], str) or value['role'] not in ROLES))
+            or (value['returnCode'] is not None and (type(value['returnCode']) is not int or not -255 <= value['returnCode'] <= 255))
+            or not isinstance(value['reason'], str) or value['reason'] not in DIAGNOSTIC_REASONS):
+        raise ValueError('invalid static failure diagnostic')
+    return dict(value)
+
+
 def fullmatch(pattern, value):
     return isinstance(value, str) and re.fullmatch(pattern, value) is not None
 
@@ -106,7 +142,7 @@ class ContainerHandle:
         self.runtime, self.record, self.returncode = runtime, record, None
 
     def poll(self):
-        state = self.runtime.inspect_owned(self.record)['State']
+        state = self.runtime.inspect_owned(self.record, phase='wait')['State']
         status = state.get('Status')
         if status == 'running' and state.get('Running') is True:
             return None
@@ -134,13 +170,14 @@ class ImageRuntime:
         self.execute = execute or bounded_run
         self.records = []
         self.blocked = False
+        self.failure = None
         self.deadline = time.monotonic() + JOURNEY_SECONDS
         self.cleanup_deadline = None
         self.uid, self.gid = os.getuid(), os.getgid()
         if self.uid == 0 or self.gid == 0:
             raise ValueError('image journey requires the non-root runner UID/GID')
 
-    def command(self, arguments, timeout=20, cleanup=False):
+    def command(self, arguments, timeout=20, cleanup=False, phase='command'):
         if not cleanup and (self.blocked or time.monotonic() >= self.deadline):
             raise RuntimeError('new Docker admission stopped')
         if cleanup and self.cleanup_deadline is None:
@@ -154,25 +191,45 @@ class ImageRuntime:
         try:
             result = self.execute(['docker', *arguments], env=env, capture_output=True,
                                   text=True, timeout=timeout, check=False)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt, OSError, RuntimeError):
+        except (subprocess.TimeoutExpired, KeyboardInterrupt, OSError, RuntimeError) as exc:
             self.blocked = True
-            raise RuntimeError('Docker operation interrupted or uncertain; admission stopped') from None
+            reason = ('timeout' if isinstance(exc, subprocess.TimeoutExpired) else
+                      'interrupted' if isinstance(exc, KeyboardInterrupt) else 'client-error')
+            diagnostic = self.record_failure(arguments, phase, None, reason)
+            raise RuntimeError('Docker operation interrupted or uncertain; admission stopped: ' + diagnostic) from None
         if len(result.stdout.encode()) + len(result.stderr.encode()) > MAX_DOCKER_OUTPUT:
             self.blocked = True
-            raise RuntimeError('Docker output exceeded byte ceiling')
+            diagnostic = self.record_failure(arguments, phase, None, 'output-limit')
+            raise RuntimeError('Docker output exceeded byte ceiling: ' + diagnostic)
         if result.returncode:
             self.blocked = True
-            raise RuntimeError('Docker operation failed; admission stopped')
+            diagnostic = self.record_failure(arguments, phase, result.returncode, failure_reason(result.stderr))
+            raise RuntimeError('Docker operation failed; admission stopped: ' + diagnostic)
         return result.stdout
+
+    def record_failure(self, arguments, phase, code, reason):
+        operation = '-'.join(arguments[:2])
+        if operation not in DIAGNOSTIC_OPERATIONS:
+            operation = 'unknown'
+        roles = {record['role'] for record in self.records
+                 if record['name'] in arguments or (record['id'] is not None and record['id'] in arguments)}
+        value = validate_failure({'operation': operation, 'phase': phase,
+                                  'role': next(iter(roles)) if len(roles) == 1 else None,
+                                  'returnCode': code if type(code) is int and -255 <= code <= 255 else None,
+                                  'reason': reason})
+        if self.failure is None:
+            self.failure = value
+            self.save()  # Independent cleanup must retain the first diagnostic.
+        return json.dumps(value, sort_keys=True)
 
     def labels(self, role):
         m = self.manifest
         return {LABEL: 'v1', LABEL + '.owner': OWNER, LABEL + '.run': m['runId'], LABEL + '.attempt': m['attempt'],
                 LABEL + '.sha': m['sourceSha'], LABEL + '.role': role}
 
-    def inspect_json(self, kind, identifier, cleanup=False):
+    def inspect_json(self, kind, identifier, cleanup=False, phase='inspect'):
         try:
-            value = json.loads(self.command([kind, 'inspect', identifier], cleanup=cleanup))
+            value = json.loads(self.command([kind, 'inspect', identifier], cleanup=cleanup, phase=phase))
             if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], dict):
                 raise ValueError()
             return value[0]
@@ -212,7 +269,7 @@ class ImageRuntime:
 
     def save(self):
         private_json(self.intent_path, {'schemaVersion': 1, 'manifest': self.manifest,
-                                       'root': str(self.root), 'containers': self.records})
+                                       'root': str(self.root), 'containers': self.records, 'failure': validate_failure(self.failure)})
 
     def mount(self, source, destination, readonly=True):
         requested = Path(source)
@@ -307,8 +364,8 @@ class ImageRuntime:
         self.command(['container', 'start', identifier])
         return ContainerHandle(self, record)
 
-    def inspect_owned(self, record, cleanup=False):
-        value = self.inspect_json('container', record['id'] or record['name'], cleanup)
+    def inspect_owned(self, record, cleanup=False, phase='inspect'):
+        value = self.inspect_json('container', record['id'] or record['name'], cleanup, phase=phase)
         labels = value.get('Config', {}).get('Labels', {})
         if (value.get('Name') != '/' + record['name'] or value.get('Image') != record['image']
                 or (record['id'] and value.get('Id') != record['id'])

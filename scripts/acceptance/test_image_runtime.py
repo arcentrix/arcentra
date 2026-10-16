@@ -237,6 +237,56 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): self.runtime.command(['container', 'ls'])
         self.assertTrue(self.runtime.blocked)
 
+    def test_static_failure_diagnostic_survives_independent_cleanup(self):
+        handle = self.runtime.create('toolchain')
+        sentinel = 'PRIVATE_TOKEN_SENTINEL_/secret/path'
+        execute = self.runtime.execute
+        self.runtime.execute = lambda *a, **k: SimpleNamespace(returncode=128, stdout=sentinel,
+                                                               stderr='OCI runtime create failed: permission denied ' + sentinel)
+        with self.assertRaises(RuntimeError) as caught:
+            self.runtime.command(['container', 'start', handle.record['id']])
+        expected = {'operation': 'container-start', 'phase': 'command', 'role': 'toolchain',
+                    'returnCode': 128, 'reason': 'permission-denied'}
+        self.assertEqual(self.runtime.failure, expected)
+        self.assertNotIn(sentinel, str(caught.exception))
+        self.assertNotIn(sentinel, self.runtime.intent_path.read_text())
+        self.runtime.cleanup_deadline = ir.time.monotonic() + 60
+        with self.assertRaises(RuntimeError):
+            self.runtime.command(['container', 'logs', handle.record['id']], cleanup=True, phase='capture')
+        self.assertEqual(self.runtime.failure, expected)
+        self.runtime.execute = execute
+        self.runtime.failure = None  # Model fresh independent cleanup process.
+        with patch.object(app, 'ImageRuntime', return_value=self.runtime):
+            app.cleanup_only(SimpleNamespace(ownership_file=self.runtime.intent_path), manifest())
+        summary = json.loads((self.root / 'image-runtime-summary.json').read_text())
+        self.assertEqual(summary['firstFailure'], expected)
+        self.assertEqual(summary['cleanupStatus'], 'confirmed')
+        self.assertNotIn(sentinel, json.dumps(summary))
+
+    def test_unknown_failure_is_generic_and_fail_closed(self):
+        sentinel = 'PRIVATE_UNKNOWN_SENTINEL'
+        self.runtime.execute = lambda *a, **k: SimpleNamespace(returncode=1, stdout='', stderr=sentinel)
+        with self.assertRaises(RuntimeError) as caught:
+            self.runtime.command(['container', 'inspect', 'unreported-path'], phase='wait')
+        self.assertEqual(self.runtime.failure['reason'], 'unknown')
+        self.assertEqual(self.runtime.failure['phase'], 'wait')
+        self.assertNotIn(sentinel, str(caught.exception))
+        self.assertNotIn('unreported-path', str(caught.exception))
+        self.assertTrue(self.runtime.blocked)
+        with self.assertRaises(RuntimeError): self.runtime.create('toolchain')
+
+    def test_failure_enums_reject_arbitrary_input(self):
+        valid = {'operation': 'container-start', 'phase': 'command', 'role': 'toolchain',
+                 'returnCode': 128, 'reason': 'unknown'}
+        for key in ('operation', 'phase', 'role', 'reason', 'returnCode'):
+            for bad in ('PRIVATE_SENTINEL', ['unknown'], {}):
+                value = valid | {key: bad}
+                with self.assertRaises(ValueError): ir.validate_failure(value)
+        with self.assertRaises(ValueError): ir.validate_failure(valid | {'extra': 'secret'})
+        with self.assertRaises(ValueError): ir.validate_failure(valid | {'returnCode': True})
+        self.assertEqual(ir.failure_reason('some private diagnostics'), 'unknown')
+        self.assertEqual(ir.failure_reason('read-only file system /private'), 'readonly-filesystem')
+
     def test_pure_input_inspection(self):
         def inspect(kind, identifier, cleanup=False):
             if kind == 'network':
