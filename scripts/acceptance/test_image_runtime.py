@@ -125,6 +125,17 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.fake.calls[0][1]['env'], {'PATH': '/usr/bin:/bin', 'HOME': str(self.root), 'LANG': 'C.UTF-8'})
         self.assertEqual(self.runtime.intent_path.stat().st_mode & 0o777, 0o600)
 
+    def test_single_file_local_log_explicitly_disables_compression(self):
+        self.runtime.create('toolchain')
+        command = self.fake.calls[0][0]
+        options = [command[i + 1] for i, item in enumerate(command) if item == '--log-opt']
+        self.assertEqual(options, ['max-size=8m', 'max-file=1', 'compress=false'])
+        self.assertEqual(command[command.index('--log-driver') + 1], 'local')
+        contract = ir.toolchain_contract()
+        self.assertEqual(contract['logMaxSize'], '8m')
+        self.assertEqual(contract['logMaxFile'], '1')
+        self.assertIs(contract['logCompress'], False)
+
     def test_agent_mount_excludes_ca_private_and_browser(self):
         self.create('agent')
         command = self.fake.calls[0][0]

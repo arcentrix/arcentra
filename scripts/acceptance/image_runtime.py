@@ -173,7 +173,7 @@ def toolchain_contract():
                       'uid': os.getuid(), 'gid': os.getgid(), 'mode': '0700'},
             'memoryMiB': 256, 'memorySwapMiB': 256, 'cpus': 0.5, 'pidsLimit': 64,
             'network': 'existing-run-compose-bridge', 'bindMounts': [], 'publishedPorts': [],
-            'logDriver': 'local', 'logMaxSize': '8m', 'logMaxFile': '1'}
+            'logDriver': 'local', 'logMaxSize': '8m', 'logMaxFile': '1', 'logCompress': False}
 
 
 def fullmatch(pattern, value):
@@ -396,6 +396,7 @@ class ImageRuntime:
                    '--memory', memory, '--memory-swap', memory, '--cpus', cpus, '--pids-limit', pids,
                    '--network', self.manifest['networkId'], '--restart', 'no',
                    '--log-driver', 'local', '--log-opt', 'max-size=8m', '--log-opt', 'max-file=1',
+                   '--log-opt', 'compress=false',
                    '--tmpfs', f'/tmp:rw,nosuid,nodev,size=128m,uid={self.uid},gid={self.gid},mode=0700']
         for key, value in self.labels(role).items():
             command += ['--label', f'{key}={value}']
