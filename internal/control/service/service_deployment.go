@@ -133,6 +133,22 @@ func (s *DeploymentService) adapter(e *model.DeploymentEnvironment) (cluster.Ada
 	return binding.Adapter, nil
 }
 
+// environmentView exposes operator policy only after the same complete target
+// binding check required for execution. A user-supplied targetRef alone is not
+// authority to discover another project's approvers or policy limits.
+func (s *DeploymentService) environmentView(entry *model.DeploymentEnvironment) *DeploymentEnvironmentView {
+	view := &DeploymentEnvironmentView{DeploymentEnvironment: *entry}
+	if _, err := s.adapter(entry); err != nil {
+		return view
+	}
+	binding := s.targets[entry.TargetRef]
+	view.Configured = true
+	view.AllowPipelineDeployments = binding.AllowPipelineDeployments
+	view.Tier = binding.Tier
+	view.PipelineApproval = cluster.ClonePipelineApprovalPolicy(binding.PipelineApproval)
+	return view
+}
+
 // CreateEnvironment 保存精确目标声明，未配置目标仍明确显示为不可执行
 func (s *DeploymentService) CreateEnvironment(ctx context.Context, project string, input DeploymentEnvironmentInput) (*DeploymentEnvironmentView, error) {
 	if artifactutil.Identity(project) != nil || strings.TrimSpace(input.Name) == "" || len(input.Name) > 128 || artifactutil.Identity(input.TargetRef) != nil || !cluster.ValidTarget(cluster.Target{Namespace: input.Namespace, Deployment: input.Deployment, Container: input.Container}) {
@@ -142,8 +158,7 @@ func (s *DeploymentService) CreateEnvironment(ctx context.Context, project strin
 	if err := s.records.CreateEnvironment(ctx, entry); err != nil {
 		return nil, err
 	}
-	_, err := s.adapter(entry)
-	return &DeploymentEnvironmentView{DeploymentEnvironment: *entry, Configured: err == nil, AllowPipelineDeployments: err == nil && s.targets[entry.TargetRef].AllowPipelineDeployments, Tier: s.environmentTier(entry, err), PipelineApproval: cluster.ClonePipelineApprovalPolicy(s.targets[entry.TargetRef].PipelineApproval)}, nil
+	return s.environmentView(entry), nil
 }
 
 // Environments 读取环境，不探测集群或推断健康
@@ -154,8 +169,7 @@ func (s *DeploymentService) Environments(ctx context.Context, project string, pa
 	}
 	out := &DeploymentEnvironmentPage{List: []DeploymentEnvironmentView{}, Total: total, Page: page, PageSize: size}
 	for _, entry := range values {
-		_, err := s.adapter(&entry)
-		out.List = append(out.List, DeploymentEnvironmentView{DeploymentEnvironment: entry, Configured: err == nil, AllowPipelineDeployments: err == nil && s.targets[entry.TargetRef].AllowPipelineDeployments, Tier: s.environmentTier(&entry, err), PipelineApproval: cluster.ClonePipelineApprovalPolicy(s.targets[entry.TargetRef].PipelineApproval)})
+		out.List = append(out.List, *s.environmentView(&entry))
 	}
 	return out, nil
 }
@@ -507,8 +521,7 @@ func (s *DeploymentService) Environment(ctx context.Context, project, id string)
 	if err != nil {
 		return nil, ErrDeploymentNotFound
 	}
-	_, err = s.adapter(entry)
-	return &DeploymentEnvironmentView{DeploymentEnvironment: *entry, Configured: err == nil, AllowPipelineDeployments: err == nil && s.targets[entry.TargetRef].AllowPipelineDeployments, Tier: s.environmentTier(entry, err), PipelineApproval: cluster.ClonePipelineApprovalPolicy(s.targets[entry.TargetRef].PipelineApproval)}, nil
+	return s.environmentView(entry), nil
 }
 
 func deploymentDefinitionRevision(run *model.PipelineRun) string {
@@ -526,11 +539,4 @@ func deploymentDefinitionRevision(run *model.PipelineRun) string {
 		return run.CommitSha
 	}
 	return ""
-}
-
-func (s *DeploymentService) environmentTier(entry *model.DeploymentEnvironment, configurationErr error) string {
-	if configurationErr != nil {
-		return ""
-	}
-	return s.targets[entry.TargetRef].Tier
 }
