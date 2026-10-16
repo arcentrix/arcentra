@@ -13,7 +13,7 @@ import tempfile
 import time
 
 import run_actual_app as actual
-from image_runtime import ImageRuntime, validate_manifest, fullmatch, JOURNEY_SECONDS, validate_failure
+from image_runtime import ImageRuntime, validate_manifest, fullmatch, JOURNEY_SECONDS, validate_failure, validate_start_diagnostic, toolchain_contract
 
 PROFILE = 'image-build-v1'
 REPOSITORY = 'git://git:9418/acceptance.git'
@@ -45,6 +45,8 @@ def write_runtime_summary(runtime, cleanup_status):
                         'removal': 'confirmed' if record['removed'] else 'unknown'} for record in runtime.records],
         'cleanupStatus': cleanup_status,
         'firstFailure': validate_failure(getattr(runtime, 'failure', None)),
+        'toolchainStartDiagnostic': validate_start_diagnostic(getattr(runtime, 'start_diagnostic', None), getattr(runtime, 'failure', None)),
+        'toolchainCreateContract': toolchain_contract(),
     })
 
 
@@ -212,7 +214,7 @@ def cleanup_only(args, manifest):
         write_runtime_summary(SimpleNamespace(manifest=manifest, intent_path=args.ownership_file, records=[]), 'confirmed')
         return 0
     value = json.loads(actual.read_private_bytes(args.ownership_file, 65536), object_pairs_hook=actual.no_duplicate_keys)
-    if (set(value) != {'schemaVersion', 'manifest', 'root', 'containers', 'failure'} or value['schemaVersion'] != 1
+    if (set(value) != {'schemaVersion', 'manifest', 'root', 'containers', 'failure', 'startDiagnostic'} or value['schemaVersion'] != 1
             or value['manifest'] != manifest or not isinstance(value['containers'], list)):
         raise ValueError('cleanup ownership manifest mismatch')
     root = Path(value['root'])
@@ -229,6 +231,7 @@ def cleanup_only(args, manifest):
             raise ValueError('invalid owned container record')
     runtime.records = value['containers']
     runtime.failure = validate_failure(value['failure'])
+    runtime.start_diagnostic = validate_start_diagnostic(value['startDiagnostic'], runtime.failure)
     try:
         runtime.cleanup()
     except BaseException:

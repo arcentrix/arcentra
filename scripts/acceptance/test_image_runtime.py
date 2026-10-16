@@ -260,6 +260,8 @@ class RuntimeTests(unittest.TestCase):
             app.cleanup_only(SimpleNamespace(ownership_file=self.runtime.intent_path), manifest())
         summary = json.loads((self.root / 'image-runtime-summary.json').read_text())
         self.assertEqual(summary['firstFailure'], expected)
+        self.assertEqual(summary['toolchainStartDiagnostic']['stateErrorStatus'], 'unavailable')
+        self.assertIn('permission', summary['toolchainStartDiagnostic']['stderr']['head'])
         self.assertEqual(summary['cleanupStatus'], 'confirmed')
         self.assertNotIn(sentinel, json.dumps(summary))
 
@@ -286,6 +288,47 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError): ir.validate_failure(valid | {'returnCode': True})
         self.assertEqual(ir.failure_reason('some private diagnostics'), 'unknown')
         self.assertEqual(ir.failure_reason('read-only file system /private'), 'readonly-filesystem')
+
+    def test_projection_redacts_credentials_addresses_paths_and_keeps_tail(self):
+        sentinel = 'PRIVATE_SECRET_SENTINEL'
+        raw = ('prefix ' * 2000 + ' failed to mount tmpfs invalid option uid=1001 ' +
+               sentinel + ' Bearer eyJ.private.signature https://private.invalid/token /private/config ' +
+               '127.0.0.1:1234 password=secret 87654321')
+        value = ir.safe_error_projection(raw)
+        serialized = json.dumps(value)
+        for secret in (sentinel, 'eyJ.private.signature', 'private.invalid', '/private/config', '127.0.0.1', '87654321', 'uid=1001'):
+            self.assertNotIn(secret, serialized)
+        self.assertIn('tmpfs', value['tail'])
+        self.assertIn('invalid', value['tail'])
+        self.assertTrue(value['truncated'])
+        self.assertTrue(value['features']['uid'])
+        self.assertEqual(ir.validate_projection(value), value)
+        with self.assertRaises(ValueError): ir.validate_projection(value | {'tail': [sentinel]})
+        with self.assertRaises(ValueError): ir.validate_projection(value | {'features': {'arbitrary': True}})
+
+    def test_owned_state_error_projection_does_not_block_cleanup(self):
+        handle = self.runtime.create('toolchain')
+        execute = self.runtime.execute
+        self.runtime.execute = lambda *a, **k: SimpleNamespace(returncode=1, stdout='', stderr='failed to start')
+        with self.assertRaises(RuntimeError): self.runtime.command(['container', 'start', handle.record['id']])
+        self.runtime.execute = execute
+        self.fake.containers[handle.record['name']]['State']['Error'] = 'invalid tmpfs option uid=1001 /private/SENTINEL'
+        self.runtime.cleanup()
+        self.assertTrue(handle.record['removed'])
+        self.assertEqual(self.runtime.start_diagnostic['stateErrorStatus'], 'available')
+        self.assertIn('tmpfs', self.runtime.start_diagnostic['stateError']['head'])
+        self.assertNotIn('SENTINEL', json.dumps(self.runtime.start_diagnostic))
+
+    def test_detailed_diagnostic_forbidden_for_application_roles(self):
+        handle = self.create('control')
+        self.runtime.execute = lambda *a, **k: SimpleNamespace(returncode=1, stdout='', stderr='PRIVATE_SECRET')
+        with self.assertRaises(RuntimeError): self.runtime.command(['container', 'start', handle.record['id']])
+        self.assertIsNone(self.runtime.start_diagnostic)
+        diagnostic = {'stdout': ir.safe_error_projection(''), 'stderr': ir.safe_error_projection(''),
+                      'stateErrorStatus': 'pending', 'stateError': None}
+        with self.assertRaises(ValueError): ir.validate_start_diagnostic(diagnostic, self.runtime.failure)
+        self.assertEqual(ir.toolchain_contract()['tmpfs']['mode'], '0700')
+        self.assertEqual(ir.toolchain_contract()['bindMounts'], [])
 
     def test_pure_input_inspection(self):
         def inspect(kind, identifier, cleanup=False):

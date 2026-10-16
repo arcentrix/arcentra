@@ -98,6 +98,84 @@ def validate_failure(value):
     return dict(value)
 
 
+# Toolchain probe has no configuration/credential mounts. Still never retain raw
+# daemon text: every emitted token must belong to this fixed generic vocabulary.
+SAFE_ERROR_WORDS = set("""error response from daemon failed failure to create start initialize initialization
+container containers task shim runtime oci runc exec executable format binary shell
+invalid unsupported unknown option options argument arguments flag flags value values
+mount mounting tmpfs filesystem file directory path rootfs root read-only readonly
+rw ro nosuid nodev noexec uid gid mode size numeric number integer permission denied
+operation not permitted allowed found no such does exist exists missing cannot unable
+network networking endpoint bridge interface sandbox port address already use in
+cgroup cgroups memory swap cpu cpus pids limit limits quota period resource resources
+sysctl kernel seccomp apparmor capabilities privilege privileges security policy
+logging log driver local initialize initialized read reading write writing supported
+configuration config device space left on busy too many open files unavailable
+out of range is are must be and or for the with setting set parse parsing
+invalidargument invalidparameter notfound internal failedprecondition rpc code desc
+connection refused timeout timed out killed signal conflict cannotstart service
+no-new-privileges max-size max-file""".split())
+START_FEATURES = ('tmpfs', 'uid', 'gid', 'mode', 'size', 'cgroup', 'sysctl', 'network',
+                  'logging', 'exec', 'rootfs', 'readonly', 'permission', 'invalid',
+                  'unsupported', 'oci', 'seccomp', 'apparmor', 'numeric')
+
+
+def safe_error_projection(value):
+    data = value.encode(errors='replace')
+    head = data[:2048].decode(errors='replace')
+    tail = data[-2048:].decode(errors='replace')
+    def tokens(text):
+        result = []
+        for item in text.split():
+            item = item.lower().strip("\"'[](),.;:")
+            result.append(item if item in SAFE_ERROR_WORDS else '[redacted]')
+        return result
+    sample = (head + ' ' + tail).lower()
+    return {'head': tokens(head)[:80], 'tail': tokens(tail)[-80:],
+            'truncated': len(data) > 4096,
+            'features': {word: (bool(re.search(r'\d', sample)) if word == 'numeric' else word in sample)
+                         for word in START_FEATURES}}
+
+
+def validate_projection(value):
+    if (not isinstance(value, dict) or set(value) != {'head', 'tail', 'truncated', 'features'}
+            or type(value['truncated']) is not bool or not isinstance(value['features'], dict)
+            or set(value['features']) != set(START_FEATURES)
+            or any(type(flag) is not bool for flag in value['features'].values())):
+        raise ValueError('invalid safe diagnostic projection')
+    for key in ('head', 'tail'):
+        if (not isinstance(value[key], list) or len(value[key]) > 80
+                or any(not isinstance(token, str) or token not in SAFE_ERROR_WORDS | {'[redacted]'} for token in value[key])):
+            raise ValueError('unreviewed diagnostic token')
+    return value
+
+
+def validate_start_diagnostic(value, failure):
+    if value is None:
+        return None
+    if (not isinstance(value, dict) or set(value) != {'stdout', 'stderr', 'stateErrorStatus', 'stateError'}
+            or failure is None or failure['operation'] != 'container-start' or failure['role'] != 'toolchain'
+            or not isinstance(value['stateErrorStatus'], str) or value['stateErrorStatus'] not in ('pending', 'available', 'unavailable')):
+        raise ValueError('toolchain start diagnostic outside fixed scope')
+    validate_projection(value['stdout'])
+    validate_projection(value['stderr'])
+    if value['stateErrorStatus'] == 'available':
+        validate_projection(value['stateError'])
+    elif value['stateError'] is not None:
+        raise ValueError('unexpected state error projection')
+    return value
+
+
+def toolchain_contract():
+    return {'entrypoint': '/bin/sh', 'entrypointPermissions': 'not-observed',
+            'readonlyRootfs': True, 'capDrop': ['ALL'], 'noNewPrivileges': True,
+            'tmpfs': {'target': '/tmp', 'options': ['rw', 'nosuid', 'nodev'], 'sizeMiB': 128,
+                      'uid': os.getuid(), 'gid': os.getgid(), 'mode': '0700'},
+            'memoryMiB': 256, 'memorySwapMiB': 256, 'cpus': 0.5, 'pidsLimit': 64,
+            'network': 'existing-run-compose-bridge', 'bindMounts': [], 'publishedPorts': [],
+            'logDriver': 'local', 'logMaxSize': '8m', 'logMaxFile': '1'}
+
+
 def fullmatch(pattern, value):
     return isinstance(value, str) and re.fullmatch(pattern, value) is not None
 
@@ -171,6 +249,7 @@ class ImageRuntime:
         self.records = []
         self.blocked = False
         self.failure = None
+        self.start_diagnostic = None
         self.deadline = time.monotonic() + JOURNEY_SECONDS
         self.cleanup_deadline = None
         self.uid, self.gid = os.getuid(), os.getgid()
@@ -203,11 +282,11 @@ class ImageRuntime:
             raise RuntimeError('Docker output exceeded byte ceiling: ' + diagnostic)
         if result.returncode:
             self.blocked = True
-            diagnostic = self.record_failure(arguments, phase, result.returncode, failure_reason(result.stderr))
+            diagnostic = self.record_failure(arguments, phase, result.returncode, failure_reason(result.stderr), result.stdout, result.stderr)
             raise RuntimeError('Docker operation failed; admission stopped: ' + diagnostic)
         return result.stdout
 
-    def record_failure(self, arguments, phase, code, reason):
+    def record_failure(self, arguments, phase, code, reason, stdout="", stderr=""):
         operation = '-'.join(arguments[:2])
         if operation not in DIAGNOSTIC_OPERATIONS:
             operation = 'unknown'
@@ -219,6 +298,9 @@ class ImageRuntime:
                                   'reason': reason})
         if self.failure is None:
             self.failure = value
+            if operation == 'container-start' and value['role'] == 'toolchain':
+                self.start_diagnostic = {'stdout': safe_error_projection(stdout), 'stderr': safe_error_projection(stderr),
+                                         'stateErrorStatus': 'pending', 'stateError': None}
             self.save()  # Independent cleanup must retain the first diagnostic.
         return json.dumps(value, sort_keys=True)
 
@@ -269,7 +351,8 @@ class ImageRuntime:
 
     def save(self):
         private_json(self.intent_path, {'schemaVersion': 1, 'manifest': self.manifest,
-                                       'root': str(self.root), 'containers': self.records, 'failure': validate_failure(self.failure)})
+                                       'root': str(self.root), 'containers': self.records, 'failure': validate_failure(self.failure),
+                                       'startDiagnostic': validate_start_diagnostic(self.start_diagnostic, self.failure)})
 
     def mount(self, source, destination, readonly=True):
         requested = Path(source)
@@ -373,6 +456,18 @@ class ImageRuntime:
                 or any(labels.get(k) != v for k, v in self.labels(record['role']).items())):
             self.blocked = True
             raise RuntimeError('container ownership/immutable identity mismatch')
+        if (cleanup and record['role'] == 'toolchain' and self.start_diagnostic is not None
+                and self.start_diagnostic['stateErrorStatus'] == 'pending'):
+            try:
+                state_error = value.get('State', {}).get('Error')
+                if not isinstance(state_error, str):
+                    raise ValueError('state error unavailable')
+                self.start_diagnostic['stateError'] = safe_error_projection(state_error)
+                self.start_diagnostic['stateErrorStatus'] = 'available'
+                self.save()
+            except Exception:
+                self.start_diagnostic['stateErrorStatus'] = 'unavailable'
+                self.start_diagnostic['stateError'] = None
         return value
 
     def remove(self, record, cleanup=False):
@@ -438,5 +533,11 @@ class ImageRuntime:
                 self.remove(record, cleanup=True)
             except Exception:
                 failures.append(record['name'])
+        if self.start_diagnostic is not None and self.start_diagnostic['stateErrorStatus'] == 'pending':
+            self.start_diagnostic['stateErrorStatus'] = 'unavailable'
+            try:
+                self.save()
+            except Exception:
+                pass  # Diagnostic capture must not change the cleanup verdict.
         if failures:
             raise RuntimeError('owned container cleanup incomplete: ' + ', '.join(failures))
