@@ -46,6 +46,41 @@ Explicit `workspace` values are honored for compatibility. An omitted job worksp
 
 Git sources support branch selection, commit pinning, and HTTPS username/password or token authentication. Git prompts are disabled. Credentials are supplied through a temporary askpass helper and environment, rather than added to Git command arguments or repository config. Credential-bearing repository URLs are rejected; supply passwords and tokens in `source.auth`. Unknown source types and missing requested artifact storage fail the job; artifact download errors are not silently ignored.
 
+## Environment and template scopes
+
+The controller builds immutable per-job and per-step environment snapshots. The
+order is runtime environment, pipeline variables, trigger-time variables, job
+environment, then step environment; each later layer overrides an earlier value,
+including with an empty string. Each job/step environment value is substituted
+once against the preceding layer, so a job `VALUE: "${{VALUE}}-job"` extends the
+run-level value once. Entries in the same environment map do not depend on map
+iteration order or see one another's newly assigned values. A sibling step and a
+retry start from the same job snapshot rather than the previous step's overrides.
+
+Step argument strings, including nested maps/lists, use the same effective step
+snapshot as the execution environment and `when`'s direct names / `env` map.
+Controller-local steps and Agent-dispatched payloads use the same resolver. The
+Agent does not interpolate a resolved payload again. `variables` in a raw `when`
+expression remains the run-level variable snapshot; job and step overrides do
+not change it. Agent-configured and inherited process environment remain command
+fallbacks and are not added to controller template or condition scopes.
+Controller conditions must be boolean; compile/evaluation errors omit expression
+source and environment values so secret aliases cannot enter persisted errors.
+
+The existing `${NAME}` / `${{NAME}}` substitution grammar is unchanged. An unknown
+key is left unchanged, and inserted replacement text is not recursively
+expanded. Dotted keys such as `${{secrets.NAME}}` refer to the existing flat keys;
+this adds no hierarchical `env`, `variables`, `with`, or `outputs` template
+language. Project-secret loading and permissions are unchanged, and known secret
+values continue to be masked before captured/streamed shell output is persisted.
+
+Registered upstream artifact keys retain the existing `ARTIFACT_<job>_<path>`
+form. They are available while resolving the job layer; a registered artifact
+key wins over a same-named job entry, and an explicit step entry can still
+override its step-local value. This removes the previous mismatch where repeated
+job overlays could hide the registered key only in a step environment/payload. These strings do not grant artifact access or
+replace the existing storage/identity checks.
+
 ## Agent artifacts
 
 Whole-job agent tasks execute `uses: builtin:artifacts` in normal step order:

@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,7 +65,6 @@ func (tf *TaskFramework) Execute(ctx context.Context, task *Task) (resultErr err
 		return fmt.Errorf("task and job must not be nil")
 	}
 	tf = NewTaskFramework(tf.execCtx.ForJob(), tf.logger)
-	tf.execCtx.Env = tf.execCtx.ResolveStepEnv(task.Job, nil)
 	if task.Job.Timeout != "" {
 		timeout, err := time.ParseDuration(task.Job.Timeout)
 		if err != nil || timeout <= 0 {
@@ -161,11 +161,15 @@ func (tf *TaskFramework) prepare(_ context.Context, task *Task) error {
 
 	// Inject upstream job artifact URIs into this job's environment so that
 	// steps can reference them as ${{ ARTIFACT_<jobName>_<artifactName> }}.
-	if artifacts := tf.execCtx.ArtifactSnapshot(); len(artifacts) > 0 {
-		for key, uri := range artifacts {
-			tf.execCtx.Env["ARTIFACT_"+strings.NewReplacer("/", "_", "-", "_", ".", "_").Replace(key)] = uri
-		}
+	artifactEnv := make(map[string]string)
+	for key, uri := range tf.execCtx.ArtifactSnapshot() {
+		artifactEnv["ARTIFACT_"+strings.NewReplacer("/", "_", "-", "_", ".", "_").Replace(key)] = uri
 	}
+	maps.Copy(tf.execCtx.Env, artifactEnv)
+	tf.execCtx.Env = tf.execCtx.ResolveStepEnv(task.Job, nil)
+	tf.execCtx.jobEnvResolved = true
+	// 登记产物键在作业快照中优先，避免步骤重新应用作业覆盖造成分歧
+	maps.Copy(tf.execCtx.Env, artifactEnv)
 
 	// Evaluate when condition
 	if task.Job.When != "" {
@@ -286,8 +290,9 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 			continue
 		}
 		stepRunID := tf.execCtx.StepRunIDs[step.Name]
+		stepCtx := tf.execCtx.forStep(task.Job, step)
 		steps = append(steps, taskqueue.StepPayload{AttemptRunIDs: tf.execCtx.StepAttemptIDs[step.Name], Name: step.Name, StepIndex: int32(i), StepRunID: stepRunID, Uses: step.Uses, Action: step.Action,
-			Args: tf.execCtx.ResolveVariables(spec.StructAsMap(step.Args)), Env: tf.execCtx.ResolveStepEnv(task.Job, step), ContinueOnError: step.ContinueOnError, Timeout: step.Timeout, When: step.When})
+			Args: stepCtx.ResolveVariables(spec.StructAsMap(step.Args)), Env: maps.Clone(stepCtx.Env), ContinueOnError: step.ContinueOnError, Timeout: step.Timeout, When: step.When})
 	}
 	artifactURIs, artifactReferences := tf.execCtx.ArtifactInputSnapshot()
 	payload := &taskqueue.JobRunTaskPayload{PipelineID: tf.execCtx.PipelineIDRef, PipelineRunID: tf.execCtx.PipelineRunID,
@@ -488,11 +493,12 @@ func (tf *TaskFramework) executeStep(ctx context.Context, task *Task, step *spec
 // executeStepOnce executes a step once
 func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *spec.Step) error {
 	start := time.Now()
+	stepRunner := NewStepRunner(tf.execCtx, task.Job, step)
 
 	// Evaluate when condition
 	if step.When != "" {
 		stepContext := map[string]any{
-			"env": tf.execCtx.ResolveStepEnv(task.Job, step),
+			"env": maps.Clone(stepRunner.ctx.Env),
 			"job": map[string]any{
 				"name": task.Job.Name,
 			},
@@ -500,7 +506,7 @@ func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *
 				"name": step.Name,
 			},
 		}
-		ok, err := tf.execCtx.EvalConditionWithContext(step.When, stepContext)
+		ok, err := stepRunner.ctx.EvalConditionWithContext(step.When, stepContext)
 		if err != nil {
 			if saveErr := tf.recordStep(ctx, task, step, 5, start, err); saveErr != nil {
 				return saveErr
@@ -523,7 +529,6 @@ func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *
 	})
 
 	// Create step runner and execute
-	stepRunner := NewStepRunner(tf.execCtx, task.Job, step)
 	if err := stepRunner.Run(ctx); err != nil {
 		status := stepFailureStatus(ctx, err)
 		if saveErr := tf.recordStep(ctx, task, step, status, start, err); saveErr != nil {

@@ -53,6 +53,8 @@ type ExecutionContext struct {
 	TaskQueue      nova.TaskQueue
 	Logger         log.Logger
 	Env            map[string]string
+	// jobEnvResolved 标记当前作业环境已从运行级快照解析，后续步骤不得重复应用作业覆盖
+	jobEnvResolved bool
 
 	// JobRunStore is set by the control-plane process to let TaskFramework
 	// persist JobRun / StepRun records and poll their status.
@@ -192,16 +194,16 @@ func (c *ExecutionContext) EvalCondition(conditionExpr string) (bool, error) {
 	// Add env map for accessing environment variables
 	env["env"] = c.Env
 
-	// Compile expression
-	program, err := expr.Compile(conditionExpr, expr.Env(env))
+	// 表达式可能引用密钥；编译/执行诊断不得回显源码或环境值
+	program, err := expr.Compile(conditionExpr, expr.Env(env), expr.AsBool())
 	if err != nil {
-		return false, fmt.Errorf("compile condition expression: %w", err)
+		return false, fmt.Errorf("compile condition expression: invalid boolean expression")
 	}
 
 	// Run expression
 	result, err := expr.Run(program, env)
 	if err != nil {
-		return false, fmt.Errorf("evaluate condition expression: %w", err)
+		return false, fmt.Errorf("evaluate condition expression failed")
 	}
 
 	// Convert result to bool
@@ -209,7 +211,7 @@ func (c *ExecutionContext) EvalCondition(conditionExpr string) (bool, error) {
 		return boolResult, nil
 	}
 
-	return false, fmt.Errorf("condition expression must return bool, got %T", result)
+	return false, fmt.Errorf("condition expression must return bool")
 }
 
 // EvalConditionWithContext evaluates condition with additional context
@@ -239,16 +241,16 @@ func (c *ExecutionContext) EvalConditionWithContext(conditionExpr string, evalCo
 	// Add additional context (e.g., job, step information)
 	maps.Copy(env, evalContext)
 
-	// Compile expression
-	program, err := expr.Compile(conditionExpr, expr.Env(env))
+	// 表达式可能引用密钥；编译/执行诊断不得回显源码或环境值
+	program, err := expr.Compile(conditionExpr, expr.Env(env), expr.AsBool())
 	if err != nil {
-		return false, fmt.Errorf("compile condition expression '%s': %w", conditionExpr, err)
+		return false, fmt.Errorf("compile condition expression: invalid boolean expression")
 	}
 
 	// Run expression
 	result, err := expr.Run(program, env)
 	if err != nil {
-		return false, fmt.Errorf("evaluate condition expression '%s': %w", conditionExpr, err)
+		return false, fmt.Errorf("evaluate condition expression failed")
 	}
 
 	// Convert result to bool
@@ -256,43 +258,56 @@ func (c *ExecutionContext) EvalConditionWithContext(conditionExpr string, evalCo
 		return boolResult, nil
 	}
 
-	return false, fmt.Errorf("condition expression must return bool, got %T: %v", result, result)
+	return false, fmt.Errorf("condition expression must return bool")
 }
 
-// ResolveStepEnv resolves environment variables for step
-// Priority: step.Env > job.Env > pipeline.Variables
+// ResolveStepEnv 按运行、作业、步骤优先级复制环境，每层仅对上一层快照替换一次
 func (c *ExecutionContext) ResolveStepEnv(job *spec.Job, step *spec.Step) map[string]string {
-	env := make(map[string]string)
-
-	// Start with pipeline variables
-	maps.Copy(env, c.Env)
-
-	// Override with job env
-	if job != nil && job.Env != nil {
-		for k, v := range job.Env {
-			env[k] = c.ResolveVariable(v)
-		}
+	env := maps.Clone(c.Env)
+	if env == nil {
+		env = make(map[string]string)
 	}
-
-	// Override with step env
-	if step != nil && step.Env != nil {
-		for k, v := range step.Env {
-			env[k] = c.ResolveVariable(v)
-		}
+	if !c.jobEnvResolved && job != nil {
+		env = resolveEnvLayer(env, job.Env)
 	}
-
+	if step != nil {
+		env = resolveEnvLayer(env, step.Env)
+	}
 	return env
+}
+
+func resolveEnvLayer(base, overrides map[string]string) map[string]string {
+	env := maps.Clone(base)
+	if env == nil {
+		env = make(map[string]string)
+	}
+	for key, value := range overrides {
+		env[key] = resolveVariable(value, base)
+	}
+	return env
+}
+
+// forStep 保留尝试标识及共享产物状态，仅为步骤创建独立的有效环境快照
+func (c *ExecutionContext) forStep(job *spec.Job, step *spec.Step) *ExecutionContext {
+	child := *c
+	child.Env = c.ResolveStepEnv(job, step)
+	child.jobEnvResolved = true
+	return &child
 }
 
 // ResolveVariable resolves variable substitution: ${{ variable }}
 var varRegex = regexp.MustCompile(`\${{?\s*(\w+(?:\.\w+)?)\s*}}?`)
 
 func (c *ExecutionContext) ResolveVariable(value string) string {
+	return resolveVariable(value, c.Env)
+}
+
+func resolveVariable(value string, env map[string]string) string {
 	return varRegex.ReplaceAllStringFunc(value, func(match string) string {
 		submatch := varRegex.FindStringSubmatch(match)
 		if len(submatch) == 2 {
 			key := submatch[1]
-			if val, ok := c.Env[key]; ok {
+			if val, ok := env[key]; ok {
 				return val
 			}
 		}
@@ -371,6 +386,7 @@ func (c *ExecutionContext) SendNotification(_ context.Context, item *spec.Notify
 func (c *ExecutionContext) ForJob() *ExecutionContext {
 	child := *c
 	child.Env = maps.Clone(c.Env)
+	child.jobEnvResolved = false
 	child.RuntimePolicy = c.RuntimePolicy.Clone()
 	if c.Runtime != nil {
 		runtime := *c.Runtime

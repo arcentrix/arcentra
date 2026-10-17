@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/shared/executor"
@@ -39,7 +40,7 @@ const defaultBuiltinActionExecute = "Execute"
 
 // NewStepRunner creates a new step runner
 func NewStepRunner(ctx *ExecutionContext, job *spec.Job, step *spec.Step) *StepRunner {
-	return &StepRunner{ctx: ctx, job: job, step: step}
+	return &StepRunner{ctx: ctx.forStep(job, step), job: job, step: step}
 }
 
 // Run executes the step
@@ -51,7 +52,7 @@ func (r *StepRunner) Run(ctx context.Context) error {
 
 	// Evaluate when condition with step context
 	stepContext := map[string]any{
-		"env": r.ctx.ResolveStepEnv(r.job, r.step),
+		"env": maps.Clone(r.ctx.Env),
 		"job": map[string]any{
 			"name": r.job.Name,
 		},
@@ -126,7 +127,7 @@ func (r *StepRunner) executeOnAgent(ctx context.Context) error {
 	}
 
 	// Resolve environment variables
-	env := r.ctx.ResolveStepEnv(r.job, r.step)
+	env := maps.Clone(r.ctx.Env)
 
 	// Get workspace path
 	workspace := r.ctx.StepWorkspace(r.job.Name, r.step.Name)
@@ -190,7 +191,7 @@ func (r *StepRunner) executeBuiltin(ctx context.Context, builtinName string) err
 	}
 
 	// Resolve environment variables
-	env := r.ctx.ResolveStepEnv(r.job, r.step)
+	env := maps.Clone(r.ctx.Env)
 
 	// Resolve params with variable substitution
 	resolvedParams := r.ctx.ResolveVariables(spec.StructAsMap(r.step.Args))
@@ -307,7 +308,7 @@ func (r *StepRunner) executePlugin(ctx context.Context) error {
 	}
 
 	// Resolve environment variables
-	env := r.ctx.ResolveStepEnv(r.job, r.step)
+	env := maps.Clone(r.ctx.Env)
 
 	// Resolve params with variable substitution
 	resolvedParams := r.ctx.ResolveVariables(spec.StructAsMap(r.step.Args))
@@ -344,7 +345,7 @@ func (r *StepRunner) executeShell(ctx context.Context) error {
 		Pipeline:  &executor.PipelineInfo{Namespace: r.ctx.PipelineIDRef},
 		Job:       &executor.JobInfo{Name: r.job.Name},
 		Step:      &executor.StepInfo{Name: r.step.Name, Uses: r.step.Uses, Action: r.step.Action, Args: r.ctx.ResolveVariables(spec.StructAsMap(r.step.Args))},
-		Workspace: r.ctx.JobWorkspace(r.job.Name), Env: r.ctx.ResolveStepEnv(r.job, r.step)}
+		Workspace: r.ctx.JobWorkspace(r.job.Name), Env: maps.Clone(r.ctx.Env)}
 	manager := executor.NewExecutorManager()
 	manager.SetLogPublisher(r.ctx.LogPublisher)
 	result, err := manager.ExecuteWithExecutor(ctx, req, executor.NewShellExecutor())

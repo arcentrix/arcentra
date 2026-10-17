@@ -298,6 +298,7 @@ func TestRealStackAcceptance(t *testing.T) {
 		return len(f.worker.reports.entries) == 0
 	})
 	realStackAssertPolling(t, f, objectStore, reference)
+	controllerWorkerAssertEnvironment(t, f, objectStore, reference)
 	t.Log("real-stack accepted: MySQL migration, real Kafka dispatch/log persistence, authenticated TLS gRPC, S3 artifact DAG, success/failure terminal replay and duplicate suppression")
 }
 
