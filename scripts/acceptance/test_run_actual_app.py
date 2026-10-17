@@ -16,12 +16,260 @@ import threading
 import time
 import tempfile
 import tomllib
+import traceback
 import unittest
 import urllib.error
 import urllib.parse
 from unittest import mock
 
 import run_actual_app as app
+
+
+def synthetic_identity():
+    return {"version": 1, "controllerBinding": "synthetic-controller-binding", "state": "ready",
+            "agentID": "synthetic-agent", "perAgentToken": "synthetic-agent:synthetic-private-signature"}
+
+
+class CommittedAgentIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.fixture = app.Fixture(mock.Mock(), self.root)
+        self.path = self.fixture.identity_path()
+        self.path.parent.mkdir(mode=0o700)
+        self.record = synthetic_identity()
+        self.agent_id = self.record["agentID"]
+        self.guard = self.path.with_name("enrollment.pending")
+        self.stage = self.path.with_name(".pending")
+        self.restored = {"count": 1, "agents": [{"agentId": self.agent_id, "isEnabled": 1,
+                                                "lastHeartbeat": "synthetic-heartbeat"}]}
+        self.write_record(self.record)
+
+    def write_record(self, record):
+        app.atomic_json(self.path, record)
+
+    def digest(self):
+        return app.committed_identity_digest(self.path, self.agent_id)
+
+    def pending_record(self):
+        return {key: self.record[key] for key in ("version", "controllerBinding")} | {"state": "pending"}
+
+    def assert_safe_error(self, operation, reason):
+        with self.assertRaises(RuntimeError) as raised:
+            operation()
+        self.assertEqual(str(raised.exception), reason)
+        diagnostic = "".join(traceback.format_exception(raised.exception))
+        for value in (self.agent_id, self.record["controllerBinding"], self.record["perAgentToken"],
+                      "synthetic-private-signature", "synthetic-heartbeat", str(self.path),
+                      hashlib.sha256(self.path.read_bytes()).hexdigest() if self.path.is_file() else "unused-digest"):
+            self.assertNotIn(value, diagnostic)
+
+    def test_pending_file_is_not_a_baseline_until_ready_commit_and_guard_removal(self):
+        pending = self.pending_record()
+        self.write_record(pending)
+        app.atomic_json(self.guard, pending)
+        pending_digest = hashlib.sha256(self.path.read_bytes()).digest()
+        self.assertTrue(self.path.is_file(), "the old existence-only predicate accepts the pending record")
+        transitions = []
+        def progress(_delay):
+            if not transitions:
+                self.write_record(self.record)
+                transitions.append("ready-with-guard")
+            else:
+                self.guard.unlink()
+                transitions.append("commit-markers-removed")
+        with mock.patch.object(app.time, "sleep", side_effect=progress) as sleep, \
+                mock.patch.object(app.time, "monotonic", side_effect=[0, 0, 0.25, 0.5, 2]):
+            baseline = self.fixture.wait_until("committed Agent identity", self.digest, timeout=1)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(transitions, ["ready-with-guard", "commit-markers-removed"])
+        self.assertNotEqual(baseline, pending_digest)
+        self.assertEqual(baseline, hashlib.sha256(self.path.read_bytes()).digest())
+        app.require_resumed_agent_identity(self.restored, self.agent_id, self.path, baseline)
+
+    def test_missing_file_and_directory_are_incomplete(self):
+        self.path.unlink()
+        self.assertIsNone(self.digest())
+        self.path.parent.rmdir()
+        self.assertIsNone(self.digest())
+
+    def test_pending_and_each_commit_marker_have_bounded_wait(self):
+        for state in ("pending", "guard", "stage"):
+            with self.subTest(state=state):
+                self.write_record(self.pending_record() if state == "pending" else self.record)
+                marker = self.guard if state == "guard" else self.stage
+                if state != "pending":
+                    app.atomic_json(marker, self.pending_record())
+                with mock.patch.object(app.time, "monotonic", side_effect=[0, 0, 2]), \
+                        mock.patch.object(app.time, "sleep") as sleep, \
+                        self.assertRaisesRegex(RuntimeError, "^timed out waiting for committed Agent identity;"):
+                    self.fixture.wait_until("committed Agent identity", self.digest, timeout=1)
+                sleep.assert_called_once_with(0.5)
+                marker.unlink(missing_ok=True)
+
+    def test_marker_checks_cover_both_sides_of_the_identity_read(self):
+        loads = app.json.loads
+        for initially_present in (False, True):
+            with self.subTest(initially_present=initially_present):
+                if initially_present:
+                    app.atomic_json(self.guard, self.pending_record())
+                def during_read(*args, **kwargs):
+                    if initially_present:
+                        self.guard.unlink()
+                    else:
+                        app.atomic_json(self.guard, self.pending_record())
+                    return loads(*args, **kwargs)
+                with mock.patch.object(app.json, "loads", side_effect=during_read):
+                    self.assertIsNone(self.digest())
+                self.guard.unlink(missing_ok=True)
+                self.assertIsNotNone(self.digest())
+
+    def test_wrong_ready_identity_is_fail_fast_even_while_guard_exists(self):
+        app.atomic_json(self.guard, self.pending_record())
+        self.write_record(self.record | {"agentID": "different-synthetic-agent"})
+        with mock.patch.object(app.time, "sleep") as sleep:
+            self.assert_safe_error(lambda: self.fixture.wait_until("committed Agent identity", self.digest),
+                                   "Agent identity does not match the enrolled Agent")
+        sleep.assert_not_called()
+
+    def test_invalid_versions_and_states_fail_without_record_diagnostics(self):
+        for patch in ({"version": 0}, {"version": 2}, {"version": True}, {"version": "1"},
+                      {"state": "unknown"}, {"state": None}):
+            with self.subTest(patch=patch):
+                self.write_record(self.record | patch)
+                self.assert_safe_error(self.digest, "Agent identity record schema is invalid")
+
+    def test_invalid_controller_bindings_fail_without_record_diagnostics(self):
+        for binding in (None, "", " leading", "trailing ", "line\nbreak", "delete\x7f", "x" * 8193):
+            with self.subTest(binding_type=type(binding).__name__):
+                self.write_record(self.record | {"controllerBinding": binding})
+                self.assert_safe_error(self.digest, "Agent identity controller binding is invalid")
+
+    def test_invalid_token_shapes_fail_without_token_diagnostics(self):
+        for token in (None, "", "other-agent:synthetic-private-signature", "synthetic-agent:",
+                      "synthetic-agent:bad signature", "synthetic-agent:bad:signature",
+                      "synthetic-agent:bad\nsignature", "synthetic-agent:非ascii", "synthetic-agent:" + "x" * 4096):
+            with self.subTest(token_type=type(token).__name__):
+                self.write_record(self.record | {"perAgentToken": token})
+                self.assert_safe_error(self.digest, "Agent identity token binding is invalid")
+
+    def test_unknown_and_pending_credential_fields_fail(self):
+        for record in (self.record | {"extra": "synthetic-private-signature"},
+                       self.pending_record() | {"agentID": self.agent_id},
+                       self.pending_record() | {"perAgentToken": self.record["perAgentToken"]}):
+            self.write_record(record)
+            self.assert_safe_error(self.digest, "Agent identity record fields are invalid")
+
+    def test_malformed_duplicate_and_non_utf8_json_are_sanitized(self):
+        for raw in (b'{"private":"synthetic-private-signature"',
+                    b'{"version":1,"version":1}', b'\xffsynthetic-private-signature',
+                    b'{} trailing-synthetic-private-signature'):
+            self.path.write_bytes(raw)
+            self.assert_safe_error(self.digest, "Agent identity record could not be safely read")
+        with mock.patch.object(app.json, "loads", side_effect=RecursionError("synthetic-private-signature")):
+            self.assert_safe_error(self.digest, "Agent identity record could not be safely read")
+
+    def test_non_object_json_is_not_a_record(self):
+        for record in (None, [], "synthetic-private-signature", 1):
+            self.write_record(record)
+            self.assert_safe_error(self.digest, "Agent identity record schema is invalid")
+
+    def test_empty_and_oversized_records_are_rejected_before_reading(self):
+        for raw in (b"", b"x" * (app.MAX_IDENTITY_BYTES + 1)):
+            self.path.write_bytes(raw)
+            self.assert_safe_error(self.digest, "Agent identity record size is invalid")
+
+    def test_private_file_mode_owner_and_hardlink_are_required(self):
+        for mode in (0o644, 0o400, 0o4600):
+            with self.subTest(mode=mode):
+                self.path.chmod(mode)
+                self.assert_safe_error(self.digest, "Agent identity file is unsafe")
+        self.path.chmod(0o600)
+        owner = os.geteuid()
+        with mock.patch.object(app.os, "geteuid", return_value=owner + 1):
+            self.assert_safe_error(self.digest, "Agent identity directory is unsafe")
+        with mock.patch.object(app.os, "geteuid", side_effect=[owner, owner + 1]):
+            self.assert_safe_error(self.digest, "Agent identity file is unsafe")
+        link = self.path.with_name("hardlink")
+        os.link(self.path, link)
+        self.assert_safe_error(self.digest, "Agent identity file is unsafe")
+
+    def test_symlink_and_fifo_cannot_supply_identity_bytes(self):
+        target = self.path.with_name("target")
+        self.path.rename(target)
+        self.path.symlink_to(target)
+        self.assert_safe_error(self.digest, "Agent identity record could not be safely read")
+        self.path.unlink()
+        os.mkfifo(self.path, 0o600)
+        self.assert_safe_error(self.digest, "Agent identity file is unsafe")
+
+    def test_private_directory_and_safe_commit_markers_are_required(self):
+        self.path.parent.chmod(0o755)
+        self.assert_safe_error(self.digest, "Agent identity directory is unsafe")
+        self.path.parent.chmod(0o700)
+        self.guard.symlink_to(self.path)
+        self.assert_safe_error(self.digest, "Agent identity file is unsafe")
+
+    def test_ready_replacement_during_read_is_not_adopted(self):
+        loads = app.json.loads
+        def replace_during_read(*args, **kwargs):
+            self.write_record(self.record)
+            return loads(*args, **kwargs)
+        with mock.patch.object(app.json, "loads", side_effect=replace_during_read):
+            self.assert_safe_error(self.digest, "Agent identity file changed while reading")
+
+    def test_filesystem_exception_cannot_expose_paths_or_returned_secrets(self):
+        with mock.patch.object(app.os, "open", side_effect=OSError(self.record["perAgentToken"])):
+            self.assert_safe_error(self.digest, "Agent identity record could not be safely read")
+
+    def test_restored_registry_invariants_fail_individually_without_waiting(self):
+        baseline = self.digest()
+        cases = [(None, "approved Agent registry count is not exactly one"),
+                 ({"count": 2, "agents": []}, "approved Agent registry count is not exactly one"),
+                 ({"count": True, "agents": []}, "approved Agent registry count is not exactly one"),
+                 ({"count": 1, "agents": []}, "approved Agent registry rows are invalid"),
+                 ({"count": 1, "agents": [{}, {}]}, "approved Agent registry rows are invalid")]
+        for field, value, reason in (
+            ("agentId", "different-synthetic-agent", "approved Agent registry identity changed"),
+            ("isEnabled", 0, "approved Agent is not enabled"),
+            ("isEnabled", True, "approved Agent is not enabled"),
+            ("lastHeartbeat", None, "approved Agent has no persisted heartbeat after readiness"),
+            ("lastHeartbeat", "", "approved Agent has no persisted heartbeat after readiness"),
+        ):
+            restored = copy.deepcopy(self.restored)
+            restored["agents"][0][field] = value
+            cases.append((restored, reason))
+        with mock.patch.object(app.time, "sleep") as sleep:
+            for restored, reason in cases:
+                with self.subTest(reason=reason):
+                    self.assert_safe_error(lambda: app.require_resumed_agent_identity(
+                        restored, self.agent_id, self.path, baseline), reason)
+        sleep.assert_not_called()
+
+    def test_ready_without_heartbeat_does_not_retry_or_read_identity(self):
+        baseline = self.digest()
+        del self.restored["agents"][0]["lastHeartbeat"]
+        with mock.patch.object(app, "committed_identity_digest") as digest:
+            self.assert_safe_error(lambda: app.require_resumed_agent_identity(
+                self.restored, self.agent_id, self.path, baseline),
+                "approved Agent has no persisted heartbeat after readiness")
+        digest.assert_not_called()
+
+    def test_restored_commit_incomplete_and_changed_original_bytes_still_fail(self):
+        baseline = self.digest()
+        app.atomic_json(self.guard, self.pending_record())
+        self.assert_safe_error(lambda: app.require_resumed_agent_identity(
+            self.restored, self.agent_id, self.path, baseline),
+            "approved Agent identity commit is incomplete after readiness")
+        self.guard.unlink()
+        # Even a JSON-equivalent whitespace change must fail exact-byte equality.
+        self.path.write_bytes(self.path.read_bytes() + b"\n")
+        self.assert_safe_error(lambda: app.require_resumed_agent_identity(
+            self.restored, self.agent_id, self.path, baseline), "approved Agent persisted identity bytes changed")
+        self.write_record(self.record | {"perAgentToken": "synthetic-agent:different-synthetic-signature"})
+        self.assert_safe_error(lambda: app.require_resumed_agent_identity(
+            self.restored, self.agent_id, self.path, baseline), "approved Agent persisted identity bytes changed")
 
 
 class FixtureResponse(io.BytesIO):
@@ -397,8 +645,8 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
         events = []
         app.atomic_json(self.summary_path, self.summary())
         identity = self.root / "identity/identity.json"
-        identity.parent.mkdir()
-        identity.write_text("synthetic durable identity")
+        identity.parent.mkdir(mode=0o700)
+        app.atomic_json(identity, synthetic_identity())
         agent_reads = 0
         approved = False
         storage_saved = False

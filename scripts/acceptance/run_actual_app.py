@@ -42,6 +42,7 @@ EXPECTED_OUTPUT = '{"message":"HELLO, ARCENTRA!","length":8}\n'
 FIXTURE_SOURCE = Path(__file__).resolve().parent / "fixtures/stdlib-build"
 COMPILE_ERROR = "\nvar _ = acceptanceCompileError\n"
 MAX_BINARY_BYTES = 32 * 1024 * 1024
+MAX_IDENTITY_BYTES = 16 * 1024
 FIRST_BUILD_JOURNEY = "three-phase-separate-browser-contexts"
 FIRST_BUILD_PREFLIGHT_STEPS = [
     "preflight-login-via-real-api",
@@ -532,8 +533,11 @@ class Fixture:
         if pending["isEnabled"] != 0 or pending.get("lastHeartbeat"):
             raise RuntimeError("new Agent did not fail closed pending explicit approval")
         identity_path = self.identity_path()
-        self.wait_until("durable pending Agent identity", identity_path.is_file, agent)
-        identity_digest = hashlib.sha256(identity_path.read_bytes()).digest()
+        # A pending Control row can precede the registration RPC response and
+        # local ready-record commit. File existence also accepts the earlier
+        # token-free pending record; only the completed identity is a baseline.
+        identity_digest = self.wait_until("committed Agent identity",
+                                          lambda: committed_identity_digest(identity_path, self.agent_id), agent)
         self.wait_until("pending Agent liveness", lambda: self.probe(AGENT_URL + "/live") == 200, agent)
         if self.probe(AGENT_URL + "/ready") != 503 or self.probe(AGENT_URL + "/live") != 200:
             raise RuntimeError("pending Agent readiness/liveness contract failed")
@@ -545,10 +549,7 @@ class Fixture:
         agent = self.start_agent("agent-approved")
         self.wait_until("approved Agent readiness", lambda: self.probe(AGENT_URL + "/ready") == 200, agent)
         restored = self.request("/agent?pageNum=1&pageSize=100")
-        if (restored["count"] != 1 or restored["agents"][0]["agentId"] != self.agent_id
-                or restored["agents"][0]["isEnabled"] != 1 or not restored["agents"][0].get("lastHeartbeat")
-                or hashlib.sha256(identity_path.read_bytes()).digest() != identity_digest):
-            raise RuntimeError("approved Agent did not resume exactly the saved authenticated identity")
+        require_resumed_agent_identity(restored, self.agent_id, identity_path, identity_digest)
         self.note("TLS enrollment remained pending, was explicitly approved and resumed the same persisted identity")
         self.configure_observer()
         self.run_build_browser(control, agent)
@@ -842,6 +843,121 @@ def no_duplicate_keys(pairs):
             raise ValueError("duplicate JSON key in fixture evidence")
         value[key] = item
     return value
+
+
+def committed_identity_digest(path, agent_id):
+    """Read only a bounded, committed v1 identity; never expose its contents.
+
+    Missing/pending records and commit markers are the only retryable states.
+    A ready record is visible before CommitIdentity removes enrollment.pending,
+    so observe both markers before and after the read. The digest covers the
+    original bytes, not normalized JSON, and remains private to this process.
+    """
+    def private_file(info):
+        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.geteuid() or info.st_nlink != 1):
+            raise RuntimeError("Agent identity file is unsafe")
+
+    def snapshot(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_nlink,
+                info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    try:
+        try:
+            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except FileNotFoundError:
+            return None
+        try:
+            info = os.fstat(directory)
+            if (not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700
+                    or info.st_uid != os.geteuid()):
+                raise RuntimeError("Agent identity directory is unsafe")
+
+            def markers_present():
+                present = False
+                for name in ("enrollment.pending", ".pending"):
+                    try:
+                        marker = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                    private_file(marker)
+                    present = True
+                return present
+
+            before = markers_present()
+            try:
+                descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+            except FileNotFoundError:
+                return None
+            with os.fdopen(descriptor, "rb") as handle:
+                info = os.fstat(handle.fileno())
+                private_file(info)
+                if not 0 < info.st_size <= MAX_IDENTITY_BYTES:
+                    raise RuntimeError("Agent identity record size is invalid")
+                data = handle.read(MAX_IDENTITY_BYTES + 1)
+                if len(data) != info.st_size or snapshot(os.fstat(handle.fileno())) != snapshot(info):
+                    raise RuntimeError("Agent identity file changed while reading")
+            record = json.loads(data.decode("utf-8"), object_pairs_hook=no_duplicate_keys)
+            fields = {"version", "controllerBinding", "state"}
+            if (not isinstance(record, dict) or type(record.get("version")) is not int
+                    or record["version"] != 1 or record.get("state") not in ("pending", "ready")):
+                raise RuntimeError("Agent identity record schema is invalid")
+            binding = record.get("controllerBinding")
+            if (not isinstance(binding, str) or not 0 < len(binding.encode("utf-8")) <= 8192
+                    or binding.strip() != binding or any(ord(char) < 32 or ord(char) == 127 for char in binding)):
+                raise RuntimeError("Agent identity controller binding is invalid")
+            if record["state"] == "ready":
+                fields |= {"agentID", "perAgentToken"}
+                if (not isinstance(record.get("agentID"), str)
+                        or not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", record["agentID"])
+                        or record["agentID"] != agent_id):
+                    raise RuntimeError("Agent identity does not match the enrolled Agent")
+                token = record.get("perAgentToken")
+                prefix = agent_id + ":"
+                if (not isinstance(token, str) or len(token) > 4096 or not token.startswith(prefix)
+                        or not token[len(prefix):]
+                        or any(ord(char) < 33 or ord(char) > 126 or char == ":" for char in token[len(prefix):])):
+                    raise RuntimeError("Agent identity token binding is invalid")
+            if set(record) != fields:
+                raise RuntimeError("Agent identity record fields are invalid")
+            after = markers_present()
+            if record["state"] == "pending":
+                return None
+            current = os.stat(path.name, dir_fd=directory, follow_symlinks=False)
+            private_file(current)
+            if snapshot(current) != snapshot(info):
+                raise RuntimeError("Agent identity file changed while reading")
+            if before or after:
+                return None
+            return hashlib.sha256(data).digest()
+        finally:
+            os.close(directory)
+    except (OSError, ValueError, TypeError, RecursionError):
+        # Decoder and filesystem errors can contain input or paths. Do not leak
+        # them through exception chaining, diagnostics or acceptance receipts.
+        raise RuntimeError("Agent identity record could not be safely read") from None
+
+
+def require_resumed_agent_identity(restored, agent_id, path, identity_digest):
+    """All post-readiness invariants are immediate failures, never polling."""
+    if not isinstance(restored, dict) or type(restored.get("count")) is not int or restored["count"] != 1:
+        raise RuntimeError("approved Agent registry count is not exactly one")
+    agents = restored.get("agents")
+    if not isinstance(agents, list) or len(agents) != 1 or not isinstance(agents[0], dict):
+        raise RuntimeError("approved Agent registry rows are invalid")
+    agent = agents[0]
+    if agent.get("agentId") != agent_id:
+        raise RuntimeError("approved Agent registry identity changed")
+    if type(agent.get("isEnabled")) is not int or agent["isEnabled"] != 1:
+        raise RuntimeError("approved Agent is not enabled")
+    # Initial Heartbeat is synchronously persisted before Agent readiness.
+    if not agent.get("lastHeartbeat"):
+        raise RuntimeError("approved Agent has no persisted heartbeat after readiness")
+    restored_digest = committed_identity_digest(path, agent_id)
+    if restored_digest is None:
+        raise RuntimeError("approved Agent identity commit is incomplete after readiness")
+    if restored_digest != identity_digest:
+        raise RuntimeError("approved Agent persisted identity bytes changed")
 
 
 def read_private_json(path):
