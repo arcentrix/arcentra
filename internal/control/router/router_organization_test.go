@@ -143,3 +143,29 @@ func TestProjectCollectionDoesNotTrustCaseCollidingOrganizationFilter(t *testing
 	require.Equal(t, 200, status, raw)
 	require.Equal(t, float64(1), body["detail"].(map[string]any)["total"])
 }
+
+// The live scoped permission boundary has an explicit HTTP 403/code 403
+// contract. A read-only observer must never reach trigger admission.
+func TestScopedPipelineObserverTriggerDenialEnvelopeHasNoRunSideEffect(t *testing.T) {
+	f := organizationHTTPFixture(t)
+	sessions := &adminSessions{values: map[string]string{}}
+	for user, token := range f.tokens {
+		raw, err := sonic.Marshal(apphttp.TokenInfo{AccessToken: token})
+		require.NoError(t, err)
+		sessions.values[consts.UserTokenKey+user] = string(raw)
+	}
+	f.rt.pipelineRouter(f.app, middleware.AuthorizationMiddleware("admin-test-secret", sessions), middleware.SubjectMiddleware(f.rt.Services.Repos().TeamMember))
+	require.NoError(t, f.db.Create(&model.Project{ProjectID: "observer-project", OrgID: "legacy", Name: "observer", CreatedBy: "admin", IsEnabled: 1, Status: model.ProjectStatusActive}).Error)
+	require.NoError(t, f.db.Create(&model.Pipeline{PipelineID: "observer-pipeline", ProjectID: "observer-project", Name: "observer"}).Error)
+	status, _, raw := f.request(t, "admin", "POST", "/project/observer-project/members", `{"userId":"ordinary","roleId":"project_reporter"}`)
+	require.Equal(t, 200, status, raw)
+	status, _, raw = f.request(t, "ordinary", "GET", "/project/observer-project", "")
+	require.Equal(t, 200, status, raw)
+	var before, after int64
+	require.NoError(t, f.db.Model(&model.PipelineRun{}).Count(&before).Error)
+	status, body, raw := f.request(t, "ordinary", "POST", "/pipelines/observer-pipeline/trigger", `{}`)
+	require.Equal(t, 403, status, raw)
+	require.Equal(t, float64(403), body["code"], raw)
+	require.NoError(t, f.db.Model(&model.PipelineRun{}).Count(&after).Error)
+	require.Equal(t, before, after)
+}

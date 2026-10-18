@@ -328,7 +328,7 @@ class SyntheticSessionHTTP:
                                                 "canEnterScope": False, "configuration": {"access": "restricted"},
                                                 "agent": {"access": "restricted"}} | self.first_build_override)
             if path.endswith("/trigger"):
-                return self.reply(request, 4030)
+                return self.reply(request, 403, http_status=403)
             if path in ("/users/", "/storage/configs"):
                 return self.reply(request, 403, http_status=403)
             return self.reply(request, 200, {"readBy": username})
@@ -392,7 +392,7 @@ class ObserverSessionTests(unittest.TestCase):
         self.fixture.require_observer_session()
         self.assertEqual(self.fixture.token, observer_token)
         self.fixture.expect_rejected("/users/fetch", 401, 4405, token="synthetic-admin-0")
-        self.fixture.expect_rejected("/pipelines/real-fixture-pipeline/trigger", 200, 4030, {}, "POST")
+        self.fixture.expect_rejected("/pipelines/real-fixture-pipeline/trigger", 403, 403, {}, "POST")
         self.assertEqual(self.fixture.token, observer_token)
 
     def test_observer_role_cannot_silently_expand_permissions_or_be_builtin(self):
@@ -427,11 +427,11 @@ class ObserverSessionTests(unittest.TestCase):
             self.fixture.require_observer_session()
 
     def test_denial_checks_reject_success_other_codes_and_session_failures_without_leaking_tokens(self):
-        for status, code in ((200, 200), (200, 4031), (401, 4405), (500, 5000)):
+        for status, code in ((200, 200), (200, 4030), (200, 403), (403, 4030), (401, 4405), (500, 5000)):
             self.fixture.http = mock.Mock()
             self.fixture.http.open.return_value = FixtureResponse({"code": code, "detail": "private-response-secret"}, status)
             with self.subTest(status=status, code=code), self.assertRaises(RuntimeError) as raised:
-                self.fixture.expect_rejected("/pipelines/fixture/trigger", 200, 4030, {}, "POST", "private-token-secret")
+                self.fixture.expect_rejected("/pipelines/fixture/trigger", 403, 403, {}, "POST", "private-token-secret")
             self.assertNotIn("private-token-secret", str(raised.exception))
             self.assertNotIn("private-response-secret", str(raised.exception))
 

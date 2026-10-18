@@ -426,8 +426,8 @@ class Fixture:
         receipt = read_private_json(self.coordination / "failed-run.json")
         self.run_snapshot(receipt, successful=False)
         # The current observer can read the real run but cannot trigger even this
-        # synthetic pipeline. Legacy permission middleware uses HTTP 200/4030.
-        self.expect_rejected(f"/pipelines/{receipt['pipelineId']}/trigger", 200, 4030, {}, "POST")
+        # synthetic pipeline. Live scoped permission middleware uses HTTP 403/code 403.
+        self.expect_rejected(f"/pipelines/{receipt['pipelineId']}/trigger", 403, 403, {}, "POST")
         self.failed_run = receipt
         self.note("Actual Agent compiler failure persisted with failed test step and zero run artifacts")
         source = self.root / "source"
