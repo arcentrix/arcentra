@@ -287,7 +287,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: c2062a377c382d02ae8936a7e554367044fc49c7
+          ref: 8b7941094647c97e51527fc412ab1a34ced291b3
           path: .acceptance/frontend
           persist-credentials: false
 

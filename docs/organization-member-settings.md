@@ -42,7 +42,23 @@ must not silently replay a stale edit. Empty editable metadata can be deliberate
 cleared where allowed; credentials are never populated, replaced or cleared by
 these operations.
 
-Archive blocks **new run admission** through the durable project/run lock order.
+Archive blocks **new run admission** through the durable lock order. Accepted
+manual and automatic admission takes `pipeline -> project -> run -> job`;
+rejection requires only the `run -> job` suffix so an archived pending run can
+still be rejected. Two competing acceptances therefore serialize first on the
+pipeline row, while accept/reject contenders share the run row. Real MySQL
+acceptance checks identify that precise common record and both connection IDs,
+then verify the winning state and exactly one execution (or zero after rejection).
+
+Project settings/archive takes `organization -> project -> authorization ->
+polling stream` and must never acquire a pipeline row while holding the project.
+Retry approval retains its `pipeline -> project -> authorization` authorization
+suffix, after its existing job/run/agent/generation/approval locks. This does not
+claim a globally acyclic lock graph; lifecycle code must not introduce the
+reverse shared locks. Archive/admission
+MySQL tests exercise both orders of the competing transactions. Existing release
+and retry authorization checks still run against current database state; a
+previous approval is not a blanket grant after scope access changes.
 Already admitted jobs and their normal execution can finish; archive is neither
 cancellation nor rollback. Explicit new manual release effects recheck current
 active project authorization. Restore does not resume old unresolved runs, undo
