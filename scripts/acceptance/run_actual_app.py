@@ -123,6 +123,10 @@ class Fixture:
         self.agent_id = ""
         self.commit = ""
         self.failed_commit = ""
+        self.visual_project_id = ""
+        self.visual_definition_commit = ""
+        self.visual_verified = False
+        self.visual_proof = None
         self.failed_run = None
         self.successful_run = None
         self.artifact_evidence = None
@@ -401,17 +405,53 @@ class Fixture:
         repositories = self.root / "repositories"
         repositories.mkdir()
         self.run("git-bare", ["git", "clone", "--bare", str(source), str(repositories / "acceptance.git")])
+        if getattr(self.args, "visual_editor_acceptance", False) is True:
+            from visual_git_fixture import prepare_visual_repository
+            prepare_visual_repository(self.root, self.run)
+            # A valid but unexported repository proves strict daemon path scope.
+            self.run("unexported-git-bare", ["git", "clone", "--bare", str(source), str(repositories / "unexported.git")])
+            self.visual_definition_commit = subprocess.run(
+                ["git", "rev-parse", "refs/heads/main"], cwd=repositories / "visual.git", env=self.env,
+                capture_output=True, text=True, check=True, timeout=10).stdout.strip()
         self.start_git_server(repositories)
+        if getattr(self.args, "visual_editor_acceptance", False) is True:
+            self.verify_visual_git_boundary()
 
     def start_git_server(self, repositories):
+        paths = [str(repositories)]
+        if getattr(self.args, "visual_editor_acceptance", False) is True:
+            paths = ["--strict-paths", str(repositories / "acceptance.git"), str(repositories / "visual.git")]
         daemon = self.start("git-daemon", ["git", "daemon", "--listen=127.0.0.1", "--port=19418",
-                                           "--export-all", f"--base-path={repositories}", str(repositories)])
+                                           "--export-all", f"--base-path={repositories}", *paths])
         def reachable():
             result = subprocess.run(["git", "ls-remote", self.repository_url(), "refs/heads/main"],
                                     env=self.env, capture_output=True, text=True, timeout=5)
             return result.returncode == 0 and self.commit in result.stdout
         self.wait_until("loopback Git source", reachable, daemon, timeout=20)
         self.note("Synthetic Git source is served read-only on loopback")
+
+    def visual_repository_url(self):
+        return self.repository_url().removesuffix("/acceptance.git") + "/visual.git"
+
+    def verify_visual_git_boundary(self):
+        # Probe the existing loopback mapping even for the image profile. Never
+        # use an arbitrary URL from browser input or a repository credential.
+        visual_url = REPO_URL.removesuffix("/acceptance.git") + "/visual.git"
+        denied_url = REPO_URL.removesuffix("/acceptance.git") + "/unexported.git"
+        source = self.root / "visual-definition-source"
+        checks = [(["ls-remote", denied_url], "unexported repository"),
+                  (["push", visual_url, "HEAD:refs/heads/forbidden"], "unapproved definition branch"),
+                  (["push", REPO_URL, "HEAD:refs/heads/forbidden"], "read-only source repository")]
+        for arguments, label in checks:
+            result = subprocess.run(["git", *arguments], cwd=source, env=self.env,
+                                    capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                raise RuntimeError("synthetic Git boundary accepted " + label)
+        head = subprocess.run(["git", "ls-remote", visual_url, "refs/heads/main"], cwd=source,
+                              env=self.env, capture_output=True, text=True, check=True, timeout=10)
+        if head.stdout.strip() != self.visual_definition_commit + "\trefs/heads/main":
+            raise RuntimeError("synthetic definition identity changed during denied-write probes")
+        self.note("Synthetic definition Git write boundary denies other repository/branch and source writes")
 
     def run_snapshot(self, receipt, successful):
         """Independently read scoped API evidence; never trust browser status claims."""
@@ -564,6 +604,11 @@ class Fixture:
         restored = self.request("/agent?pageNum=1&pageSize=100")
         require_resumed_agent_identity(restored, self.agent_id, identity_path, identity_digest)
         self.note("TLS enrollment remained pending, was explicitly approved and resumed the same persisted identity")
+        if getattr(self.args, "visual_editor_acceptance", False) is True:
+            project = self.request("/project/", {"orgId": "ci-acceptance-org", "name": "Visual definition acceptance",
+                                                "repoType": "git", "repoUrl": self.visual_repository_url(),
+                                                "defaultBranch": "main"}, "POST")
+            self.visual_project_id = safe_identifier(project.get("projectId"))
         self.configure_observer()
         self.run_build_browser(control, agent)
 
@@ -572,12 +617,20 @@ class Fixture:
             raise ValueError("unknown actual-browser acceptance phase")
         organization_keys = {"ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY", "ARCENTRA_ACCEPTANCE_MEMBER_USER_ID",
                              "ARCENTRA_ACCEPTANCE_SECRET_INITIAL_VALUE", "ARCENTRA_ACCEPTANCE_SECRET_ROTATED_VALUE",
-                             "ARCENTRA_SECRET_ENCRYPTION_KEY"}
+                             "ARCENTRA_SECRET_ENCRYPTION_KEY", "ARCENTRA_ACCEPTANCE_VISUAL_CI"}
         environment = {key: value for key, value in self.env.items() if key not in organization_keys}
         if phase == "build":
             environment |= {"ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY": "1", "ARCENTRA_ACCEPTANCE_MEMBER_USER_ID": self.observer_id}
             environment |= {"ARCENTRA_ACCEPTANCE_SECRET_INITIAL_VALUE": self.secret_initial_value,
                             "ARCENTRA_ACCEPTANCE_SECRET_ROTATED_VALUE": self.secret_rotated_value}
+            if getattr(self.args, "visual_editor_acceptance", False) is True:
+                from visual_git_fixture import INITIAL_SPEC, MARKER
+                if not self.visual_project_id or not self.visual_definition_commit:
+                    raise RuntimeError("visual editor browser requires its fixed initialized project/repository")
+                environment["ARCENTRA_ACCEPTANCE_VISUAL_CI"] = json.dumps({
+                    "projectId": self.visual_project_id, "repoUrl": self.visual_repository_url(), "branch": "main",
+                    "pipelineFilePath": "pipeline.json", "expectedHeadCommitSha": self.visual_definition_commit,
+                    "expectedSpec": INITIAL_SPEC, "marker": MARKER})
         return environment | {
             "ARCENTRA_ACCEPTANCE_PHASE": phase,
             "ARCENTRA_REAL_STACK": "1", "ARCENTRA_ACCEPTANCE_BACKEND_URL": BACKEND_URL,
@@ -649,9 +702,46 @@ class Fixture:
             raise RuntimeError("Control or Agent exited during browser acceptance")
         self.require_browser_summary("build")
         self.verify_downloads()
+        if getattr(self.args, "visual_editor_acceptance", False) is True:
+            self.verify_visual_ci()
         self.verify_project_secrets()
         self.verify_organization_management()
         self.note("Browser create-project → create-pipeline → run → logs → artifact journey completed")
+
+    def verify_visual_ci(self):
+        from visual_git_fixture import saved_spec, validate_visual_receipt, validate_visual_execution, validate_visual_pipeline
+        summary = read_private_json(self.args.evidence_dir / "browser/summary.json")
+        receipt = validate_visual_receipt(summary.get("visualCI"), self.visual_project_id, self.visual_definition_commit)
+        bare = self.root / "repositories/visual.git"
+        def git(*args):
+            result = subprocess.run(["git", *args], cwd=bare, env=self.env, capture_output=True,
+                                    check=True, text=True, timeout=10)
+            return result.stdout.strip()
+        saved = receipt["savedDefinitionCommit"]
+        if (git("rev-parse", "refs/heads/main") != saved
+                or git("rev-parse", saved + "^") != self.visual_definition_commit
+                or git("rev-list", "--count", self.visual_definition_commit + ".." + saved) != "1"
+                or git("diff-tree", "--no-commit-id", "--name-only", "-r", self.visual_definition_commit, saved) != "pipeline.json"
+                or git("for-each-ref", "--format=%(refname)", "refs/heads/") != "refs/heads/main"):
+            raise RuntimeError("visual save changed unexpected repository identity, history, branch or files")
+        content = git("show", saved + ":pipeline.json")
+        if json.loads(content) != saved_spec():
+            raise RuntimeError("persisted visual definition differs from the independently expected graph edit")
+        self.require_observer_session()
+        validate_visual_pipeline(receipt, self.request(f"/pipelines/{receipt['pipelineId']}"), self.visual_repository_url())
+        base = f"/pipelines/{receipt['pipelineId']}/runs/{receipt['runId']}"
+        validate_visual_execution(receipt, self.request(base), self.request(base + "/jobs"),
+                                  self.request(base + "/logs?limit=1000"), self.agent_id)
+        artifacts = self.request(f"/projects/{receipt['projectId']}/artifacts?" + urllib.parse.urlencode({"runId": receipt['runId'], "pageSize": 100}))
+        if artifacts.get("total") != 0 or artifacts.get("list") != []:
+            raise RuntimeError("visual shell-only acceptance must not manufacture artifacts")
+        self.expect_rejected(f"/pipelines/{receipt['pipelineId']}/trigger", 403, 403, {}, "POST")
+        self.visual_proof = {
+            "schemaVersion": 1, "completed": True, "receipt": receipt,
+            "savedDefinitionSha256": hashlib.sha256(content.encode()).hexdigest(),
+            "jobs": 2, "steps": 3, "sourceCheckout": "not-configured", "unrelatedRepositoryWritable": False}
+        self.visual_verified = True
+        self.note("Visual graph saved exactly one guarded definition commit; independent persisted Agent jobs/logs match both jobs and all three steps")
 
     def verify_project_secrets(self):
         evidence = validate_project_secrets(read_private_json(self.args.evidence_dir / "browser/summary.json"))
@@ -689,6 +779,8 @@ class Fixture:
         self.note("Real organization/member/settings CRUD and final archived lifecycle confirmed through authorized APIs")
 
     def cleanup(self, error):
+        visual_proof_path = self.args.evidence_dir / "browser/visual-ci-verification.json"
+        visual_proof_path.unlink(missing_ok=True)
         error = redact_diagnostics(error, self.redactions) if error else error
         self.cleanup_runtime()
         for _, handle in self.logs:
@@ -720,6 +812,8 @@ class Fixture:
         if runtime:
             result["runtime"] = runtime
         (self.args.evidence_dir / "actual-app-result.json").write_text(json.dumps(result, indent=2) + "\n")
+        if not error and self.visual_verified is True and self.visual_proof is not None:
+            atomic_json(visual_proof_path, self.visual_proof)
 
 
 def redact_diagnostics(content, values):
@@ -1425,6 +1519,7 @@ def main():
     parser.add_argument("--cli-bin", required=True)
     parser.add_argument("--browser-cwd", type=Path, required=True)
     parser.add_argument("--evidence-dir", type=Path, required=True)
+    parser.add_argument("--visual-editor-acceptance", action="store_true")
     parser.add_argument("browser_command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     validate_environment(os.environ)

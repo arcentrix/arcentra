@@ -367,7 +367,7 @@ class ImageRuntime:
             raise ValueError('unsafe mount path')
         return ['--mount', f'type=bind,src={source},dst={destination}' + (',readonly' if readonly else '')]
 
-    def create(self, role, config=None, state=None, repositories=None, arguments=None, secret_env_file=None):
+    def create(self, role, config=None, state=None, repositories=None, arguments=None, secret_env_file=None, visual_repository=None):
         if self.blocked or time.monotonic() >= self.deadline:
             raise RuntimeError('new container admission stopped')
         if role not in ROLES or (role in ('control', 'agent') and arguments is not None):
@@ -381,6 +381,12 @@ class ImageRuntime:
             raise ValueError('Git receives only the fixture repository')
         if role != 'git' and repositories is not None:
             raise ValueError('repository mount restricted to Git helper')
+        if visual_repository is not None:
+            if role != 'git' or visual_repository != self.root / 'repositories' / 'visual.git':
+                raise ValueError('writable definition repository is restricted to the exact Git fixture')
+            # Existing source parent remains read-only; only this synthetic bare
+            # repository can receive the fixed main/pipeline.json guarded update.
+            self.mount(visual_repository, '/repositories/visual.git', readonly=False)
         if role != 'cli' and arguments is not None:
             raise ValueError('helper command overrides forbidden')
         if secret_env_file is not None:
@@ -447,8 +453,12 @@ class ImageRuntime:
                         arguments[0], '--conf', '/conf.d/config.toml', *arguments[1:]]
         elif role == 'git':
             command += self.mount(repositories, '/repositories')
+            if visual_repository is not None:
+                command += self.mount(visual_repository, '/repositories/visual.git', readonly=False)
             command += ['--entrypoint', '/usr/bin/git', image, 'daemon', '--listen=0.0.0.0', '--port=9418',
-                        '--export-all', '--base-path=/repositories', '/repositories']
+                        '--export-all', '--base-path=/repositories']
+            command += (['--strict-paths', '/repositories/acceptance.git', '/repositories/visual.git']
+                        if visual_repository is not None else ['/repositories'])
         elif role == 'toolchain':
             command += ['--entrypoint', '/bin/sh', image, '-ec',
                         'test "$(go version)" = "go version go1.25.6 linux/amd64"; test "$(python3 --version)" = "Python 3.11.14"']

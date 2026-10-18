@@ -58,6 +58,9 @@ jobs:
       - name: Test with race detector
         run: make test
 
+      - name: Verify visual CI fixture boundaries
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/acceptance -p 'test_visual*.py'
+
       - name: Build all commands
         run: go build ./cmd/...
 
@@ -296,7 +299,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: 8d219484b7b02784372b82e880509ac8d509c161
+          ref: ac02bca0122003dd1483dd36f3e8c4eb1b3ea757
           path: .acceptance/frontend
           persist-credentials: false
 
@@ -322,6 +325,7 @@ jobs:
       - name: Exercise fresh installation through actual browser
         run: |
           python3 scripts/acceptance/run_actual_app.py \
+            --visual-editor-acceptance \
             --control-bin "$PWD/.acceptance/bin/arcentra" \
             --agent-bin "$PWD/.acceptance/bin/arcentra-agent" \
             --cli-bin "$PWD/.acceptance/bin/arcentra-cli" \
@@ -338,6 +342,7 @@ jobs:
             .acceptance/evidence/browser/*.png
             .acceptance/evidence/browser/summary.json
             .acceptance/evidence/browser/project-build-verification.json
+            .acceptance/evidence/browser/visual-ci-verification.json
           if-no-files-found: ignore
           retention-days: 7
 

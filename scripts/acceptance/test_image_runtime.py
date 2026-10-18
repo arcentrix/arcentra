@@ -202,6 +202,33 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.runtime.create('cli', config=self.root / 'image-cli-config', state=self.root / 'image-cli-state', arguments=['shell'])
 
+    def test_visual_definition_has_only_exact_writable_submount(self):
+        visual = self.root / 'repositories' / 'visual.git'
+        visual.mkdir(mode=0o700)
+        self.runtime.create('git', repositories=self.root / 'repositories', visual_repository=visual)
+        command = next(c for c, _ in self.fake.calls if c[1:3] == ['container', 'create'])
+        mounts = [x for x in command if x.startswith('type=bind,')]
+        self.assertEqual(mounts, [f'type=bind,src={self.root}/repositories,dst=/repositories,readonly',
+                                  f'type=bind,src={visual},dst=/repositories/visual.git'])
+        self.assertIn('--read-only', command)
+        self.assertIn('ALL', command)
+        self.assertIn('no-new-privileges:true', command)
+        self.assertEqual(command[-3:], ['--strict-paths', '/repositories/acceptance.git', '/repositories/visual.git'])
+        self.assertNotIn('--enable=receive-pack', command)
+        self.runtime.cleanup()
+
+    def test_visual_definition_rejects_other_role_path_or_symlink(self):
+        visual = self.root / 'repositories' / 'visual.git'
+        for role, path in [('git', self.root / 'repositories'), ('git', self.root / 'other.git'), ('toolchain', visual)]:
+            with self.subTest(role=role, path=path), self.assertRaises(ValueError):
+                self.runtime.create(role, repositories=self.root / 'repositories' if role == 'git' else None,
+                                    visual_repository=path)
+        (self.root / 'other.git').mkdir()
+        visual.symlink_to(self.root / 'other.git', target_is_directory=True)
+        with self.assertRaises(ValueError):
+            self.runtime.create('git', repositories=self.root / 'repositories', visual_repository=visual)
+        self.assertFalse(self.fake.calls)
+
     def test_restart_removes_original_and_reuses_only_state(self):
         first = self.create('agent')
         with self.assertRaises(RuntimeError):
@@ -417,9 +444,12 @@ class FixtureTests(unittest.TestCase):
             receipt = evidence / 'browser/project-build-verification.json'
             receipt.parent.mkdir(parents=True)
             receipt.write_text('{"status":"passed"}')
+            visual = evidence / 'browser/visual-ci-verification.json'
+            visual.write_text('{"completed":true}')
             with patch.object(fixture, 'cleanup_runtime', side_effect=RuntimeError('cleanup blocked')):
                 with self.assertRaises(RuntimeError): fixture.cleanup(None)
             self.assertFalse(receipt.exists())
+            self.assertFalse(visual.exists())
             result = json.loads((evidence / 'actual-app-result.json').read_text())
             self.assertEqual(result['status'], 'failed')
             self.assertEqual(result['runtime']['cleanup'], 'failed')

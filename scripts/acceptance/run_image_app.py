@@ -143,7 +143,9 @@ level = "INFO"
         return REPOSITORY
 
     def start_git_server(self, repositories):
-        handle = self.runtime.create('git', repositories=repositories)
+        handle = self.runtime.create('git', repositories=repositories,
+                                     visual_repository=(repositories / 'visual.git'
+                                                        if getattr(self.args, 'visual_editor_acceptance', False) is True else None))
         def reachable():
             result = subprocess.run(['git', 'ls-remote', actual.REPO_URL, 'refs/heads/main'],
                                     env=self.env, capture_output=True, text=True, timeout=5)
@@ -178,6 +180,7 @@ level = "INFO"
             directory = self.args.evidence_dir
             directory.mkdir(parents=True, exist_ok=True)
             (directory / 'browser/project-build-verification.json').unlink(missing_ok=True)
+            (directory / 'browser/visual-ci-verification.json').unlink(missing_ok=True)
             actual.atomic_json(directory / 'actual-app-result.json', {
                 'status': 'failed', 'error': 'image runtime cleanup or evidence finalization failed',
                 'contract': actual.BUILD_CONTRACT, 'runtime': {'profile': PROFILE, 'cleanup': 'failed'},
@@ -250,6 +253,7 @@ def main():
     parser.add_argument('--image-manifest', type=Path, required=True)
     parser.add_argument('--ownership-file', type=Path, required=True)
     parser.add_argument('--cleanup-only', action='store_true')
+    parser.add_argument('--visual-editor-acceptance', action='store_true')
     parser.add_argument('--browser-cwd', type=Path)
     parser.add_argument('--evidence-dir', type=Path)
     parser.add_argument('browser_command', nargs=argparse.REMAINDER)
