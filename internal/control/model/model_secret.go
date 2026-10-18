@@ -17,13 +17,15 @@ package model
 // Secret secret model
 type Secret struct {
 	BaseModel
-	SecretID    string `gorm:"column:secret_id" json:"secretId"`
-	Name        string `gorm:"column:name" json:"name"`
+	SecretID    string `gorm:"column:secret_id;type:varchar(64);uniqueIndex:uk_secret_business_id" json:"secretId"`
+	Name        string `gorm:"column:name;type:varchar(128);uniqueIndex:uk_secret_scope_name,priority:3" json:"name"`
 	SecretType  string `gorm:"column:secret_type" json:"secretType"`
-	SecretValue string `gorm:"column:secret_value" json:"secretValue"`
+	SecretValue string `gorm:"column:secret_value" json:"-"`
 	Description string `gorm:"column:description" json:"description"`
-	Scope       string `gorm:"column:scope" json:"scope"`
-	ScopeID     string `gorm:"column:scope_id" json:"scopeId"`
+	Scope       string `gorm:"column:scope;type:varchar(16);uniqueIndex:uk_secret_scope_name,priority:1" json:"scope"`
+	ScopeID     string `gorm:"column:scope_id;type:varchar(64);not null;default:'';uniqueIndex:uk_secret_scope_name,priority:2" json:"scopeId"`
+	Version     uint64 `gorm:"column:version;not null;default:1" json:"-"`
+	IsEnabled   int    `gorm:"column:is_enabled;not null;default:1" json:"isEnabled"`
 	CreatedBy   string `gorm:"column:created_by" json:"createdBy"`
 }
 

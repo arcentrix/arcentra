@@ -53,6 +53,9 @@ type ExecutionContext struct {
 	TaskQueue      nova.TaskQueue
 	Logger         log.Logger
 	Env            map[string]string
+	// ValidateSecrets checks the unchanged primary secret snapshot immediately
+	// before each new local execution or Agent delivery. It carries no values.
+	ValidateSecrets func(context.Context) error `json:"-"`
 	// jobEnvResolved 标记当前作业环境已从运行级快照解析，后续步骤不得重复应用作业覆盖
 	jobEnvResolved bool
 

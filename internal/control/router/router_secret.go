@@ -63,11 +63,16 @@ func (rt *Router) createSecret(c *fiber.Ctx) error {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
-	var secret model.Secret
-	if err := c.BodyParser(&secret); err != nil {
+	var input struct {
+		model.Secret
+		Value string `json:"secretValue"`
+	}
+	if err := c.BodyParser(&input); err != nil {
 		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
+	secret := input.Secret
+	secret.SecretValue = input.Value
 	if err := secretService.CreateSecret(c.Context(), &secret, claims.UserID); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -87,11 +92,16 @@ func (rt *Router) updateSecret(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "secretID is required")
 	}
 
-	var secret model.Secret
-	if err := c.BodyParser(&secret); err != nil {
+	var input struct {
+		model.Secret
+		Value string `json:"secretValue"`
+	}
+	if err := c.BodyParser(&input); err != nil {
 		return http.Err(c, http.BadRequest.Code, "invalid request body")
 	}
 
+	secret := input.Secret
+	secret.SecretValue = input.Value
 	if err := secretService.UpdateSecret(c.Context(), secretID, &secret); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}

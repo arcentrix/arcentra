@@ -141,7 +141,7 @@ func (r *PipelineRepo) List(ctx context.Context, query *PipelineQuery) ([]*model
 
 // CreateRun creates a pipeline run.
 func (r *PipelineRepo) CreateRun(ctx context.Context, run *model.PipelineRun) error {
-	if run == nil || run.TriggeredBy == "polling" || run.PollingContext != "" || run.PollingContextDigest != "" || run.RetryApprovalContext != "" || run.RetryApprovalContextDigest != "" {
+	if run == nil || run.ProjectID != "" || run.TriggeredBy == "polling" || run.PollingContext != "" || run.PollingContextDigest != "" || run.RetryApprovalContext != "" || run.RetryApprovalContextDigest != "" {
 		return gorm.ErrInvalidData
 	}
 	if err := normalizeJSONFields(map[string]*string{"env": &run.Env}, pipelineRunJSONDefaults); err != nil {
@@ -150,7 +150,7 @@ func (r *PipelineRepo) CreateRun(ctx context.Context, run *model.PipelineRun) er
 	return r.Database().WithContext(ctx).Create(run).Error
 }
 
-var pipelineRunReadColumns = []string{"id", "created_at", "updated_at", "run_id", "pipeline_id", "request_id", "pipeline_name", "branch", "commit_sha", "definition_commit_sha", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_target_fingerprint", "deployment_plan_hash", "definition_path", "status", "trigger_type", "triggered_by", "env", "total_jobs", "completed_jobs", "failed_jobs", "running_jobs", "current_stage", "total_stages", "start_time", "end_time", "duration", "retry_approval_context", "retry_approval_context_digest", "polling_context", "polling_context_digest"}
+var pipelineRunReadColumns = []string{"id", "created_at", "updated_at", "run_id", "pipeline_id", "project_id", "request_id", "pipeline_name", "branch", "commit_sha", "definition_commit_sha", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_target_fingerprint", "deployment_plan_hash", "definition_path", "status", "trigger_type", "triggered_by", "env", "total_jobs", "completed_jobs", "failed_jobs", "running_jobs", "current_stage", "total_stages", "start_time", "end_time", "duration", "retry_approval_context", "retry_approval_context_digest", "polling_context", "polling_context_digest"}
 
 // GetRun 通过运行业务标识读取完整运行与不可变证据
 func (r *PipelineRepo) GetRun(ctx context.Context, runID string) (*model.PipelineRun, error) {
@@ -165,6 +165,9 @@ func (r *PipelineRepo) GetRun(ctx context.Context, runID string) (*model.Pipelin
 
 // UpdateRun updates a pipeline run by runID.
 func (r *PipelineRepo) UpdateRun(ctx context.Context, runID string, updates map[string]any) error {
+	if err := rejectRunProjectUpdates(updates); err != nil {
+		return err
+	}
 	if err := rejectPollingRunUpdates(updates); err != nil {
 		return err
 	}
@@ -258,6 +261,9 @@ func (r *PipelineRepo) RecordRunResult(ctx context.Context, pipelineID string, s
 
 // UpdateRunIfStatus 仅当当前状态匹配时推进运行状态，防止暂停操作覆盖终态
 func (r *PipelineRepo) UpdateRunIfStatus(ctx context.Context, runID string, status int, updates map[string]any) error {
+	if err := rejectRunProjectUpdates(updates); err != nil {
+		return err
+	}
 	if err := rejectPollingRunUpdates(updates); err != nil {
 		return err
 	}

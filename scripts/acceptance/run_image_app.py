@@ -121,7 +121,10 @@ level = "INFO"
         self.runtime.remove(handle.record)
 
     def start_control(self, name):
-        handle = self.runtime.create('control', config=self.config('control'), state=self.state('control'))
+        secret_env_file = self.write_private('image-control-config/synthetic-secret.env',
+                                            'ARCENTRA_SECRET_ENCRYPTION_KEY=' + self.control_secret_key + '\n')
+        handle = self.runtime.create('control', config=self.config('control'), state=self.state('control'),
+                                     secret_env_file=secret_env_file)
         self.wait_until('image Control readiness', lambda: self.probe(actual.BACKEND_URL + '/ready') == 200, handle)
         self.note('Image Control readiness GET passed')
         return handle

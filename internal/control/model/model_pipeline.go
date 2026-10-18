@@ -52,6 +52,9 @@ func (Pipeline) TableName() string {
 
 // PipelineRun 流水线执行记录表
 type PipelineRun struct {
+	// ProjectID is pinned only by durable run admission, never inferred at execution.
+	// Empty identifies a legacy/unadmitted run and cannot authorize secret access.
+	ProjectID                  string `gorm:"column:project_id;type:varchar(64);not null;default:''" json:"-"`
 	PollingContext             string `gorm:"column:polling_context;type:mediumtext" json:"-"`
 	PollingContextDigest       string `gorm:"column:polling_context_digest;type:varchar(67);not null;default:''" json:"-"`
 	RetryApprovalContext       string `gorm:"column:retry_approval_context;type:mediumtext" json:"-"`

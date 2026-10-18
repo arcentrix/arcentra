@@ -1,10 +1,12 @@
 """Bounded, owned Docker lifecycle for the disposable image journey only."""
+import base64
 import json
 import os
 from pathlib import Path
 import re
 import selectors
 import signal
+import stat
 import subprocess
 import time
 
@@ -365,7 +367,7 @@ class ImageRuntime:
             raise ValueError('unsafe mount path')
         return ['--mount', f'type=bind,src={source},dst={destination}' + (',readonly' if readonly else '')]
 
-    def create(self, role, config=None, state=None, repositories=None, arguments=None):
+    def create(self, role, config=None, state=None, repositories=None, arguments=None, secret_env_file=None):
         if self.blocked or time.monotonic() >= self.deadline:
             raise RuntimeError('new container admission stopped')
         if role not in ROLES or (role in ('control', 'agent') and arguments is not None):
@@ -381,6 +383,26 @@ class ImageRuntime:
             raise ValueError('repository mount restricted to Git helper')
         if role != 'cli' and arguments is not None:
             raise ValueError('helper command overrides forbidden')
+        if secret_env_file is not None:
+            expected = self.root / 'image-control-config' / 'synthetic-secret.env'
+            if role != 'control' or secret_env_file != expected:
+                raise ValueError('synthetic secret environment is restricted to Control')
+            info = expected.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077
+                    or info.st_uid != os.getuid() or info.st_nlink != 1
+                    or info.st_size > 128
+                    or expected.resolve() != expected.absolute()):
+                raise ValueError('synthetic secret environment must be an owned private regular file')
+            content = expected.read_bytes()
+            prefix = b'ARCENTRA_SECRET_ENCRYPTION_KEY='
+            if len(content) > 128 or not content.startswith(prefix) or not content.endswith(b'\n'):
+                raise ValueError('invalid synthetic secret environment')
+            try:
+                decoded = base64.b64decode(content[len(prefix):-1], validate=True)
+            except ValueError:
+                raise ValueError('invalid synthetic secret environment') from None
+            if len(decoded) != 32:
+                raise ValueError('invalid synthetic secret environment')
         # No alias reuse until the original container has been removed and verified.
         if any(item['role'] == role and not item.get('removed') for item in self.records):
             raise RuntimeError('original role has not been removed')
@@ -408,6 +430,9 @@ class ImageRuntime:
             if config is None or state is None:
                 raise ValueError('private configuration and state are mandatory')
             command += self.mount(config, '/conf.d') + self.mount(state, '/var/lib/arcentra', False)
+        if secret_env_file is not None:
+            # Keep the value out of command arguments and ownership diagnostics.
+            command += ['--env-file', str(secret_env_file)]
         if role in ('agent', 'toolchain'):
             for key, value in {'PATH': '/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin', 'HOME': '/var/lib/arcentra/home' if role == 'agent' else '/tmp',
                                'TMPDIR': '/var/lib/arcentra/tmp' if role == 'agent' else '/tmp',

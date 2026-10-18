@@ -20,6 +20,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/mq/kafka"
 	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	"github.com/arcentrix/arcentra/pkg/serde"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // Coordinator drives a single PipelineRun through its full lifecycle:
@@ -221,7 +223,9 @@ func (rc *Coordinator) executeDAG(ctx context.Context) error {
 
 	maps.Copy(execCtx.Env, serde.UnmarshalStringMap(rc.run.Env))
 	execCtx.Pipeline.Variables = maps.Clone(execCtx.Env)
-	rc.loadSecrets(ctx, execCtx)
+	if err := rc.loadSecrets(ctx, execCtx); err != nil {
+		return err
+	}
 	closeEvents := rc.setupEventEmitter(execCtx)
 	defer closeEvents()
 	rc.setupLogPublisher(execCtx)
@@ -304,29 +308,107 @@ func (rc *Coordinator) setupLogPublisher(execCtx *pipeline.ExecutionContext) {
 	}
 }
 
-// loadSecrets fetches project-scoped secrets and injects them into the
-// execution context env as "secrets.<name>" so that ${{ secrets.xxx }} resolves.
-func (rc *Coordinator) loadSecrets(ctx context.Context, execCtx *pipeline.ExecutionContext) {
+// loadSecrets resolves a complete project snapshot before injecting any values.
+// Both project authority and values come from primary reads. Failure stops the
+// DAG; the mutable pipeline definition is never consulted for secret scope.
+func (rc *Coordinator) loadSecrets(ctx context.Context, execCtx *pipeline.ExecutionContext) error {
+	required := runSecretReferences(rc.spec, serde.UnmarshalStringMap(rc.run.Env))
 	if rc.engine.secretSvc == nil {
-		return
-	}
-	definition, err := rc.engine.repos.Pipeline.Get(ctx, rc.run.PipelineID)
-	if err != nil || definition == nil {
-		return
-	}
-	secrets, _, err := rc.engine.secretSvc.GetSecretList(ctx, 1, 100, "", "project", definition.ProjectID, "")
-	if err != nil {
-		log.Warnw("failed to load secrets for pipeline run", "runId", rc.run.RunID, "error", err)
-		return
-	}
-	for _, s := range secrets {
-		val, decErr := rc.engine.secretSvc.GetSecretValue(ctx, s.SecretID)
-		if decErr != nil {
-			log.Warnw("failed to decrypt secret", "secretId", s.SecretID, "error", decErr)
-			continue
+		// Standalone non-secret execution remains usable without a secret store.
+		if len(required) != 0 {
+			return fmt.Errorf("project secret resolution is unavailable")
 		}
-		execCtx.Env["secrets."+s.Name] = val
+		return nil
 	}
+	if rc.engine.repos == nil || rc.engine.repos.Pipeline == nil {
+		return fmt.Errorf("pipeline run secret authority is unavailable")
+	}
+	reader, ok := rc.engine.repos.Pipeline.(interface {
+		GetRunSecretProject(context.Context, string, string) (string, error)
+	})
+	if !ok {
+		return fmt.Errorf("pipeline run secret authority is unavailable")
+	}
+	projectID, err := reader.GetRunSecretProject(ctx, rc.run.RunID, rc.run.PipelineID)
+	if err != nil || projectID == "" {
+		return fmt.Errorf("pipeline run secret authority is unavailable")
+	}
+	resolved, err := rc.engine.secretSvc.ResolveProjectSecrets(ctx, projectID)
+	if err != nil || resolved == nil {
+		// Do not allow storage or decryption errors to leak ciphertext/plaintext
+		// through coordinator logs, persisted job errors, or assistant context.
+		return fmt.Errorf("project secret resolution failed")
+	}
+	for name := range required {
+		if _, present := resolved.Values[name]; !present {
+			return fmt.Errorf("a referenced project secret is disabled or unavailable")
+		}
+	}
+	versions := maps.Clone(resolved.Versions)
+	execCtx.ValidateSecrets = func(checkCtx context.Context) error {
+		if err := rc.engine.secretSvc.ValidateProjectSecretResolution(checkCtx, projectID, maps.Clone(versions)); err != nil {
+			return fmt.Errorf("project secret snapshot changed or is unavailable; start a fresh run")
+		}
+		return nil
+	}
+	if execCtx.Env == nil {
+		execCtx.Env = make(map[string]string)
+	}
+	for name, value := range resolved.Values {
+		execCtx.Env["secrets."+name] = value
+	}
+	return nil
+}
+
+// Match exactly the explicit secret placeholders understood by the pipeline
+// resolver. Other unknown variables retain their existing literal semantics.
+var runSecretReference = regexp.MustCompile(`\${{?\s*secrets\.(\w+)\s*}}?`)
+
+func runSecretReferences(definition *spec.Pipeline, env map[string]string) map[string]struct{} {
+	names := make(map[string]struct{})
+	inspect := func(value string) {
+		for _, match := range runSecretReference.FindAllStringSubmatch(value, -1) {
+			names[match[1]] = struct{}{}
+		}
+	}
+	for _, value := range env {
+		inspect(value)
+	}
+	// Inspect actual protobuf strings rather than serialized JSON: serialization
+	// escapes whitespace inside templates and can hide otherwise valid refs.
+	var inspectMessage func(protoreflect.Message)
+	var inspectValue func(protoreflect.Kind, protoreflect.Value)
+	inspectValue = func(kind protoreflect.Kind, value protoreflect.Value) {
+		switch kind {
+		case protoreflect.StringKind:
+			inspect(value.String())
+		case protoreflect.MessageKind, protoreflect.GroupKind:
+			inspectMessage(value.Message())
+		}
+	}
+	inspectMessage = func(message protoreflect.Message) {
+		message.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
+			switch {
+			case field.IsList():
+				list := value.List()
+				for i := 0; i < list.Len(); i++ {
+					inspectValue(field.Kind(), list.Get(i))
+				}
+			case field.IsMap():
+				value.Map().Range(func(_ protoreflect.MapKey, entry protoreflect.Value) bool {
+					inspectValue(field.MapValue().Kind(), entry)
+					return true
+				})
+			default:
+				inspectValue(field.Kind(), value)
+			}
+			return true
+		})
+	}
+	if definition != nil {
+		inspectMessage(definition.ProtoReflect())
+	}
+	return names
 }
 
 // resolveWorkspace returns the workspace root for this pipeline run.

@@ -44,6 +44,13 @@ import (
 
 const defaultMaxConcurrentRuns = 10
 
+// projectSecretResolver is a runtime-only boundary; no values or version
+// snapshots belong in persisted run inputs or assistant context.
+type projectSecretResolver interface {
+	ResolveProjectSecrets(context.Context, string) (*service.ProjectSecretResolution, error)
+	ValidateProjectSecretResolution(context.Context, string, map[string]string) error
+}
+
 // Process manages pipeline run orchestration. It bridges the trigger layer
 // (HTTP/gRPC/Cron/Webhook) with the execution process (Executor DAG).
 type Process struct {
@@ -53,7 +60,7 @@ type Process struct {
 	storage              storage.IStorage
 	logger               *log.Logger
 	appConf              *config.AppConfig
-	secretSvc            *service.SecretService
+	secretSvc            projectSecretResolver
 	deploymentService    *service.DeploymentService
 	auditWriter          *AuditWriter
 	logPublisher         executor.LogPublisher
@@ -90,10 +97,12 @@ func NewProcess(
 		storage:   st,
 		logger:    logger,
 		appConf:   appConf,
-		secretSvc: secretSvc,
 		sem:       make(chan struct{}, maxRuns),
 		ctx:       ctx,
 		cancel:    cancel,
+	}
+	if secretSvc != nil {
+		engine.secretSvc = secretSvc
 	}
 	if appConf != nil {
 		if err := appConf.Pipeline.OfflineRuntime.ValidateProduction(); err != nil {

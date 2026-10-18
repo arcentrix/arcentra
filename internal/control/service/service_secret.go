@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
@@ -129,7 +130,7 @@ func (ss *SecretService) CreateSecret(ctx context.Context, secretEntity *model.S
 	}
 
 	// validate scope
-	validScopes := []string{"global", "pipeline", "user", "project", "team"}
+	validScopes := []string{"global", "pipeline", "user", "team"}
 	isValidScope := slices.Contains(validScopes, secretEntity.Scope)
 	if !isValidScope {
 		return fmt.Errorf("invalid scope, must be one of: %v", validScopes)
@@ -138,7 +139,7 @@ func (ss *SecretService) CreateSecret(ctx context.Context, secretEntity *model.S
 	// encrypt secret value
 	encryptedValue, err := ss.encrypt(secretEntity.SecretValue)
 	if err != nil {
-		log.Errorw("failed to encrypt secret value", "error", err)
+		log.Errorw("failed to encrypt secret value")
 		return errors.New("failed to encrypt secret value")
 	}
 
@@ -148,7 +149,7 @@ func (ss *SecretService) CreateSecret(ctx context.Context, secretEntity *model.S
 	secretEntity.CreatedBy = createdBy
 
 	if err := ss.secretRepo.Create(ctx, secretEntity); err != nil {
-		log.Errorw("failed to create secret", "error", err)
+		log.Errorw("failed to create secret")
 		return errors.New("failed to create secret")
 	}
 
@@ -158,20 +159,23 @@ func (ss *SecretService) CreateSecret(ctx context.Context, secretEntity *model.S
 
 // UpdateSecret updates a secret.
 func (ss *SecretService) UpdateSecret(ctx context.Context, secretID string, secretEntity *model.Secret) error {
-	_, err := ss.secretRepo.Get(ctx, secretID)
+	existing, err := ss.secretRepo.Get(ctx, secretID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("secret not found")
 		}
-		log.Errorw("failed to get secret", "secretID", secretID, "error", err)
+		log.Errorw("failed to get secret", "secretID", secretID)
 		return errors.New("failed to get secret")
 	}
 
+	if existing == nil || existing.SecretID != secretID || strings.EqualFold(strings.TrimSpace(existing.Scope), "project") || (secretEntity.Scope != "" && secretEntity.Scope != existing.Scope) || (secretEntity.ScopeID != "" && secretEntity.ScopeID != existing.ScopeID) {
+		return errors.New("secret not found or immutable scope")
+	}
 	// if updating secret value, encrypt it
 	if secretEntity.SecretValue != "" {
 		encryptedValue, err := ss.encrypt(secretEntity.SecretValue)
 		if err != nil {
-			log.Errorw("failed to encrypt secret value", "secretID", secretID, "error", err)
+			log.Errorw("failed to encrypt secret value", "secretID", secretID)
 			return errors.New("failed to encrypt secret value")
 		}
 		secretEntity.SecretValue = encryptedValue
@@ -180,7 +184,7 @@ func (ss *SecretService) UpdateSecret(ctx context.Context, secretID string, secr
 	secretEntity.SecretID = secretID
 
 	if err := ss.secretRepo.Update(ctx, secretEntity); err != nil {
-		log.Errorw("failed to update secret", "secretID", secretID, "error", err)
+		log.Errorw("failed to update secret", "secretID", secretID)
 		return errors.New("failed to update secret")
 	}
 
@@ -195,7 +199,7 @@ func (ss *SecretService) GetSecretByID(ctx context.Context, secretID string) (*m
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("secretByID not found")
 		}
-		log.Errorw("failed to get secretByID", "secretID", secretID, "error", err)
+		log.Errorw("failed to get secretByID", "secretID", secretID)
 		return nil, errors.New("failed to get secretByID")
 	}
 
@@ -211,14 +215,14 @@ func (ss *SecretService) GetSecretValue(ctx context.Context, secretID string) (s
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", errors.New("secret not found")
 		}
-		log.Errorw("failed to get secret value", "secretID", secretID, "error", err)
+		log.Errorw("failed to get secret value", "secretID", secretID)
 		return "", errors.New("failed to get secret value")
 	}
 
 	// decrypt secret value
 	plainValue, err := ss.decrypt(encryptedValue)
 	if err != nil {
-		log.Errorw("failed to decrypt secret value", "secretID", secretID, "error", err)
+		log.Errorw("failed to decrypt secret value", "secretID", secretID)
 		return "", errors.New("failed to decrypt secret value")
 	}
 
@@ -237,9 +241,18 @@ func (ss *SecretService) GetSecretList(
 		pageSize = 20
 	}
 
-	secrets, total, err := ss.secretRepo.List(ctx, pageNum, pageSize, secretType, scope, scopeID, createdBy)
+	if strings.EqualFold(strings.TrimSpace(scope), "project") {
+		return nil, 0, errors.New("use project secret management")
+	}
+	platform, ok := ss.secretRepo.(interface {
+		ListPlatform(context.Context, int, int, string, string, string, string) ([]*model.Secret, int64, error)
+	})
+	if !ok {
+		return nil, 0, errors.New("secret list unavailable")
+	}
+	secrets, total, err := platform.ListPlatform(ctx, pageNum, pageSize, secretType, scope, scopeID, createdBy)
 	if err != nil {
-		log.Errorw("failed to get secret list", "error", err)
+		log.Errorw("failed to get secret list")
 		return nil, 0, errors.New("failed to get secret list")
 	}
 
@@ -254,12 +267,12 @@ func (ss *SecretService) DeleteSecret(ctx context.Context, secretID string) erro
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return errors.New("secret not found")
 		}
-		log.Errorw("failed to get secret", "secretID", secretID, "error", err)
+		log.Errorw("failed to get secret", "secretID", secretID)
 		return errors.New("failed to get secret")
 	}
 
 	if err := ss.secretRepo.Delete(ctx, secretID); err != nil {
-		log.Errorw("failed to delete secret", "secretID", secretID, "error", err)
+		log.Errorw("failed to delete secret", "secretID", secretID)
 		return errors.New("failed to delete secret")
 	}
 
@@ -269,9 +282,12 @@ func (ss *SecretService) DeleteSecret(ctx context.Context, secretID string) erro
 
 // GetSecretsByScope gets secrets by scope and scope_id.
 func (ss *SecretService) GetSecretsByScope(ctx context.Context, scope, scopeID string) ([]*model.Secret, error) {
+	if strings.EqualFold(strings.TrimSpace(scope), "project") {
+		return nil, errors.New("use project secret management")
+	}
 	secrets, err := ss.secretRepo.ListByScope(ctx, scope, scopeID)
 	if err != nil {
-		log.Errorw("failed to get secrets by scope", "scope", scope, "scopeID", scopeID, "error", err)
+		log.Errorw("failed to get secrets by scope", "scope", scope, "scopeID", scopeID)
 		return nil, errors.New("failed to get secrets by scope")
 	}
 	return secrets, nil

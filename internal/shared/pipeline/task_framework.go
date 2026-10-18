@@ -81,6 +81,10 @@ func (tf *TaskFramework) Execute(ctx context.Context, task *Task) (resultErr err
 		task.MarkCompleted(TaskStateFailed, err)
 		return err
 	}
+	if err := tf.checkSecrets(ctx); err != nil {
+		task.MarkCompleted(TaskStateFailed, err)
+		return err
+	}
 	defer func() { tf.finishRecords(ctx, task, resultErr) }()
 	if err := tf.createRecords(ctx, task); err != nil {
 		task.MarkCompleted(TaskStateFailed, err)
@@ -107,6 +111,13 @@ func (tf *TaskFramework) Execute(ctx context.Context, task *Task) (resultErr err
 	if err := tf.create(ctx, task); err != nil {
 		task.MarkCompleted(TaskStateFailed, err)
 		return fmt.Errorf("create task %s: %w", task.Name, err)
+	}
+
+	// Approval may have waited while secrets changed. Never reuse that old
+	// snapshot for a newly authorized execution.
+	if err := tf.checkSecrets(ctx); err != nil {
+		task.MarkCompleted(TaskStateFailed, err)
+		return err
 	}
 
 	// Start: start task execution
@@ -361,6 +372,9 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 	if err != nil {
 		return fmt.Errorf("marshal job run: %w", err)
 	}
+	if err := tf.checkSecrets(ctx); err != nil {
+		return err
+	}
 	if _, err = tf.execCtx.TaskQueue.Enqueue(&nova.Task{Type: taskqueue.TaskTypeJobRun, Payload: data}, nova.Queue(taskqueue.AgentQueue(agentID))); err != nil {
 		return fmt.Errorf("enqueue job run: %w", err)
 	}
@@ -465,6 +479,17 @@ func (tf *TaskFramework) waitForLocalJob(ctx context.Context, task *Task) error 
 	return nil
 }
 
+// checkSecrets is a non-retryable boundary: changing or revoking a snapshot
+// cannot be repaired by substituting values into an already authorized plan.
+func (tf *TaskFramework) checkSecrets(ctx context.Context) error {
+	if tf.execCtx.ValidateSecrets != nil {
+		if err := tf.execCtx.ValidateSecrets(ctx); err != nil {
+			return retry.Block(fmt.Errorf("project secret snapshot changed or is unavailable; start a fresh run"))
+		}
+	}
+	return nil
+}
+
 // checkPause blocks if the pipeline run is paused.
 func (tf *TaskFramework) checkPause(ctx context.Context) error {
 	if tf.execCtx.RunCoordinator != nil {
@@ -492,6 +517,9 @@ func (tf *TaskFramework) executeStep(ctx context.Context, task *Task, step *spec
 
 // executeStepOnce executes a step once
 func (tf *TaskFramework) executeStepOnce(ctx context.Context, task *Task, step *spec.Step) error {
+	if err := tf.checkSecrets(ctx); err != nil {
+		return err
+	}
 	start := time.Now()
 	stepRunner := NewStepRunner(tf.execCtx, task.Job, step)
 
@@ -583,6 +611,9 @@ func stepFailureStatus(ctx context.Context, err error) int {
 // handleSource handles source configuration by invoking the appropriate
 // source plugin (e.g. "git") to populate the job workspace.
 func (tf *TaskFramework) handleSource(ctx context.Context, task *Task) error {
+	if err := tf.checkSecrets(ctx); err != nil {
+		return err
+	}
 	src := task.Job.Source
 	if src == nil {
 		return nil
@@ -726,6 +757,9 @@ func (tf *TaskFramework) handleApproval(ctx context.Context, task *Task) error {
 
 // handleTarget handles target deployment
 func (tf *TaskFramework) handleTarget(ctx context.Context, task *Task) error {
+	if err := tf.checkSecrets(ctx); err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

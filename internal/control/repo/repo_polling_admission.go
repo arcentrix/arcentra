@@ -17,7 +17,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-var pollingRunColumns = []string{"run_id", "pipeline_id", "request_id", "trigger_type", "triggered_by", "definition_commit_sha", "definition_path", "branch", "commit_sha", "env", "status", "start_time", "end_time", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_plan_hash", "deployment_target_fingerprint", "retry_approval_context", "retry_approval_context_digest", "polling_context", "polling_context_digest"}
+var pollingRunColumns = []string{"run_id", "pipeline_id", "project_id", "request_id", "trigger_type", "triggered_by", "definition_commit_sha", "definition_path", "branch", "commit_sha", "env", "status", "start_time", "end_time", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_plan_hash", "deployment_target_fingerprint", "retry_approval_context", "retry_approval_context_digest", "polling_context", "polling_context_digest"}
 
 func rejectPollingRunUpdates(updates map[string]any) error {
 	for k := range updates {
@@ -146,7 +146,7 @@ func (r *PipelineRepo) CreatePollingRun(ctx context.Context, run *model.Pipeline
 	if e != nil {
 		return out, e
 	}
-	if run.Status != model.PipelineStatusPending || run.StartTime != nil || run.EndTime != nil {
+	if run.ProjectID != "" || run.Status != model.PipelineStatusPending || run.StartTime != nil || run.EndTime != nil {
 		return out, polling.ErrConflict
 	}
 	if e := normalizeJSONFields(map[string]*string{"env": &run.Env}, pipelineRunJSONDefaults); e != nil {
@@ -233,6 +233,9 @@ func (r *PipelineRepo) transitionPendingPollingRun(ctx context.Context, run *mod
 			out.Outcome = pollingDuplicateOutcome(&stored, c, batch)
 			return nil
 		}
+		if stored.ProjectID != "" || run.ProjectID != "" {
+			return polling.ErrConflict
+		}
 		var jobs []model.JobRun
 		if e := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id").Where("pipeline_run_id = ?", stored.RunID).Limit(1).Find(&jobs).Error; e != nil {
 			return e
@@ -267,7 +270,7 @@ func (r *PipelineRepo) transitionPendingPollingRun(ctx context.Context, run *mod
 		updates := map[string]any{"status": model.PipelineStatusFailed, "end_time": time.Now()}
 		out.Outcome = polling.OutcomeRejected
 		if start {
-			updates = map[string]any{"status": model.PipelineStatusRunning, "start_time": time.Now()}
+			updates = map[string]any{"status": model.PipelineStatusRunning, "start_time": time.Now(), "project_id": c.Scope.ProjectID}
 			out.Outcome = polling.OutcomeAdmitted
 		}
 		result := tx.WithContext(ctx).Model(&model.PipelineRun{}).Where("run_id = ? AND status = ? AND start_time IS NULL AND end_time IS NULL", stored.RunID, model.PipelineStatusPending).Updates(updates)

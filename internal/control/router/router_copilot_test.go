@@ -35,7 +35,12 @@ func TestCopilotHTTPAuthorizationPreviewAndValidation(t *testing.T) {
 	}
 	t.Setenv("ARCENTRA_SECRET_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString([]byte("01234567890123456789012345678901")))
 	secretService := service.NewSecretService(repos.Secret)
-	if err := secretService.CreateSecret(context.Background(), &model.Secret{Name: "fixture", Scope: "project", ScopeID: "a", SecretType: "token", SecretValue: "persisted-opaque-q7Kx"}, "project-user"); err != nil {
+	fixtureSecret := &model.Secret{Name: "fixture", Scope: "global", SecretType: "token", SecretValue: "persisted-opaque-q7Kx"}
+	if err := secretService.CreateSecret(context.Background(), fixtureSecret, "project-user"); err != nil {
+		t.Fatal(err)
+	}
+	// Synthetic historical project row; platform mutation no longer accepts project scope.
+	if err := db.Model(&model.Secret{}).Where("secret_id = ?", fixtureSecret.SecretID).Updates(map[string]any{"scope": "project", "scope_id": "a"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, secret := range []*model.Secret{

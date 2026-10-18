@@ -605,12 +605,14 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
         app.atomic_json(self.summary_path, self.summary("build"))
         with mock.patch.object(self.fixture, "start", return_value=self.browser) as start, \
                 mock.patch.object(self.fixture, "verify_downloads") as verify, \
+                mock.patch.object(self.fixture, "verify_project_secrets") as project_secrets, \
                 mock.patch.object(self.fixture, "verify_organization_management") as organization:
             self.fixture.run_build_browser(self.control, self.agent)
         self.assertEqual(start.call_args.args[0], "browser")
         self.assertEqual(start.call_args.args[1], self.args.browser_command)
         self.assertEqual(start.call_args.args[3]["ARCENTRA_ACCEPTANCE_PHASE"], "build")
         verify.assert_called_once_with()
+        project_secrets.assert_called_once_with()
         organization.assert_called_once_with()
 
     def test_preflight_summary_cannot_substitute_for_full_build_completion(self):
@@ -639,6 +641,23 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
         env = self.fixture.browser_environment("build")
         self.assertEqual(env["ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY"], "1")
         self.assertEqual(env["ARCENTRA_ACCEPTANCE_MEMBER_USER_ID"], "verified-observer")
+
+    def test_synthetic_secret_material_has_bounded_child_distribution(self):
+        fixture = self.fixture
+        self.assertEqual(len(base64.b64decode(fixture.control_secret_key, validate=True)), 32)
+        self.assertNotEqual(fixture.secret_initial_value, fixture.secret_rotated_value)
+        for value in (fixture.control_secret_key, fixture.secret_initial_value, fixture.secret_rotated_value):
+            self.assertIn(value, fixture.redactions)
+        for phase in ("preflight", "storage-setup", "build"):
+            env = fixture.browser_environment(phase)
+            self.assertNotIn("ARCENTRA_SECRET_ENCRYPTION_KEY", env)
+            for key in ("ARCENTRA_ACCEPTANCE_SECRET_INITIAL_VALUE", "ARCENTRA_ACCEPTANCE_SECRET_ROTATED_VALUE"):
+                self.assertEqual(key in env, phase == "build")
+        self.assertNotIn("ARCENTRA_SECRET_ENCRYPTION_KEY", fixture.env)
+        with mock.patch.object(fixture, "start") as start, mock.patch.object(fixture, "wait_until"):
+            fixture.start_control("synthetic-control")
+        self.assertEqual(start.call_args.kwargs["env"]["ARCENTRA_SECRET_ENCRYPTION_KEY"], fixture.control_secret_key)
+        self.assertNotIn(fixture.control_secret_key, json.dumps(start.call_args.args, default=str))
 
     def test_summary_requires_exact_same_source_completed_steps_without_extra_claims(self):
         for phase in ("preflight", "storage-setup", "build"):
@@ -803,7 +822,7 @@ class RuntimeHookTests(unittest.TestCase):
                 mock.patch.object(app.subprocess, "run", return_value=mock.Mock(stdout="a" * 40 + "\n")):
             fixture.create_repository()
             spec = json.loads((self.root / "source/.arcentra/pipeline.yaml").read_text())
-            expected = app.pipeline_spec()
+            expected = app.pipeline_spec(hashlib.sha256(fixture.secret_rotated_value.encode()).hexdigest())
             expected["jobs"][0]["source"]["repo"] = fixed_internal_repository
             self.assertEqual(spec, expected)
             serve.assert_called_once_with(self.root / "repositories")
@@ -914,6 +933,20 @@ class ActualAppFixtureTests(unittest.TestCase):
                          [f"sh build.sh {stage}" for stage in ("toolchain", "test", "build", "verify")])
         self.assertEqual(job["steps"][-1]["args"]["paths"], [app.ARTIFACT_NAME, app.MANIFEST_NAME])
         self.assertEqual(base64.b64decode(app.encoded(app.PASSWORD)).decode(), app.PASSWORD)
+
+    def test_secret_build_contract_uses_env_binding_and_only_digest_in_source(self):
+        value = "synthetic-ci-secret-" + "x" * 24
+        digest = hashlib.sha256(value.encode()).hexdigest()
+        spec = app.pipeline_spec(digest)
+        toolchain = spec["jobs"][0]["steps"][0]
+        self.assertEqual(toolchain["env"], {"CI_BUILD_TOKEN": "${{ secrets.CI_BUILD_TOKEN }}"})
+        self.assertNotIn(value, json.dumps(spec))
+        self.assertIn(digest, toolchain["args"]["run"])
+        self.assertIn('"$CI_BUILD_TOKEN"', toolchain["args"]["run"])
+        self.assertIn("ACTUAL_PROJECT_SECRET_VERIFIED", toolchain["args"]["run"])
+        for invalid in (value, "", "g" * 64, "a" * 63):
+            with self.assertRaises(ValueError):
+                app.pipeline_spec(invalid)
 
     def test_missing_go_fails_without_installing_or_running_anything(self):
         with mock.patch.object(app.shutil, "which", return_value=None), mock.patch.object(app.subprocess, "run") as run:
@@ -1239,6 +1272,324 @@ class LoopbackReadinessProbeTests(unittest.TestCase):
 
     def test_actual_tcp_persistent_reset_bounded(self):
         self.exercise_server(True)
+
+
+class RunLogEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.values = ("initial-private-canary", "rotated-private-canary", "key-private-canary")
+        self.receipt = {"schemaVersion": 1, "projectId": "project-id", "pipelineId": "pipeline-id",
+                        "runId": "run-id", "sourceCommit": "a" * 40}
+        self.job = {"jobRunId": "job-id", "pipelineId": "pipeline-id", "pipelineRunId": "run-id", "steps": [
+            {"name": name, "jobRunId": "job-id", "stepRunId": "step-" + name}
+            for name in ("toolchain", "test", "build", "verify", "publish")]}
+        self.jobs = {"total": 1, "list": [self.job]}
+        self.toolchain = ("ACTUAL_PROJECT_SECRET_VALUE ***\nACTUAL_PROJECT_SECRET_VERIFIED\n"
+                          "ACTUAL_PROJECT_TOOLCHAIN go1.25.6\n")
+
+    def entry(self, step, number, message, stream="stdout"):
+        return {"timestamp": 1, "level": "info", "message": message, "jobId": "job-id",
+                "stepId": "step-" + step, "lineNumber": number, "stream": stream}
+
+    def logs(self, successful=False):
+        entries = [self.entry("toolchain", 1, self.toolchain),
+                   self.entry("test", 1, "ACTUAL_PROJECT_TEST go test -count=1 ./...\n")]
+        if successful:
+            entries.extend([self.entry("build", 1, "ACTUAL_PROJECT_BUILD go build\n"),
+                            self.entry("verify", 1, "ACTUAL_PROJECT_BEHAVIOR " + app.EXPECTED_OUTPUT)])
+        else:
+            entries.append(self.entry("test", 2, "./main.go:45:9: undefined: acceptanceCompileError\n", "stderr"))
+        return {"entries": entries, "truncated": False}
+
+    def validate(self, logs, successful=False, jobs=None):
+        app.validate_run_log_evidence(self.receipt, self.jobs if jobs is None else jobs, logs, successful, self.values)
+
+    def test_every_fragment_boundary_and_interleaved_streams_reconstruct_in_position_order(self):
+        for cut in range(len(self.toolchain) + 1):
+            logs = self.logs()
+            logs["entries"][:1] = [self.entry("toolchain", 1, self.toolchain[:cut]),
+                                  self.entry("toolchain", 2, "diagnostic ", "stderr"),
+                                  self.entry("toolchain", 3, self.toolchain[cut:]),
+                                  self.entry("toolchain", 4, "only\n", "stderr")]
+            # The real API sorts timestamps first. They may be skewed and must
+            # never override the step-wide, cross-stream persisted positions.
+            for index, entry in enumerate(logs["entries"]):
+                entry["timestamp"] = 100 - index
+            logs["entries"].reverse()
+            with self.subTest(cut=cut):
+                self.validate(logs)
+                streams = app.reconstruct_run_log_streams(self.receipt, self.jobs, logs, self.values)
+                self.assertEqual(streams["toolchain"], {"stdout": self.toolchain, "stderr": "diagnostic only\n"})
+
+    def test_observed_value_redaction_and_verified_marker_fragmentation(self):
+        logs = self.logs()
+        fragments = ["ACTUAL_PROJECT_SECRET_VALUE ", "***\nACTUAL_PROJECT", "_SECRET_VERIFIED\n",
+                     "ACTUAL_PROJECT_TOOLCHAIN go1.25.6\n"]
+        logs["entries"][:1] = [self.entry("toolchain", number, part) for number, part in enumerate(fragments, 1)]
+        self.validate(logs)
+        self.validate(self.logs(successful=True), successful=True)
+
+    def test_plain_and_base64_canaries_detected_at_every_boundary_in_either_stream(self):
+        for value in self.values:
+            for exposed in (value, app.encoded(value)):
+                for stream in ("stdout", "stderr"):
+                    for cut in range(len(exposed) + 1):
+                        logs = self.logs()
+                        other_stream = "stderr" if stream == "stdout" else "stdout"
+                        logs["entries"].extend([self.entry("build", 3, exposed[cut:] + "\n", stream),
+                                                self.entry("build", 2, "unrelated\n", other_stream),
+                                                self.entry("build", 1, exposed[:cut], stream)])
+                        with self.subTest(stream=stream, cut=cut), self.assertRaisesRegex(RuntimeError, "exposed") as failure:
+                            self.validate(logs)
+                        diagnostic = "".join(traceback.format_exception(failure.exception))
+                        self.assertNotIn(value, diagnostic)
+                        self.assertNotIn(exposed, diagnostic)
+
+    def test_metadata_is_scanned_without_echoing_canaries(self):
+        for value in self.values:
+            for exposed in (value, app.encoded(value)):
+                for field in ("level", "jobId", "stepId", "stream", "message"):
+                    logs = self.logs()
+                    logs["entries"][0][field] = exposed
+                    with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, "exposed") as failure:
+                        self.validate(logs)
+                    self.assertNotIn(exposed, "".join(traceback.format_exception(failure.exception)))
+
+    def test_fragments_from_other_steps_or_streams_cannot_supply_secret_proof(self):
+        for destination, stream in (("toolchain", "stderr"), ("test", "stdout"), ("build", "stdout")):
+            logs = self.logs()
+            marker = "ACTUAL_PROJECT_SECRET_VERIFIED\n"
+            logs["entries"][0]["message"] = self.toolchain.replace(marker, "ACTUAL_PROJECT")
+            number = 2 if destination == "toolchain" else (3 if destination == "test" else 1)
+            logs["entries"].append(self.entry(destination, number, "_SECRET_VERIFIED\n", stream))
+            with self.subTest(destination=destination, stream=stream), self.assertRaisesRegex(RuntimeError, "secret resolution"):
+                self.validate(logs)
+        logs = self.logs()
+        logs["entries"][0]["stream"] = "stderr"
+        with self.assertRaisesRegex(RuntimeError, "secret resolution"):
+            self.validate(logs)
+
+    def test_no_secret_or_compiler_evidence_can_be_inferred_from_metadata(self):
+        for marker in ("ACTUAL_PROJECT_SECRET_VERIFIED", "undefined: acceptanceCompileError"):
+            logs = self.logs()
+            for entry in logs["entries"]:
+                entry["message"] = entry["message"].replace(marker, "missing")
+            logs["entries"][0]["level"] = marker
+            with self.subTest(marker=marker), self.assertRaises(RuntimeError):
+                self.validate(logs)
+
+    def test_foreign_or_corrupt_entry_identities_and_schema_are_rejected(self):
+        for field, value in (("jobId", "foreign-job"), ("stepId", "foreign-step"), ("jobId", ""),
+                             ("stepId", None), ("stepId", ["step-toolchain"]), ("message", None),
+                             ("stream", "combined"), ("stream", ""), ("timestamp", True),
+                             ("timestamp", -1), ("timestamp", 2**63), ("level", {}),
+                             ("runId", "foreign-run"), ("pipelineRunId", "foreign-run"),
+                             ("pipelineId", "foreign-pipeline"), ("stepRunId", "foreign-step"),
+                             ("jobRunId", "foreign-job")):
+            logs = self.logs()
+            logs["entries"][0][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                self.validate(logs)
+        for field in self.logs()["entries"][0]:
+            logs = self.logs()
+            del logs["entries"][0][field]
+            with self.subTest(missing=field), self.assertRaises(ValueError):
+                self.validate(logs)
+        logs = self.logs()
+        logs["entries"].append(None)
+        with self.assertRaises(ValueError):
+            self.validate(logs)
+
+    def test_job_and_step_inventory_must_belong_to_exact_run(self):
+        for field, value in (("pipelineId", "foreign-pipeline"), ("pipelineRunId", "foreign-run"),
+                             ("jobRunId", "foreign-job"), ("steps", [])):
+            jobs = copy.deepcopy(self.jobs)
+            jobs["list"][0][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.validate(self.logs(), jobs=jobs)
+        for patch in ({"jobRunId": "foreign-job"}, {"stepRunId": "step-toolchain"}, {"name": "toolchain"}):
+            jobs = copy.deepcopy(self.jobs)
+            jobs["list"][0]["steps"][1].update(patch)
+            with self.subTest(patch=patch), self.assertRaises(ValueError):
+                self.validate(self.logs(), jobs=jobs)
+        for jobs in (None, {}, {"list": [self.job], "total": True}, {"list": [self.job, self.job], "total": 2}):
+            with self.subTest(jobs=jobs), self.assertRaises(ValueError):
+                app.reconstruct_run_log_streams(self.receipt, jobs, self.logs(), self.values)
+
+    def test_duplicates_gaps_and_invalid_positions_fail_even_with_complete_markers(self):
+        for number in (0, -1, True, "1", 1.0, None, app.MAX_RUN_LOG_ENTRIES + 1, 2):
+            logs = self.logs()
+            logs["entries"][0]["lineNumber"] = number
+            with self.subTest(number=number), self.assertRaises(ValueError):
+                self.validate(logs)
+        for stream in ("stdout", "stderr"):
+            logs = self.logs()
+            logs["entries"].append(self.entry("toolchain", 1, "another chunk\n", stream))
+            with self.subTest(stream=stream), self.assertRaises(ValueError):
+                self.validate(logs)
+        logs = self.logs()
+        logs["entries"].append(self.entry("toolchain", 3, "tail\n", "stderr"))
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            self.validate(logs)
+
+    def test_incomplete_truncated_and_oversized_envelopes_fail_closed(self):
+        for logs in (None, {}, [], {"entries": [], "truncated": False},
+                     self.logs() | {"truncated": True}, self.logs() | {"truncated": 0},
+                     {"entries": self.logs()["entries"]}, self.logs() | {"runId": "foreign-run"},
+                     {"entries": "not an array", "truncated": False}):
+            with self.subTest(logs=logs), self.assertRaises((ValueError, RuntimeError)):
+                self.validate(logs)
+        logs = self.logs()
+        logs["entries"] += [self.entry("build", number, "x") for number in range(1, app.MAX_RUN_LOG_ENTRIES + 1)]
+        with self.assertRaisesRegex(ValueError, "bounded"):
+            self.validate(logs)
+
+    def test_byte_budget_covers_utf8_metadata_and_total_entries(self):
+        for field in ("message", "level"):
+            for text in ("x" * (app.MAX_RUN_LOG_BYTES + 1), "é" * (app.MAX_RUN_LOG_BYTES // 2 + 1), "\ud800"):
+                logs = self.logs()
+                logs["entries"][0][field] = text
+                with self.subTest(field=field, length=len(text)), self.assertRaises(ValueError) as failure:
+                    self.validate(logs)
+                self.assertNotIn(text, str(failure.exception))
+        logs = self.logs()
+        logs["entries"].extend([self.entry("build", 1, "x" * (app.MAX_RUN_LOG_BYTES // 2)),
+                                self.entry("build", 2, "y" * (app.MAX_RUN_LOG_BYTES // 2))])
+        with self.assertRaisesRegex(ValueError, "byte budget"):
+            self.validate(logs)
+        with mock.patch.object(app, "MAX_RUN_LOG_ENTRIES", len(self.logs()["entries"])):
+            self.validate(self.logs())
+        exact_bytes = sum(len(json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                          for entry in self.logs()["entries"])
+        with mock.patch.object(app, "MAX_RUN_LOG_BYTES", exact_bytes):
+            self.validate(self.logs())
+        with mock.patch.object(app, "MAX_RUN_LOG_BYTES", exact_bytes - 1), self.assertRaisesRegex(ValueError, "byte budget"):
+            self.validate(self.logs())
+
+    def test_compiler_build_and_behavior_checks_remain_required_in_own_steps(self):
+        for successful in (False, True):
+            original = self.logs(successful)
+            for index in range(1, len(original["entries"])):
+                logs = copy.deepcopy(original)
+                missing = logs["entries"][index]["message"]
+                logs["entries"][index]["message"] = "no evidence\n"
+                # Other steps cannot lend their evidence to the required step.
+                logs["entries"][0]["message"] += missing
+                with self.subTest(successful=successful, index=index), self.assertRaisesRegex(RuntimeError, "compiler/behavior"):
+                    self.validate(logs, successful)
+        logs = self.logs()
+        logs["entries"][-1]["message"] = "undefined: acceptance"
+        logs["entries"].append(self.entry("test", 3, "CompileError\n", "stdout"))
+        with self.assertRaisesRegex(RuntimeError, "compiler/behavior"):
+            self.validate(logs)
+        logs["entries"][-1]["stream"] = "stderr"
+        self.validate(logs)
+
+    def test_snapshot_uses_reconstruction_once_without_retrying_missing_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = app.Fixture(mock.Mock(), Path(directory))
+            fixture.commit, fixture.agent_id = self.receipt["sourceCommit"], "agent-id"
+            fixture.secret_initial_value, fixture.secret_rotated_value, fixture.control_secret_key = self.values
+            for valid in (True, False):
+                logs = self.logs()
+                if not valid:
+                    logs["entries"][0]["message"] = "ACTUAL_PROJECT_SECRET_VERIFIED\n"
+                with mock.patch.object(fixture, "require_observer_session"), \
+                        mock.patch.object(app, "_validate_run_snapshot") as snapshot, \
+                        mock.patch.object(fixture, "request", side_effect=[{}, self.jobs, {"list": []}, logs]) as request:
+                    if valid:
+                        self.assertEqual(fixture.run_snapshot(self.receipt, successful=False), [])
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "secret resolution"):
+                            fixture.run_snapshot(self.receipt, successful=False)
+                    snapshot.assert_called_once()
+                    self.assertEqual(request.call_count, 4)
+                    self.assertEqual(request.call_args.args, ("/pipelines/pipeline-id/runs/run-id/logs?limit=1000",))
+
+
+class ProjectSecretEvidenceTests(unittest.TestCase):
+    def test_actual_log_proof_requires_resolution_and_redaction(self):
+        values = ("initial-private-canary", "rotated-private-canary", "key-private-canary")
+        valid = "ACTUAL_PROJECT_SECRET_VALUE ***\nACTUAL_PROJECT_SECRET_VERIFIED\n"
+        app.validate_secret_log_evidence(valid, values)
+        for message in ("", "ACTUAL_PROJECT_SECRET_VERIFIED", "ACTUAL_PROJECT_SECRET_VALUE", valid.rstrip("\n"),
+                        valid.replace("***", "[REDACTED]"), valid.replace("***", ""),
+                        valid.replace("***", "unknown"), valid.replace("***", "****"),
+                        valid.replace("VALUE ***", "VALUE *** suffix"), "prefix " + valid,
+                        valid.replace("VERIFIED\n", "VERIFIED suffix\n"),
+                        valid.replace("VERIFIED\n", "VERIFIED\r\n"),
+                        valid + "ACTUAL_PROJECT_SECRET_VERIFIED\n", valid + "ACTUAL_PROJECT_SECRET_VALUE ***\n"):
+            with self.assertRaises(RuntimeError):
+                app.validate_secret_log_evidence(message, values)
+        for value in values:
+            for exposed in (value, app.encoded(value)):
+                with self.assertRaises(RuntimeError) as failure:
+                    app.validate_secret_log_evidence(valid + exposed, values)
+                self.assertNotIn(value, str(failure.exception))
+                self.assertNotIn(exposed, str(failure.exception))
+
+    def evidence(self):
+        return {"journey": "project-secrets-v1", "completed": True, "projectId": "project",
+                "activeSecretId": "active", "disabledSecretId": "disabled", "steps": list(app.PROJECT_SECRET_STEPS)}
+
+    def inventory(self):
+        common = {"projectId": "project", "secretType": "token", "configured": True,
+                  "createdAt": "synthetic", "updatedAt": "synthetic"}
+        active = common | {"secretId": "active", "name": "CI_BUILD_TOKEN", "version": "3", "isEnabled": 1,
+                           "description": "Synthetic build secret reviewed", "canUpdate": True, "canRotate": True, "canDisable": True}
+        disabled = common | {"secretId": "disabled", "name": "CI_DISABLED_TOKEN", "version": "2", "isEnabled": 0,
+                             "description": "", "canUpdate": False, "canRotate": False, "canDisable": False}
+        return {"projectId": "project", "list": [active, disabled], "total": 2, "canCreate": True,
+                "canWrite": True, "canDisable": True, "projectActive": True, "encryptionConfigured": True}
+
+    def test_exact_metadata_only_summary_required(self):
+        evidence = self.evidence()
+        self.assertEqual(app.validate_project_secrets({"projectSecrets": evidence}), evidence)
+        for key, value in (("completed", 1), ("steps", []), ("steps", app.PROJECT_SECRET_STEPS[:-1]),
+                           ("activeSecretId", "disabled"), ("projectId", "../private"),
+                           ("value", "private-test-canary"), ("journey", "simulated")):
+            with self.subTest(key=key), self.assertRaises(RuntimeError) as failure:
+                app.validate_project_secrets({"projectSecrets": evidence | {key: value}})
+            self.assertNotIn("private-test-canary", str(failure.exception))
+
+    def test_persisted_state_not_only_browser_claim_is_required(self):
+        inventory = self.inventory()
+        app.validate_persisted_project_secrets(inventory, self.evidence())
+        for mutate in (
+            lambda x: x.update(projectId="foreign"), lambda x: x.update(total=1),
+            lambda x: x.update(encryptionConfigured=False),
+            lambda x: x["list"][0].update(version="1"),
+            lambda x: x["list"][0].update(secretValue="private-test-canary"),
+            lambda x: x["list"][1].update(isEnabled=1),
+            lambda x: x["list"][0].update(isEnabled=True),
+            lambda x: x["list"][0].update(secretType="ssh_key"),
+            lambda x: x["list"][1].update(canRotate=True),
+            lambda x: x["list"][1].update(secretId="active"),
+        ):
+            changed = copy.deepcopy(inventory)
+            mutate(changed)
+            with self.assertRaises(RuntimeError) as failure:
+                app.validate_persisted_project_secrets(changed, self.evidence())
+            self.assertNotIn("private-test-canary", str(failure.exception))
+
+    def test_independent_observer_denied_before_admin_inventory_read(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture = object.__new__(app.Fixture)
+            fixture.args = type("Args", (), {"evidence_dir": root})()
+            fixture.successful_run = {"projectId": "project"}
+            fixture.secret_initial_value, fixture.secret_rotated_value, fixture.control_secret_key = "initial-canary", "rotated-canary", "key-canary"
+            (root / "browser").mkdir()
+            app.atomic_json(root / "browser/summary.json", {"projectSecrets": self.evidence()})
+            calls = []
+            with mock.patch.object(fixture, "require_observer_session", side_effect=lambda: calls.append("observer")), \
+                    mock.patch.object(fixture, "expect_rejected", side_effect=lambda *a: calls.append("denied")) as denied, \
+                    mock.patch.object(fixture, "login", side_effect=lambda: calls.append("admin")), \
+                    mock.patch.object(fixture, "request", side_effect=lambda *a: calls.append("inventory") or self.inventory()), \
+                    mock.patch.object(fixture, "note"):
+                fixture.verify_project_secrets()
+            self.assertEqual(calls, ["observer", "denied", "denied", "admin", "inventory"])
+            self.assertEqual(denied.call_args_list[0], mock.call("/project/project/secrets", 403, 403))
+            self.assertEqual(denied.call_args_list[1].args[-1], "POST")
 
 
 class OrganizationManagementEvidenceTests(unittest.TestCase):

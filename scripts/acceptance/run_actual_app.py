@@ -43,6 +43,8 @@ FIXTURE_SOURCE = Path(__file__).resolve().parent / "fixtures/stdlib-build"
 COMPILE_ERROR = "\nvar _ = acceptanceCompileError\n"
 MAX_BINARY_BYTES = 32 * 1024 * 1024
 MAX_IDENTITY_BYTES = 16 * 1024
+MAX_RUN_LOG_ENTRIES = 1000
+MAX_RUN_LOG_BYTES = 1024 * 1024
 FIRST_BUILD_JOURNEY = "three-phase-separate-browser-contexts"
 FIRST_BUILD_PREFLIGHT_STEPS = [
     "preflight-login-via-real-api",
@@ -68,6 +70,8 @@ ORGANIZATION_MANAGEMENT_STEPS = [
     "project-settings-updated", "project-archived", "project-restored",
     "organization-active-project-conflict", "project-rearchived", "organization-archived",
 ]
+PROJECT_SECRET_STEPS = ["secret-created", "secret-metadata-updated", "secret-rotated",
+                        "secondary-secret-created", "secondary-secret-disabled", "metadata-only-reload"]
 GO_ENV = {"GOTOOLCHAIN": "local", "GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off",
           "GOENV": "off", "CGO_ENABLED": "0", "GOTELEMETRY": "off", "GOMAXPROCS": "2"}
 DEPENDENCIES = {
@@ -131,6 +135,13 @@ class Fixture:
                                 encoded(DEPENDENCIES["ARCENTRA_TEST_S3_ACCESS_KEY"]),
                                 encoded(DEPENDENCIES["ARCENTRA_TEST_S3_SECRET_KEY"])])
         self.env = child_environment(os.environ, root)
+        # Disposable fixture material is generated only for this run. The AES
+        # key is sent to Control alone, never to the browser or Agent process.
+        self.control_secret_key = base64.b64encode(secrets.token_bytes(32)).decode()
+        self.secret_initial_value = "synthetic-ci-secret-" + secrets.token_urlsafe(24)
+        self.secret_rotated_value = "synthetic-ci-secret-" + secrets.token_urlsafe(24)
+        for value in (self.control_secret_key, self.secret_initial_value, self.secret_rotated_value):
+            self.redactions.extend((value, encoded(value)))
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirects())
 
     def note(self, step):
@@ -238,7 +249,8 @@ class Fixture:
 
     def start_control(self, name):
         process = self.start(name, [self.args.control_bin, "-conf", str(self.root / "control.toml"),
-                                    "-plugin-conf", str(self.root / "plugins.toml")])
+                                    "-plugin-conf", str(self.root / "plugins.toml")],
+                             env=self.env | {"ARCENTRA_SECRET_ENCRYPTION_KEY": self.control_secret_key})
         self.wait_until("Control readiness", lambda: self.probe(BACKEND_URL + "/ready") == 200, process)
         return process
 
@@ -374,7 +386,7 @@ class Fixture:
         copy_fixture_source(source)
         (source / ".arcentra").mkdir(parents=True)
         (source / "main.go").write_text((source / "main.go").read_text() + COMPILE_ERROR)
-        spec = pipeline_spec()
+        spec = pipeline_spec(hashlib.sha256(self.secret_rotated_value.encode()).hexdigest())
         spec["jobs"][0]["source"]["repo"] = self.repository_url()
         (source / ".arcentra/pipeline.yaml").write_text(json.dumps(spec, indent=2) + "\n")
         self.run("git-init", ["git", "init", "--initial-branch=main", str(source)])
@@ -411,15 +423,9 @@ class Fixture:
         artifacts = self.request(f"/projects/{receipt['projectId']}/artifacts?" +
                                  urllib.parse.urlencode({"runId": receipt["runId"], "pageSize": 100}))
         _validate_run_snapshot(receipt, run, jobs, artifacts, successful, self.agent_id, self.repository_url())
-        logs = self.request(base + "/logs?limit=1000")
-        messages = "\n".join(entry.get("message", "") for entry in logs.get("entries", []))
-        expected = ["ACTUAL_PROJECT_TOOLCHAIN go1.25.6", "ACTUAL_PROJECT_TEST"]
-        if successful:
-            expected.extend(["ACTUAL_PROJECT_BUILD", "ACTUAL_PROJECT_BEHAVIOR", EXPECTED_OUTPUT.strip()])
-        else:
-            expected.append("undefined: acceptanceCompileError")
-        if any(marker not in messages for marker in expected):
-            raise RuntimeError("actual Agent logs lack required compiler/behavior evidence")
+        logs = self.request(base + f"/logs?limit={MAX_RUN_LOG_ENTRIES}")
+        validate_run_log_evidence(receipt, jobs, logs, successful,
+                                  (self.secret_initial_value, self.secret_rotated_value, self.control_secret_key))
         return artifacts["list"]
 
     def fix_repository_after_failed_run(self):
@@ -564,10 +570,14 @@ class Fixture:
     def browser_environment(self, phase):
         if phase not in ("preflight", "storage-setup", "build"):
             raise ValueError("unknown actual-browser acceptance phase")
-        organization_keys = {"ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY", "ARCENTRA_ACCEPTANCE_MEMBER_USER_ID"}
+        organization_keys = {"ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY", "ARCENTRA_ACCEPTANCE_MEMBER_USER_ID",
+                             "ARCENTRA_ACCEPTANCE_SECRET_INITIAL_VALUE", "ARCENTRA_ACCEPTANCE_SECRET_ROTATED_VALUE",
+                             "ARCENTRA_SECRET_ENCRYPTION_KEY"}
         environment = {key: value for key, value in self.env.items() if key not in organization_keys}
         if phase == "build":
             environment |= {"ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY": "1", "ARCENTRA_ACCEPTANCE_MEMBER_USER_ID": self.observer_id}
+            environment |= {"ARCENTRA_ACCEPTANCE_SECRET_INITIAL_VALUE": self.secret_initial_value,
+                            "ARCENTRA_ACCEPTANCE_SECRET_ROTATED_VALUE": self.secret_rotated_value}
         return environment | {
             "ARCENTRA_ACCEPTANCE_PHASE": phase,
             "ARCENTRA_REAL_STACK": "1", "ARCENTRA_ACCEPTANCE_BACKEND_URL": BACKEND_URL,
@@ -639,8 +649,29 @@ class Fixture:
             raise RuntimeError("Control or Agent exited during browser acceptance")
         self.require_browser_summary("build")
         self.verify_downloads()
+        self.verify_project_secrets()
         self.verify_organization_management()
         self.note("Browser create-project → create-pipeline → run → logs → artifact journey completed")
+
+    def verify_project_secrets(self):
+        evidence = validate_project_secrets(read_private_json(self.args.evidence_dir / "browser/summary.json"))
+        if not self.successful_run or evidence["projectId"] != self.successful_run["projectId"]:
+            raise RuntimeError("secret management must belong to the independently verified build project")
+        endpoint = "/project/" + evidence["projectId"] + "/secrets"
+        self.require_observer_session()
+        self.expect_rejected(endpoint, 403, 403)
+        self.expect_rejected(endpoint, 403, 403,
+                             {"name": "OBSERVER_MUST_NOT_CREATE", "secretType": "token",
+                              "value": self.secret_initial_value}, "POST")
+        # The browser has ended; a new administrator session cannot disrupt its
+        # reads. The build observer keeps its independent existing session.
+        self.login()
+        detail = self.request(endpoint)
+        validate_persisted_project_secrets(detail, evidence)
+        serialized = json.dumps(detail)
+        if any(value in serialized for value in (self.secret_initial_value, self.secret_rotated_value, self.control_secret_key)):
+            raise RuntimeError("project secret metadata exposed synthetic secret material")
+        self.note("Project Secrets UI create/edit/rotate/disable independently verified; read-only observer denied; Agent used rotated value with redacted logs")
 
     def verify_organization_management(self):
         summary = read_private_json(self.args.evidence_dir / "browser/summary.json")
@@ -742,6 +773,148 @@ def validate_organization_management(summary):
                    for key in ("orgId", "projectId"))):
         raise RuntimeError("browser lacks the exact successful organization/member/settings evidence")
     return evidence
+
+
+def validate_secret_log_evidence(messages, values):
+    if any(value in messages or encoded(value) in messages for value in values):
+        raise RuntimeError("actual Agent logs exposed synthetic secret material")
+    # Only newline-terminated, exact command output proves resolution/redaction.
+    # The production executor replaces resolved secrets with exactly three stars.
+    lines = messages.split("\n")
+    if (lines[-1] or any(lines[:-1].count(marker) != 1 for marker in
+                        ("ACTUAL_PROJECT_SECRET_VALUE ***", "ACTUAL_PROJECT_SECRET_VERIFIED"))):
+        raise RuntimeError("actual Agent logs lack secret resolution/redaction evidence")
+
+
+def reconstruct_run_log_streams(receipt, jobs, logs, values):
+    """Reconstruct bounded persisted Write chunks, never synthetic text lines."""
+    records = jobs.get("list") if isinstance(jobs, dict) else None
+    if (not isinstance(records, list) or len(records) != 1
+            or type(jobs.get("total")) is not int or jobs["total"] != 1):
+        raise ValueError("actual logs require one independently verified job")
+    job = records[0]
+    if (not isinstance(job, dict) or job.get("pipelineId") != receipt["pipelineId"]
+            or job.get("pipelineRunId") != receipt["runId"]):
+        raise ValueError("actual log job belongs to another pipeline/run")
+    job_id = safe_identifier(job.get("jobRunId"))
+    steps = job.get("steps")
+    if (not isinstance(steps, list) or len(steps) != 5 or any(not isinstance(step, dict) for step in steps)
+            or [step.get("name") for step in steps] != ["toolchain", "test", "build", "verify", "publish"]):
+        raise ValueError("actual logs require every independently verified build step")
+    grouped = {}
+    for step in steps:
+        step_id = safe_identifier(step.get("stepRunId"))
+        if step_id in grouped or step.get("jobRunId") != job_id:
+            raise ValueError("actual log steps require distinct identities in the verified job")
+        grouped[step_id] = {}
+
+    entries = logs.get("entries") if isinstance(logs, dict) else None
+    if (not isinstance(logs, dict) or set(logs) != {"entries", "truncated"}
+            or not isinstance(entries, list) or logs.get("truncated") is not False
+            or len(entries) > MAX_RUN_LOG_ENTRIES):
+        raise ValueError("actual execution requires complete bounded persisted logs")
+    needles = tuple(needle for value in values for needle in (value, encoded(value)))
+    total_bytes = 0
+    for entry in entries:
+        # PipelineLogView exposes only these fields. Run ownership comes from
+        # the scoped endpoint and the independently verified job/step inventory;
+        # reject injected run IDs or alternative identity fields as well.
+        if (not isinstance(entry, dict) or set(entry) !=
+                {"timestamp", "level", "message", "jobId", "stepId", "lineNumber", "stream"}
+                or any(not isinstance(entry[key], str) for key in
+                       ("level", "message", "jobId", "stepId", "stream"))):
+            raise ValueError("actual log entry differs from the persisted API schema")
+        fields = [value for value in entry.values() if isinstance(value, str)]
+        if any(len(value) > MAX_RUN_LOG_BYTES for value in fields):
+            raise ValueError("actual execution logs exceed the byte budget")
+        # Include metadata, not just message bodies, in both the byte budget and
+        # canary checks. No rejected content is copied into diagnostics.
+        if any(needle in text for needle in needles for text in fields):
+            raise RuntimeError("actual Agent logs exposed synthetic secret material")
+        if (type(entry["timestamp"]) is not int or not 0 <= entry["timestamp"] < 2**63
+                or type(entry["lineNumber"]) is not int
+                or not 1 <= entry["lineNumber"] <= MAX_RUN_LOG_ENTRIES):
+            raise ValueError("actual log requires bounded integer timestamps and positions")
+        try:
+            total_bytes += len(json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        except UnicodeEncodeError:
+            raise ValueError("actual execution logs require valid UTF-8") from None
+        if total_bytes > MAX_RUN_LOG_BYTES:
+            raise ValueError("actual execution logs exceed the byte budget")
+        step_id, number, stream = entry["stepId"], entry["lineNumber"], entry["stream"]
+        if entry["jobId"] != job_id or step_id not in grouped:
+            raise ValueError("actual log does not belong to a verified job/step")
+        if number in grouped[step_id] or stream not in ("stdout", "stderr"):
+            raise ValueError("actual log requires unique step positions and a recognized stream")
+        grouped[step_id][number] = (stream, entry["message"])
+
+    streams = {}
+    for step_id, positions in grouped.items():
+        # Control numbers chunks per step across BOTH streams. The run endpoint
+        # sorts by timestamp first, which is not the chunk sequence. Validate the
+        # full step-wide sequence before separating and joining its streams.
+        if sorted(positions) != list(range(1, len(positions) + 1)):
+            raise ValueError("actual execution log positions are incomplete")
+        streams[step_id] = {
+            stream: "".join(positions[number][1] for number in sorted(positions)
+                            if positions[number][0] == stream)
+            for stream in ("stdout", "stderr")
+        }
+        if any(needle in text for needle in needles for text in streams[step_id].values()):
+            raise RuntimeError("actual Agent logs exposed synthetic secret material")
+    return {step["name"]: streams[step["stepRunId"]] for step in steps}
+
+
+def validate_run_log_evidence(receipt, jobs, logs, successful, values):
+    streams = reconstruct_run_log_streams(receipt, jobs, logs, values)
+    validate_secret_log_evidence(streams["toolchain"]["stdout"], values)
+    expected = {"toolchain": ["ACTUAL_PROJECT_TOOLCHAIN go1.25.6"], "test": ["ACTUAL_PROJECT_TEST"]}
+    if successful:
+        expected.update({"build": ["ACTUAL_PROJECT_BUILD"],
+                         "verify": ["ACTUAL_PROJECT_BEHAVIOR", EXPECTED_OUTPUT.strip()]})
+    else:
+        expected["test"].append("undefined: acceptanceCompileError")
+    if any(not any(marker in text for text in streams[step].values())
+           for step, markers in expected.items() for marker in markers):
+        raise RuntimeError("actual Agent logs lack required compiler/behavior evidence")
+
+
+def validate_project_secrets(summary):
+    evidence = summary.get("projectSecrets") if isinstance(summary, dict) else None
+    if (not isinstance(evidence, dict)
+            or set(evidence) != {"journey", "completed", "projectId", "activeSecretId", "disabledSecretId", "steps"}
+            or evidence.get("journey") != "project-secrets-v1" or evidence.get("completed") is not True
+            or evidence.get("steps") != PROJECT_SECRET_STEPS
+            or any(not isinstance(evidence.get(key), str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", evidence[key])
+                   for key in ("projectId", "activeSecretId", "disabledSecretId"))
+            or evidence.get("activeSecretId") == evidence.get("disabledSecretId")):
+        raise RuntimeError("browser lacks the exact successful project Secrets evidence")
+    return evidence
+
+
+def validate_persisted_project_secrets(detail, evidence):
+    list_keys = {"projectId", "list", "total", "canCreate", "canWrite", "canDisable", "projectActive", "encryptionConfigured"}
+    row_keys = {"secretId", "projectId", "name", "secretType", "description", "version", "isEnabled", "configured",
+                "createdAt", "updatedAt", "canUpdate", "canRotate", "canDisable"}
+    if (not isinstance(detail, dict) or set(detail) != list_keys or detail.get("projectId") != evidence["projectId"]
+            or detail.get("total") != 2 or not isinstance(detail.get("list"), list) or len(detail["list"]) != 2
+            or any(detail.get(key) is not True for key in ("canCreate", "canWrite", "canDisable", "projectActive", "encryptionConfigured"))):
+        raise RuntimeError("project Secrets persisted inventory is incomplete or unauthorized")
+    rows = detail["list"]
+    if any(not isinstance(row, dict) or set(row) != row_keys or row.get("projectId") != evidence["projectId"]
+           or row.get("configured") is not True or row.get("secretType") != "token"
+           or type(row.get("isEnabled")) is not int for row in rows):
+        raise RuntimeError("project Secrets metadata has unexpected fields or scope")
+    by_id = {row["secretId"]: row for row in rows}
+    if set(by_id) != {evidence["activeSecretId"], evidence["disabledSecretId"]}:
+        raise RuntimeError("project Secrets identity does not match browser evidence")
+    active, disabled = by_id[evidence["activeSecretId"]], by_id[evidence["disabledSecretId"]]
+    if (active["name"] != "CI_BUILD_TOKEN" or active["version"] != "3" or active["isEnabled"] != 1
+            or active["description"] != "Synthetic build secret reviewed"
+            or any(active[key] is not True for key in ("canUpdate", "canRotate", "canDisable"))
+            or disabled["name"] != "CI_DISABLED_TOKEN" or disabled["version"] != "2" or disabled["isEnabled"] != 0
+            or any(disabled[key] is not False for key in ("canUpdate", "canRotate", "canDisable"))):
+        raise RuntimeError("project Secrets persisted rotation or disable state is incorrect")
 
 
 def validate_persisted_storage(detail, configuration):
@@ -1219,8 +1392,8 @@ maxDiskUsageMB = 32
 '''
 
 
-def pipeline_spec():
-    return {"namespace": "acceptance", "version": "1.0.0", "jobs": [{
+def pipeline_spec(secret_digest=None):
+    spec = {"namespace": "acceptance", "version": "1.0.0", "jobs": [{
         "name": "build", "source": {"type": "git", "repo": REPO_URL, "branch": "main"},
         "steps": [
             *[{"name": stage, "uses": "shell", "runOnAgent": True, "timeout": "120s",
@@ -1229,6 +1402,20 @@ def pipeline_spec():
              "args": {"paths": [ARTIFACT_NAME, MANIFEST_NAME]}},
         ],
     }]}
+    if secret_digest is not None:
+        if not re.fullmatch(r"[a-f0-9]{64}", secret_digest):
+            raise ValueError("synthetic secret verification requires a SHA-256 digest")
+        step = spec["jobs"][0]["steps"][0]
+        step["env"] = {"CI_BUILD_TOKEN": "${{ secrets.CI_BUILD_TOKEN }}"}
+        step["args"]["run"] = (
+            "set -eu\n"
+            "actual=$(printf '%s' \"$CI_BUILD_TOKEN\" | sha256sum)\n"
+            f"test \"${{actual%% *}}\" = '{secret_digest}'\n"
+            "printf 'ACTUAL_PROJECT_SECRET_VALUE %s\\n' \"$CI_BUILD_TOKEN\"\n"
+            "printf 'ACTUAL_PROJECT_SECRET_VERIFIED\\n'\n"
+            "sh build.sh toolchain"
+        )
+    return spec
 
 
 def main():
