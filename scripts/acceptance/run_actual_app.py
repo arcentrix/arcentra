@@ -43,6 +43,8 @@ FIXTURE_SOURCE = Path(__file__).resolve().parent / "fixtures/stdlib-build"
 COMPILE_ERROR = "\nvar _ = acceptanceCompileError\n"
 MAX_BINARY_BYTES = 32 * 1024 * 1024
 MAX_IDENTITY_BYTES = 16 * 1024
+MAX_RUN_LOG_ENTRIES = 1000
+MAX_RUN_LOG_BYTES = 1024 * 1024
 FIRST_BUILD_JOURNEY = "three-phase-separate-browser-contexts"
 FIRST_BUILD_PREFLIGHT_STEPS = [
     "preflight-login-via-real-api",
@@ -421,17 +423,9 @@ class Fixture:
         artifacts = self.request(f"/projects/{receipt['projectId']}/artifacts?" +
                                  urllib.parse.urlencode({"runId": receipt["runId"], "pageSize": 100}))
         _validate_run_snapshot(receipt, run, jobs, artifacts, successful, self.agent_id, self.repository_url())
-        logs = self.request(base + "/logs?limit=1000")
-        messages = "\n".join(entry.get("message", "") for entry in logs.get("entries", []))
-        validate_secret_log_evidence(messages, (self.secret_initial_value, self.secret_rotated_value,
-                                                self.control_secret_key))
-        expected = ["ACTUAL_PROJECT_TOOLCHAIN go1.25.6", "ACTUAL_PROJECT_TEST"]
-        if successful:
-            expected.extend(["ACTUAL_PROJECT_BUILD", "ACTUAL_PROJECT_BEHAVIOR", EXPECTED_OUTPUT.strip()])
-        else:
-            expected.append("undefined: acceptanceCompileError")
-        if any(marker not in messages for marker in expected):
-            raise RuntimeError("actual Agent logs lack required compiler/behavior evidence")
+        logs = self.request(base + f"/logs?limit={MAX_RUN_LOG_ENTRIES}")
+        validate_run_log_evidence(receipt, jobs, logs, successful,
+                                  (self.secret_initial_value, self.secret_rotated_value, self.control_secret_key))
         return artifacts["list"]
 
     def fix_repository_after_failed_run(self):
@@ -784,8 +778,105 @@ def validate_organization_management(summary):
 def validate_secret_log_evidence(messages, values):
     if any(value in messages or encoded(value) in messages for value in values):
         raise RuntimeError("actual Agent logs exposed synthetic secret material")
-    if any(marker not in messages for marker in ("ACTUAL_PROJECT_SECRET_VERIFIED", "ACTUAL_PROJECT_SECRET_VALUE")):
+    # Only newline-terminated, exact command output proves resolution/redaction.
+    # The production executor replaces resolved secrets with exactly three stars.
+    lines = messages.split("\n")
+    if (lines[-1] or any(lines[:-1].count(marker) != 1 for marker in
+                        ("ACTUAL_PROJECT_SECRET_VALUE ***", "ACTUAL_PROJECT_SECRET_VERIFIED"))):
         raise RuntimeError("actual Agent logs lack secret resolution/redaction evidence")
+
+
+def reconstruct_run_log_streams(receipt, jobs, logs, values):
+    """Reconstruct bounded persisted Write chunks, never synthetic text lines."""
+    records = jobs.get("list") if isinstance(jobs, dict) else None
+    if (not isinstance(records, list) or len(records) != 1
+            or type(jobs.get("total")) is not int or jobs["total"] != 1):
+        raise ValueError("actual logs require one independently verified job")
+    job = records[0]
+    if (not isinstance(job, dict) or job.get("pipelineId") != receipt["pipelineId"]
+            or job.get("pipelineRunId") != receipt["runId"]):
+        raise ValueError("actual log job belongs to another pipeline/run")
+    job_id = safe_identifier(job.get("jobRunId"))
+    steps = job.get("steps")
+    if (not isinstance(steps, list) or len(steps) != 5 or any(not isinstance(step, dict) for step in steps)
+            or [step.get("name") for step in steps] != ["toolchain", "test", "build", "verify", "publish"]):
+        raise ValueError("actual logs require every independently verified build step")
+    grouped = {}
+    for step in steps:
+        step_id = safe_identifier(step.get("stepRunId"))
+        if step_id in grouped or step.get("jobRunId") != job_id:
+            raise ValueError("actual log steps require distinct identities in the verified job")
+        grouped[step_id] = {}
+
+    entries = logs.get("entries") if isinstance(logs, dict) else None
+    if (not isinstance(logs, dict) or set(logs) != {"entries", "truncated"}
+            or not isinstance(entries, list) or logs.get("truncated") is not False
+            or len(entries) > MAX_RUN_LOG_ENTRIES):
+        raise ValueError("actual execution requires complete bounded persisted logs")
+    needles = tuple(needle for value in values for needle in (value, encoded(value)))
+    total_bytes = 0
+    for entry in entries:
+        # PipelineLogView exposes only these fields. Run ownership comes from
+        # the scoped endpoint and the independently verified job/step inventory;
+        # reject injected run IDs or alternative identity fields as well.
+        if (not isinstance(entry, dict) or set(entry) !=
+                {"timestamp", "level", "message", "jobId", "stepId", "lineNumber", "stream"}
+                or any(not isinstance(entry[key], str) for key in
+                       ("level", "message", "jobId", "stepId", "stream"))):
+            raise ValueError("actual log entry differs from the persisted API schema")
+        fields = [value for value in entry.values() if isinstance(value, str)]
+        if any(len(value) > MAX_RUN_LOG_BYTES for value in fields):
+            raise ValueError("actual execution logs exceed the byte budget")
+        # Include metadata, not just message bodies, in both the byte budget and
+        # canary checks. No rejected content is copied into diagnostics.
+        if any(needle in text for needle in needles for text in fields):
+            raise RuntimeError("actual Agent logs exposed synthetic secret material")
+        if (type(entry["timestamp"]) is not int or not 0 <= entry["timestamp"] < 2**63
+                or type(entry["lineNumber"]) is not int
+                or not 1 <= entry["lineNumber"] <= MAX_RUN_LOG_ENTRIES):
+            raise ValueError("actual log requires bounded integer timestamps and positions")
+        try:
+            total_bytes += len(json.dumps(entry, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        except UnicodeEncodeError:
+            raise ValueError("actual execution logs require valid UTF-8") from None
+        if total_bytes > MAX_RUN_LOG_BYTES:
+            raise ValueError("actual execution logs exceed the byte budget")
+        step_id, number, stream = entry["stepId"], entry["lineNumber"], entry["stream"]
+        if entry["jobId"] != job_id or step_id not in grouped:
+            raise ValueError("actual log does not belong to a verified job/step")
+        if number in grouped[step_id] or stream not in ("stdout", "stderr"):
+            raise ValueError("actual log requires unique step positions and a recognized stream")
+        grouped[step_id][number] = (stream, entry["message"])
+
+    streams = {}
+    for step_id, positions in grouped.items():
+        # Control numbers chunks per step across BOTH streams. The run endpoint
+        # sorts by timestamp first, which is not the chunk sequence. Validate the
+        # full step-wide sequence before separating and joining its streams.
+        if sorted(positions) != list(range(1, len(positions) + 1)):
+            raise ValueError("actual execution log positions are incomplete")
+        streams[step_id] = {
+            stream: "".join(positions[number][1] for number in sorted(positions)
+                            if positions[number][0] == stream)
+            for stream in ("stdout", "stderr")
+        }
+        if any(needle in text for needle in needles for text in streams[step_id].values()):
+            raise RuntimeError("actual Agent logs exposed synthetic secret material")
+    return {step["name"]: streams[step["stepRunId"]] for step in steps}
+
+
+def validate_run_log_evidence(receipt, jobs, logs, successful, values):
+    streams = reconstruct_run_log_streams(receipt, jobs, logs, values)
+    validate_secret_log_evidence(streams["toolchain"]["stdout"], values)
+    expected = {"toolchain": ["ACTUAL_PROJECT_TOOLCHAIN go1.25.6"], "test": ["ACTUAL_PROJECT_TEST"]}
+    if successful:
+        expected.update({"build": ["ACTUAL_PROJECT_BUILD"],
+                         "verify": ["ACTUAL_PROJECT_BEHAVIOR", EXPECTED_OUTPUT.strip()]})
+    else:
+        expected["test"].append("undefined: acceptanceCompileError")
+    if any(not any(marker in text for text in streams[step].values())
+           for step, markers in expected.items() for marker in markers):
+        raise RuntimeError("actual Agent logs lack required compiler/behavior evidence")
 
 
 def validate_project_secrets(summary):

@@ -16,9 +16,12 @@ import (
 
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/pkg/polling"
 	drivermysql "github.com/go-sql-driver/mysql"
+	"github.com/stretchr/testify/require"
 	"gorm.io/datatypes"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -154,6 +157,11 @@ func TestProjectAdmissionMySQLArchiveSerialization(t *testing.T) {
 	}
 	if err := MigrateSchema(ctx, db); err != nil {
 		t.Fatal("repeated production migration", err)
+	}
+	for _, firstArchive := range []bool{true, false} {
+		t.Run(fmt.Sprintf("polling/archive-first-%v", firstArchive), func(t *testing.T) {
+			projectAdmissionPollingArchive(t, newPollingMySQLFixture(t, db, other), firstArchive, cfg.DBName)
+		})
 	}
 	for _, source := range []string{"manual", "automatic"} {
 		for _, firstArchive := range []bool{true, false} {
@@ -401,4 +409,219 @@ func TestProjectAdmissionMySQLArchiveSerialization(t *testing.T) {
 		}
 	}
 
+}
+
+// The same scoped-authority fixture and protocol assertions run locally. SQLite
+// verifies setup, identity, receipts and lock order, not InnoDB serialization.
+func TestProjectAdmissionPollingArchiveFixture(t *testing.T) {
+	for _, firstArchive := range []bool{true, false} {
+		t.Run(fmt.Sprintf("archive-first-%v", firstArchive), func(t *testing.T) {
+			f := projectAdmissionPollingSQLiteFixture(t)
+			projectAdmissionPollingArchive(t, f, firstArchive, "")
+		})
+	}
+}
+
+func projectAdmissionPollingSQLiteFixture(t *testing.T) *pollingMySQLFixture {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "project-polling-admission.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	pool, err := db.DB()
+	require.NoError(t, err)
+	pool.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = pool.Close() })
+	require.NoError(t, MigrateSchema(context.Background(), db))
+	return newPollingMySQLFixture(t, db, db)
+}
+
+func projectAdmissionPollingPending(t *testing.T, f *pollingMySQLFixture) (*model.SCMPollingStream, *model.PipelineRun) {
+	t.Helper()
+	// This prepares a real actor, scoped grant and permission bindings, then
+	// baselines, enables, captures observations and freezes a selected batch.
+	stream, run := f.prepare(t)
+	run.Env = `{"SECOND":"two","FIRST":"one"}`
+	project, err := NewProjectRepo(statusTestDB{f.db}).Get(f.ctx, f.projectID)
+	require.NoError(t, err)
+	pipeline, err := f.runs.Get(f.ctx, f.pipelineID)
+	require.NoError(t, err)
+	for _, row := range []any{project, pipeline, run} {
+		require.NoError(t, retryApprovalMySQLValidateJSON(f.db, row))
+	}
+	captured, err := pollingRunContext(run)
+	require.NoError(t, err)
+	require.Equal(t, polling.Actor, run.TriggeredBy)
+	require.Equal(t, f.actorID, captured.ActorID)
+	require.Equal(t, f.scope, captured.Scope)
+	require.Equal(t, f.pipelineID, captured.Target.PipelineID)
+	require.Equal(t, stream.Revision, captured.BatchRevision)
+	require.Equal(t, polling.StateEnabled, stream.State)
+	batch, err := polling.ParseBatch(stream.PendingBatchJSON)
+	require.NoError(t, err)
+	require.Equal(t, []polling.Target{captured.Target}, batch.Targets)
+	require.Empty(t, batch.Results)
+	f.create(t, run)
+	stored := f.stored(t, run)
+	require.True(t, samePollingRunIdentity(stored, run))
+	require.Empty(t, stored.ProjectID, "creation cannot grant project secret authority")
+	require.Nil(t, stored.StartTime)
+	require.Nil(t, stored.EndTime)
+	_, err = f.runs.GetRunSecretProject(f.ctx, run.RunID, run.PipelineID)
+	require.Error(t, err)
+	return stream, run
+}
+
+func projectAdmissionPollingArchive(t *testing.T, f *pollingMySQLFixture, firstArchive bool, schema string) {
+	t.Helper()
+	stream, run := projectAdmissionPollingPending(t, f)
+	var admission polling.AdmissionOutcome
+	admit := func(ctx context.Context, db *gorm.DB) error {
+		var err error
+		admission, err = (&PipelineRepo{IDatabase: statusTestDB{db}}).StartPollingRunIfPending(ctx, run)
+		return err
+	}
+	archive := func(ctx context.Context, db *gorm.DB) error {
+		return NewProjectRepo(statusTestDB{db}).Update(ctx, f.projectID, map[string]any{"status": model.ProjectStatusArchived})
+	}
+	first, second := admit, archive
+	admissionIndex, archiveIndex := 0, 1
+	if firstArchive {
+		first, second = archive, admit
+		admissionIndex, archiveIndex = 1, 0
+	}
+	var errs []error
+	if schema != "" {
+		// Actual independent-connection MySQL contention on the project row,
+		// the first shared current-read lock in archive and polling admission.
+		errs = projectAdmissionPollingMySQLOrderedRace(t, f, schema, first, second)
+	} else {
+		// SQLite cannot establish concurrent InnoDB row-lock behavior. Exercise
+		// the same two serial outcomes and assert the production locking clauses.
+		runInOrder := func(operation func(context.Context, *gorm.DB) error, isArchive bool) error {
+			var locks []string
+			name := "project-admission:polling-lock-order"
+			require.NoError(t, f.db.Callback().Query().Before("gorm:query").Register(name, func(tx *gorm.DB) {
+				for _, table := range []string{"pipeline", "project", "scm_polling_stream"} {
+					if pollingMySQLLockedQuery(tx, table) && (len(locks) == 0 || locks[len(locks)-1] != table) {
+						if table == "project" {
+							require.True(t, projectAdmissionPollingProjectLock(tx, f.projectID), "MySQL gate must recognize the exact shared locking read")
+							require.False(t, projectAdmissionPollingProjectLock(tx, "another-project"))
+						}
+						locks = append(locks, table)
+					}
+				}
+			}))
+			defer f.db.Callback().Query().Remove(name)
+			err := operation(f.ctx, f.db)
+			want := []string{"pipeline", "project", "scm_polling_stream"}
+			if isArchive {
+				want = []string{"project", "scm_polling_stream"}
+			}
+			require.Equal(t, want, locks, "archive must never acquire pipeline after project")
+			return err
+		}
+		errs = []error{runInOrder(first, firstArchive), runInOrder(second, !firstArchive)}
+	}
+	require.NoError(t, errs[archiveIndex], "archive must complete without a lock inversion")
+	if firstArchive {
+		require.ErrorIs(t, errs[admissionIndex], polling.ErrConflict, "archive invalidates the captured activation generation")
+		require.False(t, admission.ClaimedNow)
+		require.Equal(t, polling.OutcomeUnresolved, admission.Outcome)
+	} else {
+		require.NoError(t, errs[admissionIndex])
+		require.True(t, admission.ClaimedNow)
+		require.Equal(t, polling.OutcomeAdmitted, admission.Outcome)
+		require.Equal(t, run.RunID, admission.RunID)
+	}
+	stored, latest := f.stored(t, run), f.latest(t)
+	require.True(t, samePollingRunIdentity(stored, run), "archive must retain the frozen event identity")
+	require.Empty(t, run.ProjectID, "admission must not mutate the shared caller input")
+	require.Nil(t, stored.EndTime, "archive cannot cancel a pending or admitted run")
+	require.Equal(t, polling.StatePaused, latest.State)
+	require.Equal(t, "configuration_changed", latest.PauseReason)
+	require.Equal(t, stream.ActivationGeneration+1, latest.ActivationGeneration)
+	wantRevision := stream.Revision + 1
+	if !firstArchive {
+		wantRevision++ // admission receipt, then archive invalidation
+	}
+	require.Equal(t, wantRevision, latest.Revision)
+	require.Equal(t, stream.CursorJSON, latest.CursorJSON, "archive cannot acknowledge a batch")
+	require.Equal(t, stream.SelectionJSON, latest.SelectionJSON)
+	project, err := NewProjectRepo(statusTestDB{f.other}).Get(f.ctx, f.projectID)
+	require.NoError(t, err)
+	require.Equal(t, model.ProjectStatusArchived, project.Status)
+	batch, err := polling.ParseBatch(latest.PendingBatchJSON)
+	require.NoError(t, err)
+	originalBatch, err := polling.ParseBatch(stream.PendingBatchJSON)
+	require.NoError(t, err)
+	withoutReceipts := *batch
+	withoutReceipts.Results = originalBatch.Results
+	require.Equal(t, *originalBatch, withoutReceipts, "archive must preserve frozen targets and cursor evidence")
+	if firstArchive {
+		require.Equal(t, model.PipelineStatusPending, stored.Status)
+		require.Nil(t, stored.StartTime)
+		require.Empty(t, stored.ProjectID, "denied admission cannot manufacture secret authority")
+		require.Equal(t, stream.PendingBatchJSON, latest.PendingBatchJSON)
+		require.Empty(t, batch.Results)
+		_, err := f.runs.GetRunSecretProject(f.ctx, run.RunID, run.PipelineID)
+		require.Error(t, err)
+	} else {
+		require.Equal(t, model.PipelineStatusRunning, stored.Status)
+		require.NotNil(t, stored.StartTime)
+		require.Equal(t, f.projectID, stored.ProjectID)
+		require.Equal(t, []polling.TargetResult{{PipelineID: run.PipelineID, RequestID: run.RequestID, RunID: run.RunID, Outcome: polling.OutcomeAdmitted}}, batch.Results)
+		pinned, err := f.runs.GetRunSecretProject(f.ctx, run.RunID, run.PipelineID)
+		require.NoError(t, err)
+		require.Equal(t, f.projectID, pinned)
+	}
+	// Check replay before moving the pipeline, so denial specifically proves the
+	// archived generation cannot reclaim even an already-admitted polling run.
+	replay, err := f.otherRuns.StartPollingRunIfPending(f.ctx, run)
+	require.ErrorIs(t, err, polling.ErrConflict)
+	require.False(t, replay.ClaimedNow)
+	require.Equal(t, polling.OutcomeUnresolved, replay.Outcome)
+	afterReplay := f.stored(t, run)
+	require.Equal(t, stored.ProjectID, afterReplay.ProjectID)
+	require.Equal(t, stored.Status, afterReplay.Status)
+	require.True(t, sameOptionalTime(stored.StartTime, afterReplay.StartTime))
+	require.Nil(t, afterReplay.EndTime)
+	streamAfterReplay := f.latest(t)
+	require.Equal(t, latest.PendingBatchJSON, streamAfterReplay.PendingBatchJSON)
+	require.Equal(t, latest.Revision, streamAfterReplay.Revision)
+	if !firstArchive {
+		replacementID := f.projectID + "-replacement"
+		rows, _ := projectAdmissionMySQLEntities(replacementID, "unused", "unused", "manual")
+		require.NoError(t, f.db.WithContext(f.ctx).Create(rows[0]).Error)
+		require.NoError(t, f.runs.Update(f.ctx, f.pipelineID, map[string]any{"project_id": replacementID}))
+		pinned, err := f.otherRuns.GetRunSecretProject(f.ctx, run.RunID, run.PipelineID)
+		require.NoError(t, err)
+		require.Equal(t, f.projectID, pinned, "pipeline reassignment cannot change admitted secret authority")
+	}
+}
+
+func TestProjectAdmissionPollingFixtureRequiresLiveAuthority(t *testing.T) {
+	for _, missing := range []string{"actor", "grant", "permission-binding"} {
+		t.Run(missing, func(t *testing.T) {
+			f := projectAdmissionPollingSQLiteFixture(t)
+			_, run := projectAdmissionPollingPending(t, f)
+			var err error
+			switch missing {
+			case "actor":
+				err = f.db.Model(&model.User{}).Where("user_id = ?", f.actorID).Update("is_enabled", 0).Error
+			case "grant":
+				err = f.db.Model(&model.RoleGrant{}).Where("grant_id = ?", f.grantID).Update("is_enabled", 0).Error
+			case "permission-binding":
+				err = f.db.Where("role_id = ? AND permission_id = ?", f.roleID, "pipeline:trigger").Delete(&model.RolePermissionBinding{}).Error
+			}
+			require.NoError(t, err)
+			outcome, err := f.runs.StartPollingRunIfPending(f.ctx, run)
+			require.ErrorIs(t, err, polling.ErrForbidden)
+			require.False(t, outcome.ClaimedNow)
+			require.Equal(t, polling.OutcomeRejected, outcome.Outcome)
+			stored := f.stored(t, run)
+			require.Empty(t, stored.ProjectID)
+			require.Nil(t, stored.StartTime)
+			_, err = f.runs.GetRunSecretProject(f.ctx, run.RunID, run.PipelineID)
+			require.Error(t, err)
+		})
+	}
 }
