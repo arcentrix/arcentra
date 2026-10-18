@@ -4,6 +4,7 @@ package repo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -74,14 +75,47 @@ func TestInboxMySQLRealOldShapeMigrationAndLargeHistoryPlans(t *testing.T) {
 			require.NoError(t, db.CreateInBatches(runs, 100).Error)
 			require.NoError(t, db.CreateInBatches(works, 100).Error)
 			require.NoError(t, enrollInboxWork(db, "run", "due-source"))
-			for _, query := range []string{"SELECT id, run_id FROM pipeline_run WHERE inbox_origin = 1 AND id > 4900 AND id <= 5001 ORDER BY id ASC LIMIT 100", "SELECT * FROM inbox_work WHERE source_kind = 'run' AND state = 0 AND next_check_at <= CURRENT_TIMESTAMP ORDER BY next_check_at ASC, id ASC LIMIT 1"} {
-				var explain []struct {
-					Key  *string
-					Rows int64
-					Type string
+			type queryPlan struct {
+				Table        string
+				Key          *string
+				PossibleKeys *string
+				Rows         int64
+				Type         string
+				Filtered     float64
+				Extra        *string
+			}
+			queries := []struct{ name, sql string }{
+				{"repair-id-window", "SELECT id, run_id FROM pipeline_run WHERE inbox_origin = 1 AND id > 4900 AND id <= 5001 ORDER BY id ASC LIMIT 100"},
+				{"due-work", "SELECT * FROM inbox_work WHERE source_kind = 'run' AND state = 0 AND next_check_at <= CURRENT_TIMESTAMP ORDER BY next_check_at ASC, id ASC LIMIT 1"},
+			}
+			plans := make([][]queryPlan, len(queries))
+			// Capture both fixed synthetic queries before assertions. Index names and
+			// execution plans contain no user data or connection credentials. Preserve
+			// the strict gate until actual optimizer/scan evidence explains a failure.
+			for i, query := range queries {
+				require.NoError(t, db.WithContext(ctx).Raw("EXPLAIN "+query.sql).Scan(&plans[i]).Error)
+				diagnostic, err := json.Marshal(plans[i])
+				require.NoError(t, err)
+				require.LessOrEqual(t, len(diagnostic), 8192)
+				t.Logf("synthetic Inbox plan %s: %s", query.name, diagnostic)
+				rows, err := db.WithContext(ctx).Raw("EXPLAIN ANALYZE " + query.sql).Rows()
+				require.NoError(t, err)
+				defer rows.Close()
+				count := 0
+				for rows.Next() {
+					count++
+					require.LessOrEqual(t, count, 1)
+					var execution string
+					require.NoError(t, rows.Scan(&execution))
+					require.LessOrEqual(t, len(execution), 8192)
+					t.Logf("synthetic Inbox execution %s: %s", query.name, execution)
 				}
-				require.NoError(t, db.Raw("EXPLAIN "+query).Scan(&explain).Error)
-				require.NotEmpty(t, explain)
+				require.NoError(t, rows.Err())
+				require.NoError(t, rows.Close())
+				require.Equal(t, 1, count)
+			}
+			for i, explain := range plans {
+				require.NotEmpty(t, explain, queries[i].name)
 				for _, row := range explain {
 					require.NotNil(t, row.Key)
 					require.True(t, strings.Contains(*row.Key, "inbox"), "bounded work must use Inbox range indexes")

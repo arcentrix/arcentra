@@ -368,6 +368,12 @@ class Fixture:
             raise RuntimeError("observer login interfered with the administrator session")
         self.note("Separate synthetic pipeline-read observer verified; relogin revokes only its own prior session")
 
+    def login_observer(self):
+        # Explicitly select the distinct fixture identity before checking it.
+        # A check never silently substitutes the current administrator session.
+        self.login(OBSERVER_USERNAME)
+        self.require_observer_session()
+
     def require_observer_session(self):
         if not self.observer_id:
             raise RuntimeError("independent build verification requires its read-only fixture observer")

@@ -27,15 +27,24 @@ class Fixture:
         self.failed_run = dict(projectId='p', pipelineId='pipe', runId='failed')
         self.successful_run = dict(projectId='p', pipelineId='pipe', runId='success')
         self.calls = []
+        self.session = None
+        self.wrong_observer = False
         self.receipt = {'readEntry': dict(id='success', kind='run_result', status='success', occurredAt='2026-10-18T00:00:00Z', deliveredAt='2026-10-18T00:00:01Z', readAt=None, target=dict(type='run', projectId='p', pipelineId='pipe', runId='success'), availability='available'),
                         'unreadEntry': dict(id='failed', kind='run_result', status='failed', occurredAt='2026-10-18T00:00:00Z', deliveredAt='2026-10-18T00:00:01Z', readAt=None, target=dict(type='run', projectId='p', pipelineId='pipe', runId='failed'), availability='available')}
         self.bad_resume = False
         self.bad_browser = False
-    def login(self):
-        self.calls.append('login')
+    def login(self, username='ci-admin'):
+        self.session = username
+        self.calls.append('login' if username == 'ci-admin' else 'login-observer')
+    def login_observer(self):
+        self.login('ci-build-observer')
+        if self.wrong_observer:
+            self.session = 'ci-admin'
+        self.require_observer_session()
     def request(self, path):
         if path == '/users/fetch':
-            return dict(userId='actor', username='ci-admin')
+            return dict(userId='actor' if self.session == 'ci-admin' else 'observer', username=self.session)
+        assert self.session == 'ci-admin', 'primary Inbox snapshot must use its recipient'
         self.calls.append('primary-snapshot')
         return dict(list=[self.receipt['readEntry'], self.receipt['unreadEntry']], nextCursor=None, scanIncomplete=False)
     def stop_application(self, control):
@@ -67,8 +76,11 @@ class Fixture:
             self.receipt['readEntry']['id'] = 'recreated'
         return Handle()
     def require_observer_session(self):
+        if self.session != 'ci-build-observer':
+            raise RuntimeError('observer identity required')
         self.calls.append('observer')
     def expect_rejected(self, *args):
+        assert self.session == 'ci-build-observer', 'foreign denial must use distinct identity'
         assert args[1:] == (404, 404, {}, 'POST')
         self.calls.append('foreign-denied')
     def note(self, note):
@@ -86,13 +98,13 @@ class InboxJourneyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             fixture = Fixture(Path(directory))
             run_personal_inbox(fixture, Running(), Running(), read_json=fixture.read)
-            self.assertEqual(fixture.calls, ['login', 'primary-snapshot', 'browser-read', 'login', 'primary-snapshot', 'observer',
+            self.assertEqual(fixture.calls, ['login', 'primary-snapshot', 'browser-read', 'login', 'primary-snapshot', 'login-observer', 'observer',
                              'foreign-denied', 'foreign-denied', 'login', 'stop-control', 'restart-control',
                              'browser-resume', 'login', 'primary-snapshot'])
             self.assertEqual(len(fixture.inbox_evidence['receiptDigests']), 2)
             self.assertFalse(fixture.inbox_evidence['approvalBrowserFlowVerified'])
     def test_restart_changed_identity_and_browser_errors_never_publish_evidence(self):
-        for option in ('bad_resume', 'bad_browser'):
+        for option in ('bad_resume', 'bad_browser', 'wrong_observer'):
             with self.subTest(option=option), tempfile.TemporaryDirectory() as directory:
                 fixture = Fixture(Path(directory))
                 setattr(fixture, option, True)
@@ -110,6 +122,14 @@ class InboxJourneyTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 run_personal_inbox(fixture, Running(), Running(), read_json=fixture.read)
             self.assertEqual(fixture.calls, [])
+    def test_production_observer_login_precedes_identity_check(self):
+        from run_actual_app import Fixture as ActualFixture, OBSERVER_USERNAME
+        calls = []
+        fixture = SimpleNamespace(login=lambda username: calls.append(('login', username)),
+                                  require_observer_session=lambda: calls.append(('check',)))
+        ActualFixture.login_observer(fixture)
+        self.assertEqual(calls, [('login', OBSERVER_USERNAME), ('check',)])
+
     def test_missing_safety_summary_never_passes(self):
         with self.assertRaises(RuntimeError):
             require_browser_summary(dict(kind='actual-backend', status='passed'))

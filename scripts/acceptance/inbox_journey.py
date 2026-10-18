@@ -88,7 +88,7 @@ def run_personal_inbox(fixture, control, agent, *, read_json):
         fixture.login()
         validate_primary_snapshot(fixture.request('/inbox?filter=all&limit=50'), receipt)
         if phase == 'read':
-            fixture.require_observer_session()
+            fixture.login_observer()
             for item in (receipt['readEntry'], receipt['unreadEntry']):
                 fixture.expect_rejected('/inbox/' + item['id'] + '/read', 404, 404, {}, 'POST')
             fixture.login()
