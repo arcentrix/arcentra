@@ -40,10 +40,17 @@ func newDeploymentAuthorizer(repositories *repo.Repositories, deployments *Deplo
 				return ErrDeploymentAuthorization
 			}
 		}
-		if repositories == nil || repositories.User == nil || repositories.TeamMember == nil || repositories.Team == nil || repositories.Project == nil || repositories.Pipeline == nil || deployments == nil {
+		if deployments == nil || deployments.records == nil {
 			return ErrDeploymentAuthorization
 		}
-		actors, ok := repositories.User.(repo.IExecutionActorReader)
+		// Every execution boundary needs current source reads. A newly built
+		// permission snapshot from an ordinary read-routed repository can still
+		// authorize an archived project or revoked actor from a lagging replica.
+		current, err := repositories.PollingPrimaryRepositories()
+		if err != nil || current == nil {
+			return ErrDeploymentAuthorization
+		}
+		actors, ok := current.User.(repo.IExecutionActorReader)
 		if !ok {
 			return ErrDeploymentAuthorization
 		}
@@ -51,15 +58,15 @@ func newDeploymentAuthorizer(repositories *repo.Repositories, deployments *Deplo
 		if err != nil || user == nil || user.UserID != actorID || user.IsEnabled != 1 {
 			return ErrDeploymentAuthorization
 		}
-		project, err := repositories.Project.Get(ctx, projectID)
+		project, err := current.Project.Get(ctx, projectID)
 		if err != nil || project == nil || project.ProjectID != projectID || project.IsEnabled != 1 || project.Status != model.ProjectStatusActive {
 			return ErrDeploymentAuthorization
 		}
-		pipeline, err := repositories.Pipeline.Get(ctx, pipelineID)
+		pipeline, err := current.Pipeline.Get(ctx, pipelineID)
 		if err != nil || pipeline == nil || pipeline.PipelineID != pipelineID || pipeline.ProjectID != projectID || pipeline.IsEnabled != 1 {
 			return ErrDeploymentAuthorization
 		}
-		memberships, err := repositories.TeamMember.ListUserTeams(ctx, actorID)
+		memberships, err := current.TeamMember.ListUserTeams(ctx, actorID)
 		if err != nil || len(memberships) > 1000 {
 			return ErrDeploymentAuthorization
 		}
@@ -76,7 +83,7 @@ func newDeploymentAuthorizer(repositories *repo.Repositories, deployments *Deplo
 		}
 		subject := authz.Subject{UserID: actorID}
 		if len(ids) > 0 {
-			teams, err := repositories.Team.BatchGet(ctx, ids)
+			teams, err := current.Team.BatchGet(ctx, ids)
 			if err != nil {
 				return ErrDeploymentAuthorization
 			}
@@ -93,7 +100,7 @@ func newDeploymentAuthorizer(repositories *repo.Repositories, deployments *Deplo
 		if err != nil || (action != "release:deploy_dev" && action != "release:deploy_staging" && action != "release:deploy_prod") {
 			return ErrDeploymentAuthorization
 		}
-		authorizer, err := authz.NewLiveAuthorizer(ctx, repositories)
+		authorizer, err := authz.NewLiveAuthorizer(ctx, current)
 		if err != nil {
 			return ErrDeploymentAuthorization
 		}

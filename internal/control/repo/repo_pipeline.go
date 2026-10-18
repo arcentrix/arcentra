@@ -19,11 +19,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/database"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // PipelineQuery defines query parameters for listing pipelines.
@@ -269,12 +269,22 @@ func (r *PipelineRepo) UpdateRunIfStatus(ctx context.Context, runID string, stat
 	if err != nil {
 		return err
 	}
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return r.Database().WithContext(ctx).Clauses(database.Write()).Transaction(func(tx *gorm.DB) error {
 		var run model.PipelineRun
 		if err := tx.Select("pipeline_id").Where("run_id = ?", runID).First(&run).Error; err != nil {
 			return err
 		}
-		result := tx.Model(&model.PipelineRun{}).Where("run_id = ? AND status = ?", runID, status).Updates(updates)
+		// Admission takes pipeline -> project -> run. Acquire the pipeline
+		// before updating a run too, so cancellation cannot form run -> pipeline
+		// against a new admission waiting for that run.
+		var pipeline model.Pipeline
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("pipeline_id").Where("pipeline_id = ?", run.PipelineID).First(&pipeline).Error; err != nil {
+			return err
+		}
+		if pipeline.PipelineID != run.PipelineID {
+			return gorm.ErrRecordNotFound
+		}
+		result := tx.Model(&model.PipelineRun{}).Where("run_id = ? AND pipeline_id = ? AND status = ?", runID, run.PipelineID, status).Updates(updates)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -288,14 +298,19 @@ func (r *PipelineRepo) UpdateRunIfStatus(ctx context.Context, runID string, stat
 	})
 }
 
-// StartRunIfPending 原子认领部署运行，防止重复调度或重启后自动重放
+// StartRunIfPending retains the legacy internal entry point with the same
+// lifecycle and immutable identity admission boundary used by the process.
 func (r *PipelineRepo) StartRunIfPending(ctx context.Context, runID string) error {
-	result := r.Database().WithContext(ctx).Model(&model.PipelineRun{}).Where("run_id = ? AND status = ?", runID, model.PipelineStatusPending).Updates(map[string]any{"status": model.PipelineStatusRunning, "start_time": time.Now()})
-	if result.Error != nil {
-		return result.Error
+	run, err := r.GetRun(ctx, runID)
+	if err != nil {
+		return err
 	}
-	if result.RowsAffected != 1 {
-		return fmt.Errorf("pipeline run is no longer pending")
+	admitted, err := r.StartManualRunIfPending(ctx, run)
+	if err != nil {
+		return err
+	}
+	if !admitted {
+		return fmt.Errorf("pipeline run is no longer eligible for scheduling")
 	}
 	return nil
 }

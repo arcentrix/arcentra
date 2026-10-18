@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -10,12 +11,20 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/authz"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/plugin/dbresolver"
 )
 
 func liveDeploymentAuthorizationFixture(t *testing.T, team bool) (PipelineDeploymentAuthorizer, *gorm.DB, string, *repo.Repositories) {
 	t.Helper()
 	service, db, input, _ := releaseFixture(t)
+	repositories := liveDeploymentRepositories(t, db, team)
+	return NewPipelineDeploymentAuthorizer(repositories, service), db, input.EnvironmentID, repositories
+}
+
+func liveDeploymentRepositories(t *testing.T, db *gorm.DB, team bool) *repo.Repositories {
+	t.Helper()
 	if err := db.AutoMigrate(&model.User{}, &model.Team{}, &model.TeamMember{}, &model.Role{}, &model.RoleGrant{}, &model.Permission{}, &model.RolePermissionBinding{}); err != nil {
 		t.Fatal(err)
 	}
@@ -50,8 +59,7 @@ func liveDeploymentAuthorizationFixture(t *testing.T, team bool) (PipelineDeploy
 	if err := db.Create(grant).Error; err != nil {
 		t.Fatal(err)
 	}
-	repositories := repo.NewRepositories(artifactServiceDatabase{db}, nil)
-	return NewPipelineDeploymentAuthorizer(repositories, service), db, input.EnvironmentID, repositories
+	return repo.NewRepositories(artifactServiceDatabase{db}, nil)
 }
 
 func TestDeploymentLiveAuthorizationRechecksCurrentState(t *testing.T) {
@@ -139,6 +147,89 @@ func TestDeploymentLiveAuthorizationFailsClosed(t *testing.T) {
 	}
 	if err := NewPipelineDeploymentAuthorizer(nil, nil)(context.Background(), "actor", "project", "pipe", environment); err == nil {
 		t.Fatal("missing dependencies accepted")
+	}
+}
+
+func TestDeploymentLiveAuthorizationRejectsLaggingReplica(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		revoke func(*gorm.DB) error
+	}{
+		{"archived-project", func(db *gorm.DB) error {
+			return db.Model(&model.Project{}).Where("project_id = ?", "project").Update("status", model.ProjectStatusArchived).Error
+		}},
+		{"disabled-actor", func(db *gorm.DB) error {
+			return db.Model(&model.User{}).Where("user_id = ?", "actor").Update("is_enabled", 0).Error
+		}},
+		{"revoked-grant", func(db *gorm.DB) error {
+			return db.Model(&model.RoleGrant{}).Where("grant_id = ?", "grant").Update("is_enabled", 0).Error
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			deployment, primary, input, _ := releaseFixture(t)
+			repositories := liveDeploymentRepositories(t, primary, false)
+			authorize := NewPipelineDeploymentAuthorizer(repositories, deployment)
+			ctx := context.Background()
+			if err := authorize(ctx, "actor", "project", "pipe", input.EnvironmentID); err != nil {
+				t.Fatal(err)
+			}
+			// A real second SQLite database preserves all identities and the
+			// immutable environment while the source receives a later revocation.
+			replicaPath := filepath.Join(t.TempDir(), "lagging-replica.db")
+			if err := primary.Exec("VACUUM INTO ?", replicaPath).Error; err != nil {
+				t.Fatal(err)
+			}
+			replica, err := gorm.Open(sqlite.Open(replicaPath), &gorm.Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pool, err := replica.DB()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = pool.Close() })
+			if err := primary.Use(dbresolver.Register(dbresolver.Config{Replicas: []gorm.Dialector{sqlite.Open(replicaPath)}})); err != nil {
+				t.Fatal(err)
+			}
+			if err := authorize(ctx, "actor", "project", "pipe", input.EnvironmentID); err != nil {
+				t.Fatal("primary-routed valid authority was denied", err)
+			}
+			if err := test.revoke(primary); err != nil {
+				t.Fatal(err)
+			}
+			stale := NewPipelineDeploymentAuthorizer(repo.NewRepositories(artifactServiceDatabase{replica}, nil), deployment)
+			if err := stale(ctx, "actor", "project", "pipe", input.EnvironmentID); err != nil {
+				t.Fatal("replica did not preserve stale authority", err)
+			}
+			if err := authorize(ctx, "actor", "project", "pipe", input.EnvironmentID); !errors.Is(err, ErrDeploymentAuthorization) {
+				t.Fatal("stale replica granted deployment authority", err)
+			}
+		})
+	}
+}
+
+type deploymentMutablePrimaryDatabase struct{ db *gorm.DB }
+
+func (d *deploymentMutablePrimaryDatabase) Database() *gorm.DB { return d.db }
+
+func TestDeploymentLiveAuthorizationRequiresCurrentPrimary(t *testing.T) {
+	deployment, db, input, _ := releaseFixture(t)
+	current := liveDeploymentRepositories(t, db, false)
+	// Fully populated public repositories without their source handle must not
+	// silently fall back to the ordinary read-routed repository interfaces.
+	missing := &repo.Repositories{User: current.User, Team: current.Team, TeamMember: current.TeamMember, Project: current.Project, Pipeline: current.Pipeline, Permission: current.Permission, Role: current.Role, RoleGrant: current.RoleGrant}
+	ctx := context.Background()
+	if err := NewPipelineDeploymentAuthorizer(missing, deployment)(ctx, "actor", "project", "pipe", input.EnvironmentID); !errors.Is(err, ErrDeploymentAuthorization) {
+		t.Fatal("missing primary fell back to ordinary repositories", err)
+	}
+	mutable := &deploymentMutablePrimaryDatabase{db: db}
+	authorize := NewPipelineDeploymentAuthorizer(repo.NewRepositories(mutable, nil), deployment)
+	if err := authorize(ctx, "actor", "project", "pipe", input.EnvironmentID); err != nil {
+		t.Fatal(err)
+	}
+	mutable.db = nil
+	if err := authorize(ctx, "actor", "project", "pipe", input.EnvironmentID); !errors.Is(err, ErrDeploymentAuthorization) {
+		t.Fatal("unavailable primary reused prior authority", err)
 	}
 }
 

@@ -8,7 +8,6 @@ import (
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/authz"
 	"github.com/arcentrix/arcentra/internal/control/model"
-	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/http/jwt"
 	"github.com/arcentrix/arcentra/pkg/http/middleware"
 	"github.com/gofiber/fiber/v2"
@@ -27,11 +26,8 @@ func collectionSubject(c *fiber.Ctx) (authz.Subject, bool) {
 // collectionAccess 仅建立鉴权前置条件，资源权限在列表分页之前逐项检查
 func (rt *Router) collectionAccess() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		if rt.Services == nil || rt.Services.Authorizer == nil {
-			return http.Err(c, http.InternalError.Code, http.InternalError.Msg)
-		}
-		if _, ok := collectionSubject(c); !ok {
-			return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
+		if _, err := rt.liveRequestAuthorization(c); err != nil {
+			return organizationError(c, err)
 		}
 		return c.Next()
 	}
@@ -67,14 +63,15 @@ func (rt *Router) resolveCreatePipelineScope() middleware.ScopeResolver {
 }
 
 func (rt *Router) allowed(c *fiber.Ctx, action string, resource authz.ResourceRef) (bool, error) {
-	if rt.Services == nil || rt.Services.Authorizer == nil {
-		return false, errors.New("authorizer is unavailable")
+	live, err := rt.liveRequestAuthorization(c)
+	if err != nil {
+		return false, err
 	}
-	subject, ok := collectionSubject(c)
-	if !ok {
-		return false, errors.New("authenticated subject is required")
+	resource, err = live.resource(c.UserContext(), resource)
+	if err != nil {
+		return false, err
 	}
-	return rt.Services.Authorizer.Check(c.Context(), subject, action, resource)
+	return live.checker.Check(c.UserContext(), live.subject, action, resource)
 }
 
 func normalizedCollectionPage(page, size int) (int, int) {
@@ -160,7 +157,7 @@ func (rt *Router) authorizedProjectList(c *fiber.Ctx, query *model.ProjectQueryR
 	if rt.Services == nil || rt.Services.Project == nil {
 		return nil, 0, errors.New("project service is unavailable")
 	}
-	allAllowed, err := rt.allowed(c, "project:read", authz.ResourceRef{OrgID: query.OrgID})
+	allAllowed, err := rt.allowed(c, "project:read", authz.ResourceRef{})
 	if err != nil {
 		return nil, 0, err
 	}

@@ -31,10 +31,10 @@ func approvalRouterFixture(t *testing.T) (*fiber.App, *Router, *gorm.DB) {
 	// 使用真实服务聚合以逐次重读角色、授权和过期条件
 	rt.Services = service.NewServices(adapter, nil, repos)
 	ctx := context.Background()
-	for _, id := range []string{"project-user", "org-user", "admin", "team-user"} {
+	for _, id := range []string{"team-user"} {
 		require.NoError(t, db.WithContext(ctx).Create(&model.User{UserID: id, Username: id, IsEnabled: 1}).Error)
 	}
-	require.NoError(t, db.WithContext(ctx).Create(&model.Role{RoleID: "scoped-test", Name: "test approvals", IsEnabled: 1}).Error)
+	// The base collection fixture now seeds active users and the scoped role.
 	for _, permission := range []string{consts.PermApprovalRead, consts.PermApprovalApprove, consts.PermApprovalReject} {
 		require.NoError(t, db.WithContext(ctx).Create(&model.RolePermissionBinding{RoleID: "scoped-test", PermissionID: permission}).Error)
 	}

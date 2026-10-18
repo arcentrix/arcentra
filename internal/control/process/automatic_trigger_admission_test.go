@@ -139,6 +139,11 @@ func TestAutomaticTriggerRetryApprovalRefusedBeforeRunCreation(t *testing.T) {
 
 func pendingAutomaticRun(t *testing.T, repository repo.IPipelineRepository, suffix string) *model.PipelineRun {
 	t.Helper()
+	if _, err := repository.Get(context.Background(), "pipeline"); err != nil {
+		if err := repository.Create(context.Background(), &model.Pipeline{PipelineID: "pipeline", ProjectID: "admission-project", IsEnabled: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	run := &model.PipelineRun{RunID: "automatic-" + suffix, PipelineID: "pipeline", RequestID: "cron:pipeline:" + suffix, TriggerType: int(pipelinev1.TriggerType_TRIGGER_TYPE_CRON), TriggeredBy: "cron", Status: model.PipelineStatusPending}
 	if err := repository.CreateRun(context.Background(), run); err != nil {
 		t.Fatal(err)

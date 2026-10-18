@@ -21,20 +21,21 @@ import (
 // Organization 组织表
 type Organization struct {
 	BaseModel
-	OrgID       string         `gorm:"column:org_id" json:"orgId"`                // 组织唯一标识
-	Name        string         `gorm:"column:name" json:"name"`                   // 组织名称
-	DisplayName string         `gorm:"column:display_name" json:"displayName"`    // 组织显示名称
-	Description string         `gorm:"column:description" json:"description"`     // 组织描述
-	Logo        string         `gorm:"column:logo" json:"logo"`                   // 组织Logo URL
-	Website     string         `gorm:"column:website" json:"website"`             // 组织官网
-	Email       string         `gorm:"column:email" json:"email"`                 // 组织联系邮箱
-	Phone       string         `gorm:"column:phone" json:"phone"`                 // 组织联系电话
-	Address     string         `gorm:"column:address" json:"address"`             // 组织地址
-	Settings    datatypes.JSON `gorm:"column:settings;type:json" json:"settings"` // 组织设置
-	Plan        string         `gorm:"column:plan" json:"plan"`                   // 订阅计划(free/pro/enterprise)
-	Status      int            `gorm:"column:status" json:"status"`               // 状态: 0-未激活, 1-正常, 2-冻结, 3-已删除
-	OwnerUserID string         `gorm:"column:owner_user_id" json:"ownerUserId"`   // 组织所有者用户ID
-	IsEnabled   int            `gorm:"column:is_enabled" json:"isEnabled"`        // 0: disabled, 1: enabled
+	Version     uint64         `gorm:"column:version;not null;default:1" json:"version"`
+	OrgID       string         `gorm:"column:org_id;not null;uniqueIndex;type:varchar(64)" json:"orgId"` // 组织唯一标识
+	Name        string         `gorm:"column:name;not null;uniqueIndex;type:varchar(64)" json:"name"`    // 组织名称
+	DisplayName string         `gorm:"column:display_name" json:"displayName"`                           // 组织显示名称
+	Description string         `gorm:"column:description" json:"description"`                            // 组织描述
+	Logo        string         `gorm:"column:logo" json:"logo"`                                          // 组织Logo URL
+	Website     string         `gorm:"column:website" json:"website"`                                    // 组织官网
+	Email       string         `gorm:"column:email" json:"email"`                                        // 组织联系邮箱
+	Phone       string         `gorm:"column:phone" json:"phone"`                                        // 组织联系电话
+	Address     string         `gorm:"column:address" json:"address"`                                    // 组织地址
+	Settings    datatypes.JSON `gorm:"column:settings;type:json" json:"settings"`                        // 组织设置
+	Plan        string         `gorm:"column:plan" json:"plan"`                                          // 订阅计划(free/pro/enterprise)
+	Status      int            `gorm:"column:status" json:"status"`                                      // 状态: 0-未激活, 1-正常, 2-冻结, 3-已删除
+	OwnerUserID string         `gorm:"column:owner_user_id" json:"ownerUserId"`                          // 组织所有者用户ID
+	IsEnabled   int            `gorm:"column:is_enabled" json:"isEnabled"`                               // 0: disabled, 1: enabled
 
 	// 统计字段
 	TotalMembers  int `gorm:"column:total_members" json:"totalMembers"`   // 成员总数

@@ -20,10 +20,14 @@ type releaseFakeAdapter struct {
 	inspect, apply, observe    int
 	applyErr, errorObservation error
 	observation                cluster.Observation
+	afterInspect               func()
 }
 
 func (f *releaseFakeAdapter) Inspect(context.Context, cluster.Target) (cluster.Receipt, error) {
 	f.inspect++
+	if f.afterInspect != nil {
+		f.afterInspect()
+	}
 	return cluster.Receipt{UID: "workload", Generation: 7}, nil
 }
 func (f *releaseFakeAdapter) Apply(context.Context, cluster.Target, string, string, cluster.Receipt) (cluster.Receipt, error) {
@@ -38,6 +42,12 @@ func releaseFixture(t *testing.T) (*DeploymentService, *gorm.DB, DeploymentRelea
 	t.Helper()
 	files, db, artifact := artifactServiceFixture(t)
 	if err := db.AutoMigrate(&model.DeploymentEnvironment{}, &model.DeploymentRelease{}, &model.ApprovalRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.Project{}).Where("project_id = ?", "project").Updates(map[string]any{"is_enabled": 1, "status": model.ProjectStatusActive}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.Pipeline{}).Where("pipeline_id = ?", "pipe").Update("is_enabled", 1).Error; err != nil {
 		t.Fatal(err)
 	}
 	manifest := []byte(`{"image":"registry.example/team/app@sha256:` + strings.Repeat("a", 64) + `"}`)
@@ -58,6 +68,18 @@ func releaseFixture(t *testing.T) (*DeploymentService, *gorm.DB, DeploymentRelea
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Unit fixtures authorize only their fixed actor and scope, while reloading
+	// project state. Production installs NewPipelineDeploymentAuthorizer.
+	service.ConfigurePipelineDeployments(nil, nil, func(ctx context.Context, actor, project, pipeline, env string) error {
+		if actor != "user" || project != "project" || pipeline != "pipe" || env != environment.EnvironmentID {
+			return ErrDeploymentAuthorization
+		}
+		var current model.Project
+		if err := db.WithContext(ctx).Where("project_id = ?", project).First(&current).Error; err != nil || current.IsEnabled != 1 || current.Status != model.ProjectStatusActive {
+			return ErrDeploymentAuthorization
+		}
+		return nil
+	})
 	return service, db, DeploymentReleaseInput{RequestID: "request", EnvironmentID: environment.EnvironmentID, PipelineID: "pipe", PipelineRunID: "run", ArtifactID: artifact.ArtifactID}, adapter
 }
 func TestDeploymentReleaseLifecycleAndImmutableIdempotency(t *testing.T) {
@@ -84,18 +106,18 @@ func TestDeploymentReleaseLifecycleAndImmutableIdempotency(t *testing.T) {
 	if _, err := s.GetRelease(ctx, "other", release.ReleaseID); !errors.Is(err, ErrDeploymentNotFound) {
 		t.Fatalf("cross project read %v", err)
 	}
-	release, err = s.Advance(ctx, "project", release.ReleaseID)
+	release, err = s.AdvanceAuthorized(ctx, "project", release.ReleaseID, "user")
 	if err != nil || release.Status != "observing" || adapter.observe != 0 {
 		t.Fatalf("apply faked health %+v %v", release, err)
 	}
 	if _, err := s.Cancel(ctx, "project", release.ReleaseID); !errors.Is(err, ErrDeploymentCancel) {
 		t.Fatalf("active cancellation accepted %v", err)
 	}
-	release, err = s.Advance(ctx, "project", release.ReleaseID)
+	release, err = s.AdvanceAuthorized(ctx, "project", release.ReleaseID, "user")
 	if err != nil || release.Status != "succeeded" || release.LastObservedAt == nil || release.FinishedAt == nil {
 		t.Fatalf("observation %+v %v", release, err)
 	}
-	if _, err = s.Advance(ctx, "project", release.ReleaseID); err != nil || adapter.apply != 1 || adapter.observe != 1 {
+	if _, err = s.AdvanceAuthorized(ctx, "project", release.ReleaseID, "user"); err != nil || adapter.apply != 1 || adapter.observe != 1 {
 		t.Fatal("terminal release was reexecuted")
 	}
 	if _, err := s.CreateRelease(ctx, "project", "user", second); err != nil {
@@ -124,7 +146,7 @@ func TestDeploymentUnconfiguredExactScopeAndSafeCancel(t *testing.T) {
 				binding.Target.Container = "admin"
 				s.targets["staging"] = binding
 			}
-			if _, err := s.Advance(context.Background(), "project", release.ReleaseID); !errors.Is(err, cluster.ErrUnconfigured) {
+			if _, err := s.AdvanceAuthorized(context.Background(), "project", release.ReleaseID, "user"); !errors.Is(err, cluster.ErrUnconfigured) {
 				t.Fatalf("not fail closed %v", err)
 			}
 			if adapter.inspect+adapter.apply+adapter.observe != 0 {
@@ -152,7 +174,7 @@ func TestDeploymentUnknownApplyRetainsClaimAndRetries(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter.applyErr = cluster.ErrUnavailable
-	if _, err := s.Advance(ctx, "project", release.ReleaseID); !errors.Is(err, cluster.ErrUnavailable) {
+	if _, err := s.AdvanceAuthorized(ctx, "project", release.ReleaseID, "user"); !errors.Is(err, cluster.ErrUnavailable) {
 		t.Fatal(err)
 	}
 	after, _ := s.GetRelease(ctx, "project", release.ReleaseID)
@@ -163,12 +185,12 @@ func TestDeploymentUnknownApplyRetainsClaimAndRetries(t *testing.T) {
 		t.Fatal("ambiguous apply cancelled")
 	}
 	adapter.applyErr = nil
-	after, err = s.Advance(ctx, "project", release.ReleaseID)
+	after, err = s.AdvanceAuthorized(ctx, "project", release.ReleaseID, "user")
 	if err != nil || after.Status != "observing" || adapter.inspect != 1 {
 		t.Fatalf("failed recovery %+v %v", after, err)
 	}
 	adapter.errorObservation = cluster.ErrUnavailable
-	if _, err := s.Advance(ctx, "project", release.ReleaseID); err == nil {
+	if _, err := s.AdvanceAuthorized(ctx, "project", release.ReleaseID, "user"); err == nil {
 		t.Fatal("API failure considered success")
 	}
 	after, _ = s.GetRelease(ctx, "project", release.ReleaseID)
@@ -244,7 +266,7 @@ func TestDeploymentTargetIdentityCannotChangeAfterPreparation(t *testing.T) {
 	binding := s.targets["staging"]
 	binding.Fingerprint = "changed-cluster-identity"
 	s.targets["staging"] = binding
-	if _, err := s.Advance(ctx, "project", release.ReleaseID); !errors.Is(err, ErrDeploymentTargetChanged) {
+	if _, err := s.AdvanceAuthorized(ctx, "project", release.ReleaseID, "user"); !errors.Is(err, ErrDeploymentTargetChanged) {
 		t.Fatalf("retargeted queued release: %v", err)
 	}
 	if adapter.inspect+adapter.apply != 0 {
@@ -269,7 +291,7 @@ func TestDeploymentManualSourceUsesDefinitionRevisionWithoutSourceClaim(t *testi
 	if err != nil || release.CommitSHA != strings.Repeat("d", 40) {
 		t.Fatalf("definition revision missing: %+v %v", release, err)
 	}
-	if _, err = s.Advance(context.Background(), "project", release.ReleaseID); err != nil {
+	if _, err = s.AdvanceAuthorized(context.Background(), "project", release.ReleaseID, "user"); err != nil {
 		t.Fatal(err)
 	}
 }

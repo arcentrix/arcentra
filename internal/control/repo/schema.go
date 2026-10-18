@@ -14,6 +14,9 @@ func MigrateSchema(ctx context.Context, db *gorm.DB) error {
 	if db == nil {
 		return fmt.Errorf("database is required")
 	}
+	if err := preflightOrganizationSchema(ctx, db); err != nil {
+		return err
+	}
 	models := schemaModels()
 	if err := db.WithContext(ctx).AutoMigrate(models...); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)

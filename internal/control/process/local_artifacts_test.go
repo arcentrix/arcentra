@@ -41,7 +41,7 @@ func TestProcessArtifactUploadSurvivesWorkspaceCleanup(t *testing.T) {
 	t.Cleanup(engine.Stop)
 	projectID := "artifact-project"
 	pipelineID := id.GetUild()
-	for _, value := range []any{&model.Project{ProjectID: projectID}, &model.Pipeline{PipelineID: pipelineID, ProjectID: projectID, Name: "local-artifacts", IsEnabled: 1}} {
+	for _, value := range []any{&model.Project{ProjectID: projectID, IsEnabled: 1, Status: model.ProjectStatusActive}, &model.Pipeline{PipelineID: pipelineID, ProjectID: projectID, Name: "local-artifacts", IsEnabled: 1}} {
 		if err = db.Create(value).Error; err != nil {
 			t.Fatal(err)
 		}

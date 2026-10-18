@@ -35,7 +35,10 @@ func newTestProcess(t *testing.T) (*Process, *repo.Repositories) {
 	}
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.AutoMigrate(&model.Pipeline{}, &model.PipelineRun{}, &model.JobRun{}, &model.StepRun{}, &model.StepRunLog{}); err != nil {
+	if err := db.AutoMigrate(&model.Project{}, &model.Pipeline{}, &model.PipelineRun{}, &model.JobRun{}, &model.StepRun{}, &model.StepRunLog{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Project{ProjectID: "admission-project", IsEnabled: 1, Status: model.ProjectStatusActive}).Error; err != nil {
 		t.Fatal(err)
 	}
 	adapter := processTestDB{db}
@@ -49,7 +52,7 @@ func newTestProcess(t *testing.T) (*Process, *repo.Repositories) {
 func submitTestPipeline(t *testing.T, engine *Process, repos *repo.Repositories, jobs ...*spec.Job) *model.PipelineRun {
 	t.Helper()
 	pipelineID := id.GetUild()
-	if err := repos.Pipeline.Create(context.Background(), &model.Pipeline{PipelineID: pipelineID, Name: "integration", IsEnabled: 1}); err != nil {
+	if err := repos.Pipeline.Create(context.Background(), &model.Pipeline{PipelineID: pipelineID, ProjectID: "admission-project", Name: "integration", IsEnabled: 1}); err != nil {
 		t.Fatal(err)
 	}
 	run := &model.PipelineRun{RunID: id.GetUild(), PipelineID: pipelineID, Status: model.PipelineStatusPending, Env: `{"INTEGRATION_VALUE":"real"}`, TotalJobs: len(jobs)}

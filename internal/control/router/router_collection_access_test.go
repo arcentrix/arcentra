@@ -43,7 +43,7 @@ func collectionRouterFixture(t *testing.T) (*fiber.App, *Router) {
 	repos := repo.NewRepositories(collectionTestDB{db}, nil)
 	for i, item := range []struct{ id, org string }{{"a", "org-one"}, {"b", "org-one"}, {"c", "org-two"}} {
 		created := time.Now().Add(time.Duration(i) * time.Second)
-		if err := repos.Project.Create(context.Background(), &model.Project{BaseModel: model.BaseModel{CreatedAt: created}, ProjectID: item.id, OrgID: item.org, Name: item.id, RepoURL: "https://example.test/" + item.id, Status: 1}); err != nil {
+		if err := repos.Project.Create(context.Background(), &model.Project{BaseModel: model.BaseModel{CreatedAt: created}, ProjectID: item.id, OrgID: item.org, Name: item.id, RepoURL: "https://example.test/" + item.id, Status: 1, IsEnabled: 1}); err != nil {
 			t.Fatal(err)
 		}
 		if err := repos.Pipeline.Create(context.Background(), &model.Pipeline{BaseModel: model.BaseModel{CreatedAt: created}, PipelineID: "pipe-" + item.id, ProjectID: item.id, Name: item.id, IsEnabled: 1}); err != nil {
@@ -64,11 +64,17 @@ func collectionRouterFixture(t *testing.T) (*fiber.App, *Router) {
 			t.Fatal(err)
 		}
 	}
-	authorizer, err := authz.NewAuthorizer(repos, nil)
-	if err != nil {
+
+	for _, user := range []string{"project-user", "org-user", "admin", "outsider"} {
+		if err := db.Create(&model.User{UserID: user, Username: user, IsEnabled: 1}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Create(&model.Role{RoleID: "scoped-test", Name: "scoped-test", IsEnabled: 1}).Error; err != nil {
 		t.Fatal(err)
 	}
-	rt := &Router{HTTP: &http.HTTP{Auth: http.Auth{SecretKey: "test-secret"}}, Services: &service.Services{PipelineRepo: repos.Pipeline, ProjectRepo: repos.Project, Project: service.NewProjectService(repos.Project), Authorizer: authorizer}}
+	rt := &Router{HTTP: &http.HTTP{Auth: http.Auth{SecretKey: "test-secret"}}, Services: service.NewServices(collectionTestDB{db}, nil, repos)}
+
 	app := fiber.New()
 	app.Use(middleware.UnifiedResponseMiddleware())
 	authMW := func(c *fiber.Ctx) error {

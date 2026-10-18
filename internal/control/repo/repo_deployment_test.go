@@ -119,3 +119,12 @@ func TestDeploymentPipelineCreationLinksStepOrRollsBackTogether(t *testing.T) {
 		t.Fatalf("duplicate release count: %d", count)
 	}
 }
+
+func TestDeploymentApplyStateFailsClosedWithoutPrimaryDatabase(t *testing.T) {
+	for _, records := range []*DeploymentRepo{nil, {}, {IDatabase: artifactTestDatabase{nil}}} {
+		entry, environment, err := records.GetApplyState(context.Background(), "project", "release")
+		if err != ErrDeploymentApplyState || entry != nil || environment != nil {
+			t.Fatalf("unavailable primary state accepted: %+v %+v %v", entry, environment, err)
+		}
+	}
+}

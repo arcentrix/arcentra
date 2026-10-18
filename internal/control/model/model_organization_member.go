@@ -17,12 +17,15 @@ package model
 // OrganizationMember 组织成员表
 type OrganizationMember struct {
 	BaseModel
-	OrgID     string `gorm:"column:org_id" json:"orgId"`         // 组织ID
-	UserID    string `gorm:"column:user_id" json:"userId"`       // 用户ID
-	Username  string `gorm:"column:username" json:"username"`    // 用户名(冗余)
-	Email     string `gorm:"column:email" json:"email"`          // 邮箱(冗余)
-	InvitedBy string `gorm:"column:invited_by" json:"invitedBy"` // 邀请人用户ID
-	Status    int    `gorm:"column:status" json:"status"`        // 状态: 0-待接受, 1-正常, 2-禁用
+	Version        uint64 `gorm:"column:version;not null;default:1" json:"version"`
+	ManagedGrantID string `gorm:"column:managed_grant_id;not null;default:'';type:varchar(64)" json:"-"`
+	ManagedRoleID  string `gorm:"column:managed_role_id;not null;default:'';type:varchar(64)" json:"-"`
+	OrgID          string `gorm:"column:org_id;not null;uniqueIndex:idx_org_member_user;type:varchar(64)" json:"orgId"`   // 组织ID
+	UserID         string `gorm:"column:user_id;not null;uniqueIndex:idx_org_member_user;type:varchar(64)" json:"userId"` // 用户ID
+	Username       string `gorm:"column:username" json:"username"`                                                        // 用户名(冗余)
+	Email          string `gorm:"column:email" json:"email"`                                                              // 邮箱(冗余)
+	InvitedBy      string `gorm:"column:invited_by" json:"invitedBy"`                                                     // 邀请人用户ID
+	Status         int    `gorm:"column:status" json:"status"`                                                            // 状态: 0-待接受, 1-正常, 2-禁用
 }
 
 func (OrganizationMember) TableName() string {

@@ -604,12 +604,14 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
         self.fixture.storage_setup_verified = True
         app.atomic_json(self.summary_path, self.summary("build"))
         with mock.patch.object(self.fixture, "start", return_value=self.browser) as start, \
-                mock.patch.object(self.fixture, "verify_downloads") as verify:
+                mock.patch.object(self.fixture, "verify_downloads") as verify, \
+                mock.patch.object(self.fixture, "verify_organization_management") as organization:
             self.fixture.run_build_browser(self.control, self.agent)
         self.assertEqual(start.call_args.args[0], "browser")
         self.assertEqual(start.call_args.args[1], self.args.browser_command)
         self.assertEqual(start.call_args.args[3]["ARCENTRA_ACCEPTANCE_PHASE"], "build")
         verify.assert_called_once_with()
+        organization.assert_called_once_with()
 
     def test_preflight_summary_cannot_substitute_for_full_build_completion(self):
         self.fixture.preflight_verified = True
@@ -627,6 +629,16 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
                 self.fixture.browser_environment(phase)
         self.fixture.env["ARCENTRA_ACCEPTANCE_PHASE"] = "preflight"
         self.assertEqual(self.fixture.browser_environment("build")["ARCENTRA_ACCEPTANCE_PHASE"], "build")
+        self.fixture.env["ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY"] = "1"
+        self.fixture.env["ARCENTRA_ACCEPTANCE_MEMBER_USER_ID"] = "inherited-user"
+        self.fixture.observer_id = "verified-observer"
+        for phase in ("preflight", "storage-setup"):
+            env = self.fixture.browser_environment(phase)
+            self.assertNotIn("ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY", env)
+            self.assertNotIn("ARCENTRA_ACCEPTANCE_MEMBER_USER_ID", env)
+        env = self.fixture.browser_environment("build")
+        self.assertEqual(env["ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY"], "1")
+        self.assertEqual(env["ARCENTRA_ACCEPTANCE_MEMBER_USER_ID"], "verified-observer")
 
     def test_summary_requires_exact_same_source_completed_steps_without_extra_claims(self):
         for phase in ("preflight", "storage-setup", "build"):
@@ -1227,6 +1239,51 @@ class LoopbackReadinessProbeTests(unittest.TestCase):
 
     def test_actual_tcp_persistent_reset_bounded(self):
         self.exercise_server(True)
+
+
+class OrganizationManagementEvidenceTests(unittest.TestCase):
+    def evidence(self):
+        return {"organizationManagement": {"journey": "organization-members-settings-v1",
+            "completed": True, "orgId": "synthetic-org", "projectId": "synthetic-project",
+            "steps": list(app.ORGANIZATION_MANAGEMENT_STEPS)}}
+
+    def test_exact_evidence_required(self):
+        expected = self.evidence()
+        self.assertEqual(app.validate_organization_management(expected), expected["organizationManagement"])
+        for key, value in (("completed", False), ("completed", 1), ("steps", []),
+                           ("steps", app.ORGANIZATION_MANAGEMENT_STEPS[:-1]),
+                           ("orgId", "../private-token"), ("projectId", ""),
+                           ("token", "private-token"), ("journey", "simulated")):
+            changed = copy.deepcopy(expected)
+            changed["organizationManagement"][key] = value
+            with self.subTest(key=key), self.assertRaises(RuntimeError) as failure:
+                app.validate_organization_management(changed)
+            self.assertNotIn("private-token", str(failure.exception))
+        with self.assertRaises(RuntimeError):
+            app.validate_organization_management({})
+
+    def test_independent_final_state_read_rejects_wrong_scope_or_capabilities(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture = object.__new__(app.Fixture)
+            fixture.args = type("Args", (), {"evidence_dir": root})()
+            (root / "browser").mkdir()
+            app.atomic_json(root / "browser/summary.json", self.evidence())
+            project = {"projectId": "synthetic-project", "orgId": "synthetic-org", "status": 2,
+                       "isEnabled": 1, "canUpdate": False, "canArchive": False, "canRestore": False}
+            with mock.patch.object(fixture, "login") as login, \
+                    mock.patch.object(fixture, "expect_rejected") as absent, \
+                    mock.patch.object(fixture, "request", return_value=project) as request, \
+                    mock.patch.object(fixture, "note"):
+                fixture.verify_organization_management()
+                login.assert_called_once_with()
+                absent.assert_called_once_with("/organization/synthetic-org", 404, 404)
+                request.assert_called_once_with("/project/synthetic-project/settings")
+                for key, value in (("orgId", "foreign"), ("projectId", "foreign"),
+                                   ("status", 1), ("canRestore", True), ("canArchive", None)):
+                    request.return_value = project | {key: value}
+                    with self.subTest(key=key), self.assertRaises(RuntimeError):
+                        fixture.verify_organization_management()
 
 
 if __name__ == "__main__":

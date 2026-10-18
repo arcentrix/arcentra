@@ -26,6 +26,17 @@ func deploymentRouterFixture(t *testing.T) (*fiber.App, string, string) {
 	database := collectionTestDB{db}
 	records := repo.NewDeploymentRepo(database)
 	rt.Services.Deployment = service.NewDeploymentService(records, rt.Services.PipelineRepo, nil, nil, nil, nil)
+	for _, user := range []string{"deploy-user", "trigger-test", "dev-release-test"} {
+		if err := db.Create(&model.User{UserID: user, Username: user, IsEnabled: 1}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, role := range []string{"deploy-test", "trigger-test", "dev-release-test"} {
+		if err := db.Create(&model.Role{RoleID: role, Name: role, IsEnabled: 1}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	for _, action := range []string{"project:read", "project:update", "pipeline:read", "pipeline:trigger", "release:deploy_prod"} {
 		if err := db.Create(&model.RolePermissionBinding{RoleID: "deploy-test", PermissionID: action}).Error; err != nil {
 			t.Fatal(err)

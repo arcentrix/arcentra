@@ -21,33 +21,34 @@ import (
 // Project 项目表
 type Project struct {
 	BaseModel
-	ProjectID     string         `gorm:"column:project_id" json:"projectId"`               // 项目唯一标识
-	OrgID         string         `gorm:"column:org_id" json:"orgId"`                       // 所属组织ID
-	Name          string         `gorm:"column:name" json:"name"`                          // 项目名称
-	DisplayName   string         `gorm:"column:display_name" json:"displayName"`           // 项目显示名称
-	Namespace     string         `gorm:"column:namespace" json:"namespace"`                // 项目命名空间(org_name/project_name)
-	Description   string         `gorm:"column:description" json:"description"`            // 项目描述
-	RepoURL       string         `gorm:"column:repo_url" json:"repoUrl"`                   // 代码仓库URL
-	RepoType      string         `gorm:"column:repo_type" json:"repoType"`                 // 仓库类型(git/svn/gitlab/github/gitee)
-	DefaultBranch string         `gorm:"column:default_branch" json:"defaultBranch"`       // 默认分支
-	AuthType      int            `gorm:"column:auth_type" json:"authType"`                 // 认证类型: 0-无, 1-用户名密码, 2-Token, 3-SSH密钥
-	Credential    string         `gorm:"column:credential" json:"-"`                       // 认证凭证(加密存储)
-	TriggerMode   int            `gorm:"column:trigger_mode" json:"triggerMode"`           // 触发模式: 1-手动, 2-Webhook, 4-定时, 8-Push触发(可组合)
-	WebhookSecret string         `gorm:"column:webhook_secret" json:"-"`                   // Webhook密钥
-	CronExpr      string         `gorm:"column:cron_expr" json:"cronExpr"`                 // 定时任务Cron表达式
-	BuildConfig   datatypes.JSON `gorm:"column:build_config;type:json" json:"buildConfig"` // 构建配置
-	EnvVars       datatypes.JSON `gorm:"column:env_vars;type:json" json:"envVars"`         // 环境变量
-	Settings      datatypes.JSON `gorm:"column:settings;type:json" json:"settings"`        // 项目设置
-	Tags          string         `gorm:"column:tags" json:"tags"`                          // 项目标签(逗号分隔)
-	Language      string         `gorm:"column:language" json:"language"`                  // 主要编程语言
-	Framework     string         `gorm:"column:framework" json:"framework"`                // 使用的框架
-	Status        int            `gorm:"column:status" json:"status"`                      // 项目状态: 0-未激活, 1-正常, 2-归档, 3-禁用
-	Visibility    int            `gorm:"column:visibility" json:"visibility"`              // 可见性: 0-私有, 1-内部, 2-公开
-	AccessLevel   string         `gorm:"column:access_level" json:"accessLevel"`           // 默认访问级别(owner/team/org)
-	CreatedBy     string         `gorm:"column:created_by" json:"createdBy"`               // 创建者用户ID
-	IsEnabled     int            `gorm:"column:is_enabled" json:"isEnabled"`               // 0: disabled, 1: enabled
-	Icon          string         `gorm:"column:icon" json:"icon"`                          // 项目图标URL
-	Homepage      string         `gorm:"column:homepage" json:"homepage"`                  // 项目主页
+	SettingsVersion uint64         `gorm:"column:settings_version;not null;default:1" json:"-"`
+	ProjectID       string         `gorm:"column:project_id;not null;uniqueIndex;type:varchar(64)" json:"projectId"` // 项目唯一标识
+	OrgID           string         `gorm:"column:org_id" json:"orgId"`                                               // 所属组织ID
+	Name            string         `gorm:"column:name" json:"name"`                                                  // 项目名称
+	DisplayName     string         `gorm:"column:display_name" json:"displayName"`                                   // 项目显示名称
+	Namespace       string         `gorm:"column:namespace" json:"namespace"`                                        // 项目命名空间(org_name/project_name)
+	Description     string         `gorm:"column:description" json:"description"`                                    // 项目描述
+	RepoURL         string         `gorm:"column:repo_url" json:"repoUrl"`                                           // 代码仓库URL
+	RepoType        string         `gorm:"column:repo_type" json:"repoType"`                                         // 仓库类型(git/svn/gitlab/github/gitee)
+	DefaultBranch   string         `gorm:"column:default_branch" json:"defaultBranch"`                               // 默认分支
+	AuthType        int            `gorm:"column:auth_type" json:"authType"`                                         // 认证类型: 0-无, 1-用户名密码, 2-Token, 3-SSH密钥
+	Credential      string         `gorm:"column:credential" json:"-"`                                               // 认证凭证(加密存储)
+	TriggerMode     int            `gorm:"column:trigger_mode" json:"triggerMode"`                                   // 触发模式: 1-手动, 2-Webhook, 4-定时, 8-Push触发(可组合)
+	WebhookSecret   string         `gorm:"column:webhook_secret" json:"-"`                                           // Webhook密钥
+	CronExpr        string         `gorm:"column:cron_expr" json:"cronExpr"`                                         // 定时任务Cron表达式
+	BuildConfig     datatypes.JSON `gorm:"column:build_config;type:json" json:"buildConfig"`                         // 构建配置
+	EnvVars         datatypes.JSON `gorm:"column:env_vars;type:json" json:"envVars"`                                 // 环境变量
+	Settings        datatypes.JSON `gorm:"column:settings;type:json" json:"settings"`                                // 项目设置
+	Tags            string         `gorm:"column:tags" json:"tags"`                                                  // 项目标签(逗号分隔)
+	Language        string         `gorm:"column:language" json:"language"`                                          // 主要编程语言
+	Framework       string         `gorm:"column:framework" json:"framework"`                                        // 使用的框架
+	Status          int            `gorm:"column:status" json:"status"`                                              // 项目状态: 0-未激活, 1-正常, 2-归档, 3-禁用
+	Visibility      int            `gorm:"column:visibility" json:"visibility"`                                      // 可见性: 0-私有, 1-内部, 2-公开
+	AccessLevel     string         `gorm:"column:access_level" json:"accessLevel"`                                   // 默认访问级别(owner/team/org)
+	CreatedBy       string         `gorm:"column:created_by" json:"createdBy"`                                       // 创建者用户ID
+	IsEnabled       int            `gorm:"column:is_enabled" json:"isEnabled"`                                       // 0: disabled, 1: enabled
+	Icon            string         `gorm:"column:icon" json:"icon"`                                                  // 项目图标URL
+	Homepage        string         `gorm:"column:homepage" json:"homepage"`                                          // 项目主页
 
 	// 统计字段
 	TotalPipelines int `gorm:"column:total_pipelines" json:"totalPipelines"` // 流水线总数

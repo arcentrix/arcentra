@@ -39,16 +39,7 @@ func NewProjectService(projectRepo repo.IProjectRepository) *ProjectService {
 // CreateProject creates a project.
 func (s *ProjectService) CreateProject(ctx context.Context, req *model.CreateProjectReq, createdBy string) (*model.Project, error) {
 	if err := validateCreateProject(req, createdBy); err != nil {
-		return nil, err
-	}
-
-	exists, err := s.projectRepo.NameExists(ctx, req.OrgID, req.Name)
-	if err != nil {
-		log.Errorw("check project name failed", "orgID", req.OrgID, "name", req.Name, "error", err)
-		return nil, fmt.Errorf("check project name failed: %w", err)
-	}
-	if exists {
-		return nil, errors.New("project name already exists")
+		return nil, fmt.Errorf("%w: %v", repo.ErrOrganizationInvalid, err)
 	}
 
 	// 3. 转换 JSON 字段
@@ -123,7 +114,11 @@ func (s *ProjectService) CreateProject(ctx context.Context, req *model.CreatePro
 		Homepage:      req.Homepage,
 	}
 
-	if err := s.projectRepo.Create(ctx, project); err != nil {
+	creator, ok := s.projectRepo.(repo.IProjectCreationRepository)
+	if !ok {
+		return nil, errors.New("transactional project creation unavailable")
+	}
+	if err := creator.CreateAuthorized(ctx, project, ScopedOrganizationAuthorization); err != nil {
 		log.Errorw("create project failed", "name", project.Name, "error", err)
 		return nil, fmt.Errorf("create project failed: %w", err)
 	}
