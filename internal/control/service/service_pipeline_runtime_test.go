@@ -74,6 +74,10 @@ func pipelineRuntimeFixture(t *testing.T, parsed *pipelinev1.Spec) (pipelineServ
 	// No real git is invoked, including for clone, commit, or push.
 	script := `#!/bin/sh
 set -eu
+if [ "$1" = -c ]; then
+  [ "$2" = user.name=Arcentra ] && [ "$3" = -c ] && [ "$4" = user.email=noreply@arcentra.local ] && [ "$5" = commit ] || exit 1
+  shift 4
+fi
 printf '%s\n' "$1" >> "$ARCENTRA_TEST_GIT_CALLS"
 case "$1" in
 clone) cp "$ARCENTRA_TEST_PIPELINE_FILE" pipeline.json ;;

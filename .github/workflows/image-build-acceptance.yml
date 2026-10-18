@@ -141,7 +141,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed image/host acceptance client: immutable cross-repository dependency.
-          ref: 8d219484b7b02784372b82e880509ac8d509c161
+          ref: e95ef30fa266b624f10a2d8db8d7debaa72e3c9b
           path: .acceptance/frontend
           persist-credentials: false
 
@@ -199,6 +199,7 @@ jobs:
           if [ "$remaining" -le 0 ]; then echo 'Image journey work budget exhausted; cleanup reserved' >&2; exit 1; fi
           timeout --signal=TERM --kill-after=15s "${remaining}s" bash -euo pipefail <<'IMAGE_WORK'
           python3 scripts/acceptance/run_image_app.py \
+            --visual-editor-acceptance \
             --image-manifest "$RUNNER_TEMP/arcentra-image-manifest.json" \
             --ownership-file "$RUNNER_TEMP/arcentra-image-app-ownership.json" \
             --evidence-dir "$PWD/.acceptance/image-evidence" \
@@ -248,7 +249,7 @@ jobs:
           CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
         run: |
           if [ "$JOURNEY_OUTCOME" != success ] || [ "$CLEANUP_OUTCOME" != success ]; then
-            rm -f -- .acceptance/image-evidence/browser/project-build-verification.json
+            rm -f -- .acceptance/image-evidence/browser/project-build-verification.json .acceptance/image-evidence/browser/visual-ci-verification.json
           fi
 
       - name: Preserve only sanitized image journey evidence
@@ -265,5 +266,6 @@ jobs:
             .acceptance/image-evidence/browser/*.png
             .acceptance/image-evidence/browser/summary.json
             .acceptance/image-evidence/browser/project-build-verification.json
+            .acceptance/image-evidence/browser/visual-ci-verification.json
           if-no-files-found: ignore
           retention-days: 7

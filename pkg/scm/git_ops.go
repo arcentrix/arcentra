@@ -69,7 +69,9 @@ func Add(req GitAddRequest) error {
 
 // Commit creates a commit in current workdir.
 func Commit(req GitCommitRequest) error {
-	args := []string{"commit", "-m", req.Message}
+	// A service checkout must not depend on an operator HOME/global Git identity.
+	// These process-local defaults do not write repository or host configuration.
+	args := []string{"-c", "user.name=Arcentra", "-c", "user.email=noreply@arcentra.local", "commit", "-m", req.Message}
 	if strings.TrimSpace(req.Author) != "" {
 		args = append(args, fmt.Sprintf("--author=%s <noreply@arcentra.local>", req.Author))
 	}
