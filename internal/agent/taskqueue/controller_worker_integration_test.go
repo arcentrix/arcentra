@@ -218,7 +218,7 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 	}
 	f := &controllerWorkerFixture{t: t, ctx: ctx, waitTimeout: waitTimeout, db: db, tasks: make(map[string]nova.Task), repos: repos, projectID: id.GetUild(), pipelineID: id.GetUild(), receipts: make(map[string][]controllerWorkerReceipt), loseProducerACK: loseProducerACK}
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(os.TempDir(), "pipelines", f.pipelineID)) })
-	if err := db.WithContext(ctx).Create(&model.Project{ProjectID: f.projectID}).Error; err != nil {
+	if err := db.WithContext(ctx).Create(&model.Project{ProjectID: f.projectID, IsEnabled: 1, Status: model.ProjectStatusActive}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := repos.Pipeline.Create(ctx, &model.Pipeline{PipelineID: f.pipelineID, ProjectID: f.projectID, Name: "controller-agent-roundtrip", Metadata: "{}", IsEnabled: 1}); err != nil {

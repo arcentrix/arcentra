@@ -12,6 +12,7 @@ import (
 
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/pkg/database"
 	"github.com/bytedance/sonic"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -48,8 +49,16 @@ func (r *PipelineRepo) transitionPendingAutomaticRun(ctx context.Context, run *m
 		return false, nil
 	}
 	changed := false
-	err := r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 正向认领与拒绝采用同一锁顺序；精确比较禁止 MySQL 不区分大小写排序规则扩张身份
+	err := r.Database().WithContext(ctx).Clauses(database.Write()).Transaction(func(tx *gorm.DB) error {
+		if start {
+			allowed, err := lockPipelineAdmissionProject(ctx, tx, run.PipelineID)
+			if err != nil || !allowed {
+				return err
+			}
+		}
+		// Both transitions share the run -> job suffix. Rejection intentionally
+		// needs no active scope; it can safely terminalize an archived pending run.
+		// Exact comparison prevents case-insensitive MySQL aliases expanding identity.
 		var stored model.PipelineRun
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Select("run_id", "pipeline_id", "request_id", "trigger_type", "triggered_by", "definition_commit_sha", "definition_path", "branch", "commit_sha", "env", "status", "start_time", "end_time", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_plan_hash", "deployment_target_fingerprint", "retry_approval_context", "retry_approval_context_digest", "polling_context", "polling_context_digest").
@@ -112,4 +121,79 @@ func automaticEnvironment(value string) (map[string]string, bool) {
 		result[key] = *value
 	}
 	return result, true
+}
+
+// lockPipelineAdmissionProject serializes new run admission against project
+// archive/disable. The order is pipeline -> project -> run -> job, matching
+// polling admission. Never acquire a project lock after a run/job lock here.
+// Missing or ambiguous scope is unavailable; tests must provide real scope rows.
+func lockPipelineAdmissionProject(ctx context.Context, tx *gorm.DB, pipelineID string) (bool, error) {
+	var pipelines []model.Pipeline
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("pipeline_id", "project_id", "is_enabled", "is_deleted").Where("pipeline_id = ?", pipelineID).Limit(2).Find(&pipelines).Error; err != nil {
+		return false, err
+	}
+	if len(pipelines) != 1 || pipelines[0].PipelineID != pipelineID || pipelines[0].ProjectID == "" || pipelines[0].IsEnabled != 1 || pipelines[0].IsDeleted != 0 {
+		return false, nil
+	}
+	var projects []model.Project
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("project_id", "is_enabled", "status").Where("project_id = ?", pipelines[0].ProjectID).Limit(2).Find(&projects).Error; err != nil {
+		return false, err
+	}
+	return len(projects) == 1 && projects[0].ProjectID == pipelines[0].ProjectID && projects[0].IsEnabled == 1 && projects[0].Status == model.ProjectStatusActive, nil
+}
+
+// StartManualRunIfPending admits an unchanged manual/gated run exactly once.
+// A false result or uncertain commit never grants scheduling permission. Already
+// admitted jobs keep their authority; archive does not cancel or rewrite them.
+func (r *PipelineRepo) StartManualRunIfPending(ctx context.Context, run *model.PipelineRun) (bool, error) {
+	if !manualAdmissionIdentity(run) {
+		return false, nil
+	}
+	changed := false
+	err := r.Database().WithContext(ctx).Clauses(database.Write()).Transaction(func(tx *gorm.DB) error {
+		allowed, err := lockPipelineAdmissionProject(ctx, tx, run.PipelineID)
+		if err != nil || !allowed {
+			return err
+		}
+		var rows []model.PipelineRun
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select(pipelineRunReadColumns).
+			Where("run_id = ?", run.RunID).Limit(2).Find(&rows).Error; err != nil {
+			return err
+		}
+		if len(rows) != 1 {
+			return nil
+		}
+		stored := &rows[0]
+		if !sameManualAdmissionIdentity(stored, run) || stored.Status != model.PipelineStatusPending || stored.StartTime != nil || stored.EndTime != nil {
+			return nil
+		}
+		var jobs []model.JobRun
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id").Where("pipeline_run_id = ?", stored.RunID).Limit(1).Find(&jobs).Error; err != nil {
+			return err
+		}
+		if len(jobs) != 0 {
+			return nil
+		}
+		result := tx.Model(&model.PipelineRun{}).Where("id = ? AND status = ? AND start_time IS NULL AND end_time IS NULL", stored.ID, model.PipelineStatusPending).
+			Updates(map[string]any{"status": model.PipelineStatusRunning, "start_time": time.Now()})
+		changed = result.RowsAffected == 1
+		return result.Error
+	})
+	return changed && err == nil, err
+}
+func manualAdmissionIdentity(run *model.PipelineRun) bool {
+	// Zero is retained for legacy internal manual runs; automatic trigger types
+	// and every polling marker remain excluded, never relabelled as manual.
+	return run != nil && run.RunID != "" && run.PipelineID != "" &&
+		(run.TriggerType == 0 || run.TriggerType == int(pipelinev1.TriggerType_TRIGGER_TYPE_MANUAL)) &&
+		run.PollingContext == "" && run.PollingContextDigest == "" && run.TriggeredBy != "polling"
+}
+func sameManualAdmissionIdentity(a, b *model.PipelineRun) bool {
+	return manualAdmissionIdentity(a) && manualAdmissionIdentity(b) && a.RunID == b.RunID && a.PipelineID == b.PipelineID && a.RequestID == b.RequestID &&
+		a.TriggerType == b.TriggerType && a.TriggeredBy == b.TriggeredBy && a.DefinitionCommitSha == b.DefinitionCommitSha && a.DefinitionPath == b.DefinitionPath &&
+		a.Branch == b.Branch && a.CommitSha == b.CommitSha && sameAutomaticEnvironment(a.Env, b.Env) &&
+		a.AllowDeployments == b.AllowDeployments && a.DeploymentActorID == b.DeploymentActorID && a.DeploymentPlan == b.DeploymentPlan && a.DeploymentPlanHash == b.DeploymentPlanHash && a.DeploymentTargetFingerprint == b.DeploymentTargetFingerprint &&
+		a.RetryApprovalContext == b.RetryApprovalContext && a.RetryApprovalContextDigest == b.RetryApprovalContextDigest
 }

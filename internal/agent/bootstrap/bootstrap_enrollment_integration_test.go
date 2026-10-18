@@ -538,7 +538,7 @@ func TestDynamicEnrollmentRestoresTerminalJournalThroughRealProcessAndWorker(t *
 	t.Cleanup(engine.Stop)
 	projectID, pipelineID, runID := id.GetUild(), id.GetUild(), id.GetUild()
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(os.TempDir(), "pipelines", pipelineID)) })
-	if err := f.db.WithContext(f.ctx).Create(&model.Project{ProjectID: projectID}).Error; err != nil {
+	if err := f.db.WithContext(f.ctx).Create(&model.Project{ProjectID: projectID, IsEnabled: 1, Status: model.ProjectStatusActive}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := f.repos.Pipeline.Create(f.ctx, &model.Pipeline{PipelineID: pipelineID, ProjectID: projectID, Name: "durable-enrollment", IsEnabled: 1}); err != nil {

@@ -197,7 +197,7 @@ func newLifecycleFixture(t *testing.T, policies ...*cluster.PipelineApprovalPoli
 		t.Fatal(err)
 	}
 	f.environmentID = environment.EnvironmentID
-	for _, value := range []any{&model.Project{ProjectID: f.projectID}, &model.Pipeline{PipelineID: f.pipelineID, ProjectID: f.projectID, Name: "lifecycle", IsEnabled: 1}} {
+	for _, value := range []any{&model.Project{ProjectID: f.projectID, IsEnabled: 1, Status: model.ProjectStatusActive}, &model.Pipeline{PipelineID: f.pipelineID, ProjectID: f.projectID, Name: "lifecycle", IsEnabled: 1}} {
 		if err = db.WithContext(context.Background()).Create(value).Error; err != nil {
 			t.Fatal(err)
 		}

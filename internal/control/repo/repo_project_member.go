@@ -42,7 +42,7 @@ func NewProjectMemberRepo(db database.IDatabase) IProjectMemberRepository {
 func (r *ProjectMemberRepo) Get(ctx context.Context, projectID, userID string) (*model.ProjectMember, error) {
 	var member model.ProjectMember
 	err := r.Database().WithContext(ctx).Select("id", "project_id", "user_id", "created_at", "updated_at").
-		Where("project_id = ? AND user_id = ?", projectID, userID).First(&member).Error
+		Where("project_id = ? AND user_id = ? AND is_enabled = ?", projectID, userID, 1).First(&member).Error
 	return &member, err
 }
 
@@ -50,7 +50,7 @@ func (r *ProjectMemberRepo) Get(ctx context.Context, projectID, userID string) (
 func (r *ProjectMemberRepo) ListProjectMembers(ctx context.Context, projectID string) ([]model.ProjectMember, error) {
 	var members []model.ProjectMember
 	err := r.Database().WithContext(ctx).Select("id", "project_id", "user_id", "created_at", "updated_at").
-		Where("project_id = ?", projectID).Find(&members).Error
+		Where("project_id = ? AND is_enabled = ?", projectID, 1).Find(&members).Error
 	return members, err
 }
 
@@ -69,6 +69,6 @@ func (r *ProjectMemberRepo) RemoveProjectMember(ctx context.Context, projectID, 
 func (r *ProjectMemberRepo) GetUserProjects(ctx context.Context, userID string) ([]model.ProjectMember, error) {
 	var members []model.ProjectMember
 	err := r.Database().WithContext(ctx).Select("id", "project_id", "user_id", "created_at", "updated_at").
-		Where("user_id = ?", userID).Find(&members).Error
+		Where("user_id = ? AND is_enabled = ?", userID, 1).Find(&members).Error
 	return members, err
 }

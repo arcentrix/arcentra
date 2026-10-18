@@ -129,8 +129,8 @@ func TestFirstBuildPrimaryAuthorizationSucceedsWithEmptyReplica(t *testing.T) {
 	// A validation-only request proves POST authorization reaches its service
 	// without involving existing project persistence reads outside this change.
 	status, _, raw := f.request(t, "admin", "POST", "/project/", `{"orgId":"scope","name":"x"}`)
-	require.Equal(t, 200, status, raw)
-	require.Contains(t, raw, "project name must contain")
+	require.Equal(t, 400, status, raw)
+	require.Contains(t, raw, "invalid project request")
 	status, _, raw = f.request(t, "ordinary", "POST", "/project/", firstBuildProjectBody)
 	require.Equal(t, 403, status, raw)
 }

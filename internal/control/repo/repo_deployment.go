@@ -17,6 +17,10 @@ import (
 // ErrDeploymentConflict 表示发布身份或环境执行权冲突
 var ErrDeploymentConflict = errors.New("deployment identity or active release conflict")
 
+// ErrDeploymentApplyState hides database details when authoritative apply state
+// cannot be read. Replica reads must never stand in for this safety check.
+var ErrDeploymentApplyState = errors.New("current deployment apply state is unavailable")
+
 // IDeploymentRepository 定义按项目隔离且具有条件状态更新的发布仓储
 type IDeploymentRepository interface {
 	CreateEnvironment(context.Context, *model.DeploymentEnvironment) error
@@ -27,6 +31,12 @@ type IDeploymentRepository interface {
 	GetReleaseByRequest(context.Context, string, string) (*model.DeploymentRelease, error)
 	ListReleases(context.Context, string, int, int) ([]model.DeploymentRelease, int64, error)
 	Transition(context.Context, *model.DeploymentRelease, string, map[string]any) (bool, error)
+}
+
+// IDeploymentApplyStateReader is required before any external apply. Both rows
+// must come from the primary database in one fresh read transaction.
+type IDeploymentApplyStateReader interface {
+	GetApplyState(context.Context, string, string) (*model.DeploymentRelease, *model.DeploymentEnvironment, error)
 }
 
 // DeploymentRepo 使用事务确保同一目标只有一个活动发布
@@ -76,6 +86,31 @@ func (r *DeploymentRepo) GetRelease(ctx context.Context, project, id string) (*m
 	var value model.DeploymentRelease
 	err := r.Database().WithContext(ctx).Select(releaseColumns).Where("project_id = ? AND release_id = ?", project, id).First(&value).Error
 	return &value, err
+}
+
+// GetApplyState bypasses read replicas without changing history/observation
+// routing. A fresh session prevents inherited query conditions or read routing
+// from contaminating the final external-write check.
+func (r *DeploymentRepo) GetApplyState(ctx context.Context, project, id string) (*model.DeploymentRelease, *model.DeploymentEnvironment, error) {
+	if r == nil || r.IDatabase == nil {
+		return nil, nil, ErrDeploymentApplyState
+	}
+	base := r.Database()
+	if base == nil {
+		return nil, nil, ErrDeploymentApplyState
+	}
+	var release model.DeploymentRelease
+	var environment model.DeploymentEnvironment
+	err := base.Session(&gorm.Session{NewDB: true}).Clauses(database.Write()).WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Select(releaseColumns).Where("project_id = ? AND release_id = ?", project, id).First(&release).Error; err != nil {
+			return err
+		}
+		return tx.Select(environmentColumns).Where("project_id = ? AND environment_id = ?", project, release.EnvironmentID).First(&environment).Error
+	})
+	if err != nil {
+		return nil, nil, ErrDeploymentApplyState
+	}
+	return &release, &environment, nil
 }
 
 // GetReleaseByRequest 读取已经持久化的幂等请求

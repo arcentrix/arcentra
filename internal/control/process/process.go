@@ -185,19 +185,15 @@ func (e *Process) submit(triggerCtx context.Context, run *model.PipelineRun, par
 		}
 	}
 	if isDeployment || isRetryApproval {
-		starter, ok := e.repos.Pipeline.(interface {
-			StartRunIfPending(context.Context, string) error
-		})
-		if !ok {
-			return fmt.Errorf("durable gated scheduling is unavailable")
-		}
 		checkCtx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
 		defer cancel()
 		stored, err := e.repos.Pipeline.GetRun(checkCtx, run.RunID)
 		if err != nil {
 			return err
 		}
-		if stored == nil || stored.Status != model.PipelineStatusPending || stored.PipelineID != run.PipelineID || stored.DefinitionCommitSha != run.DefinitionCommitSha || stored.RetryApprovalContext != run.RetryApprovalContext || stored.RetryApprovalContextDigest != run.RetryApprovalContextDigest || isRetryApproval && (stored.Env != run.Env || stored.TriggeredBy != run.TriggeredBy || stored.TriggerType != run.TriggerType || stored.DefinitionPath != run.DefinitionPath) || isDeployment && (!stored.AllowDeployments || stored.DeploymentActorID != run.DeploymentActorID || stored.DeploymentPlan != run.DeploymentPlan || stored.DeploymentPlanHash != run.DeploymentPlanHash || stored.DeploymentTargetFingerprint != run.DeploymentTargetFingerprint) {
+		// The durable admission CAS below compares Env as a string map: MySQL
+		// normalizes JSON whitespace/key order, so byte equality is not identity.
+		if stored == nil || stored.Status != model.PipelineStatusPending || stored.PipelineID != run.PipelineID || stored.DefinitionCommitSha != run.DefinitionCommitSha || stored.RetryApprovalContext != run.RetryApprovalContext || stored.RetryApprovalContextDigest != run.RetryApprovalContextDigest || isRetryApproval && (stored.TriggeredBy != run.TriggeredBy || stored.TriggerType != run.TriggerType || stored.DefinitionPath != run.DefinitionPath) || isDeployment && (!stored.AllowDeployments || stored.DeploymentActorID != run.DeploymentActorID || stored.DeploymentPlan != run.DeploymentPlan || stored.DeploymentPlanHash != run.DeploymentPlanHash || stored.DeploymentTargetFingerprint != run.DeploymentTargetFingerprint) {
 			return fmt.Errorf("gated run cannot be replayed or changed")
 		}
 		jobs, err := e.repos.JobRun.ListByPipelineRunID(checkCtx, run.RunID)
@@ -206,9 +202,6 @@ func (e *Process) submit(triggerCtx context.Context, run *model.PipelineRun, par
 		}
 		if len(jobs) != 0 {
 			return fmt.Errorf("gated run already has execution records; automatic resume is prohibited")
-		}
-		if err := starter.StartRunIfPending(checkCtx, run.RunID); err != nil {
-			return err
 		}
 	}
 	if isPolling {
@@ -233,6 +226,22 @@ func (e *Process) submit(triggerCtx context.Context, run *model.PipelineRun, par
 		}
 		if !claimed {
 			return fmt.Errorf("automatic run is no longer eligible for scheduling")
+		}
+	} else {
+		starter, ok := e.repos.Pipeline.(interface {
+			StartManualRunIfPending(context.Context, *model.PipelineRun) (bool, error)
+		})
+		if !ok {
+			return fmt.Errorf("durable manual scheduling is unavailable")
+		}
+		checkCtx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
+		defer cancel()
+		claimed, err := starter.StartManualRunIfPending(checkCtx, run)
+		if err != nil {
+			return fmt.Errorf("claim manual pipeline run: %w", err)
+		}
+		if !claimed {
+			return fmt.Errorf("manual run is no longer eligible for scheduling")
 		}
 	}
 	runCtx, runCancel := context.WithCancel(e.ctx)

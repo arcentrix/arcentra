@@ -336,6 +336,13 @@ func realStackAutomaticConnection(ctx context.Context, tx *gorm.DB) (uint64, err
 }
 
 func realStackAutomaticTargetLocks(locks []realStackAutomaticLock, rowID uint64, runID string) ([]string, error) {
+	return realStackAutomaticRecordLocks(locks, rowID, runID, "uk_pipeline_run_business_id")
+}
+
+func realStackAutomaticRecordLocks(locks []realStackAutomaticLock, rowID uint64, runID, businessIndex string) ([]string, error) {
+	if businessIndex != "uk_pipeline_run_business_id" && businessIndex != "uk_pipeline_business_id" {
+		return nil, fmt.Errorf("unsupported automatic admission lock target")
+	}
 	if rowID == 0 || runID == "" || len(locks) == 0 || len(locks) > 2 {
 		return nil, fmt.Errorf("automatic admission must hold a bounded exact target-row lock set")
 	}
@@ -351,7 +358,7 @@ func realStackAutomaticTargetLocks(locks []realStackAutomaticLock, rowID uint64,
 			if *lock.LockData != primary {
 				return nil, fmt.Errorf("automatic admission primary lock belongs to another run")
 			}
-		case "uk_pipeline_run_business_id":
+		case businessIndex:
 			key, row, ok := strings.Cut(*lock.LockData, ", ")
 			if !ok || row != primary || (key != runID && key != "'"+runID+"'" && key != strconv.Quote(runID)) {
 				return nil, fmt.Errorf("automatic admission business-key lock belongs to another run")
@@ -368,9 +375,9 @@ func realStackAutomaticTargetLocks(locks []realStackAutomaticLock, rowID uint64,
 	return result, nil
 }
 
-// realStackAutomaticContention 要求 MySQL 实测第二个连接等待首事务的同一运行行
+// realStackAutomaticContention 要求 MySQL 实测第二个连接等待首事务的首个共同记录锁
 // 两个独立 Process 的本地互斥锁不能串行化这个边界；测试不以 sleep 推断竞争
-func realStackAutomaticContention(t *testing.T, f *controllerWorkerFixture, observed *gorm.DB, schema string, run *model.PipelineRun, first, second func() error) [2]error {
+func realStackAutomaticContention(t *testing.T, f *controllerWorkerFixture, observed *gorm.DB, schema string, run *model.PipelineRun, bothAccept bool, first, second func() error) [2]error {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 	defer cancel()
@@ -378,14 +385,25 @@ func realStackAutomaticContention(t *testing.T, f *controllerWorkerFixture, obse
 	if err := f.db.WithContext(ctx).Select("id", "run_id").Where("run_id = ?", run.RunID).First(&target).Error; err != nil || target.ID == 0 || target.RunID != run.RunID {
 		t.Fatalf("cannot identify exact automatic admission row: %v", err)
 	}
+	// Accepted contenders share pipeline -> project -> run -> job. A rejection
+	// needs no active project and shares only the run -> job suffix. Observe the
+	// first common durable lock, rather than waiting for an unreachable later lock.
+	targetTable, targetKey, targetRowID, targetIndex := (model.PipelineRun{}).TableName(), target.RunID, target.ID, "uk_pipeline_run_business_id"
+	if bothAccept {
+		var pipeline model.Pipeline
+		if err := f.db.WithContext(ctx).Select("id", "pipeline_id").Where("pipeline_id = ?", run.PipelineID).First(&pipeline).Error; err != nil || pipeline.ID == 0 || pipeline.PipelineID != run.PipelineID {
+			t.Fatalf("cannot identify exact automatic admission pipeline row: %v", err)
+		}
+		targetTable, targetKey, targetRowID, targetIndex = pipeline.TableName(), pipeline.PipelineID, pipeline.ID, "uk_pipeline_business_id"
+	}
 	locked, competing := make(chan realStackAutomaticLockOwner, 1), make(chan realStackAutomaticLockOwner, 1)
 	release := make(chan struct{})
 	var lockOnce, competingOnce, releaseOnce sync.Once
 	var wait sync.WaitGroup
 	beforeName, afterName := "test:auto-before-"+id.GetUUID(), "test:auto-after-"+id.GetUUID()
-	isRunLock := func(tx *gorm.DB) bool {
+	isTargetLock := func(tx *gorm.DB) bool {
 		lock, ok := tx.Statement.Clauses["FOR"].Expression.(clause.Locking)
-		return tx.Statement.Table == (model.PipelineRun{}).TableName() && ok && lock.Strength == "UPDATE"
+		return tx.Statement.Table == targetTable && ok && lock.Strength == "UPDATE"
 	}
 	defer func() {
 		releaseOnce.Do(func() { close(release) })
@@ -399,7 +417,7 @@ func realStackAutomaticContention(t *testing.T, f *controllerWorkerFixture, obse
 		}
 	}()
 	if err := observed.Callback().Query().Before("gorm:query").Register(beforeName, func(tx *gorm.DB) {
-		if isRunLock(tx) && tx.Statement.Context.Value(realStackAutomaticOrderKey{}) == (realStackAutomaticOrder{"second", target.RunID}) {
+		if isTargetLock(tx) && tx.Statement.Context.Value(realStackAutomaticOrderKey{}) == (realStackAutomaticOrder{"second", target.RunID}) {
 			competingOnce.Do(func() {
 				threadID, err := realStackAutomaticConnection(ctx, tx)
 				if err != nil {
@@ -412,11 +430,18 @@ func realStackAutomaticContention(t *testing.T, f *controllerWorkerFixture, obse
 		t.Fatal(err)
 	}
 	if err := observed.Callback().Query().After("gorm:query").Register(afterName, func(tx *gorm.DB) {
-		if tx.Error == nil && isRunLock(tx) && tx.Statement.Context.Value(realStackAutomaticOrderKey{}) == (realStackAutomaticOrder{"first", target.RunID}) {
+		if tx.Error == nil && isTargetLock(tx) && tx.Statement.Context.Value(realStackAutomaticOrderKey{}) == (realStackAutomaticOrder{"first", target.RunID}) {
 			lockOnce.Do(func() {
 				owner := realStackAutomaticLockOwner{}
-				stored, ok := tx.Statement.Dest.(*model.PipelineRun)
-				if !ok || tx.RowsAffected != 1 || stored.RunID != target.RunID {
+				matches := false
+				if bothAccept {
+					stored, ok := tx.Statement.Dest.(*[]model.Pipeline)
+					matches = ok && len(*stored) == 1 && (*stored)[0].PipelineID == targetKey
+				} else {
+					stored, ok := tx.Statement.Dest.(*model.PipelineRun)
+					matches = ok && stored.RunID == targetKey
+				}
+				if !matches || tx.RowsAffected != 1 {
 					owner.err = fmt.Errorf("automatic admission did not lock exactly the target run")
 				} else {
 					owner.threadID, owner.err = realStackAutomaticConnection(ctx, tx)
@@ -425,10 +450,10 @@ func realStackAutomaticContention(t *testing.T, f *controllerWorkerFixture, obse
 					var locks []realStackAutomaticLock
 					owner.err = tx.Session(&gorm.Session{NewDB: true, Context: ctx}).
 						Table("performance_schema.data_locks").Select("ENGINE_LOCK_ID AS engine_lock_id", "INDEX_NAME AS index_name", "LOCK_DATA AS lock_data").
-						Where("ENGINE = ? AND THREAD_ID = ? AND OBJECT_SCHEMA = ? AND OBJECT_NAME = ?", "INNODB", owner.threadID, schema, (model.PipelineRun{}).TableName()).
+						Where("ENGINE = ? AND THREAD_ID = ? AND OBJECT_SCHEMA = ? AND OBJECT_NAME = ?", "INNODB", owner.threadID, schema, targetTable).
 						Where("LOCK_TYPE = ? AND LOCK_STATUS = ? AND LOCK_MODE LIKE ?", "RECORD", "GRANTED", "X%").Find(&locks).Error
 					if owner.err == nil {
-						owner.lockIDs, owner.err = realStackAutomaticTargetLocks(locks, target.ID, target.RunID)
+						owner.lockIDs, owner.err = realStackAutomaticRecordLocks(locks, targetRowID, targetKey, targetIndex)
 					}
 				}
 				locked <- owner
@@ -477,8 +502,8 @@ func realStackAutomaticContention(t *testing.T, f *controllerWorkerFixture, obse
 			Joins("JOIN performance_schema.data_locks AS requested ON requested.ENGINE = waits.ENGINE AND requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID AND requested.THREAD_ID = waits.REQUESTING_THREAD_ID").
 			Joins("JOIN performance_schema.data_locks AS blocking ON blocking.ENGINE = waits.ENGINE AND blocking.ENGINE_LOCK_ID = waits.BLOCKING_ENGINE_LOCK_ID AND blocking.THREAD_ID = waits.BLOCKING_THREAD_ID").
 			Where("waits.ENGINE = ? AND waits.REQUESTING_THREAD_ID = ? AND waits.BLOCKING_THREAD_ID = ?", "INNODB", contender.threadID, owner.threadID).
-			Where("requested.OBJECT_SCHEMA = ? AND requested.OBJECT_NAME = ? AND requested.LOCK_TYPE = ? AND requested.LOCK_STATUS = ?", schema, (model.PipelineRun{}).TableName(), "RECORD", "WAITING").
-			Where("blocking.OBJECT_SCHEMA = ? AND blocking.OBJECT_NAME = ? AND blocking.LOCK_TYPE = ? AND blocking.LOCK_STATUS = ?", schema, (model.PipelineRun{}).TableName(), "RECORD", "GRANTED").
+			Where("requested.OBJECT_SCHEMA = ? AND requested.OBJECT_NAME = ? AND requested.LOCK_TYPE = ? AND requested.LOCK_STATUS = ?", schema, targetTable, "RECORD", "WAITING").
+			Where("blocking.OBJECT_SCHEMA = ? AND blocking.OBJECT_NAME = ? AND blocking.LOCK_TYPE = ? AND blocking.LOCK_STATUS = ?", schema, targetTable, "RECORD", "GRANTED").
 			Where("requested.LOCK_MODE LIKE ? AND blocking.LOCK_MODE LIKE ?", "X%", "X%").
 			Where("requested.INDEX_NAME = blocking.INDEX_NAME AND requested.LOCK_DATA = blocking.LOCK_DATA").
 			Where("blocking.ENGINE_LOCK_ID IN ?", owner.lockIDs).Limit(1).Find(&edges).Error
@@ -486,7 +511,7 @@ func realStackAutomaticContention(t *testing.T, f *controllerWorkerFixture, obse
 			t.Fatalf("cannot inspect automatic admission MySQL contention: %v", err)
 		}
 		if len(edges) == 1 && edges[0].RequestingLockID != "" {
-			t.Log("observed two independent Process connections contending for the exact automatic PipelineRun record lock")
+			t.Logf("observed two independent Process connections contending for exact automatic admission record: table=%s row=%d index=%s", targetTable, targetRowID, targetIndex)
 			break
 		}
 		select {
@@ -549,7 +574,7 @@ func realStackAssertAutomaticContention(t *testing.T, f *controllerWorkerFixture
 		secondSpec = valid
 	}
 	firstRun, secondRun := *run, *run
-	results := realStackAutomaticContention(t, f, observed, config.DBName, run,
+	results := realStackAutomaticContention(t, f, observed, config.DBName, run, acceptFirst && acceptSecond,
 		func() error { return first.Submit(&firstRun, firstSpec) },
 		func() error { return second.Submit(&secondRun, secondSpec) },
 	)
@@ -642,5 +667,28 @@ func TestRealStackAutomaticTargetLocks(t *testing.T) {
 				t.Fatalf("exact target-lock proof: locks=%d error=%v", len(locks), err)
 			}
 		})
+	}
+}
+
+// Pipeline contention needs its own exact index identity; run-index evidence
+// cannot stand in for the earlier pipeline row even with identical key bytes.
+func TestRealStackAutomaticPipelineTargetLocks(t *testing.T) {
+	primary, business := "42", "'pipeline-id', 42"
+	locks := []realStackAutomaticLock{{"primary-lock", "PRIMARY", &primary}, {"business-lock", "uk_pipeline_business_id", &business}}
+	if actual, err := realStackAutomaticRecordLocks(locks, 42, "pipeline-id", "uk_pipeline_business_id"); err != nil || len(actual) != 2 {
+		t.Fatalf("exact pipeline row proof rejected: %v", err)
+	}
+	for _, test := range []struct {
+		key, index string
+		id         uint64
+	}{
+		{"other-pipeline", "uk_pipeline_business_id", 42},
+		{"pipeline-id", "uk_pipeline_run_business_id", 42},
+		{"pipeline-id", "unrelated-index", 42},
+		{"pipeline-id", "uk_pipeline_business_id", 43},
+	} {
+		if _, err := realStackAutomaticRecordLocks(locks, test.id, test.key, test.index); err == nil {
+			t.Fatal("accepted incorrect pipeline row/index identity")
+		}
 	}
 }

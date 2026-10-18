@@ -257,6 +257,9 @@ func (s *DeploymentService) CreateRelease(ctx context.Context, project, actor st
 			return nil, ErrDeploymentInput
 		}
 	}
+	if err := s.pipelinePermission(ctx, actor, project, input.PipelineID, input.EnvironmentID, false); err != nil {
+		return nil, err
+	}
 	old, err := s.records.GetReleaseByRequest(ctx, project, input.RequestID)
 	if err == nil {
 		if !matchesRelease(old, input) {
@@ -283,6 +286,10 @@ func (s *DeploymentService) CreateRelease(ctx context.Context, project, actor st
 	}
 	entry, image, err := s.readReleaseArtifact(ctx, project, input.PipelineID, input.PipelineRunID, input.ArtifactID)
 	if err != nil {
+		return nil, err
+	}
+	// Artifact reads may outlive project archival or an authorization change.
+	if err := s.pipelinePermission(ctx, actor, project, input.PipelineID, input.EnvironmentID, false); err != nil {
 		return nil, err
 	}
 	release := &model.DeploymentRelease{Origin: "manual", ReleaseID: uuid.NewString(), ProjectID: project, RequestID: input.RequestID, EnvironmentID: input.EnvironmentID, PipelineID: input.PipelineID, PipelineRunID: input.PipelineRunID, ArtifactID: input.ArtifactID, ArtifactSHA256: entry.SHA256, TargetFingerprint: s.targets[environment.TargetRef].Fingerprint, CommitSHA: deploymentDefinitionRevision(run), Image: image, CreatedBy: actor, Status: "queued", Reason: "Awaiting explicit execution", Version: 1}
@@ -342,6 +349,13 @@ func (s *DeploymentService) advance(ctx context.Context, project, id, actor stri
 	if model.IsDeploymentTerminal(entry.Status) {
 		return entry, nil
 	}
+	// Existing rollouts can still be observed, but a new or uncertain manual
+	// submission must use the current caller's live authorization.
+	if entry.Origin != "pipeline_job" && (entry.Status == "queued" || entry.Status == "applying") {
+		if err := s.pipelinePermission(ctx, actor, entry.ProjectID, entry.PipelineID, entry.EnvironmentID, false); err != nil {
+			return nil, err
+		}
+	}
 	env, err := s.records.GetEnvironment(ctx, project, entry.EnvironmentID)
 	if err != nil {
 		return nil, err
@@ -388,36 +402,40 @@ func (s *DeploymentService) advance(ctx context.Context, project, id, actor stri
 			if err := s.authorizePipelineRelease(ctx, entry, actor, automatic); err != nil {
 				return nil, err
 			}
+		} else if err := s.pipelinePermission(ctx, actor, entry.ProjectID, entry.PipelineID, entry.EnvironmentID, false); err != nil {
+			return nil, err
 		}
-		applyCtx := ctx
-		if entry.Origin == "pipeline_job" || recovery {
-			applyCtx = cluster.WithApplyGuard(ctx, func(checkCtx context.Context) error {
-				current, err := s.GetRelease(checkCtx, project, id)
-				if err != nil {
+		stateReader, ok := s.records.(repo.IDeploymentApplyStateReader)
+		if !ok {
+			return nil, repo.ErrDeploymentApplyState
+		}
+		// Every apply path rechecks after the adapter's final GET, immediately
+		// before PATCH. Replica state and cached router grants cannot authorize it.
+		applyCtx := cluster.WithApplyGuard(ctx, func(checkCtx context.Context) error {
+			current, environment, err := stateReader.GetApplyState(checkCtx, project, id)
+			if err != nil {
+				return repo.ErrDeploymentApplyState
+			}
+			if current == nil || environment == nil || current.Status != "applying" || current.Version != entry.Version || current.EnvironmentID != entry.EnvironmentID {
+				return repo.ErrDeploymentConflict
+			}
+			if environment.ActiveReleaseID != current.ReleaseID {
+				return repo.ErrDeploymentConflict
+			}
+			if environment.TargetRef != env.TargetRef || environmentTarget(environment) != target || current.TargetFingerprint != s.targets[environment.TargetRef].Fingerprint {
+				return ErrDeploymentTargetChanged
+			}
+			if current.Origin == "pipeline_job" {
+				if err := s.verifyDeploymentApproval(checkCtx, current); err != nil {
 					return err
 				}
-				if current.Status != "applying" || current.Version != entry.Version {
-					return repo.ErrDeploymentConflict
+				if err := s.authorizePipelineRelease(checkCtx, current, actor, automatic); err != nil {
+					return err
 				}
-				environment, err := s.records.GetEnvironment(checkCtx, project, current.EnvironmentID)
-				if err != nil || environment.ActiveReleaseID != current.ReleaseID {
-					return repo.ErrDeploymentConflict
-				}
-				if current.TargetFingerprint != s.targets[environment.TargetRef].Fingerprint {
-					return ErrDeploymentTargetChanged
-				}
-				if current.Origin == "pipeline_job" {
-					if err := s.verifyDeploymentApproval(checkCtx, current); err != nil {
-						return err
-					}
-					if err := s.authorizePipelineRelease(checkCtx, current, actor, automatic); err != nil {
-						return err
-					}
-					return s.finalDeploymentApprovalDeadline(checkCtx, current)
-				}
-				return s.pipelinePermission(checkCtx, actor, current.ProjectID, current.PipelineID, current.EnvironmentID, false)
-			})
-		}
+				return s.finalDeploymentApprovalDeadline(checkCtx, current)
+			}
+			return s.pipelinePermission(checkCtx, actor, current.ProjectID, current.PipelineID, current.EnvironmentID, false)
+		})
 		receipt, err := adapter.Apply(applyCtx, target, entry.ReleaseID, entry.Image, cluster.Receipt{UID: entry.WorkloadUID, Generation: entry.BaselineGeneration})
 		if errors.Is(err, cluster.ErrSuperseded) {
 			_, updateErr := s.records.Transition(ctx, entry, "superseded", map[string]any{"reason": "Workload identity or generation changed; no overwrite performed"})

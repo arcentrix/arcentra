@@ -29,8 +29,12 @@ const (
 // ProjectMember 项目成员表
 type ProjectMember struct {
 	BaseModel
-	ProjectID string `gorm:"column:project_id;not null;index:idx_project_user,unique;type:varchar(64)" json:"projectId"`
-	UserID    string `gorm:"column:user_id;not null;index:idx_project_user,unique;index:idx_project_member_user;type:varchar(64)" json:"userId"`
+	IsEnabled      int    `gorm:"column:is_enabled;not null;default:1" json:"isEnabled"`
+	Version        uint64 `gorm:"column:version;not null;default:1" json:"version"`
+	ManagedGrantID string `gorm:"column:managed_grant_id;not null;default:'';type:varchar(64)" json:"-"`
+	ManagedRoleID  string `gorm:"column:managed_role_id;not null;default:'';type:varchar(64)" json:"-"`
+	ProjectID      string `gorm:"column:project_id;not null;index:idx_project_user,unique;type:varchar(64)" json:"projectId"`
+	UserID         string `gorm:"column:user_id;not null;index:idx_project_user,unique;index:idx_project_member_user;type:varchar(64)" json:"userId"`
 }
 
 func (pm *ProjectMember) TableName() string {

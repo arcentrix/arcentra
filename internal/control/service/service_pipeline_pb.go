@@ -377,6 +377,9 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 		}, nil
 	}
 
+	if project == nil || project.ProjectID != pipeline.ProjectID || project.IsEnabled != 1 || project.Status != model.ProjectStatusActive {
+		return &pipelinev1.TriggerPipelineResponse{Success: false, Message: "project is not active", Error: s.error(409, "project is not active", "conflict", nil)}, nil
+	}
 	content, headSha, err := s.loadDefinitionFromRepo(ctx, pipeline, project)
 	if err != nil {
 		return &pipelinev1.TriggerPipelineResponse{
@@ -479,9 +482,8 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 		}
 	}
 	if err := submitPipelineRun(ctx, engine, run, parsedSpec); err != nil {
-		now := time.Now()
-		_ = s.pipelineRepo.UpdateRun(ctx, run.RunID, map[string]any{"status": model.PipelineStatusFailed, "end_time": now})
-		_ = s.pipelineRepo.Update(ctx, run.PipelineID, map[string]any{"status": model.PipelineStatusFailed})
+		// The durable admission commit may have succeeded despite a lost ACK.
+		// Never turn an unknown or already-admitted run into failed here.
 		return &pipelinev1.TriggerPipelineResponse{Success: false, RunId: run.RunID, Message: "pipeline could not be scheduled", Error: s.error(503, err.Error(), "unavailable", nil)}, nil
 	}
 

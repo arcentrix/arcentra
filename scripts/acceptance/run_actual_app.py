@@ -61,6 +61,13 @@ FIRST_BUILD_CONFIGURED_STEPS = [
     "configured-persisted-storage-and-signing-recent-agent",
     "configured-explicit-status-refresh",
 ]
+ORGANIZATION_MANAGEMENT_STEPS = [
+    "organization-created", "organization-updated", "organization-member-added",
+    "organization-role-updated", "organization-member-removed", "project-created",
+    "project-member-added", "project-role-updated", "project-member-removed",
+    "project-settings-updated", "project-archived", "project-restored",
+    "organization-active-project-conflict", "project-rearchived", "organization-archived",
+]
 GO_ENV = {"GOTOOLCHAIN": "local", "GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off",
           "GOENV": "off", "CGO_ENABLED": "0", "GOTELEMETRY": "off", "GOMAXPROCS": "2"}
 DEPENDENCIES = {
@@ -274,7 +281,7 @@ class Fixture:
         return {}
 
     def runtime_limitations(self):
-        return ["Organization creation is not implemented; current admin project API accepts a synthetic orgId.",
+        return ["The build fixture uses a synthetic scope ID; the separate organization journey verifies explicit organization and member management without changing role defaults.",
                 "Trusted baremetal commands run with Agent host permissions on a disposable runner.",
                 "Module downloads are disabled; this does not prove host network isolation or container builds.",
                 "Manifest is an unsigned integrity record, not a provenance attestation."]
@@ -419,8 +426,8 @@ class Fixture:
         receipt = read_private_json(self.coordination / "failed-run.json")
         self.run_snapshot(receipt, successful=False)
         # The current observer can read the real run but cannot trigger even this
-        # synthetic pipeline. Legacy permission middleware uses HTTP 200/4030.
-        self.expect_rejected(f"/pipelines/{receipt['pipelineId']}/trigger", 200, 4030, {}, "POST")
+        # synthetic pipeline. Live scoped permission middleware uses HTTP 403/code 403.
+        self.expect_rejected(f"/pipelines/{receipt['pipelineId']}/trigger", 403, 403, {}, "POST")
         self.failed_run = receipt
         self.note("Actual Agent compiler failure persisted with failed test step and zero run artifacts")
         source = self.root / "source"
@@ -557,7 +564,11 @@ class Fixture:
     def browser_environment(self, phase):
         if phase not in ("preflight", "storage-setup", "build"):
             raise ValueError("unknown actual-browser acceptance phase")
-        return self.env | {
+        organization_keys = {"ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY", "ARCENTRA_ACCEPTANCE_MEMBER_USER_ID"}
+        environment = {key: value for key, value in self.env.items() if key not in organization_keys}
+        if phase == "build":
+            environment |= {"ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY": "1", "ARCENTRA_ACCEPTANCE_MEMBER_USER_ID": self.observer_id}
+        return environment | {
             "ARCENTRA_ACCEPTANCE_PHASE": phase,
             "ARCENTRA_REAL_STACK": "1", "ARCENTRA_ACCEPTANCE_BACKEND_URL": BACKEND_URL,
             "ARCENTRA_ACCEPTANCE_REPO_URL": self.repository_url(), "ARCENTRA_ACCEPTANCE_ORG_ID": "ci-acceptance-org",
@@ -628,7 +639,23 @@ class Fixture:
             raise RuntimeError("Control or Agent exited during browser acceptance")
         self.require_browser_summary("build")
         self.verify_downloads()
+        self.verify_organization_management()
         self.note("Browser create-project → create-pipeline → run → logs → artifact journey completed")
+
+    def verify_organization_management(self):
+        summary = read_private_json(self.args.evidence_dir / "browser/summary.json")
+        evidence = validate_organization_management(summary)
+        # Browser has ended. This rotates only the synthetic administrator's
+        # session; the separate build observer retains its original identity.
+        self.login()
+        self.expect_rejected("/organization/" + evidence["orgId"], 404, 404)
+        project = self.request("/project/" + evidence["projectId"] + "/settings")
+        if (project.get("projectId") != evidence["projectId"]
+                or project.get("orgId") != evidence["orgId"]
+                or project.get("status") != 2 or project.get("isEnabled") != 1
+                or any(project.get(key) is not False for key in ("canUpdate", "canArchive", "canRestore"))):
+            raise RuntimeError("browser organization lifecycle was not confirmed by independent project settings read")
+        self.note("Real organization/member/settings CRUD and final archived lifecycle confirmed through authorized APIs")
 
     def cleanup(self, error):
         error = redact_diagnostics(error, self.redactions) if error else error
@@ -701,6 +728,20 @@ def validate_first_build_summary(summary, phase, source_commit):
             or summary.get("stage") != ({"preflight": "preflight-complete", "storage-setup": "storage-setup-complete", "build": "journey-complete"}[phase])
             or summary.get("firstBuildReadiness") != expected):
         raise RuntimeError("browser phase lacks the exact successful first-build guidance evidence")
+
+
+def validate_organization_management(summary):
+    evidence = summary.get("organizationManagement") if isinstance(summary, dict) else None
+    if (not isinstance(evidence, dict)
+            or set(evidence) != {"journey", "completed", "orgId", "projectId", "steps"}
+            or evidence.get("journey") != "organization-members-settings-v1"
+            or evidence.get("completed") is not True
+            or evidence.get("steps") != ORGANIZATION_MANAGEMENT_STEPS
+            or any(not isinstance(evidence.get(key), str)
+                   or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", evidence[key])
+                   for key in ("orgId", "projectId"))):
+        raise RuntimeError("browser lacks the exact successful organization/member/settings evidence")
+    return evidence
 
 
 def validate_persisted_storage(detail, configuration):

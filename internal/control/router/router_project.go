@@ -22,6 +22,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/authz"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/internal/control/repo"
 	"github.com/arcentrix/arcentra/pkg/auth"
 	"github.com/arcentrix/arcentra/pkg/http"
 	"github.com/arcentrix/arcentra/pkg/http/middleware"
@@ -37,15 +38,21 @@ func (rt *Router) projectRouter(r fiber.Router, authMW fiber.Handler, subjectMW 
 			rt.liveCreateProjectAccess(),
 			rt.createProject)
 
+		// Versioned settings and lifecycle operations use live transaction-bound authorization.
+		projectGroup.Get("/:projectID/settings", sensitiveHTTPStatus, authMW, rt.projectSettingsHandler("read"))
+		projectGroup.Patch("/:projectID/settings", sensitiveHTTPStatus, authMW, rt.projectSettingsHandler("update"))
+		projectGroup.Post("/:projectID/settings/archive", sensitiveHTTPStatus, authMW, rt.projectSettingsHandler("archive"))
+		projectGroup.Post("/:projectID/settings/restore", sensitiveHTTPStatus, authMW, rt.projectSettingsHandler("restore"))
+
 		// 更新项目
 		projectGroup.Put("/:projectID", authMW, subjectMW,
 			rt.permission("project:update", rt.resolveProjectScope()),
-			rt.updateProject)
+			rt.legacyProjectMutationUnavailable)
 
 		// 删除项目
 		projectGroup.Delete("/:projectID", authMW, subjectMW,
 			rt.permission("project:update", rt.resolveProjectScope()),
-			rt.deleteProject)
+			rt.legacyProjectMutationUnavailable)
 
 		// 获取项目详情
 		projectGroup.Get("/:projectID", authMW, subjectMW,
@@ -70,30 +77,28 @@ func (rt *Router) projectRouter(r fiber.Router, authMW fiber.Handler, subjectMW 
 		// 启用/禁用项目
 		projectGroup.Post("/:projectID/enable", authMW, subjectMW,
 			rt.permission("project:update", rt.resolveProjectScope()),
-			rt.enableProject)
+			rt.legacyProjectMutationUnavailable)
 		projectGroup.Post("/:projectID/disable", authMW, subjectMW,
 			rt.permission("project:update", rt.resolveProjectScope()),
-			rt.disableProject)
+			rt.legacyProjectMutationUnavailable)
 
 		// 更新项目统计信息
 		projectGroup.Post("/:projectID/statistics", authMW, subjectMW,
 			rt.permission("project:update", rt.resolveProjectScope()),
-			rt.updateProjectStatistics)
+			rt.legacyProjectMutationUnavailable)
 
 		// 项目成员管理
-		projectGroup.Get("/:projectID/members", authMW, subjectMW,
-			rt.permission("project:manage_member", rt.resolveProjectScope()),
-			rt.getProjectMembers)
-		projectGroup.Post("/:projectID/members", authMW, subjectMW,
-			rt.permission("project:manage_member", rt.resolveProjectScope()),
-			rt.addProjectMember)
-		projectGroup.Put("/:projectID/members/:userID", authMW, subjectMW,
-			rt.permission("project:manage_member", rt.resolveProjectScope()),
-			rt.updateProjectMemberRole)
-		projectGroup.Delete("/:projectID/members/:userID", authMW, subjectMW,
-			rt.permission("project:manage_member", rt.resolveProjectScope()),
-			rt.removeProjectMember)
+		projectGroup.Get("/:projectID/members", sensitiveHTTPStatus, authMW, rt.firstBuildLiveUser(false), rt.scopedProjectListMembers)
+		projectGroup.Post("/:projectID/members", sensitiveHTTPStatus, authMW, rt.firstBuildLiveUser(false), rt.scopedProjectAddMember)
+		projectGroup.Put("/:projectID/members/:userID", sensitiveHTTPStatus, authMW, rt.firstBuildLiveUser(false), rt.scopedProjectUpdateMember)
+		projectGroup.Delete("/:projectID/members/:userID", sensitiveHTTPStatus, authMW, rt.firstBuildLiveUser(false), rt.scopedProjectRemoveMember)
 	}
+}
+
+// Legacy project mutations cannot bypass versioned lifecycle or scope checks.
+// Existing clients must read /settings and submit its current version explicitly.
+func (rt *Router) legacyProjectMutationUnavailable(c *fiber.Ctx) error {
+	return c.Status(fiber.StatusConflict).JSON(fiber.Map{"code": 409, "msg": "Use versioned project settings; legacy unversioned mutations are unavailable"})
 }
 
 // createProject 创建项目
@@ -115,11 +120,16 @@ func (rt *Router) createProject(c *fiber.Ctx) error {
 
 	result, err := projectService.CreateProject(c.Context(), &req, claims.UserID)
 	if err != nil {
-		log.Errorw("create project failed", "error", err)
-		return http.Err(c, http.Failed.Code, err.Error())
+		if errors.Is(err, repo.ErrOrganizationInvalid) {
+			return sensitiveError(c, 400, "invalid project request")
+		}
+		if errors.Is(err, repo.ErrOrganizationForbidden) || errors.Is(err, repo.ErrOrganizationConflict) || errors.Is(err, repo.ErrOrganizationInvalid) || errors.Is(err, repo.ErrApprovalForbidden) {
+			return organizationError(c, err)
+		}
+		return sensitiveError(c, 503, "project creation is unavailable")
 	}
 
-	return http.Detail(c, result)
+	return http.Detail(c, publicProject(result))
 }
 
 // updateProject 更新项目
@@ -140,10 +150,10 @@ func (rt *Router) updateProject(c *fiber.Ctx) error {
 	result, err := projectService.UpdateProject(c.Context(), projectID, &req)
 	if err != nil {
 		log.Errorw("update project failed", "error", err)
-		return http.Err(c, http.Failed.Code, err.Error())
+		return sensitiveError(c, 503, "project operation is unavailable")
 	}
 
-	return http.Detail(c, result)
+	return http.Detail(c, publicProject(result))
 }
 
 // deleteProject 删除项目
@@ -157,7 +167,7 @@ func (rt *Router) deleteProject(c *fiber.Ctx) error {
 
 	if err := projectService.DeleteProject(c.Context(), projectID); err != nil {
 		log.Errorw("delete project failed", "error", err)
-		return http.Err(c, http.Failed.Code, err.Error())
+		return sensitiveError(c, 503, "project operation is unavailable")
 	}
 
 	return http.Operation(c)
@@ -175,10 +185,10 @@ func (rt *Router) getProjectByID(c *fiber.Ctx) error {
 	result, err := projectService.GetProjectByID(c.Context(), projectID)
 	if err != nil {
 		log.Errorw("get project by id failed", "error", err)
-		return http.Err(c, http.Failed.Code, err.Error())
+		return sensitiveError(c, 503, "project operation is unavailable")
 	}
 
-	return http.Detail(c, result)
+	return http.Detail(c, publicProject(result))
 }
 
 // listProjects 查询项目列表
@@ -218,12 +228,12 @@ func (rt *Router) listProjects(c *fiber.Ctx) error {
 	query.PageNum, query.PageSize = normalizedCollectionPage(query.PageNum, query.PageSize)
 	projects, total, err := rt.authorizedProjectList(c, &query)
 	if err != nil {
-		return http.Err(c, http.Failed.Code, err.Error())
+		return sensitiveError(c, 503, "project operation is unavailable")
 	}
 
 	// 构造响应
 	response := map[string]any{
-		"list":     projects,
+		"list":     publicProjects(projects),
 		"total":    total,
 		"pageNum":  query.PageNum,
 		"pageSize": query.PageSize,
@@ -249,16 +259,15 @@ func (rt *Router) getProjectsByOrgID(c *fiber.Ctx) error {
 		}
 	}
 
-	projectService := rt.Services.Project
-
-	projects, total, err := projectService.GetProjectsByOrgID(c.Context(), orgID, pageNum, pageSize, status)
+	pageNum, pageSize = normalizedCollectionPage(pageNum, pageSize)
+	projects, total, err := rt.authorizedProjectList(c, &model.ProjectQueryReq{OrgID: orgID, PageNum: pageNum, PageSize: pageSize, Status: status})
 	if err != nil {
 		log.Errorw("get projects by org id failed", "error", err)
-		return http.Err(c, http.Failed.Code, err.Error())
+		return sensitiveError(c, 503, "project operation is unavailable")
 	}
 
 	response := map[string]any{
-		"list":     projects,
+		"list":     publicProjects(projects),
 		"total":    total,
 		"pageNum":  pageNum,
 		"pageSize": pageSize,
@@ -285,10 +294,10 @@ func (rt *Router) enableProject(c *fiber.Ctx) error {
 	result, err := projectService.EnableProject(c.Context(), projectID)
 	if err != nil {
 		log.Errorw("enable project failed", "error", err)
-		return http.Err(c, http.Failed.Code, err.Error())
+		return sensitiveError(c, 503, "project operation is unavailable")
 	}
 
-	return http.Detail(c, result)
+	return http.Detail(c, publicProject(result))
 }
 
 // disableProject 禁用项目
@@ -303,10 +312,10 @@ func (rt *Router) disableProject(c *fiber.Ctx) error {
 	result, err := projectService.DisableProject(c.Context(), projectID)
 	if err != nil {
 		log.Errorw("disable project failed", "error", err)
-		return http.Err(c, http.Failed.Code, err.Error())
+		return sensitiveError(c, 503, "project operation is unavailable")
 	}
 
-	return http.Detail(c, result)
+	return http.Detail(c, publicProject(result))
 }
 
 // updateProjectStatistics 更新项目统计信息
@@ -327,10 +336,10 @@ func (rt *Router) updateProjectStatistics(c *fiber.Ctx) error {
 	result, err := projectService.UpdateProjectStatistics(c.Context(), projectID, &req)
 	if err != nil {
 		log.Errorw("update project statistics failed", "error", err)
-		return http.Err(c, http.Failed.Code, err.Error())
+		return sensitiveError(c, 503, "project operation is unavailable")
 	}
 
-	return http.Detail(c, result)
+	return http.Detail(c, publicProject(result))
 }
 
 // getProjectMembers 获取项目成员列表
@@ -346,7 +355,7 @@ func (rt *Router) getProjectMembers(c *fiber.Ctx) error {
 	members, err := rt.Services.ProjectMemberRepo.ListProjectMembers(c.Context(), projectID)
 	if err != nil {
 		log.Errorw("get project members failed", "error", err)
-		return http.Err(c, http.Failed.Code, err.Error())
+		return sensitiveError(c, 503, "project operation is unavailable")
 	}
 
 	response := map[string]any{
@@ -382,7 +391,7 @@ func (rt *Router) addProjectMember(c *fiber.Ctx) error {
 
 	if err := rt.Services.ProjectMemberRepo.AddProjectMember(c.Context(), member); err != nil {
 		log.Errorw("add project member failed", "error", err)
-		return http.Err(c, http.Failed.Code, err.Error())
+		return sensitiveError(c, 503, "project operation is unavailable")
 	}
 
 	return http.Detail(c, member)
@@ -422,7 +431,7 @@ func (rt *Router) removeProjectMember(c *fiber.Ctx) error {
 
 	if err := rt.Services.ProjectMemberRepo.RemoveProjectMember(c.Context(), projectID, userID); err != nil {
 		log.Errorw("remove project member failed", "error", err)
-		return http.Err(c, http.Failed.Code, err.Error())
+		return sensitiveError(c, 503, "project operation is unavailable")
 	}
 
 	return http.Operation(c)

@@ -53,7 +53,7 @@ func NewProjectRepo(db database.IDatabase) IProjectRepository {
 
 // Create creates a new project.
 func (r *ProjectRepo) Create(ctx context.Context, p *model.Project) error {
-	return r.Database().WithContext(ctx).Create(p).Error
+	return createProjectInActiveOrganization(ctx, r.Database(), p)
 }
 
 // Update updates project by projectID.
@@ -191,7 +191,7 @@ func (r *ProjectRepo) ListByUser(
 
 	db := r.Database().WithContext(ctx).Table("project").
 		Joins("INNER JOIN project_member ON project.project_id = project_member.project_id").
-		Where("project_member.user_id = ?", userID)
+		Where("project_member.user_id = ? AND project_member.is_enabled = ?", userID, 1)
 
 	if orgID != "" {
 		db = db.Where("project.org_id = ?", orgID)

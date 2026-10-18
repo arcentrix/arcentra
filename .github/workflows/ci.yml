@@ -221,6 +221,40 @@ jobs:
               TestPollingMySQLAcceptance/cursor_cas_failure_replays_without_reclaim
           done
 
+      - name: Verify scoped membership and archive admission with actual MySQL
+        timeout-minutes: 5
+        run: |
+          set -o pipefail
+          for attempt in 1 2; do
+            schema="arcentra_retry_approval_test_org_$attempt"
+            admission_schema="arcentra_project_admission_test_ci_$attempt"
+            collation=utf8mb4_0900_ai_ci
+            if [ "$attempt" = 2 ]; then collation=utf8mb4_bin; fi
+            docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysql -uroot -e "CREATE DATABASE $schema CHARACTER SET utf8mb4 COLLATE $collation; CREATE DATABASE $admission_schema CHARACTER SET utf8mb4 COLLATE $collation;"
+            ARCENTRA_REQUIRE_RETRY_APPROVAL_MYSQL=1 \
+            ARCENTRA_RETRY_APPROVAL_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
+              go test -race -v -count=1 -timeout=2m -run '^Test(OrganizationMySQL|ProjectSettingsMySQL)' ./internal/control/repo | tee ".acceptance/evidence/organization-mysql-$attempt.log"
+            python3 scripts/acceptance/verify_containerd_test_log.py ".acceptance/evidence/organization-mysql-$attempt.log" 1 \
+              TestOrganizationMySQLConcurrentMemberCASAndScopeIsolation \
+              TestOrganizationMySQLRevocationSerializesBeforeMemberAdmission \
+              TestOrganizationMySQLArchiveSerializesProjectCreation \
+              TestOrganizationMySQLCaseCollidingIdentityDenies \
+              TestOrganizationMySQLLastOwnerMutationsSerialize \
+              TestOrganizationMySQLCollationAliasCannotBypassFrozenLifecycle \
+              TestOrganizationMySQLListAndCreateDoNotInvertDomainLocks \
+              TestOrganizationMySQLMigrationUpgradesOldShape \
+              TestProjectSettingsMySQLCASAndRollback
+            ARCENTRA_REQUIRE_PROJECT_ADMISSION_MYSQL=1 \
+            ARCENTRA_PROJECT_ADMISSION_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$admission_schema?charset=utf8mb4&parseTime=True&loc=UTC" \
+              go test -race -v -count=1 -timeout=2m -run '^TestProjectAdmissionMySQLArchiveSerialization$' ./internal/control/repo | tee ".acceptance/evidence/project-admission-mysql-$attempt.log"
+            python3 scripts/acceptance/verify_containerd_test_log.py ".acceptance/evidence/project-admission-mysql-$attempt.log" 1 \
+              TestProjectAdmissionMySQLArchiveSerialization \
+              TestProjectAdmissionMySQLArchiveSerialization/manual/archive-first-true \
+              TestProjectAdmissionMySQLArchiveSerialization/manual/archive-first-false \
+              TestProjectAdmissionMySQLArchiveSerialization/automatic/archive-first-true \
+              TestProjectAdmissionMySQLArchiveSerialization/automatic/archive-first-false
+          done
+
       - name: Verify durable approval with actual MySQL authorization contention
         timeout-minutes: 5
         run: |
@@ -253,7 +287,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: 3fc1b50ca9c2ade85b98e04e2778540455c30cff
+          ref: dd2a1c506bf3984920e703b3ed03a5f9c3bf2716
           path: .acceptance/frontend
           persist-credentials: false
 

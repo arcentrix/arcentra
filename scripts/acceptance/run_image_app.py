@@ -164,7 +164,7 @@ level = "INFO"
                 'The stock Agent image does not ship the fixture compiler/Python toolchain.',
                 'This does not establish containerd job isolation or arbitrary OCI build support.',
                 'The manifest is an unsigned integrity record, not a supply-chain attestation.',
-                'Organization creation is not implemented; the fixture uses a synthetic orgId.']
+                'The build fixture uses a synthetic scope ID; the separate organization journey verifies explicit organization and member management without changing role defaults.']
 
     def cleanup(self, error):
         try:

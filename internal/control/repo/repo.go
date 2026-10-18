@@ -34,6 +34,7 @@ type Repositories struct {
 	Team                 ITeamRepository
 	Identity             IIdentityRepository
 	Setting              ISettingRepository
+	Organization         IOrganizationRepository
 	Project              IProjectRepository
 	ProjectMember        IProjectMemberRepository
 	TeamMember           ITeamMemberRepository
@@ -71,6 +72,7 @@ func NewRepositories(db database.IDatabase, ch cache.ICache) *Repositories {
 		Team:                 NewTeamRepo(db),
 		Identity:             NewIdentityRepo(db),
 		Setting:              NewSettingRepo(db, ch),
+		Organization:         NewOrganizationRepo(db),
 		Project:              NewProjectRepo(db),
 		ProjectMember:        NewProjectMemberRepo(db),
 		TeamMember:           NewTeamMemberRepo(db),

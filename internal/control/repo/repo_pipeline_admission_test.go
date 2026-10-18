@@ -30,8 +30,13 @@ func automaticAdmissionRepository(t *testing.T) (*PipelineRepo, *model.PipelineR
 	}
 	pool.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = pool.Close() })
-	if err := db.AutoMigrate(&model.Pipeline{}, &model.PipelineRun{}, &model.JobRun{}); err != nil {
+	if err := db.AutoMigrate(&model.Project{}, &model.Pipeline{}, &model.PipelineRun{}, &model.JobRun{}); err != nil {
 		t.Fatal(err)
+	}
+	for _, row := range []any{&model.Project{ProjectID: "project", IsEnabled: 1, Status: model.ProjectStatusActive}, &model.Pipeline{PipelineID: "pipeline", ProjectID: "project", IsEnabled: 1, Metadata: "{}"}} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
 	}
 	r := &PipelineRepo{IDatabase: statusTestDB{db}}
 	run := &model.PipelineRun{RunID: "run", PipelineID: "pipeline", RequestID: "cron:pipeline:delivery", TriggerType: int(pipelinev1.TriggerType_TRIGGER_TYPE_CRON), TriggeredBy: "cron", Status: model.PipelineStatusPending, DefinitionCommitSha: "definition", DefinitionPath: "pipeline.json", Branch: "main", CommitSha: "source"}

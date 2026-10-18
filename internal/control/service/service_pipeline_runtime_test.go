@@ -56,7 +56,7 @@ func pipelineRuntimeFixture(t *testing.T, parsed *pipelinev1.Spec) (pipelineServ
 	adapter := pipelineServiceTestDB{db}
 	repositories := repo.NewRepositories(adapter, nil)
 	ctx := context.Background()
-	if err := repositories.Project.Create(ctx, &model.Project{ProjectID: "runtime-project", Name: "runtime", RepoURL: "https://fixture.invalid/repo.git", DefaultBranch: "main", IsEnabled: 1}); err != nil {
+	if err := repositories.Project.Create(ctx, &model.Project{ProjectID: "runtime-project", Name: "runtime", RepoURL: "https://fixture.invalid/repo.git", DefaultBranch: "main", IsEnabled: 1, Status: model.ProjectStatusActive}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repositories.Pipeline.Create(ctx, &model.Pipeline{PipelineID: "runtime-pipeline", ProjectID: "runtime-project", Name: "runtime", RepoURL: "https://fixture.invalid/repo.git", DefaultBranch: "main", PipelineFilePath: "pipeline.json", IsEnabled: 1}); err != nil {
