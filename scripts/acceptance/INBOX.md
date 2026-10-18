@@ -52,10 +52,13 @@ Approval delivery is verified separately through genuine service request/decisio
 paths in the MySQL/runtime suite. This browser run does not prove the approval
 UI path. External email/chat delivery is outside this first in-app slice.
 
-## Current validation status
+## Validation evidence
 
-Local validator and orchestration unit tests are present. Hosted real Inbox
-browser/MySQL/runtime acceptance is pending; no result is implied by this file.
+Local validator and orchestration unit tests accompany these checks. Hosted
+results are specific to a source commit: consult that commit's complete CI runs
+and the cumulative delivery evidence for browser, MySQL and runtime outcomes.
+The presence of this harness or one successful lane does not establish that all
+acceptance checks passed.
 
 ## Conservative admission boundary
 

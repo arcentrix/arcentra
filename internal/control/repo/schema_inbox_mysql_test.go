@@ -6,7 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -65,68 +68,198 @@ func TestInboxMySQLRealOldShapeMigrationAndLargeHistoryPlans(t *testing.T) {
 				require.Zero(t, count)
 			}
 			now := time.Now().UTC()
-			runs := make([]model.PipelineRun, 0, 5000)
+			runs := make([]model.PipelineRun, 0, 10001)
 			works := make([]model.InboxWork, 0, 5000)
-			for i := 0; i < 5000; i++ {
+			for i := 0; i < 10001; i++ {
 				id := fmt.Sprintf("completed-%05d", i)
-				runs = append(runs, model.PipelineRun{RunID: id, PipelineID: "pipe", InboxOrigin: 1, InboxActorID: "actor", Status: model.PipelineStatusSuccess, Env: "{}"})
-				works = append(works, model.InboxWork{SourceKind: "run", SourceID: id, State: 1, TerminalDone: true, NextCheckAt: now})
-			}
-			require.NoError(t, db.CreateInBatches(runs, 100).Error)
-			require.NoError(t, db.CreateInBatches(works, 100).Error)
-			require.NoError(t, enrollInboxWork(db, "run", "due-source"))
-			type queryPlan struct {
-				Table        string
-				Key          *string
-				PossibleKeys *string
-				Rows         int64
-				Type         string
-				Filtered     float64
-				Extra        *string
-			}
-			queries := []struct{ name, sql string }{
-				{"repair-id-window", "SELECT id, run_id FROM pipeline_run WHERE inbox_origin = 1 AND id > 4900 AND id <= 5001 ORDER BY id ASC LIMIT 100"},
-				{"due-work", "SELECT * FROM inbox_work WHERE source_kind = 'run' AND state = 0 AND next_check_at <= CURRENT_TIMESTAMP ORDER BY next_check_at ASC, id ASC LIMIT 1"},
-			}
-			plans := make([][]queryPlan, len(queries))
-			// Capture both fixed synthetic queries before assertions. Index names and
-			// execution plans contain no user data or connection credentials. Preserve
-			// the strict gate until actual optimizer/scan evidence explains a failure.
-			for i, query := range queries {
-				require.NoError(t, db.WithContext(ctx).Raw("EXPLAIN "+query.sql).Scan(&plans[i]).Error)
-				diagnostic, err := json.Marshal(plans[i])
-				require.NoError(t, err)
-				require.LessOrEqual(t, len(diagnostic), 8192)
-				t.Logf("synthetic Inbox plan %s: %s", query.name, diagnostic)
-				rows, err := db.WithContext(ctx).Raw("EXPLAIN ANALYZE " + query.sql).Rows()
-				require.NoError(t, err)
-				defer rows.Close()
-				count := 0
-				for rows.Next() {
-					count++
-					require.LessOrEqual(t, count, 1)
-					var execution string
-					require.NoError(t, rows.Scan(&execution))
-					require.LessOrEqual(t, len(execution), 8192)
-					t.Logf("synthetic Inbox execution %s: %s", query.name, execution)
+				origin, actor := 0, ""
+				if i <= 5000 || i == 10000 {
+					origin, actor = 1, "actor"
 				}
-				require.NoError(t, rows.Err())
-				require.NoError(t, rows.Close())
-				require.Equal(t, 1, count)
-			}
-			for i, explain := range plans {
-				require.NotEmpty(t, explain, queries[i].name)
-				for _, row := range explain {
-					require.NotNil(t, row.Key)
-					require.True(t, strings.Contains(*row.Key, "inbox"), "bounded work must use Inbox range indexes")
-					require.NotEqual(t, "ALL", row.Type)
-					require.Less(t, row.Rows, int64(1000), "completed history must stay outside the scanned range")
+				// Explicit IDs make both excluded boundary sentinels deterministic.
+				runs = append(runs, model.PipelineRun{BaseModel: model.BaseModel{ID: uint64(i + 2)}, RunID: id, PipelineID: "pipe", InboxOrigin: origin, InboxActorID: actor, Status: model.PipelineStatusSuccess, Env: "{}"})
+				if i < 5000 {
+					works = append(works, model.InboxWork{SourceKind: "run", SourceID: id, State: 1, TerminalDone: true, NextCheckAt: now.Add(-24 * time.Hour)})
 				}
 			}
+			require.NoError(t, db.WithContext(ctx).CreateInBatches(runs, 100).Error)
+			require.NoError(t, db.WithContext(ctx).CreateInBatches(works, 100).Error)
+			require.NoError(t, enrollInboxWork(db.WithContext(ctx), "run", "due-source"))
+			// Database-relative past/future values avoid any clock or timestamp-
+			// precision inference from the earlier zero-hit execution plan.
+			require.NoError(t, db.WithContext(ctx).Model(&model.InboxWork{}).Where("source_kind = ? AND source_id = ?", "run", "due-source").UpdateColumn("next_check_at", gorm.Expr("CURRENT_TIMESTAMP - INTERVAL 1 DAY")).Error)
+			require.NoError(t, db.WithContext(ctx).Create(&model.InboxWork{SourceKind: "approval", SourceID: "other-kind", NextCheckAt: now.Add(-48 * time.Hour)}).Error)
+			require.NoError(t, enrollInboxWork(db.WithContext(ctx), "run", "future-source"))
+			require.NoError(t, db.WithContext(ctx).Model(&model.InboxWork{}).Where("source_kind = ? AND source_id = ?", "run", "future-source").UpdateColumn("next_check_at", gorm.Expr("CURRENT_TIMESTAMP + INTERVAL 1 DAY")).Error)
+
+			const repairSQL = "SELECT id, run_id FROM pipeline_run WHERE inbox_origin = 1 AND id > 4900 AND id <= 5001 ORDER BY id ASC LIMIT 100"
+			const dueSQL = "SELECT * FROM inbox_work WHERE source_kind = 'run' AND state = 0 AND next_check_at <= CURRENT_TIMESTAMP ORDER BY next_check_at ASC, id ASC LIMIT 1"
+			densePlan, denseExecution := captureInboxMySQLPlan(t, ctx, db, "repair-dense", repairSQL)
+			duePlan, dueExecution := captureInboxMySQLPlan(t, ctx, db, "due-work", dueSQL)
+			require.NoError(t, validateInboxMySQLPlan(densePlan, denseExecution, "repair", 100))
+			require.NoError(t, validateInboxMySQLPlan(duePlan, dueExecution, "due", 1))
+			var selected []model.PipelineRun
+			require.NoError(t, db.WithContext(ctx).Raw(repairSQL).Scan(&selected).Error)
+			require.Len(t, selected, 100)
+			for i, row := range selected {
+				require.EqualValues(t, 4901+i, row.ID)
+			}
+			var due []model.InboxWork
+			require.NoError(t, db.WithContext(ctx).Raw(dueSQL).Scan(&due).Error)
+			require.Len(t, due, 1)
+			require.Equal(t, "due-source", due[0].SourceID)
+			require.Equal(t, "run", due[0].SourceKind)
+			require.Zero(t, due[0].State)
+
+			// Keep matching sentinels at 4900 and 5002 outside the window, and
+			// only its first/last IDs inside. Thousands of irrelevant rows remain.
+			require.NoError(t, db.WithContext(ctx).Model(&model.PipelineRun{}).Where("id > 4901 AND id < 5001").Updates(map[string]any{"inbox_origin": 0, "inbox_actor_id": ""}).Error)
+			sparsePlan, sparseExecution := captureInboxMySQLPlan(t, ctx, db, "repair-sparse-boundaries", repairSQL)
+			require.NoError(t, validateInboxMySQLPlan(sparsePlan, sparseExecution, "repair", 2))
+			selected = nil
+			require.NoError(t, db.WithContext(ctx).Raw(repairSQL).Scan(&selected).Error)
+			require.Len(t, selected, 2)
+			require.EqualValues(t, 4901, selected[0].ID)
+			require.EqualValues(t, 5001, selected[1].ID)
+
+			// A production sweep's upper bound may be far away. This separate
+			// 5101-slot window contains 5099 valid legacy/origin0 rows and only
+			// two eligible rows. A PRIMARY range cannot prove this sparse case.
+			require.NoError(t, db.WithContext(ctx).Model(&model.PipelineRun{}).Where("id > 4901 AND id < 10001").Updates(map[string]any{"inbox_origin": 0, "inbox_actor_id": ""}).Error)
+			require.NoError(t, db.WithContext(ctx).Model(&model.PipelineRun{}).Where("id = ?", 10001).Updates(map[string]any{"inbox_origin": 1, "inbox_actor_id": "actor"}).Error)
+			const wideSQL = "SELECT id, run_id FROM pipeline_run WHERE inbox_origin = 1 AND id > 4900 AND id <= 10001 ORDER BY id ASC LIMIT 100"
+			widePlan, wideExecution := captureInboxMySQLPlan(t, ctx, db, "repair-wide-sparse", wideSQL)
+			require.NoError(t, validateInboxMySQLPlan(widePlan, wideExecution, "repair-wide", 2))
+			selected = nil
+			require.NoError(t, db.WithContext(ctx).Raw(wideSQL).Scan(&selected).Error)
+			require.Len(t, selected, 2)
+			require.EqualValues(t, 4901, selected[0].ID)
+			require.EqualValues(t, 10001, selected[1].ID)
+
 			// Schema replay leaves original legacy rows unbound and new work untouched.
 			require.NoError(t, MigrateSchema(ctx, db))
 			require.NoError(t, db.Where("run_id = ?", "legacy").First(&legacy).Error)
 			require.Empty(t, legacy.InboxActorID)
 		})
 	}
+}
+
+// These diagnostics and the parser below intentionally target the pinned MySQL
+// 8.0.40 TREE format. Unknown operators or syntax fail closed, never imply a pass.
+type inboxMySQLQueryPlan struct {
+	Table        string
+	Key          *string
+	PossibleKeys *string
+	Rows         int64
+	Type         string
+	Filtered     float64
+	Extra        *string
+}
+
+func captureInboxMySQLPlan(t *testing.T, ctx context.Context, db *gorm.DB, name, query string) ([]inboxMySQLQueryPlan, string) {
+	t.Helper()
+	var plan []inboxMySQLQueryPlan
+	require.NoError(t, db.WithContext(ctx).Raw("EXPLAIN "+query).Scan(&plan).Error)
+	diagnostic, err := json.Marshal(plan)
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(diagnostic), 8192)
+	t.Logf("synthetic Inbox plan %s: %s", name, diagnostic)
+	rows, err := db.WithContext(ctx).Raw("EXPLAIN ANALYZE " + query).Rows()
+	require.NoError(t, err)
+	defer rows.Close()
+	require.True(t, rows.Next(), "execution plan must contain one row")
+	var execution string
+	require.NoError(t, rows.Scan(&execution))
+	require.LessOrEqual(t, len(execution), 8192)
+	t.Logf("synthetic Inbox execution %s: %s", name, execution)
+	require.False(t, rows.Next(), "execution plan must contain only one row")
+	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
+	return plan, execution
+}
+
+const inboxPlanNumber = `[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?`
+
+var inboxPlanLine = regexp.MustCompile(`^( *)-> (.+)  \(cost=` + inboxPlanNumber + ` rows=` + inboxPlanNumber + `\) \(actual time=(` + inboxPlanNumber + `)\.\.(` + inboxPlanNumber + `) rows=(` + inboxPlanNumber + `) loops=(` + inboxPlanNumber + `)\)$`)
+var inboxDueRange = regexp.MustCompile(`^Index range scan on inbox_work using idx_inbox_work_due over \(source_kind = 'run' AND state = 0 AND next_check_at <= '[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?'\), with index condition: \(\(inbox_work.state = 0\) and \(inbox_work.source_kind = 'run'\) and \(inbox_work.next_check_at <= <cache>\(now\(\)\)\)\)$`)
+
+func validateInboxMySQLPlan(plan []inboxMySQLQueryPlan, execution, kind string, outputRows int) error {
+	if len(plan) != 1 || plan[0].Key == nil || plan[0].Type != "range" || plan[0].Rows <= 0 || plan[0].Rows >= 1000 {
+		return fmt.Errorf("expected one bounded estimated range plan")
+	}
+	if len(execution) == 0 || len(execution) > 8192 {
+		return fmt.Errorf("execution plan exceeds diagnostic bounds")
+	}
+	lines := strings.Split(strings.TrimSuffix(execution, "\n"), "\n")
+	if len(lines) < 2 || len(lines) > 3 {
+		return fmt.Errorf("unknown execution plan shape")
+	}
+	limit, maxScan, upperID := 100, 101, 5001 // The narrow unique-ID window has at most 101 rows.
+	if kind == "repair-wide" {
+		maxScan, upperID = 2, 10001
+	}
+	if kind == "due" {
+		limit, maxScan = 1, 1
+		if outputRows != 1 || plan[0].Table != "inbox_work" || *plan[0].Key != "idx_inbox_work_due" || len(lines) != 2 {
+			return fmt.Errorf("unexpected due-work range plan")
+		}
+	} else if (kind != "repair" && kind != "repair-wide") || plan[0].Table != "pipeline_run" || (outputRows != 100 && outputRows != 2) || (kind == "repair-wide" && outputRows != 2) {
+		return fmt.Errorf("unexpected repair range plan")
+	}
+	descriptions := make([]string, len(lines))
+	for i, line := range lines {
+		match := inboxPlanLine.FindStringSubmatch(line)
+		if match == nil || len(match[1]) != i*4 {
+			return fmt.Errorf("unknown execution iterator syntax at %d", i)
+		}
+		descriptions[i] = match[2]
+		values := make([]float64, 4)
+		for j := range values {
+			value, err := strconv.ParseFloat(match[j+3], 64)
+			if err != nil || math.IsInf(value, 0) || math.IsNaN(value) {
+				return fmt.Errorf("invalid actual iterator metric at %d", i)
+			}
+			values[j] = value
+		}
+		if values[1] < values[0] || values[3] != 1 || values[2] != math.Trunc(values[2]) || values[2] < float64(outputRows) || values[2] > float64(maxScan) {
+			return fmt.Errorf("excessive or anomalous actual iterator work at %d", i)
+		}
+		if (i < len(lines)-1 || len(lines) == 2 || *plan[0].Key != "PRIMARY") && values[2] != float64(outputRows) {
+			return fmt.Errorf("unexpected actual output at %d", i)
+		}
+	}
+	if descriptions[0] != fmt.Sprintf("Limit: %d row(s)", limit) {
+		return fmt.Errorf("missing exact query limit")
+	}
+	leaf := descriptions[len(descriptions)-1]
+	if kind == "due" {
+		if !inboxDueRange.MatchString(leaf) {
+			return fmt.Errorf("unknown or unbounded due-work scan")
+		}
+		return nil
+	}
+	predicate := fmt.Sprintf("((pipeline_run.inbox_origin = 1) and (pipeline_run.id > 4900) and (pipeline_run.id <= %d))", upperID)
+	if len(lines) == 3 && descriptions[1] != "Filter: "+predicate {
+		return fmt.Errorf("unknown repair filter")
+	}
+	key := *plan[0].Key
+	rangeText := fmt.Sprintf("(inbox_origin = 1 AND 4900 < id <= %d)", upperID)
+	switch key {
+	case "PRIMARY":
+		if kind == "repair-wide" {
+			return fmt.Errorf("wide sparse repair requires an origin-aware bounded range")
+		}
+		rangeText = "(4900 < id <= 5001)"
+		if len(lines) != 3 {
+			return fmt.Errorf("primary range must retain origin filter")
+		}
+	case "idx_run_inbox_repair", "idx_run_inbox_origin":
+	default:
+		return fmt.Errorf("unknown repair range index")
+	}
+	prefix := "Index range scan on pipeline_run using " + key + " over " + rangeText
+	if leaf != prefix && leaf != prefix+", with index condition: "+predicate {
+		return fmt.Errorf("unknown or unbounded repair scan")
+	}
+	return nil
 }

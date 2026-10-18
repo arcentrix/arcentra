@@ -1,7 +1,7 @@
 # 012: Personal in-app Inbox
 
-Baseline: accepted Secrets main fdba88e248f3db50afa4cd7057861f60ed66c0f6,
-after migration 011. Apply the existing explicit operator command
+Baseline: accepted Visual CI main b932f7c194d2d7617a39b2bbdcacdc38d58efed9,
+which retains migration 011 from the Secrets release. Apply the existing explicit operator command
 `arcentra-cli migrate --conf /private/path/config.toml` after backup, stopping old
 Controls and pausing administrative writes. Test a representative copy first.
 No startup AutoMigrate and no mixed-version operation are supported. MySQL DDL
