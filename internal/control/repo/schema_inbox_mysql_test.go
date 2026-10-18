@@ -146,6 +146,11 @@ func TestInboxMySQLRealOldShapeMigrationAndLargeHistoryPlans(t *testing.T) {
 
 // These diagnostics and the parser below intentionally target the pinned MySQL
 // 8.0.40 TREE format. Unknown operators or syntax fail closed, never imply a pass.
+// Accepted shapes are Limit -> [Filter] -> exact range, plus the observed wide
+// Limit -> Sort -> Filter -> Intersect -> one exact range. Numeric checks bound
+// narrow repair to at most 301 iterator row-visits (100+100+101), origin-aware
+// sparse ranges to at most six, due-work to two, and the intersection to ten.
+// This accounts for reported iterator work, not physical I/O or page reads.
 type inboxMySQLQueryPlan struct {
 	Table        string
 	Key          *string
@@ -184,14 +189,29 @@ var inboxPlanLine = regexp.MustCompile(`^( *)-> (.+)  \(cost=` + inboxPlanNumber
 var inboxDueRange = regexp.MustCompile(`^Index range scan on inbox_work using idx_inbox_work_due over \(source_kind = 'run' AND state = 0 AND next_check_at <= '[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?'\), with index condition: \(\(inbox_work.state = 0\) and \(inbox_work.source_kind = 'run'\) and \(inbox_work.next_check_at <= <cache>\(now\(\)\)\)\)$`)
 
 func validateInboxMySQLPlan(plan []inboxMySQLQueryPlan, execution, kind string, outputRows int) error {
-	if len(plan) != 1 || plan[0].Key == nil || plan[0].Type != "range" || plan[0].Rows <= 0 || plan[0].Rows >= 1000 {
+	if len(plan) != 1 || plan[0].Key == nil || plan[0].Rows <= 0 || plan[0].Rows >= 1000 {
 		return fmt.Errorf("expected one bounded estimated range plan")
+	}
+	intersection := plan[0].Type == "index_merge"
+	if intersection {
+		// This one observed 8.0.40 intersection uses PRIMARY only as a row-ID
+		// filter, not a second retrieval leaf (MySQL Index Merge documentation):
+		// https://dev.mysql.com/doc/refman/8.0/en/index-merge-optimization.html
+		// Do not generalize this exception to unions or multi-leaf intersections.
+		if kind != "repair-wide" || outputRows != 2 || plan[0].Table != "pipeline_run" ||
+			*plan[0].Key != "idx_run_inbox_origin,PRIMARY" || plan[0].Rows != 2 || plan[0].Filtered != 100 ||
+			plan[0].Extra == nil || *plan[0].Extra != "Using intersect(idx_run_inbox_origin,PRIMARY); Using where; Using filesort" ||
+			plan[0].PossibleKeys == nil || *plan[0].PossibleKeys != "PRIMARY,idx_run_inbox_origin,idx_run_inbox_repair" {
+			return fmt.Errorf("unknown index-merge metadata")
+		}
+	} else if plan[0].Type != "range" {
+		return fmt.Errorf("expected a supported bounded access method")
 	}
 	if len(execution) == 0 || len(execution) > 8192 {
 		return fmt.Errorf("execution plan exceeds diagnostic bounds")
 	}
 	lines := strings.Split(strings.TrimSuffix(execution, "\n"), "\n")
-	if len(lines) < 2 || len(lines) > 3 {
+	if (intersection && len(lines) != 5) || (!intersection && (len(lines) < 2 || len(lines) > 3)) {
 		return fmt.Errorf("unknown execution plan shape")
 	}
 	limit, maxScan, upperID := 100, 101, 5001 // The narrow unique-ID window has at most 101 rows.
@@ -207,6 +227,7 @@ func validateInboxMySQLPlan(plan []inboxMySQLQueryPlan, execution, kind string, 
 		return fmt.Errorf("unexpected repair range plan")
 	}
 	descriptions := make([]string, len(lines))
+	iteratorRowVisits := float64(0)
 	for i, line := range lines {
 		match := inboxPlanLine.FindStringSubmatch(line)
 		if match == nil || len(match[1]) != i*4 {
@@ -224,12 +245,34 @@ func validateInboxMySQLPlan(plan []inboxMySQLQueryPlan, execution, kind string, 
 		if values[1] < values[0] || values[3] != 1 || values[2] != math.Trunc(values[2]) || values[2] < float64(outputRows) || values[2] > float64(maxScan) {
 			return fmt.Errorf("excessive or anomalous actual iterator work at %d", i)
 		}
+		iteratorRowVisits += values[2] * values[3]
 		if (i < len(lines)-1 || len(lines) == 2 || *plan[0].Key != "PRIMARY") && values[2] != float64(outputRows) {
 			return fmt.Errorf("unexpected actual output at %d", i)
 		}
 	}
 	if descriptions[0] != fmt.Sprintf("Limit: %d row(s)", limit) {
 		return fmt.Errorf("missing exact query limit")
+	}
+	if intersection {
+		// Exact single-chain shape observed under both collations. Each of the
+		// five iterators reports two rows and one loop: ten iterator row-visits,
+		// not a claim about physical I/O or storage-engine page reads.
+		expected := []string{
+			"Limit: 100 row(s)",
+			"Sort: pipeline_run.id, limit input to 100 row(s) per chunk",
+			"Filter: ((pipeline_run.inbox_origin = 1) and (pipeline_run.id > 4900) and (pipeline_run.id <= 10001))",
+			"Intersect rows sorted by row ID",
+			"Index range scan on pipeline_run using idx_run_inbox_origin over (inbox_origin = 1 AND 4900 < id <= 10001)",
+		}
+		for i, description := range descriptions {
+			if description != expected[i] {
+				return fmt.Errorf("unknown index-merge iterator at %d", i)
+			}
+		}
+		if iteratorRowVisits != 10 {
+			return fmt.Errorf("unexpected aggregate index-merge iterator work")
+		}
+		return nil
 	}
 	leaf := descriptions[len(descriptions)-1]
 	if kind == "due" {

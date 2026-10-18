@@ -108,3 +108,79 @@ func TestInboxMySQLBoundedPlanRequiresConsistentStructuredRange(t *testing.T) {
 	plan[0].Type, plan[0].Rows = "range", 5000
 	require.Error(t, validateInboxMySQLPlan(plan, inboxDensePrimaryPlan, "repair", 100))
 }
+
+// Full observed MySQL 8.0.40 wide-window plan, utf8mb4_0900_ai_ci.
+const inboxWideIntersectPlan = `-> Limit: 100 row(s)  (cost=1.09 rows=2) (actual time=0.0506..0.0509 rows=2 loops=1)
+    -> Sort: pipeline_run.id, limit input to 100 row(s) per chunk  (cost=1.09 rows=2) (actual time=0.05..0.0502 rows=2 loops=1)
+        -> Filter: ((pipeline_run.inbox_origin = 1) and (pipeline_run.id > 4900) and (pipeline_run.id <= 10001))  (cost=1.09 rows=2) (actual time=0.0354..0.0425 rows=2 loops=1)
+            -> Intersect rows sorted by row ID  (cost=1.09 rows=2) (actual time=0.0339..0.0406 rows=2 loops=1)
+                -> Index range scan on pipeline_run using idx_run_inbox_origin over (inbox_origin = 1 AND 4900 < id <= 10001)  (cost=0.251 rows=4) (actual time=0.0266..0.0293 rows=2 loops=1)
+`
+
+func inboxObservedMergeEstimate() []inboxMySQLQueryPlan {
+	key, possible := "idx_run_inbox_origin,PRIMARY", "PRIMARY,idx_run_inbox_origin,idx_run_inbox_repair"
+	extra := "Using intersect(idx_run_inbox_origin,PRIMARY); Using where; Using filesort"
+	return []inboxMySQLQueryPlan{{Table: "pipeline_run", Key: &key, PossibleKeys: &possible, Rows: 2, Type: "index_merge", Filtered: 100, Extra: &extra}}
+}
+
+func TestInboxMySQLBoundedPlanObservedSingleLeafIntersection(t *testing.T) {
+	for _, execution := range []string{
+		inboxWideIntersectPlan,
+		// Same full observed shape in utf8mb4_bin, including its actual timings.
+		strings.NewReplacer("0.0506..0.0509", "0.0531..0.0534", "0.05..0.0502", "0.0523..0.0524",
+			"0.0354..0.0425", "0.0365..0.0439", "0.0339..0.0406", "0.0345..0.0414", "0.0266..0.0293", "0.0268..0.0296").Replace(inboxWideIntersectPlan),
+	} {
+		require.NoError(t, validateInboxMySQLPlan(inboxObservedMergeEstimate(), execution, "repair-wide", 2))
+	}
+	for _, kind := range []string{"repair", "due", "unknown"} {
+		require.Error(t, validateInboxMySQLPlan(inboxObservedMergeEstimate(), inboxWideIntersectPlan, kind, 2))
+	}
+	for i := range 5 {
+		for _, metrics := range []string{"rows=0 loops=1", "rows=3 loops=1", "rows=5000 loops=1", "rows=2 loops=2", "rows=2 loops=0", "rows=NaN loops=1", "rows=2 loops=1e999"} {
+			lines := strings.Split(strings.TrimSuffix(inboxWideIntersectPlan, "\n"), "\n")
+			lines[i] = strings.Replace(lines[i], "rows=2 loops=1", metrics, 1)
+			require.Error(t, validateInboxMySQLPlan(inboxObservedMergeEstimate(), strings.Join(lines, "\n"), "repair-wide", 2), "iterator %d: %s", i, metrics)
+		}
+	}
+	for name, execution := range map[string]string{
+		"unknown-intersect":        strings.Replace(inboxWideIntersectPlan, "Intersect rows sorted by row ID", "Union rows sorted by row ID", 1),
+		"unlimited-sort":           strings.Replace(inboxWideIntersectPlan, ", limit input to 100 row(s) per chunk", "", 1),
+		"larger-sort":              strings.Replace(inboxWideIntersectPlan, "limit input to 100", "limit input to 5000", 1),
+		"wrong-sort":               strings.Replace(inboxWideIntersectPlan, "Sort: pipeline_run.id,", "Sort: pipeline_run.run_id,", 1),
+		"descending-sort":          strings.Replace(inboxWideIntersectPlan, "Sort: pipeline_run.id,", "Sort: pipeline_run.id DESC,", 1),
+		"wrong-limit":              strings.Replace(inboxWideIntersectPlan, "Limit: 100", "Limit: 1", 1),
+		"wrong-filter":             strings.Replace(inboxWideIntersectPlan, "pipeline_run.inbox_origin = 1", "pipeline_run.inbox_origin = 0", 1),
+		"unknown-leaf":             strings.Replace(inboxWideIntersectPlan, "Index range scan", "Index scan", 1),
+		"unbounded-leaf":           strings.Replace(inboxWideIntersectPlan, "inbox_origin = 1 AND 4900 < id <= 10001", "inbox_origin = 1", 1),
+		"wrong-lower-bound":        strings.Replace(inboxWideIntersectPlan, "4900 < id", "1 < id", 1),
+		"wrong-filter-upper-bound": strings.Replace(inboxWideIntersectPlan, "id <= 10001)", "id <= 50000)", 1),
+		"wrong-leaf-upper-bound":   strings.Replace(inboxWideIntersectPlan, "over (inbox_origin = 1 AND 4900 < id <= 10001)", "over (inbox_origin = 1 AND 4900 < id <= 50000)", 1),
+		"inclusive-lower-bound":    strings.Replace(inboxWideIntersectPlan, "4900 < id", "4900 <= id", 1),
+		"wrong-origin":             strings.Replace(inboxWideIntersectPlan, "over (inbox_origin = 1", "over (inbox_origin = 0", 1),
+		"wrong-index":              strings.Replace(inboxWideIntersectPlan, "using idx_run_inbox_origin", "using PRIMARY", 1),
+		"wrong-leaf-table":         strings.Replace(inboxWideIntersectPlan, "scan on pipeline_run", "scan on inbox_work", 1),
+		"second-leaf":              inboxWideIntersectPlan + "                -> Index range scan on pipeline_run using PRIMARY over (4900 < id <= 10001)  (cost=1 rows=2) (actual time=0.01..0.02 rows=2 loops=1)\n",
+		"sibling-branch":           strings.Replace(inboxWideIntersectPlan, "                ->", "            ->", 1),
+		"extra-node":               inboxWideIntersectPlan + "                    -> Table scan on pipeline_run  (cost=1 rows=2) (actual time=0.01..0.02 rows=2 loops=1)\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Error(t, validateInboxMySQLPlan(inboxObservedMergeEstimate(), execution, "repair-wide", 2))
+		})
+	}
+	for _, mutate := range []func(*inboxMySQLQueryPlan){
+		func(p *inboxMySQLQueryPlan) { p.Type = "range" },
+		func(p *inboxMySQLQueryPlan) { p.Type = "ALL" },
+		func(p *inboxMySQLQueryPlan) { p.Table = "inbox_work" },
+		func(p *inboxMySQLQueryPlan) { p.Rows = 3 },
+		func(p *inboxMySQLQueryPlan) { p.Filtered = 50 },
+		func(p *inboxMySQLQueryPlan) { p.Key = nil },
+		func(p *inboxMySQLQueryPlan) { *p.Key = "PRIMARY,idx_run_inbox_origin" },
+		func(p *inboxMySQLQueryPlan) { p.Extra = nil },
+		func(p *inboxMySQLQueryPlan) { *p.Extra = "Using union(idx_run_inbox_origin,PRIMARY)" },
+		func(p *inboxMySQLQueryPlan) { p.PossibleKeys = nil },
+	} {
+		plan := inboxObservedMergeEstimate()
+		mutate(&plan[0])
+		require.Error(t, validateInboxMySQLPlan(plan, inboxWideIntersectPlan, "repair-wide", 2))
+	}
+}
