@@ -44,6 +44,12 @@ func (rt *Router) projectRouter(r fiber.Router, authMW fiber.Handler, subjectMW 
 		projectGroup.Post("/:projectID/settings/archive", sensitiveHTTPStatus, authMW, rt.projectSettingsHandler("archive"))
 		projectGroup.Post("/:projectID/settings/restore", sensitiveHTTPStatus, authMW, rt.projectSettingsHandler("restore"))
 
+		projectGroup.Get("/:projectID/secrets", sensitiveHTTPStatus, authMW, rt.projectSecretsHandler("list"))
+		projectGroup.Post("/:projectID/secrets", sensitiveHTTPStatus, authMW, rt.projectSecretsHandler("create"))
+		projectGroup.Patch("/:projectID/secrets/:secretID", sensitiveHTTPStatus, authMW, rt.projectSecretsHandler("update"))
+		projectGroup.Post("/:projectID/secrets/:secretID/rotate", sensitiveHTTPStatus, authMW, rt.projectSecretsHandler("rotate"))
+		projectGroup.Post("/:projectID/secrets/:secretID/disable", sensitiveHTTPStatus, authMW, rt.projectSecretsHandler("disable"))
+
 		// 更新项目
 		projectGroup.Put("/:projectID", authMW, subjectMW,
 			rt.permission("project:update", rt.resolveProjectScope()),

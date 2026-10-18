@@ -13,6 +13,7 @@ import (
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/database"
+	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	"github.com/bytedance/sonic"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -50,9 +51,11 @@ func (r *PipelineRepo) transitionPendingAutomaticRun(ctx context.Context, run *m
 	}
 	changed := false
 	err := r.Database().WithContext(ctx).Clauses(database.Write()).Transaction(func(tx *gorm.DB) error {
+		projectID := ""
 		if start {
-			allowed, err := lockPipelineAdmissionProject(ctx, tx, run.PipelineID)
-			if err != nil || !allowed {
+			var err error
+			projectID, err = lockPipelineAdmissionProject(ctx, tx, run.PipelineID)
+			if err != nil || projectID == "" {
 				return err
 			}
 		}
@@ -61,7 +64,7 @@ func (r *PipelineRepo) transitionPendingAutomaticRun(ctx context.Context, run *m
 		// Exact comparison prevents case-insensitive MySQL aliases expanding identity.
 		var stored model.PipelineRun
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("run_id", "pipeline_id", "request_id", "trigger_type", "triggered_by", "definition_commit_sha", "definition_path", "branch", "commit_sha", "env", "status", "start_time", "end_time", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_plan_hash", "deployment_target_fingerprint", "retry_approval_context", "retry_approval_context_digest", "polling_context", "polling_context_digest").
+			Select("run_id", "pipeline_id", "project_id", "request_id", "trigger_type", "triggered_by", "definition_commit_sha", "definition_path", "branch", "commit_sha", "env", "status", "start_time", "end_time", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_plan_hash", "deployment_target_fingerprint", "retry_approval_context", "retry_approval_context_digest", "polling_context", "polling_context_digest").
 			Where("run_id = ?", run.RunID).First(&stored).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
@@ -69,7 +72,7 @@ func (r *PipelineRepo) transitionPendingAutomaticRun(ctx context.Context, run *m
 		if err != nil {
 			return err
 		}
-		if !sameAutomaticRunIdentity(&stored, run) || stored.Status != model.PipelineStatusPending || stored.StartTime != nil || stored.EndTime != nil {
+		if !sameAutomaticRunIdentity(&stored, run) || stored.ProjectID != "" || run.ProjectID != "" || stored.Status != model.PipelineStatusPending || stored.StartTime != nil || stored.EndTime != nil {
 			return nil
 		}
 		var jobs []model.JobRun
@@ -81,7 +84,7 @@ func (r *PipelineRepo) transitionPendingAutomaticRun(ctx context.Context, run *m
 		}
 		updates := map[string]any{"status": model.PipelineStatusFailed, "end_time": time.Now()}
 		if start {
-			updates = map[string]any{"status": model.PipelineStatusRunning, "start_time": time.Now()}
+			updates = map[string]any{"status": model.PipelineStatusRunning, "start_time": time.Now(), "project_id": projectID}
 		}
 		result := tx.Model(&model.PipelineRun{}).Where("run_id = ? AND status = ? AND start_time IS NULL AND end_time IS NULL", stored.RunID, model.PipelineStatusPending).Updates(updates)
 		changed = result.RowsAffected == 1
@@ -127,21 +130,24 @@ func automaticEnvironment(value string) (map[string]string, bool) {
 // archive/disable. The order is pipeline -> project -> run -> job, matching
 // polling admission. Never acquire a project lock after a run/job lock here.
 // Missing or ambiguous scope is unavailable; tests must provide real scope rows.
-func lockPipelineAdmissionProject(ctx context.Context, tx *gorm.DB, pipelineID string) (bool, error) {
+func lockPipelineAdmissionProject(ctx context.Context, tx *gorm.DB, pipelineID string) (string, error) {
 	var pipelines []model.Pipeline
 	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
 		Select("pipeline_id", "project_id", "is_enabled", "is_deleted").Where("pipeline_id = ?", pipelineID).Limit(2).Find(&pipelines).Error; err != nil {
-		return false, err
+		return "", err
 	}
 	if len(pipelines) != 1 || pipelines[0].PipelineID != pipelineID || pipelines[0].ProjectID == "" || pipelines[0].IsEnabled != 1 || pipelines[0].IsDeleted != 0 {
-		return false, nil
+		return "", nil
 	}
 	var projects []model.Project
 	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
 		Select("project_id", "is_enabled", "status").Where("project_id = ?", pipelines[0].ProjectID).Limit(2).Find(&projects).Error; err != nil {
-		return false, err
+		return "", err
 	}
-	return len(projects) == 1 && projects[0].ProjectID == pipelines[0].ProjectID && projects[0].IsEnabled == 1 && projects[0].Status == model.ProjectStatusActive, nil
+	if len(projects) != 1 || projects[0].ProjectID != pipelines[0].ProjectID || projects[0].IsEnabled != 1 || projects[0].Status != model.ProjectStatusActive {
+		return "", nil
+	}
+	return pipelines[0].ProjectID, nil
 }
 
 // StartManualRunIfPending admits an unchanged manual/gated run exactly once.
@@ -153,8 +159,8 @@ func (r *PipelineRepo) StartManualRunIfPending(ctx context.Context, run *model.P
 	}
 	changed := false
 	err := r.Database().WithContext(ctx).Clauses(database.Write()).Transaction(func(tx *gorm.DB) error {
-		allowed, err := lockPipelineAdmissionProject(ctx, tx, run.PipelineID)
-		if err != nil || !allowed {
+		projectID, err := lockPipelineAdmissionProject(ctx, tx, run.PipelineID)
+		if err != nil || projectID == "" {
 			return err
 		}
 		var rows []model.PipelineRun
@@ -166,8 +172,15 @@ func (r *PipelineRepo) StartManualRunIfPending(ctx context.Context, run *model.P
 			return nil
 		}
 		stored := &rows[0]
-		if !sameManualAdmissionIdentity(stored, run) || stored.Status != model.PipelineStatusPending || stored.StartTime != nil || stored.EndTime != nil {
+		if !sameManualAdmissionIdentity(stored, run) || stored.ProjectID != "" || run.ProjectID != "" || stored.Status != model.PipelineStatusPending || stored.StartTime != nil || stored.EndTime != nil {
 			return nil
+		}
+		if stored.RetryApprovalContext != "" {
+			// A pipeline move cannot expand an already captured approval scope.
+			captured, err := retryapproval.ParseRunContext(stored.RetryApprovalContext)
+			if err != nil || captured.ProjectID != projectID {
+				return nil
+			}
 		}
 		var jobs []model.JobRun
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id").Where("pipeline_run_id = ?", stored.RunID).Limit(1).Find(&jobs).Error; err != nil {
@@ -177,7 +190,7 @@ func (r *PipelineRepo) StartManualRunIfPending(ctx context.Context, run *model.P
 			return nil
 		}
 		result := tx.Model(&model.PipelineRun{}).Where("id = ? AND status = ? AND start_time IS NULL AND end_time IS NULL", stored.ID, model.PipelineStatusPending).
-			Updates(map[string]any{"status": model.PipelineStatusRunning, "start_time": time.Now()})
+			Updates(map[string]any{"status": model.PipelineStatusRunning, "start_time": time.Now(), "project_id": projectID})
 		changed = result.RowsAffected == 1
 		return result.Error
 	})

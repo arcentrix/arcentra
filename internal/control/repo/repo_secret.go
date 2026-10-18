@@ -16,6 +16,10 @@ package repo
 
 import (
 	"context"
+	"strings"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/pkg/database"
@@ -57,25 +61,33 @@ func NewSecretRepo(db database.IDatabase) ISecretRepository {
 
 // Create creates a new secret.
 func (sr *SecretRepo) Create(ctx context.Context, secret *model.Secret) error {
-	return sr.Database().WithContext(ctx).Table(secret.TableName()).Create(secret).Error
+	if secret == nil || strings.EqualFold(strings.TrimSpace(secret.Scope), "project") {
+		return ErrProjectSecretInvalid
+	}
+	return sr.Database().WithContext(ctx).Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)}).Table(secret.TableName()).Create(secret).Error
 }
 
 // Update updates a secret by secretId.
 func (sr *SecretRepo) Update(ctx context.Context, secret *model.Secret) error {
-	return sr.Database().WithContext(ctx).Table(secret.TableName()).
-		Omit("id", "secret_id", "created_at").
-		Where("secret_id = ?", secret.SecretID).
-		Updates(secret).Error
+	if secret == nil || strings.EqualFold(strings.TrimSpace(secret.Scope), "project") {
+		return ErrProjectSecretInvalid
+	}
+	return sr.Database().WithContext(ctx).Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)}).Table(secret.TableName()).
+		Omit("id", "secret_id", "scope", "scope_id", "version", "is_enabled", "created_by", "created_at").
+		Where("secret_id = ? AND LOWER(TRIM(scope)) <> ?", secret.SecretID, "project").Updates(secret).Error
 }
 
 // Get returns secret by secretId.
 func (sr *SecretRepo) Get(ctx context.Context, secretID string) (*model.Secret, error) {
-	var secret model.Secret
-	err := sr.Database().WithContext(ctx).Table(secret.TableName()).
-		Select(secretSelectFields).
-		Where("secret_id = ?", secretID).
-		First(&secret).Error
-	return &secret, err
+	var rows []model.Secret
+	err := sr.Database().WithContext(ctx).Clauses(database.Write()).Select(secretSelectFields).Where("secret_id = ? AND LOWER(TRIM(scope)) <> ?", secretID, "project").Limit(2).Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) != 1 || rows[0].SecretID != secretID || strings.EqualFold(strings.TrimSpace(rows[0].Scope), "project") {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &rows[0], nil
 }
 
 // List lists secrets with pagination and filters.
@@ -84,11 +96,23 @@ func (sr *SecretRepo) List(
 	pageNum, pageSize int,
 	secretType, scope, scopeID, createdBy string,
 ) ([]*model.Secret, int64, error) {
+	return sr.list(ctx, pageNum, pageSize, secretType, scope, scopeID, createdBy, false)
+}
+
+// ListPlatform 仅返回旧平台端点可管理的非项目元数据
+func (sr *SecretRepo) ListPlatform(ctx context.Context, pageNum, pageSize int, secretType, scope, scopeID, createdBy string) ([]*model.Secret, int64, error) {
+	return sr.list(ctx, pageNum, pageSize, secretType, scope, scopeID, createdBy, true)
+}
+
+func (sr *SecretRepo) list(ctx context.Context, pageNum, pageSize int, secretType, scope, scopeID, createdBy string, platform bool) ([]*model.Secret, int64, error) {
 	var secrets []*model.Secret
 	var secret model.Secret
 	var total int64
 
-	query := sr.Database().WithContext(ctx).Table(secret.TableName())
+	query := sr.Database().WithContext(ctx).Clauses(database.Write()).Table(secret.TableName())
+	if platform {
+		query = query.Where("LOWER(TRIM(scope)) <> ?", "project")
+	}
 
 	if secretType != "" {
 		query = query.Where("secret_type = ?", secretType)
@@ -121,7 +145,7 @@ func (sr *SecretRepo) List(
 func (sr *SecretRepo) Delete(ctx context.Context, secretID string) error {
 	var secret model.Secret
 	return sr.Database().WithContext(ctx).Table(secret.TableName()).
-		Where("secret_id = ?", secretID).
+		Where("secret_id = ? AND LOWER(TRIM(scope)) <> ?", secretID, "project").
 		Delete(&model.Secret{}).Error
 }
 
@@ -131,17 +155,16 @@ func (sr *SecretRepo) ListByScope(ctx context.Context, scope, scopeID string) ([
 	var secret model.Secret
 	err := sr.Database().WithContext(ctx).Table(secret.TableName()).
 		Select("id", "secret_id", "name", "secret_type", "description", "scope", "scope_id", "created_by").
-		Where("scope = ? AND scope_id = ?", scope, scopeID).
+		Where("scope = ? AND scope_id = ? AND LOWER(TRIM(scope)) <> ?", scope, scopeID, "project").
 		Find(&secrets).Error
 	return secrets, err
 }
 
 // GetValue returns secret value by secretId.
 func (sr *SecretRepo) GetValue(ctx context.Context, secretID string) (string, error) {
-	var secret model.Secret
-	err := sr.Database().WithContext(ctx).Table(secret.TableName()).
-		Select("secret_value").
-		Where("secret_id = ?", secretID).
-		First(&secret).Error
-	return secret.SecretValue, err
+	secret, err := sr.Get(ctx, secretID)
+	if err != nil {
+		return "", err
+	}
+	return secret.SecretValue, nil
 }

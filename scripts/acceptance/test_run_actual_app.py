@@ -605,12 +605,14 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
         app.atomic_json(self.summary_path, self.summary("build"))
         with mock.patch.object(self.fixture, "start", return_value=self.browser) as start, \
                 mock.patch.object(self.fixture, "verify_downloads") as verify, \
+                mock.patch.object(self.fixture, "verify_project_secrets") as project_secrets, \
                 mock.patch.object(self.fixture, "verify_organization_management") as organization:
             self.fixture.run_build_browser(self.control, self.agent)
         self.assertEqual(start.call_args.args[0], "browser")
         self.assertEqual(start.call_args.args[1], self.args.browser_command)
         self.assertEqual(start.call_args.args[3]["ARCENTRA_ACCEPTANCE_PHASE"], "build")
         verify.assert_called_once_with()
+        project_secrets.assert_called_once_with()
         organization.assert_called_once_with()
 
     def test_preflight_summary_cannot_substitute_for_full_build_completion(self):
@@ -639,6 +641,23 @@ class FirstUseBrowserSequenceTests(unittest.TestCase):
         env = self.fixture.browser_environment("build")
         self.assertEqual(env["ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY"], "1")
         self.assertEqual(env["ARCENTRA_ACCEPTANCE_MEMBER_USER_ID"], "verified-observer")
+
+    def test_synthetic_secret_material_has_bounded_child_distribution(self):
+        fixture = self.fixture
+        self.assertEqual(len(base64.b64decode(fixture.control_secret_key, validate=True)), 32)
+        self.assertNotEqual(fixture.secret_initial_value, fixture.secret_rotated_value)
+        for value in (fixture.control_secret_key, fixture.secret_initial_value, fixture.secret_rotated_value):
+            self.assertIn(value, fixture.redactions)
+        for phase in ("preflight", "storage-setup", "build"):
+            env = fixture.browser_environment(phase)
+            self.assertNotIn("ARCENTRA_SECRET_ENCRYPTION_KEY", env)
+            for key in ("ARCENTRA_ACCEPTANCE_SECRET_INITIAL_VALUE", "ARCENTRA_ACCEPTANCE_SECRET_ROTATED_VALUE"):
+                self.assertEqual(key in env, phase == "build")
+        self.assertNotIn("ARCENTRA_SECRET_ENCRYPTION_KEY", fixture.env)
+        with mock.patch.object(fixture, "start") as start, mock.patch.object(fixture, "wait_until"):
+            fixture.start_control("synthetic-control")
+        self.assertEqual(start.call_args.kwargs["env"]["ARCENTRA_SECRET_ENCRYPTION_KEY"], fixture.control_secret_key)
+        self.assertNotIn(fixture.control_secret_key, json.dumps(start.call_args.args, default=str))
 
     def test_summary_requires_exact_same_source_completed_steps_without_extra_claims(self):
         for phase in ("preflight", "storage-setup", "build"):
@@ -803,7 +822,7 @@ class RuntimeHookTests(unittest.TestCase):
                 mock.patch.object(app.subprocess, "run", return_value=mock.Mock(stdout="a" * 40 + "\n")):
             fixture.create_repository()
             spec = json.loads((self.root / "source/.arcentra/pipeline.yaml").read_text())
-            expected = app.pipeline_spec()
+            expected = app.pipeline_spec(hashlib.sha256(fixture.secret_rotated_value.encode()).hexdigest())
             expected["jobs"][0]["source"]["repo"] = fixed_internal_repository
             self.assertEqual(spec, expected)
             serve.assert_called_once_with(self.root / "repositories")
@@ -914,6 +933,20 @@ class ActualAppFixtureTests(unittest.TestCase):
                          [f"sh build.sh {stage}" for stage in ("toolchain", "test", "build", "verify")])
         self.assertEqual(job["steps"][-1]["args"]["paths"], [app.ARTIFACT_NAME, app.MANIFEST_NAME])
         self.assertEqual(base64.b64decode(app.encoded(app.PASSWORD)).decode(), app.PASSWORD)
+
+    def test_secret_build_contract_uses_env_binding_and_only_digest_in_source(self):
+        value = "synthetic-ci-secret-" + "x" * 24
+        digest = hashlib.sha256(value.encode()).hexdigest()
+        spec = app.pipeline_spec(digest)
+        toolchain = spec["jobs"][0]["steps"][0]
+        self.assertEqual(toolchain["env"], {"CI_BUILD_TOKEN": "${{ secrets.CI_BUILD_TOKEN }}"})
+        self.assertNotIn(value, json.dumps(spec))
+        self.assertIn(digest, toolchain["args"]["run"])
+        self.assertIn('"$CI_BUILD_TOKEN"', toolchain["args"]["run"])
+        self.assertIn("ACTUAL_PROJECT_SECRET_VERIFIED", toolchain["args"]["run"])
+        for invalid in (value, "", "g" * 64, "a" * 63):
+            with self.assertRaises(ValueError):
+                app.pipeline_spec(invalid)
 
     def test_missing_go_fails_without_installing_or_running_anything(self):
         with mock.patch.object(app.shutil, "which", return_value=None), mock.patch.object(app.subprocess, "run") as run:
@@ -1239,6 +1272,86 @@ class LoopbackReadinessProbeTests(unittest.TestCase):
 
     def test_actual_tcp_persistent_reset_bounded(self):
         self.exercise_server(True)
+
+
+class ProjectSecretEvidenceTests(unittest.TestCase):
+    def test_actual_log_proof_requires_resolution_and_redaction(self):
+        values = ("initial-private-canary", "rotated-private-canary", "key-private-canary")
+        valid = "ACTUAL_PROJECT_SECRET_VALUE [REDACTED]\nACTUAL_PROJECT_SECRET_VERIFIED"
+        app.validate_secret_log_evidence(valid, values)
+        for message in ("", "ACTUAL_PROJECT_SECRET_VERIFIED", "ACTUAL_PROJECT_SECRET_VALUE"):
+            with self.assertRaises(RuntimeError):
+                app.validate_secret_log_evidence(message, values)
+        for value in values:
+            for exposed in (value, app.encoded(value)):
+                with self.assertRaises(RuntimeError) as failure:
+                    app.validate_secret_log_evidence(valid + exposed, values)
+                self.assertNotIn(value, str(failure.exception))
+                self.assertNotIn(exposed, str(failure.exception))
+
+    def evidence(self):
+        return {"journey": "project-secrets-v1", "completed": True, "projectId": "project",
+                "activeSecretId": "active", "disabledSecretId": "disabled", "steps": list(app.PROJECT_SECRET_STEPS)}
+
+    def inventory(self):
+        common = {"projectId": "project", "secretType": "token", "configured": True,
+                  "createdAt": "synthetic", "updatedAt": "synthetic"}
+        active = common | {"secretId": "active", "name": "CI_BUILD_TOKEN", "version": "3", "isEnabled": 1,
+                           "description": "Synthetic build secret reviewed", "canUpdate": True, "canRotate": True, "canDisable": True}
+        disabled = common | {"secretId": "disabled", "name": "CI_DISABLED_TOKEN", "version": "2", "isEnabled": 0,
+                             "description": "", "canUpdate": False, "canRotate": False, "canDisable": False}
+        return {"projectId": "project", "list": [active, disabled], "total": 2, "canCreate": True,
+                "canWrite": True, "canDisable": True, "projectActive": True, "encryptionConfigured": True}
+
+    def test_exact_metadata_only_summary_required(self):
+        evidence = self.evidence()
+        self.assertEqual(app.validate_project_secrets({"projectSecrets": evidence}), evidence)
+        for key, value in (("completed", 1), ("steps", []), ("steps", app.PROJECT_SECRET_STEPS[:-1]),
+                           ("activeSecretId", "disabled"), ("projectId", "../private"),
+                           ("value", "private-test-canary"), ("journey", "simulated")):
+            with self.subTest(key=key), self.assertRaises(RuntimeError) as failure:
+                app.validate_project_secrets({"projectSecrets": evidence | {key: value}})
+            self.assertNotIn("private-test-canary", str(failure.exception))
+
+    def test_persisted_state_not_only_browser_claim_is_required(self):
+        inventory = self.inventory()
+        app.validate_persisted_project_secrets(inventory, self.evidence())
+        for mutate in (
+            lambda x: x.update(projectId="foreign"), lambda x: x.update(total=1),
+            lambda x: x.update(encryptionConfigured=False),
+            lambda x: x["list"][0].update(version="1"),
+            lambda x: x["list"][0].update(secretValue="private-test-canary"),
+            lambda x: x["list"][1].update(isEnabled=1),
+            lambda x: x["list"][0].update(isEnabled=True),
+            lambda x: x["list"][0].update(secretType="ssh_key"),
+            lambda x: x["list"][1].update(canRotate=True),
+            lambda x: x["list"][1].update(secretId="active"),
+        ):
+            changed = copy.deepcopy(inventory)
+            mutate(changed)
+            with self.assertRaises(RuntimeError) as failure:
+                app.validate_persisted_project_secrets(changed, self.evidence())
+            self.assertNotIn("private-test-canary", str(failure.exception))
+
+    def test_independent_observer_denied_before_admin_inventory_read(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fixture = object.__new__(app.Fixture)
+            fixture.args = type("Args", (), {"evidence_dir": root})()
+            fixture.successful_run = {"projectId": "project"}
+            fixture.secret_initial_value, fixture.secret_rotated_value, fixture.control_secret_key = "initial-canary", "rotated-canary", "key-canary"
+            (root / "browser").mkdir()
+            app.atomic_json(root / "browser/summary.json", {"projectSecrets": self.evidence()})
+            calls = []
+            with mock.patch.object(fixture, "require_observer_session", side_effect=lambda: calls.append("observer")), \
+                    mock.patch.object(fixture, "expect_rejected", side_effect=lambda *a: calls.append("denied")) as denied, \
+                    mock.patch.object(fixture, "login", side_effect=lambda: calls.append("admin")), \
+                    mock.patch.object(fixture, "request", side_effect=lambda *a: calls.append("inventory") or self.inventory()), \
+                    mock.patch.object(fixture, "note"):
+                fixture.verify_project_secrets()
+            self.assertEqual(calls, ["observer", "denied", "denied", "admin", "inventory"])
+            self.assertEqual(denied.call_args_list[0], mock.call("/project/project/secrets", 403, 403))
+            self.assertEqual(denied.call_args_list[1].args[-1], "POST")
 
 
 class OrganizationManagementEvidenceTests(unittest.TestCase):

@@ -62,6 +62,10 @@ func TestCopilotSecretValueRequiresGlobalUniqueIdentity(t *testing.T) {
 	if err := db.AutoMigrate(&model.Secret{}); err != nil {
 		t.Fatal(err)
 	}
+	// Reproduce a legacy pre-migration database to retain the runtime ambiguity guard.
+	if err := db.Migrator().DropIndex(&model.Secret{}, "uk_secret_business_id"); err != nil {
+		t.Fatal(err)
+	}
 	repository := NewSecretRepo(statusTestDB{db}).(*SecretRepo)
 	if err := db.Create(&model.Secret{SecretID: "unique", SecretValue: "ciphertext-a", Scope: "project", ScopeID: "p"}).Error; err != nil {
 		t.Fatal(err)

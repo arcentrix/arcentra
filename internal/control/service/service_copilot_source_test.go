@@ -932,6 +932,12 @@ func TestCopilotSourceDuplicateSecretIdentityFailsClosed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, db, reader, provider, in := copilotSourceFixture(t)
+			// Retain runtime fail-closed coverage on historical schemas lacking unique keys.
+			for _, index := range []string{"uk_secret_business_id", "uk_secret_scope_name"} {
+				if err := db.Migrator().DropIndex(&model.Secret{}, index); err != nil {
+					t.Fatal(err)
+				}
+			}
 			ciphertext, err := s.secrets.encrypt("ambiguous-second-value")
 			if err != nil {
 				t.Fatal(err)

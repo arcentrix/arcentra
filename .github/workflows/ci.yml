@@ -233,7 +233,7 @@ jobs:
             docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysql -uroot -e "CREATE DATABASE $schema CHARACTER SET utf8mb4 COLLATE $collation; CREATE DATABASE $admission_schema CHARACTER SET utf8mb4 COLLATE $collation;"
             ARCENTRA_REQUIRE_RETRY_APPROVAL_MYSQL=1 \
             ARCENTRA_RETRY_APPROVAL_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
-              go test -race -v -count=1 -timeout=2m -run '^Test(OrganizationMySQL|ProjectSettingsMySQL)' ./internal/control/repo | tee ".acceptance/evidence/organization-mysql-$attempt.log"
+              go test -race -v -count=1 -timeout=2m -run '^Test(OrganizationMySQL|ProjectSettingsMySQL|ProjectSecretsMySQL)' ./internal/control/repo | tee ".acceptance/evidence/organization-mysql-$attempt.log"
             python3 scripts/acceptance/verify_containerd_test_log.py ".acceptance/evidence/organization-mysql-$attempt.log" 1 \
               TestOrganizationMySQLConcurrentMemberCASAndScopeIsolation \
               TestOrganizationMySQLRevocationSerializesBeforeMemberAdmission \
@@ -243,7 +243,10 @@ jobs:
               TestOrganizationMySQLCollationAliasCannotBypassFrozenLifecycle \
               TestOrganizationMySQLListAndCreateDoNotInvertDomainLocks \
               TestOrganizationMySQLMigrationUpgradesOldShape \
-              TestProjectSettingsMySQLCASAndRollback
+              TestProjectSettingsMySQLCASAndRollback \
+              TestProjectSecretsMySQLConcurrentCASRollbackAndRevocation \
+              TestProjectSecretsMySQLCipherBudgetUsesCurrentLockedMetadata \
+              TestProjectSecretsMySQLSchemaUpgradePreservesLegacyCiphertext
             ARCENTRA_REQUIRE_PROJECT_ADMISSION_MYSQL=1 \
             ARCENTRA_PROJECT_ADMISSION_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$admission_schema?charset=utf8mb4&parseTime=True&loc=UTC" \
               go test -race -v -count=1 -timeout=2m -run '^TestProjectAdmissionMySQLArchiveSerialization$' ./internal/control/repo | tee ".acceptance/evidence/project-admission-mysql-$attempt.log"
@@ -252,7 +255,13 @@ jobs:
               TestProjectAdmissionMySQLArchiveSerialization/manual/archive-first-true \
               TestProjectAdmissionMySQLArchiveSerialization/manual/archive-first-false \
               TestProjectAdmissionMySQLArchiveSerialization/automatic/archive-first-true \
-              TestProjectAdmissionMySQLArchiveSerialization/automatic/archive-first-false
+              TestProjectAdmissionMySQLArchiveSerialization/automatic/archive-first-false \
+              TestProjectAdmissionMySQLArchiveSerialization/polling/archive-first-true \
+              TestProjectAdmissionMySQLArchiveSerialization/polling/archive-first-false \
+              TestProjectAdmissionMySQLArchiveSerialization/manual/project-move-first-true \
+              TestProjectAdmissionMySQLArchiveSerialization/manual/project-move-first-false \
+              TestProjectAdmissionMySQLArchiveSerialization/automatic/project-move-first-true \
+              TestProjectAdmissionMySQLArchiveSerialization/automatic/project-move-first-false
           done
 
       - name: Verify durable approval with actual MySQL authorization contention
@@ -287,7 +296,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: dd2a1c506bf3984920e703b3ed03a5f9c3bf2716
+          ref: 6526212d096297f4b48d3dc96f385606b4e5b340
           path: .acceptance/frontend
           persist-credentials: false
 

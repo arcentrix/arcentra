@@ -36,7 +36,7 @@ func rejectRetryApprovalRunUpdates(updates map[string]any) error {
 
 // CreateRetryApprovalRun 通过专用入口保存已验证的可信手动运行上下文
 func (r *PipelineRepo) CreateRetryApprovalRun(ctx context.Context, run *model.PipelineRun) error {
-	if run == nil || run.PollingContext != "" || run.PollingContextDigest != "" || run.TriggeredBy == "polling" {
+	if run == nil || run.ProjectID != "" || run.PollingContext != "" || run.PollingContextDigest != "" || run.TriggeredBy == "polling" {
 		return gorm.ErrInvalidData
 	}
 	c, err := retryapproval.ParseRunContext(run.RetryApprovalContext)

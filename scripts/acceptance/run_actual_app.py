@@ -68,6 +68,8 @@ ORGANIZATION_MANAGEMENT_STEPS = [
     "project-settings-updated", "project-archived", "project-restored",
     "organization-active-project-conflict", "project-rearchived", "organization-archived",
 ]
+PROJECT_SECRET_STEPS = ["secret-created", "secret-metadata-updated", "secret-rotated",
+                        "secondary-secret-created", "secondary-secret-disabled", "metadata-only-reload"]
 GO_ENV = {"GOTOOLCHAIN": "local", "GOPROXY": "off", "GOSUMDB": "off", "GOWORK": "off",
           "GOENV": "off", "CGO_ENABLED": "0", "GOTELEMETRY": "off", "GOMAXPROCS": "2"}
 DEPENDENCIES = {
@@ -131,6 +133,13 @@ class Fixture:
                                 encoded(DEPENDENCIES["ARCENTRA_TEST_S3_ACCESS_KEY"]),
                                 encoded(DEPENDENCIES["ARCENTRA_TEST_S3_SECRET_KEY"])])
         self.env = child_environment(os.environ, root)
+        # Disposable fixture material is generated only for this run. The AES
+        # key is sent to Control alone, never to the browser or Agent process.
+        self.control_secret_key = base64.b64encode(secrets.token_bytes(32)).decode()
+        self.secret_initial_value = "synthetic-ci-secret-" + secrets.token_urlsafe(24)
+        self.secret_rotated_value = "synthetic-ci-secret-" + secrets.token_urlsafe(24)
+        for value in (self.control_secret_key, self.secret_initial_value, self.secret_rotated_value):
+            self.redactions.extend((value, encoded(value)))
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirects())
 
     def note(self, step):
@@ -238,7 +247,8 @@ class Fixture:
 
     def start_control(self, name):
         process = self.start(name, [self.args.control_bin, "-conf", str(self.root / "control.toml"),
-                                    "-plugin-conf", str(self.root / "plugins.toml")])
+                                    "-plugin-conf", str(self.root / "plugins.toml")],
+                             env=self.env | {"ARCENTRA_SECRET_ENCRYPTION_KEY": self.control_secret_key})
         self.wait_until("Control readiness", lambda: self.probe(BACKEND_URL + "/ready") == 200, process)
         return process
 
@@ -374,7 +384,7 @@ class Fixture:
         copy_fixture_source(source)
         (source / ".arcentra").mkdir(parents=True)
         (source / "main.go").write_text((source / "main.go").read_text() + COMPILE_ERROR)
-        spec = pipeline_spec()
+        spec = pipeline_spec(hashlib.sha256(self.secret_rotated_value.encode()).hexdigest())
         spec["jobs"][0]["source"]["repo"] = self.repository_url()
         (source / ".arcentra/pipeline.yaml").write_text(json.dumps(spec, indent=2) + "\n")
         self.run("git-init", ["git", "init", "--initial-branch=main", str(source)])
@@ -413,6 +423,8 @@ class Fixture:
         _validate_run_snapshot(receipt, run, jobs, artifacts, successful, self.agent_id, self.repository_url())
         logs = self.request(base + "/logs?limit=1000")
         messages = "\n".join(entry.get("message", "") for entry in logs.get("entries", []))
+        validate_secret_log_evidence(messages, (self.secret_initial_value, self.secret_rotated_value,
+                                                self.control_secret_key))
         expected = ["ACTUAL_PROJECT_TOOLCHAIN go1.25.6", "ACTUAL_PROJECT_TEST"]
         if successful:
             expected.extend(["ACTUAL_PROJECT_BUILD", "ACTUAL_PROJECT_BEHAVIOR", EXPECTED_OUTPUT.strip()])
@@ -564,10 +576,14 @@ class Fixture:
     def browser_environment(self, phase):
         if phase not in ("preflight", "storage-setup", "build"):
             raise ValueError("unknown actual-browser acceptance phase")
-        organization_keys = {"ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY", "ARCENTRA_ACCEPTANCE_MEMBER_USER_ID"}
+        organization_keys = {"ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY", "ARCENTRA_ACCEPTANCE_MEMBER_USER_ID",
+                             "ARCENTRA_ACCEPTANCE_SECRET_INITIAL_VALUE", "ARCENTRA_ACCEPTANCE_SECRET_ROTATED_VALUE",
+                             "ARCENTRA_SECRET_ENCRYPTION_KEY"}
         environment = {key: value for key, value in self.env.items() if key not in organization_keys}
         if phase == "build":
             environment |= {"ARCENTRA_ACCEPTANCE_ORGANIZATION_JOURNEY": "1", "ARCENTRA_ACCEPTANCE_MEMBER_USER_ID": self.observer_id}
+            environment |= {"ARCENTRA_ACCEPTANCE_SECRET_INITIAL_VALUE": self.secret_initial_value,
+                            "ARCENTRA_ACCEPTANCE_SECRET_ROTATED_VALUE": self.secret_rotated_value}
         return environment | {
             "ARCENTRA_ACCEPTANCE_PHASE": phase,
             "ARCENTRA_REAL_STACK": "1", "ARCENTRA_ACCEPTANCE_BACKEND_URL": BACKEND_URL,
@@ -639,8 +655,29 @@ class Fixture:
             raise RuntimeError("Control or Agent exited during browser acceptance")
         self.require_browser_summary("build")
         self.verify_downloads()
+        self.verify_project_secrets()
         self.verify_organization_management()
         self.note("Browser create-project → create-pipeline → run → logs → artifact journey completed")
+
+    def verify_project_secrets(self):
+        evidence = validate_project_secrets(read_private_json(self.args.evidence_dir / "browser/summary.json"))
+        if not self.successful_run or evidence["projectId"] != self.successful_run["projectId"]:
+            raise RuntimeError("secret management must belong to the independently verified build project")
+        endpoint = "/project/" + evidence["projectId"] + "/secrets"
+        self.require_observer_session()
+        self.expect_rejected(endpoint, 403, 403)
+        self.expect_rejected(endpoint, 403, 403,
+                             {"name": "OBSERVER_MUST_NOT_CREATE", "secretType": "token",
+                              "value": self.secret_initial_value}, "POST")
+        # The browser has ended; a new administrator session cannot disrupt its
+        # reads. The build observer keeps its independent existing session.
+        self.login()
+        detail = self.request(endpoint)
+        validate_persisted_project_secrets(detail, evidence)
+        serialized = json.dumps(detail)
+        if any(value in serialized for value in (self.secret_initial_value, self.secret_rotated_value, self.control_secret_key)):
+            raise RuntimeError("project secret metadata exposed synthetic secret material")
+        self.note("Project Secrets UI create/edit/rotate/disable independently verified; read-only observer denied; Agent used rotated value with redacted logs")
 
     def verify_organization_management(self):
         summary = read_private_json(self.args.evidence_dir / "browser/summary.json")
@@ -742,6 +779,51 @@ def validate_organization_management(summary):
                    for key in ("orgId", "projectId"))):
         raise RuntimeError("browser lacks the exact successful organization/member/settings evidence")
     return evidence
+
+
+def validate_secret_log_evidence(messages, values):
+    if any(value in messages or encoded(value) in messages for value in values):
+        raise RuntimeError("actual Agent logs exposed synthetic secret material")
+    if any(marker not in messages for marker in ("ACTUAL_PROJECT_SECRET_VERIFIED", "ACTUAL_PROJECT_SECRET_VALUE")):
+        raise RuntimeError("actual Agent logs lack secret resolution/redaction evidence")
+
+
+def validate_project_secrets(summary):
+    evidence = summary.get("projectSecrets") if isinstance(summary, dict) else None
+    if (not isinstance(evidence, dict)
+            or set(evidence) != {"journey", "completed", "projectId", "activeSecretId", "disabledSecretId", "steps"}
+            or evidence.get("journey") != "project-secrets-v1" or evidence.get("completed") is not True
+            or evidence.get("steps") != PROJECT_SECRET_STEPS
+            or any(not isinstance(evidence.get(key), str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", evidence[key])
+                   for key in ("projectId", "activeSecretId", "disabledSecretId"))
+            or evidence.get("activeSecretId") == evidence.get("disabledSecretId")):
+        raise RuntimeError("browser lacks the exact successful project Secrets evidence")
+    return evidence
+
+
+def validate_persisted_project_secrets(detail, evidence):
+    list_keys = {"projectId", "list", "total", "canCreate", "canWrite", "canDisable", "projectActive", "encryptionConfigured"}
+    row_keys = {"secretId", "projectId", "name", "secretType", "description", "version", "isEnabled", "configured",
+                "createdAt", "updatedAt", "canUpdate", "canRotate", "canDisable"}
+    if (not isinstance(detail, dict) or set(detail) != list_keys or detail.get("projectId") != evidence["projectId"]
+            or detail.get("total") != 2 or not isinstance(detail.get("list"), list) or len(detail["list"]) != 2
+            or any(detail.get(key) is not True for key in ("canCreate", "canWrite", "canDisable", "projectActive", "encryptionConfigured"))):
+        raise RuntimeError("project Secrets persisted inventory is incomplete or unauthorized")
+    rows = detail["list"]
+    if any(not isinstance(row, dict) or set(row) != row_keys or row.get("projectId") != evidence["projectId"]
+           or row.get("configured") is not True or row.get("secretType") != "token"
+           or type(row.get("isEnabled")) is not int for row in rows):
+        raise RuntimeError("project Secrets metadata has unexpected fields or scope")
+    by_id = {row["secretId"]: row for row in rows}
+    if set(by_id) != {evidence["activeSecretId"], evidence["disabledSecretId"]}:
+        raise RuntimeError("project Secrets identity does not match browser evidence")
+    active, disabled = by_id[evidence["activeSecretId"]], by_id[evidence["disabledSecretId"]]
+    if (active["name"] != "CI_BUILD_TOKEN" or active["version"] != "3" or active["isEnabled"] != 1
+            or active["description"] != "Synthetic build secret reviewed"
+            or any(active[key] is not True for key in ("canUpdate", "canRotate", "canDisable"))
+            or disabled["name"] != "CI_DISABLED_TOKEN" or disabled["version"] != "2" or disabled["isEnabled"] != 0
+            or any(disabled[key] is not False for key in ("canUpdate", "canRotate", "canDisable"))):
+        raise RuntimeError("project Secrets persisted rotation or disable state is incorrect")
 
 
 def validate_persisted_storage(detail, configuration):
@@ -1219,8 +1301,8 @@ maxDiskUsageMB = 32
 '''
 
 
-def pipeline_spec():
-    return {"namespace": "acceptance", "version": "1.0.0", "jobs": [{
+def pipeline_spec(secret_digest=None):
+    spec = {"namespace": "acceptance", "version": "1.0.0", "jobs": [{
         "name": "build", "source": {"type": "git", "repo": REPO_URL, "branch": "main"},
         "steps": [
             *[{"name": stage, "uses": "shell", "runOnAgent": True, "timeout": "120s",
@@ -1229,6 +1311,20 @@ def pipeline_spec():
              "args": {"paths": [ARTIFACT_NAME, MANIFEST_NAME]}},
         ],
     }]}
+    if secret_digest is not None:
+        if not re.fullmatch(r"[a-f0-9]{64}", secret_digest):
+            raise ValueError("synthetic secret verification requires a SHA-256 digest")
+        step = spec["jobs"][0]["steps"][0]
+        step["env"] = {"CI_BUILD_TOKEN": "${{ secrets.CI_BUILD_TOKEN }}"}
+        step["args"]["run"] = (
+            "set -eu\n"
+            "actual=$(printf '%s' \"$CI_BUILD_TOKEN\" | sha256sum)\n"
+            f"test \"${{actual%% *}}\" = '{secret_digest}'\n"
+            "printf 'ACTUAL_PROJECT_SECRET_VALUE %s\\n' \"$CI_BUILD_TOKEN\"\n"
+            "printf 'ACTUAL_PROJECT_SECRET_VERIFIED\\n'\n"
+            "sh build.sh toolchain"
+        )
+    return spec
 
 
 def main():

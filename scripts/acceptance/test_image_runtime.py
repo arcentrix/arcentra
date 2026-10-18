@@ -1,5 +1,6 @@
 """Pure command/response fixture tests; never invoke Docker or privileged operations."""
 import copy
+import base64
 import json
 import os
 from pathlib import Path
@@ -85,6 +86,46 @@ class RuntimeTests(unittest.TestCase):
 
     def create(self, role='control'):
         return self.runtime.create(role, config=self.root / f'image-{role}-config', state=self.root / f'image-{role}-state')
+
+    def test_synthetic_key_is_private_control_env_file_not_command_value(self):
+        path = self.root / 'image-control-config/synthetic-secret.env'
+        key = base64.b64encode(b's' * 32).decode()
+        path.write_text('ARCENTRA_SECRET_ENCRYPTION_KEY=' + key + '\n')
+        path.chmod(0o600)
+        self.runtime.create('control', config=path.parent, state=self.root / 'image-control-state', secret_env_file=path)
+        command = self.fake.calls[0][0]
+        self.assertEqual(command[command.index('--env-file') + 1], str(path))
+        self.assertNotIn(key, json.dumps(self.fake.calls))
+        self.assertNotIn(key, self.runtime.intent_path.read_text())
+
+    def test_synthetic_key_rejects_wrong_role_permissions_symlink_fifo_and_extra_env(self):
+        path = self.root / 'image-control-config/synthetic-secret.env'
+        content = 'ARCENTRA_SECRET_ENCRYPTION_KEY=' + base64.b64encode(b's' * 32).decode() + '\n'
+        path.write_text(content)
+        path.chmod(0o600)
+        with self.assertRaises(ValueError):
+            self.runtime.create('agent', config=self.root / 'image-agent-config', state=self.root / 'image-agent-state', secret_env_file=path)
+        for mode in (0o644, 0o660):
+            path.chmod(mode)
+            with self.assertRaises(ValueError):
+                self.runtime.create('control', config=path.parent, state=self.root / 'image-control-state', secret_env_file=path)
+        path.chmod(0o600)
+        path.write_text(content + 'UNREVIEWED=value\n')
+        with self.assertRaises(ValueError):
+            self.runtime.create('control', config=path.parent, state=self.root / 'image-control-state', secret_env_file=path)
+        path.unlink()
+        target = path.parent / 'target'
+        target.write_text(content)
+        target.chmod(0o600)
+        path.symlink_to(target)
+        with self.assertRaises(ValueError):
+            self.runtime.create('control', config=path.parent, state=self.root / 'image-control-state', secret_env_file=path)
+        path.unlink()
+        os.mkfifo(path, 0o600)
+        with self.assertRaises(ValueError):
+            self.runtime.create('control', config=path.parent, state=self.root / 'image-control-state', secret_env_file=path)
+        self.assertEqual(self.fake.calls, [])
+        self.assertEqual(self.runtime.records, [])
 
     def test_bounded_reader_kills_group_even_when_parent_already_exited(self):
         from unittest.mock import Mock

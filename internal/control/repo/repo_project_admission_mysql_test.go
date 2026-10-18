@@ -271,10 +271,134 @@ func TestProjectAdmissionMySQLArchiveSerialization(t *testing.T) {
 				if stored.Status != expected || stored.EndTime != nil {
 					t.Fatal("archive rewrote admission outcome")
 				}
+				if firstArchive {
+					if stored.ProjectID != "" {
+						t.Fatal("denied admission manufactured project secret authority")
+					}
+				} else {
+					if stored.ProjectID != project {
+						t.Fatal("admission did not pin the locked original project")
+					}
+					replacementRows, _ := projectAdmissionMySQLEntities("replacement-"+suffix, "unused", "unused", "manual")
+					if err := db.WithContext(ctx).Create(replacementRows[0]).Error; err != nil {
+						t.Fatal(err)
+					}
+					if err := repository.Update(ctx, pipeline, map[string]any{"project_id": "replacement-" + suffix}); err != nil {
+						t.Fatal(err)
+					}
+					pinned, err := repository.GetRunSecretProject(ctx, runID, pipeline)
+					if err != nil || pinned != project {
+						t.Fatal("pipeline reassignment changed admitted secret authority", err)
+					}
+				}
 				if replay, err := admit(other); err != nil || replay {
 					t.Fatal("archived scope admitted replay", err)
 				}
 			})
 		}
 	}
+	for _, source := range []string{"manual", "automatic"} {
+		for _, moveFirst := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/project-move-first-%v", source, moveFirst), func(t *testing.T) {
+				suffix := fmt.Sprintf("move-%s-%v", source, moveFirst)
+				project, destination, pipeline, runID := "source-"+suffix, "target-"+suffix, "pipeline-"+suffix, "run-"+suffix
+				rows, run := projectAdmissionMySQLEntities(project, pipeline, runID, source)
+				targetRows, _ := projectAdmissionMySQLEntities(destination, "unused", "unused", source)
+				for _, row := range append(rows, targetRows[0]) {
+					if err := db.WithContext(ctx).Create(row).Error; err != nil {
+						t.Fatal(err)
+					}
+				}
+				r := &PipelineRepo{IDatabase: statusTestDB{db}}
+				if err := r.CreateRun(ctx, run); err != nil {
+					t.Fatal(err)
+				}
+				locked, attempted, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+				var firstOnce, secondOnce sync.Once
+				hook1, hook2 := "project-pin:first:"+suffix, "project-pin:second:"+suffix
+				if err := db.Callback().Query().After("gorm:query").Register(hook1, func(tx *gorm.DB) {
+					if tx.Statement.Table == "pipeline" && tx.Error == nil {
+						firstOnce.Do(func() {
+							close(locked)
+							select {
+							case <-release:
+							case <-ctx.Done():
+								tx.AddError(ctx.Err())
+							}
+						})
+					}
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := other.Callback().Query().Before("gorm:query").Register(hook2, func(tx *gorm.DB) {
+					if tx.Statement.Table == "pipeline" {
+						secondOnce.Do(func() { close(attempted) })
+					}
+				}); err != nil {
+					t.Fatal(err)
+				}
+				defer db.Callback().Query().Remove(hook1)
+				defer other.Callback().Query().Remove(hook2)
+				type result struct {
+					admitted bool
+					err      error
+				}
+				admit := func(database *gorm.DB) result {
+					repository := &PipelineRepo{IDatabase: statusTestDB{database}}
+					var admitted bool
+					var err error
+					if source == "manual" {
+						admitted, err = repository.StartManualRunIfPending(ctx, run)
+					} else {
+						admitted, err = repository.StartAutomaticRunIfPending(ctx, run)
+					}
+					return result{admitted, err}
+				}
+				move := func(database *gorm.DB) result {
+					return result{err: (&PipelineRepo{IDatabase: statusTestDB{database}}).Update(ctx, pipeline, map[string]any{"project_id": destination})}
+				}
+				first, second := make(chan result, 1), make(chan result, 1)
+				go func() {
+					if moveFirst {
+						first <- move(db)
+					} else {
+						first <- admit(db)
+					}
+				}()
+				select {
+				case <-locked:
+				case <-ctx.Done():
+					close(release)
+					t.Fatal("first transaction never locked pipeline")
+				}
+				go func() {
+					if moveFirst {
+						second <- admit(other)
+					} else {
+						second <- move(other)
+					}
+				}()
+				select {
+				case <-attempted:
+				case <-ctx.Done():
+					close(release)
+					t.Fatal("second transaction never attempted pipeline lock")
+				}
+				close(release)
+				a, b := <-first, <-second
+				if a.err != nil || b.err != nil || !(a.admitted || b.admitted) {
+					t.Fatalf("move/admission race failed: first=%v second=%v", a.err, b.err)
+				}
+				want := project
+				if moveFirst {
+					want = destination
+				}
+				pinned, err := r.GetRunSecretProject(ctx, runID, pipeline)
+				if err != nil || pinned != want {
+					t.Fatalf("secret project pin crossed pipeline lock: got=%s want=%s err=%v", pinned, want, err)
+				}
+			})
+		}
+	}
+
 }
