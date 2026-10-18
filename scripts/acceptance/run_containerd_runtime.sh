@@ -118,6 +118,8 @@ run_test sandboxexec '^TestLiveStepJournalRestartContainerdAcceptance$' "${SESSI
   TestLiveStepJournalRestartContainerdAcceptance/successor-intent TestLiveStepJournalRestartContainerdAcceptance/successor-admission \
   TestLiveStepJournalRestartContainerdAcceptance/successor-consumed
 run_test taskqueue '^TestRealContainerJobAcceptance$' 8m full-job 1 TestRealContainerJobAcceptance \
+  TestRealContainerJobAcceptance/durable-retry-approval-approved-finite-plan/personal-inbox-request-delivery \
+  TestRealContainerJobAcceptance/failed-step-approval/durable-retry-approval-approved-finite-plan/personal-inbox-request-delivery \
   TestRealContainerJobAcceptance/failed-step/same-live-session-immutable-inputs-ack-loss \
   TestRealContainerJobAcceptance/failed-step/earlier-background-refused \
   TestRealContainerJobAcceptance/failed-step/adopted-zombie-refused \

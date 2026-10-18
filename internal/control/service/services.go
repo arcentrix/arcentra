@@ -28,6 +28,7 @@ import (
 
 // Services 统一管理所有 service
 type Services struct {
+	Inbox             *InboxService
 	Deployment        *DeploymentService
 	Artifact          *ArtifactService
 	User              *UserService
@@ -116,6 +117,7 @@ func NewServices(
 	meService := NewMeService(repos.Menu, repos.TeamMember, menuService, authorizer)
 
 	services := &Services{
+		Inbox:             NewInboxService(repos),
 		Deployment:        NewDeploymentService(repos.Deployment, repos.Pipeline, repos.Artifact, NewArtifactService(repos.Artifact, repos.Storage, ""), repos.Approval, nil),
 		Artifact:          NewArtifactService(repos.Artifact, repos.Storage, ""),
 		User:              userService,

@@ -173,7 +173,16 @@ func (r *DeploymentRepo) CreateRelease(ctx context.Context, value *model.Deploym
 			if _, err := model.ApprovalCandidates(approval); err != nil {
 				return err
 			}
-			return tx.Create(approval).Error
+			if approval.InboxOrigin != 0 {
+				return ErrDeploymentConflict
+			}
+			if err := tx.Create(approval).Error; err != nil {
+				return err
+			}
+			if value.Origin == "pipeline_job" {
+				return enrollInboxApproval(ctx, tx, approval)
+			}
+			return nil
 		}
 		if value.ApprovalRequest != nil || value.ApprovalEvidenceHash != "" {
 			return ErrDeploymentConflict

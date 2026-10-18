@@ -16,6 +16,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -332,12 +333,15 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 		}, nil
 	}
 
+	if actor := VerifiedPipelineActor(ctx); actor != "" && req.GetTriggeredBy() != actor {
+		return &pipelinev1.TriggerPipelineResponse{Success: false, Message: "manual trigger actor does not match authenticated user", Error: s.error(403, "manual trigger actor does not match authenticated user", "forbidden", nil)}, nil
+	}
 	pipeline, err := s.pipelineRepo.Get(ctx, req.GetPipelineId())
-	if err != nil {
+	if err != nil || pipeline == nil || pipeline.PipelineID != req.GetPipelineId() {
 		return &pipelinev1.TriggerPipelineResponse{
 			Success: false,
 			Message: "pipeline not found",
-			Error:   s.error(404, err.Error(), "not_found", nil),
+			Error:   s.error(404, "pipeline not found", "not_found", nil),
 		}, nil
 	}
 	if pipeline.IsEnabled != 1 {
@@ -350,6 +354,9 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 	requestID := strings.TrimSpace(req.GetRequestId())
 	if requestID != "" {
 		existing, getErr := s.pipelineRepo.GetRunByRequestID(ctx, pipeline.PipelineID, requestID)
+		if errors.Is(getErr, repo.ErrManualTriggerConflict) {
+			return &pipelinev1.TriggerPipelineResponse{Success: false, Message: repo.ErrManualTriggerConflict.Error(), Error: s.error(409, repo.ErrManualTriggerConflict.Error(), "conflict", nil)}, nil
+		}
 		if getErr != nil {
 			return &pipelinev1.TriggerPipelineResponse{
 				Success: false,
@@ -446,8 +453,19 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 		run.CommitSha = ""
 	}
 	if err := createPipelineTriggerRun(ctx, s.pipelineRepo, run); err != nil {
-		if requestID != "" && isDuplicateEntryError(err) {
-			existing, getErr := s.pipelineRepo.GetRunByRequestID(ctx, pipeline.PipelineID, requestID)
+		// Duplicate insert and lost commit acknowledgement both reconcile from
+		// the primary. A found run is returned, never submitted a second time.
+		{
+			var existing *model.PipelineRun
+			var getErr error
+			if requestID != "" {
+				existing, getErr = s.pipelineRepo.GetRunByRequestID(ctx, pipeline.PipelineID, requestID)
+			} else {
+				existing, getErr = s.pipelineRepo.GetRun(ctx, run.RunID)
+			}
+			if errors.Is(getErr, repo.ErrManualTriggerConflict) {
+				return &pipelinev1.TriggerPipelineResponse{Success: false, Message: repo.ErrManualTriggerConflict.Error(), Error: s.error(409, repo.ErrManualTriggerConflict.Error(), "conflict", nil)}, nil
+			}
 			if getErr == nil && existing != nil {
 				if err := validatePipelineTriggerDuplicate(ctx, req, existing); err != nil {
 					return &pipelinev1.TriggerPipelineResponse{Success: false, Message: err.Error(), Error: s.error(409, err.Error(), "conflict", nil)}, nil
@@ -461,7 +479,7 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 		}
 		return &pipelinev1.TriggerPipelineResponse{
 			Success: false,
-			Message: "create run failed",
+			Message: "run creation could not be confirmed",
 			Error:   s.error(500, err.Error(), "internal", nil),
 		}, nil
 	}

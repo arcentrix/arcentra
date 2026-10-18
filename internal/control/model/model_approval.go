@@ -33,6 +33,7 @@ const (
 
 // ApprovalRequest 保存审批门禁及不可变候选人快照
 type ApprovalRequest struct {
+	InboxOrigin   int     `gorm:"column:inbox_origin;not null;default:0;index:idx_approval_inbox_origin" json:"-"`
 	RetryJobRunID *string `gorm:"column:retry_job_run_id;type:varchar(64);uniqueIndex:uk_approval_retry_job_run;check:ck_approval_exclusive_binding,retry_job_run_id IS NULL OR deployment_release_id IS NULL" json:"retryJobRunId,omitempty"`
 	BindingKind   string  `gorm:"column:binding_kind;type:varchar(32);not null;default:''" json:"bindingKind"`
 	EvidenceJSON  string  `gorm:"column:evidence_json;type:mediumtext" json:"-"`

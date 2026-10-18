@@ -294,12 +294,35 @@ jobs:
             python3 scripts/acceptance/verify_step_approval_mysql_log.py ".acceptance/evidence/step-retry-approval-mysql-$suite.log" "$suite"
           done
 
+      - name: Verify durable personal Inbox against disposable MySQL
+        timeout-minutes: 5
+        run: |
+          set -o pipefail
+          for suite in provenance migration service; do
+            if [ "$suite" = service ]; then
+              schema=arcentra_retry_approval_test_inbox
+              test_name=TestInboxMySQLVerifiedRetryServiceJourney
+              package=service
+            else
+              schema="arcentra_inbox_test_$suite"
+              package=repo
+              if [ "$suite" = provenance ]; then test_name=TestManualInboxMySQLProvenanceBothCollations; else test_name=TestInboxMySQLRealOldShapeMigrationAndLargeHistoryPlans; fi
+            fi
+            docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create "$schema"
+            ARCENTRA_REQUIRE_INBOX_MYSQL=1 \
+            ARCENTRA_INBOX_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
+            ARCENTRA_REQUIRE_RETRY_APPROVAL_MYSQL=1 \
+            ARCENTRA_RETRY_APPROVAL_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
+              go test -race -v -count=1 -timeout=3m -run "^$test_name$" "./internal/control/$package" | tee ".acceptance/evidence/inbox-mysql-$suite.log"
+            python3 scripts/acceptance/verify_inbox_mysql_log.py ".acceptance/evidence/inbox-mysql-$suite.log" "$suite"
+          done
+
       - name: Check out pinned frontend acceptance client
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: e95ef30fa266b624f10a2d8db8d7debaa72e3c9b
+          ref: 905bdbaea197b6101a9f302155d5b53712e7e614
           path: .acceptance/frontend
           persist-credentials: false
 
@@ -323,6 +346,8 @@ jobs:
           pnpm exec playwright install --with-deps chromium
 
       - name: Exercise fresh installation through actual browser
+        env:
+          ARCENTRA_ACCEPTANCE_INBOX_JOURNEY: "1"
         run: |
           python3 scripts/acceptance/run_actual_app.py \
             --visual-editor-acceptance \
@@ -343,6 +368,11 @@ jobs:
             .acceptance/evidence/browser/summary.json
             .acceptance/evidence/browser/project-build-verification.json
             .acceptance/evidence/browser/visual-ci-verification.json
+            .acceptance/evidence/inbox-verification.json
+            .acceptance/evidence/inbox-read/*.png
+            .acceptance/evidence/inbox-read/summary.json
+            .acceptance/evidence/inbox-resume/*.png
+            .acceptance/evidence/inbox-resume/summary.json
           if-no-files-found: ignore
           retention-days: 7
 

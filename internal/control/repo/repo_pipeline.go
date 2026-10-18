@@ -16,7 +16,6 @@ package repo
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -141,7 +140,7 @@ func (r *PipelineRepo) List(ctx context.Context, query *PipelineQuery) ([]*model
 
 // CreateRun creates a pipeline run.
 func (r *PipelineRepo) CreateRun(ctx context.Context, run *model.PipelineRun) error {
-	if run == nil || run.ProjectID != "" || run.TriggeredBy == "polling" || run.PollingContext != "" || run.PollingContextDigest != "" || run.RetryApprovalContext != "" || run.RetryApprovalContextDigest != "" {
+	if run == nil || !emptyRunInboxBinding(run) || run.ProjectID != "" || run.TriggeredBy == "polling" || run.PollingContext != "" || run.PollingContextDigest != "" || run.RetryApprovalContext != "" || run.RetryApprovalContextDigest != "" {
 		return gorm.ErrInvalidData
 	}
 	if err := normalizeJSONFields(map[string]*string{"env": &run.Env}, pipelineRunJSONDefaults); err != nil {
@@ -150,17 +149,23 @@ func (r *PipelineRepo) CreateRun(ctx context.Context, run *model.PipelineRun) er
 	return r.Database().WithContext(ctx).Create(run).Error
 }
 
-var pipelineRunReadColumns = []string{"id", "created_at", "updated_at", "run_id", "pipeline_id", "project_id", "request_id", "pipeline_name", "branch", "commit_sha", "definition_commit_sha", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_target_fingerprint", "deployment_plan_hash", "definition_path", "status", "trigger_type", "triggered_by", "env", "total_jobs", "completed_jobs", "failed_jobs", "running_jobs", "current_stage", "total_stages", "start_time", "end_time", "duration", "retry_approval_context", "retry_approval_context_digest", "polling_context", "polling_context_digest"}
+var pipelineRunReadColumns = []string{"id", "created_at", "updated_at", "run_id", "pipeline_id", "project_id", "inbox_actor_id", "inbox_origin", "request_id", "pipeline_name", "branch", "commit_sha", "definition_commit_sha", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_target_fingerprint", "deployment_plan_hash", "definition_path", "status", "trigger_type", "triggered_by", "env", "total_jobs", "completed_jobs", "failed_jobs", "running_jobs", "current_stage", "total_stages", "start_time", "end_time", "duration", "retry_approval_context", "retry_approval_context_digest", "polling_context", "polling_context_digest"}
 
 // GetRun 通过运行业务标识读取完整运行与不可变证据
 func (r *PipelineRepo) GetRun(ctx context.Context, runID string) (*model.PipelineRun, error) {
-	var one model.PipelineRun
-	if err := r.Database().WithContext(ctx).
+	var rows []model.PipelineRun
+	if err := r.Database().WithContext(ctx).Clauses(database.Write()).
 		Select(pipelineRunReadColumns).Where("run_id = ?", runID).
-		First(&one).Error; err != nil {
+		Limit(2).Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	return &one, nil
+	if len(rows) == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if len(rows) != 1 || rows[0].RunID != runID {
+		return nil, ErrManualTriggerConflict
+	}
+	return &rows[0], nil
 }
 
 // UpdateRun updates a pipeline run by runID.
@@ -191,17 +196,20 @@ func (r *PipelineRepo) GetRunByRequestID(ctx context.Context, pipelineID, reques
 	if strings.TrimSpace(pipelineID) == "" || strings.TrimSpace(requestID) == "" {
 		return nil, nil
 	}
-	var one model.PipelineRun
-	err := r.Database().WithContext(ctx).
-		Select(pipelineRunReadColumns).Where("pipeline_id = ? AND request_id = ?", pipelineID, requestID).
-		First(&one).Error
+	var rows []model.PipelineRun
+	err := r.Database().WithContext(ctx).Clauses(database.Write()).
+		Select(pipelineRunReadColumns).Where("pipeline_id = ? AND LOWER(request_id) = LOWER(?)", pipelineID, requestID).
+		Limit(2).Find(&rows).Error
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	return &one, nil
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	if len(rows) != 1 || rows[0].PipelineID != pipelineID || rows[0].RequestID != requestID {
+		return nil, ErrManualTriggerConflict
+	}
+	return &rows[0], nil
 }
 
 // ListRuns lists pipeline runs.

@@ -52,6 +52,9 @@ func (Pipeline) TableName() string {
 
 // PipelineRun 流水线执行记录表
 type PipelineRun struct {
+	// Set only by verified manual creation; never serialized or backfilled.
+	InboxActorID string `gorm:"column:inbox_actor_id;type:varchar(64);not null;default:''" json:"-"`
+	InboxOrigin  int    `gorm:"column:inbox_origin;not null;default:0;index:idx_run_inbox_origin,priority:1" json:"-"`
 	// ProjectID is pinned only by durable run admission, never inferred at execution.
 	// Empty identifies a legacy/unadmitted run and cannot authorize secret access.
 	ProjectID                  string `gorm:"column:project_id;type:varchar(64);not null;default:''" json:"-"`
@@ -105,6 +108,9 @@ type PipelineStage struct {
 func (PipelineStage) TableName() string {
 	return "pipeline_stage"
 }
+
+// RunInboxOriginVerifiedManual identifies provenance minted by the dedicated writer.
+const RunInboxOriginVerifiedManual = 1
 
 // PipelineStatusUnknown and related constants enumerate pipeline execution statuses.
 const (

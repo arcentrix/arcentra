@@ -61,24 +61,7 @@ type deploymentApprovalTarget struct {
 }
 
 func approvalEvidence(entry *model.DeploymentRelease, req *model.ApprovalRequest) string {
-	if entry == nil || req == nil || req.ExpiresAt == nil || entry.ExecutionStepRunID == nil {
-		return ""
-	}
-	candidates, err := model.ApprovalCandidates(req)
-	if err != nil {
-		return ""
-	}
-	var target deploymentApprovalTarget
-	var targetFields map[string]any
-	if sonic.Unmarshal(entry.ApprovalTarget, &target) != nil || sonic.Unmarshal(entry.ApprovalTarget, &targetFields) != nil || len(targetFields) != 6 {
-		return ""
-	}
-	values := []any{"pipeline-deployment-approval-v1", entry.ReleaseID, entry.ProjectID, entry.RequestID, entry.EnvironmentID, entry.PipelineID, entry.PipelineRunID, entry.ExecutionJobRunID, *entry.ExecutionStepRunID, entry.ProducerJobRunID, entry.ProducerStepRunID, entry.DeploymentPlanHash, entry.TargetFingerprint, entry.ArtifactID, entry.ArtifactSHA256, entry.CommitSHA, entry.Image, entry.CreatedBy, target, req.ApprovalID, req.JobName, req.StepName, req.Plugin, candidates, req.RequiredApproverCount, req.Mode, req.RequestedBy, req.ExpiresAt.UTC().UnixMilli()}
-	data, err := sonic.Marshal(values)
-	if err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%x", sha256.Sum256(data))
+	return repo.InboxDeploymentEvidence(entry, req)
 }
 
 func (s *DeploymentService) prepareDeploymentApproval(ctx context.Context, entry *model.DeploymentRelease, plan *cluster.PipelineDeploymentPlan) error {

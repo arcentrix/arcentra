@@ -105,6 +105,18 @@ func validateRetryApprovalDuplicate(ctx context.Context, req *pipelinev1.Trigger
 }
 
 func validatePipelineTriggerDuplicate(ctx context.Context, req *pipelinev1.TriggerPipelineRequest, run *model.PipelineRun) error {
+	actor := VerifiedPipelineActor(ctx)
+	if run == nil || req == nil || run.PipelineID != req.GetPipelineId() || run.RequestID != strings.TrimSpace(req.GetRequestId()) {
+		return repo.ErrManualTriggerConflict
+	}
+	if actor != "" || run.InboxActorID != "" || run.InboxOrigin != 0 {
+		if actor == "" || run.InboxActorID != actor || run.InboxOrigin != model.RunInboxOriginVerifiedManual || run.TriggerType != int(pipelinev1.TriggerType_TRIGGER_TYPE_MANUAL) || run.PollingContext != "" || run.PollingContextDigest != "" || run.TriggeredBy != actor || req.GetTriggeredBy() != actor {
+			return repo.ErrManualTriggerConflict
+		}
+	}
+	if !maps.Equal(req.GetVariables(), serde.UnmarshalStringMap(run.Env)) || (req.GetExpectedDefinitionCommitSha() != "" && req.GetExpectedDefinitionCommitSha() != run.DefinitionCommitSha) {
+		return repo.ErrManualTriggerConflict
+	}
 	if err := validateDeploymentDuplicate(ctx, req, run); err != nil {
 		return err
 	}
@@ -125,6 +137,15 @@ func submitPipelineRun(ctx context.Context, engine IPipelineEngine, run *model.P
 }
 
 func createPipelineTriggerRun(ctx context.Context, repository repo.IPipelineRepository, run *model.PipelineRun) error {
+	if actor := VerifiedPipelineActor(ctx); actor != "" {
+		creator, ok := repository.(repo.IVerifiedManualTriggerCreator)
+		if !ok {
+			return repo.ErrManualTriggerForbidden
+		}
+		return creator.CreateVerifiedManualTriggerRun(ctx, actor, run, authorizeManualInboxTrigger)
+	}
+	// Legacy/internal calls without authenticated context remain unbound.
+	// A body display field is never promoted into personal provenance.
 	if run.RetryApprovalContext == "" {
 		return repository.CreateRun(ctx, run)
 	}

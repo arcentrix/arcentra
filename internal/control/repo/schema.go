@@ -20,15 +20,22 @@ func MigrateSchema(ctx context.Context, db *gorm.DB) error {
 	if err := preflightProjectSecretSchema(ctx, db); err != nil {
 		return err
 	}
+	if err := preflightInboxSchema(ctx, db); err != nil {
+		return err
+	}
 	models := schemaModels()
 	if err := db.WithContext(ctx).AutoMigrate(models...); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)
+	}
+	if err := inboxSchemaIndexes(ctx, db); err != nil {
+		return err
 	}
 	return seedAuthorization(ctx, db)
 }
 
 func schemaModels() []any {
 	return []any{
+		&model.InboxDelivery{}, &model.InboxWork{}, &model.InboxCursor{}, &model.InboxSweep{},
 		&model.Agent{},
 		&model.DeploymentEnvironment{},
 		&model.DeploymentRelease{},

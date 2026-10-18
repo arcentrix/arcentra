@@ -26,6 +26,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from inbox_journey import run_personal_inbox
+
 
 BACKEND_URL = "http://127.0.0.1:18080"
 AGENT_URL = "http://127.0.0.1:18081"
@@ -113,6 +115,10 @@ class Fixture:
     def __init__(self, args, root):
         self.args = args
         self.root = root
+        inbox_mode = os.environ.get("ARCENTRA_ACCEPTANCE_INBOX_JOURNEY", "0")
+        if inbox_mode not in ("0", "1"):
+            raise ValueError("invalid Inbox acceptance opt-in")
+        self.inbox_enabled = inbox_mode == "1"
         self.children = []
         self.logs = []
         self.redactions = [PASSWORD, encoded(PASSWORD), DEPENDENCIES["ARCENTRA_TEST_S3_SECRET_KEY"],
@@ -131,6 +137,7 @@ class Fixture:
         self.successful_run = None
         self.artifact_evidence = None
         self.build_verified = False
+        self.inbox_evidence = None
         self.preflight_verified = False
         self.storage_setup_verified = False
         self.coordination = root / "coordination"
@@ -611,6 +618,8 @@ class Fixture:
             self.visual_project_id = safe_identifier(project.get("projectId"))
         self.configure_observer()
         self.run_build_browser(control, agent)
+        if self.inbox_enabled:
+            run_personal_inbox(self, control, agent, read_json=read_private_json)
 
     def browser_environment(self, phase):
         if phase not in ("preflight", "storage-setup", "build"):
@@ -808,6 +817,9 @@ class Fixture:
         visual_proof_path.unlink(missing_ok=True)
         error = redact_diagnostics(error, self.redactions) if error else error
         self.cleanup_runtime()
+        self.args.evidence_dir.mkdir(parents=True, exist_ok=True)
+        inbox_path = self.args.evidence_dir / "inbox-verification.json"
+        inbox_path.unlink(missing_ok=True)
         for _, handle in self.logs:
             handle.close()
         self.args.evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -839,6 +851,8 @@ class Fixture:
         (self.args.evidence_dir / "actual-app-result.json").write_text(json.dumps(result, indent=2) + "\n")
         if not error and self.visual_verified is True and self.visual_proof is not None:
             atomic_json(visual_proof_path, self.visual_proof)
+        if not error and self.inbox_evidence is not None:
+            atomic_json(inbox_path, self.inbox_evidence)
 
 
 def redact_diagnostics(content, values):

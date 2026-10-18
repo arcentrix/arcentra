@@ -254,6 +254,10 @@ func runContext(ctx context.Context, app *App, cleanup func(), shutdownTimeout t
 	defer func() {
 		app.ready.Store(false)
 		cancelRun()
+		// Join Inbox before releasing the database.
+		if app.Services != nil && app.Services.Inbox != nil {
+			app.Services.Inbox.Stop()
+		}
 		if app.ShutdownMgr != nil {
 			app.ShutdownMgr.Shutdown()
 		}
@@ -298,6 +302,9 @@ func runContext(ctx context.Context, app *App, cleanup func(), shutdownTimeout t
 		return fmt.Errorf("HTTP listen failed: %w", err)
 	}
 	httpListener = &startupListener{Listener: bound, started: make(chan struct{}), onStart: func() { app.ready.Store(true) }}
+	if app.Services != nil && app.Services.Inbox != nil {
+		app.Services.Inbox.Start(ctx)
+	}
 	// Initialize and start global cron scheduler
 	cron.Init(app.Logger)
 	cron.Start()

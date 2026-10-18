@@ -83,6 +83,13 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 				approval = values[0]
 				return approval.Status == model.ApprovalStatusPending
 			})
+			if scenario == "approved-finite-plan" {
+				if !t.Run("personal-inbox-request-delivery", func(t *testing.T) {
+					verifyContainerApprovalInbox(t, f, services, approval, actor, policy.Candidates[0], grantIDs[1])
+				}) {
+					t.FailNow()
+				}
+			}
 			review, err := services.Approval.RetryReview(f.ctx, approval)
 			if err != nil || review == nil || review.Evidence == nil {
 				t.Fatalf("read exact retry evidence: %v", err)
@@ -481,13 +488,11 @@ func submitContainerApproval(t *testing.T, f *controllerWorkerFixture, cfg *real
 	if err != nil {
 		t.Fatal(err)
 	}
-	creator, ok := f.repos.Pipeline.(interface {
-		CreateRetryApprovalRun(context.Context, *model.PipelineRun) error
-	})
+	creator, ok := f.repos.Pipeline.(repo.IVerifiedManualTriggerCreator)
 	if !ok {
 		t.Fatal("durable run capture missing")
 	}
-	if err := creator.CreateRetryApprovalRun(f.ctx, run); err != nil {
+	if err := creator.CreateVerifiedManualTriggerRun(f.ctx, actor, run, authorizeContainerInboxFixture); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.engine.SubmitVerified(controlservice.WithVerifiedPipelineActor(f.ctx, actor), run, pipeline); err != nil {
@@ -567,7 +572,7 @@ func seedContainerApprovalActors(t *testing.T, f *controllerWorkerFixture, actor
 				t.Fatal(err)
 			}
 		}
-		actions := []string{"project:read", "pipeline:read"}
+		actions := []string{"project:read", "pipeline:read", "approval:read"}
 		if index == 0 {
 			actions = append(actions, "pipeline:trigger")
 		} else {
@@ -598,6 +603,22 @@ func seedContainerApprovalActors(t *testing.T, f *controllerWorkerFixture, actor
 			if err := f.db.WithContext(ctx).Model(&model.ApprovalRequest{}).Where("pipeline_run_id IN ?", runIDs).Pluck("approval_id", &approvalIDs).Error; err != nil {
 				t.Error(err)
 				return
+			}
+		}
+		// Only this fixture's recipients and sources are removed; no global sweep state.
+		for _, item := range []struct {
+			entity any
+			column string
+			ids    []string
+		}{
+			{&model.InboxDelivery{}, "recipient_id", users},
+			{&model.InboxCursor{}, "owner_id", users},
+			{&model.InboxWork{}, "source_id", append(append([]string(nil), runIDs...), approvalIDs...)},
+		} {
+			if len(item.ids) > 0 {
+				if err := f.db.WithContext(ctx).Where(item.column+" IN ?", item.ids).Delete(item.entity).Error; err != nil {
+					t.Error(err)
+				}
 			}
 		}
 		if len(approvalIDs) > 0 {
