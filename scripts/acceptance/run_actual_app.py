@@ -697,6 +697,7 @@ class Fixture:
             return browser.poll() is not None
         self.wait_until("browser acceptance completion", browser_complete, timeout=600)
         if browser.returncode != 0:
+            self.visual_save_failure_diagnostic()
             raise RuntimeError(f"browser acceptance exited {browser.returncode}; see sanitized evidence")
         if control.poll() is not None or agent.poll() is not None:
             raise RuntimeError("Control or Agent exited during browser acceptance")
@@ -707,6 +708,30 @@ class Fixture:
         self.verify_project_secrets()
         self.verify_organization_management()
         self.note("Browser create-project → create-pipeline → run → logs → artifact journey completed")
+
+    def visual_save_failure_diagnostic(self):
+        # Read-only observation after browser exit. Never retry a save or print
+        # raw server/Git error bodies, which may contain repository credentials.
+        if getattr(self.args, "visual_editor_acceptance", False) is not True:
+            return
+        category = "unavailable"
+        try:
+            summary = read_private_json(self.args.evidence_dir / "browser/summary.json")
+            if summary.get("stage") != "visual-ci-save":
+                return
+            receipt = summary.get("visualCI", {})
+            pipeline_id = safe_identifier(receipt.get("pipelineId"))
+            if receipt.get("projectId") != self.visual_project_id:
+                raise ValueError("diagnostic source mismatch")
+            detail = self.request("/pipelines/" + pipeline_id)
+            if detail.get("projectId") != self.visual_project_id or detail.get("pipelineId") != pipeline_id:
+                raise ValueError("diagnostic persisted scope mismatch")
+            from visual_git_fixture import classify_visual_save_failure
+            category = classify_visual_save_failure(detail.get("lastSyncMessage"))
+        except Exception:
+            # Diagnostic unavailability never replaces or weakens the original failure.
+            pass
+        self.note("Visual save failure diagnostic (persisted sync state only): " + category)
 
     def verify_visual_ci(self):
         from visual_git_fixture import saved_spec, validate_visual_receipt, validate_visual_execution, validate_visual_pipeline

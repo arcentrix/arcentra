@@ -169,3 +169,27 @@ def validate_visual_logs(expected_outputs, logs):
             raise ValueError('visual execution requires one complete exact command output in its own step')
         if any(line in markers and line != expected_outputs[identity] for line in lines[:-1]):
             raise ValueError('visual command output belongs to another step')
+
+
+def classify_visual_save_failure(message):
+    """Return fixed diagnostics only; never echo a Git URL, command or error body."""
+    if not isinstance(message, str) or len(message) > 16384:
+        return 'unclassified'
+    if message.startswith('git commit failed:'):
+        if 'Committer identity unknown' in message or 'Author identity unknown' in message:
+            return 'git-identity-missing'
+        return 'git-commit-failed'
+    for prefix, category in (
+        ('clone repo failed:', 'git-clone-failed'),
+        ('read head failed:', 'git-read-head-failed'),
+        ('create directory failed:', 'workspace-directory-failed'),
+        ('write spec failed:', 'workspace-write-failed'),
+        ('git add failed:', 'git-add-failed'),
+        ('read commit failed:', 'git-read-commit-failed'),
+        ('create branch failed:', 'git-create-branch-failed'),
+        ('git push failed:', 'git-push-failed'),
+        ('create pull request failed:', 'change-request-failed'),
+    ):
+        if message.startswith(prefix):
+            return category
+    return 'unclassified'

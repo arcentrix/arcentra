@@ -5,6 +5,43 @@ from visual_git_fixture import INITIAL_SPEC, MARKER, MAX_VISUAL_LOG_BYTES, MAX_V
 
 
 class VisualEvidenceTests(unittest.TestCase):
+    def test_save_failure_categories_never_return_untrusted_error_text(self):
+        from visual_git_fixture import classify_visual_save_failure
+        synthetic = 'fixture-private-url-token'
+        self.assertEqual(classify_visual_save_failure('git commit failed: Committer identity unknown ' + synthetic), 'git-identity-missing')
+        self.assertEqual(classify_visual_save_failure('git commit failed: Author identity unknown'), 'git-identity-missing')
+        self.assertEqual(classify_visual_save_failure('git push failed: ' + synthetic), 'git-push-failed')
+        self.assertEqual(classify_visual_save_failure('clone repo failed: ' + synthetic), 'git-clone-failed')
+        for value in [None, {}, synthetic, 'git push failed:' + ('x' * 16385)]:
+            self.assertEqual(classify_visual_save_failure(value), 'unclassified')
+
+    def test_save_failure_diagnostic_is_scoped_read_only_and_redacted(self):
+        import run_actual_app as actual
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        fixture = actual.Fixture.__new__(actual.Fixture)
+        fixture.args = SimpleNamespace(visual_editor_acceptance=True, evidence_dir=Path('/synthetic'))
+        fixture.visual_project_id = 'project'
+        messages, requests = [], []
+        fixture.note = messages.append
+        def request(path):
+            requests.append(path)
+            return {'pipelineId': 'pipeline', 'projectId': 'project',
+                    'lastSyncMessage': 'git push failed: fixture-private-url-token'}
+        fixture.request = request
+        summary = {'stage': 'visual-ci-save', 'visualCI': {'projectId': 'project', 'pipelineId': 'pipeline'}}
+        with patch.object(actual, 'read_private_json', return_value=summary):
+            fixture.visual_save_failure_diagnostic()
+        self.assertEqual(requests, ['/pipelines/pipeline'])
+        self.assertEqual(messages, ['Visual save failure diagnostic (persisted sync state only): git-push-failed'])
+        requests.clear(); messages.clear()
+        summary['visualCI']['projectId'] = 'other-project'
+        with patch.object(actual, 'read_private_json', return_value=summary):
+            fixture.visual_save_failure_diagnostic()
+        self.assertEqual(requests, [])
+        self.assertEqual(messages, ['Visual save failure diagnostic (persisted sync state only): unavailable'])
+
     def receipt(self):
         return {'journey': 'visual-ci-v1', 'completed': True, 'steps': list(VISUAL_STEPS),
                 'projectId': 'project', 'pipelineId': 'pipeline', 'runId': 'run',
