@@ -31,7 +31,7 @@ type AuditLog struct {
 	LogID        string         `gorm:"column:log_id;not null;uniqueIndex;type:varchar(64)" json:"logId"`
 	ActorUserID  string         `gorm:"column:actor_user_id;not null;default:'';index;type:varchar(64)" json:"actorUserId"`
 	ActorIP      string         `gorm:"column:actor_ip;not null;default:''" json:"actorIp"`
-	Action       string         `gorm:"column:action;not null;index;type:varchar(32)" json:"action"`
+	Action       string         `gorm:"column:action;not null;index:idx_audit_log_action,length:191;type:longtext" json:"action"`
 	ResourceType string         `gorm:"column:resource_type;not null;default:'';index:idx_resource,priority:1;type:varchar(32)" json:"resourceType"`
 	ResourceID   string         `gorm:"column:resource_id;not null;default:'';index:idx_resource,priority:2;type:varchar(64)" json:"resourceId"`
 	ScopeType    string         `gorm:"column:scope_type;not null;default:''" json:"scopeType"`

@@ -29,6 +29,15 @@ func MigrateSchema(ctx context.Context, db *gorm.DB) error {
 	if err := preflightCopilotExecutionSchema(ctx, db); err != nil {
 		return err
 	}
+	auditAction, err := preflightAuditActionSchema(ctx, db)
+	if err != nil {
+		return err
+	}
+	// All preflights above are read-only. Apply the coupled column/index change
+	// before AutoMigrate can try widening an indexed VARCHAR by itself.
+	if err := auditAction.apply(ctx, db); err != nil {
+		return err
+	}
 	models := schemaModels()
 	if err := db.WithContext(ctx).AutoMigrate(models...); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)
