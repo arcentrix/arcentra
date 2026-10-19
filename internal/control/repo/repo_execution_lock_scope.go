@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/pkg/database"
 	"github.com/arcentrix/arcentra/pkg/retryapproval"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -66,6 +67,8 @@ func executionTransaction(ctx context.Context, db *gorm.DB, id string, fn func(*
 	if _, nested := db.Statement.ConnPool.(gorm.TxCommitter); nested {
 		return fmt.Errorf("nested execution transaction forbidden")
 	}
+	// Identity hints and the following transaction must use the primary.
+	db = db.WithContext(ctx).Clauses(database.Write())
 	locator := executionScopeLocator{}
 	if id != "" {
 		locator.jobErr = db.WithContext(ctx).Select(jobSnapshotColumns).Where("job_run_id = ?", id).First(&locator.job).Error
@@ -172,7 +175,9 @@ func lockExecutionJob(ctx context.Context, tx *gorm.DB, id string, mode executio
 		if err := q().Select("org_id").Where("org_id = ?", projectLocator.OrgID).Limit(2).Find(&orgs).Error; err != nil {
 			return nil, err
 		}
-		if len(orgs) != 1 || orgs[0].OrgID != projectLocator.OrgID {
+		// Legacy project scopes may name an organization without an organization row.
+		// Preserve the indexed locked lookup and reject ambiguity or nonexact aliases.
+		if len(orgs) > 1 || len(orgs) == 1 && orgs[0].OrgID != projectLocator.OrgID {
 			return nil, fmt.Errorf("execution organization identity changed")
 		}
 	}

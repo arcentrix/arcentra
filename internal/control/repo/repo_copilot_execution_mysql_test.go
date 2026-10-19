@@ -176,6 +176,10 @@ func TestCopilotExecutionMySQLRealRequiredGate(t *testing.T) {
 						return
 					}
 					v := executionPrepare(t, r, in)
+					prepared, created, e := r.CopilotExecutionPrepare(ctx, in, historyTestAllow)
+					require.NoError(t, e)
+					require.False(t, created)
+					assertExecutionReceiptEqual(t, v, prepared)
 					mutation := executionMutationInput(v)
 					switch scenario {
 					case "cancel-wins", "confirm-wins", "duplicate-ack":
@@ -190,12 +194,13 @@ func TestCopilotExecutionMySQLRealRequiredGate(t *testing.T) {
 							return historyTestAllow(c, rr, o, p, pipe)
 						}
 						first := make(chan error, 1)
+						var firstReceipt *model.CopilotExecutionIntent
 						go func() {
 							var e error
 							if scenario == "cancel-wins" {
-								_, e = r.CopilotExecutionCancel(ctx, mutation, blocking)
+								firstReceipt, e = r.CopilotExecutionCancel(ctx, mutation, blocking)
 							} else {
-								_, e = r.CopilotExecutionConfirm(ctx, mutation, blocking)
+								firstReceipt, e = r.CopilotExecutionConfirm(ctx, mutation, blocking)
 							}
 							first <- e
 						}()
@@ -226,6 +231,15 @@ func TestCopilotExecutionMySQLRealRequiredGate(t *testing.T) {
 						restarted := &Repositories{database: statusTestDB{db.Session(&gorm.Session{NewDB: true})}}
 						got, e := restarted.CopilotExecutionGet(ctx, v.OwnerUserID, v.ProjectID, v.IntentID, historyTestAllow)
 						require.NoError(t, e)
+						assertExecutionReceiptEqual(t, firstReceipt, got)
+						var replay *model.CopilotExecutionIntent
+						if scenario == "cancel-wins" {
+							replay, e = restarted.CopilotExecutionCancel(ctx, mutation, historyTestAllow)
+						} else {
+							replay, e = restarted.CopilotExecutionConfirm(ctx, mutation, historyTestAllow)
+						}
+						require.NoError(t, e)
+						assertExecutionReceiptEqual(t, firstReceipt, replay)
 						var n int64
 						require.NoError(t, db.Model(&model.ApprovalDecision{}).Count(&n).Error)
 						if scenario == "cancel-wins" {

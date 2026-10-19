@@ -4,7 +4,10 @@ import (
 	"context"
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/plugin/dbresolver"
+	"path/filepath"
 	"testing"
 )
 
@@ -41,7 +44,7 @@ func TestExecutionScopePrefixOrderAndTransactionProof(t *testing.T) {
 	}))
 }
 func TestExecutionScopeMissingModernScopeFailsClosed(t *testing.T) {
-	for _, kind := range []string{"pipeline", "project", "run", "run-project", "case-alias", "missing-organization"} {
+	for _, kind := range []string{"pipeline", "project", "run", "run-project", "case-alias"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx, db, _, _ := sourceTestRepository(t)
 			switch kind {
@@ -55,9 +58,7 @@ func TestExecutionScopeMissingModernScopeFailsClosed(t *testing.T) {
 				require.NoError(t, db.Model(&model.PipelineRun{}).Where("run_id = ?", "run").Update("project_id", "").Error)
 			case "case-alias":
 				require.NoError(t, db.Model(&model.JobRun{}).Where("job_run_id = ?", "job").Update("pipeline_id", "PIPELINE").Error)
-			case "missing-organization":
-				require.NoError(t, db.AutoMigrate(&model.Organization{}))
-				require.NoError(t, db.Model(&model.Project{}).Where("project_id = ?", "project").Update("org_id", "absent").Error)
+
 			}
 			require.Error(t, executionTransaction(ctx, db, "job", func(tx *gorm.DB) error { _, err := lockExecutionJob(ctx, tx, "job", executionLockActive); return err }))
 		})
@@ -211,4 +212,45 @@ func TestExecutionScopeStaleNonpendingVoteCannotCreateDecision(t *testing.T) {
 	var count int64
 	require.NoError(t, f.db.Model(&model.ApprovalDecision{}).Where("approval_id = ?", a.ApprovalID).Count(&count).Error)
 	require.Zero(t, count)
+}
+
+func TestExecutionScopeLegacyOrganizationSourceCapture(t *testing.T) {
+	for _, present := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy-absent", true: "present"}[present], func(t *testing.T) {
+			ctx, db, jobs, binding := sourceTestRepository(t)
+			require.NoError(t, db.AutoMigrate(&model.Organization{}))
+			require.NoError(t, db.Model(&model.Project{}).Where("project_id = ?", "project").Update("org_id", "ci-acceptance-org").Error)
+			if present {
+				require.NoError(t, db.Create(&model.Organization{OrgID: "ci-acceptance-org"}).Error)
+			}
+			require.NoError(t, jobs.CaptureSourceExpectation(ctx, "pipeline", "run", "job", "agent", binding))
+			job, err := jobs.GetByJobRunID(ctx, "job")
+			require.NoError(t, err)
+			require.True(t, job.SourceExpectationCaptured)
+			require.Equal(t, "agent", job.AgentID)
+		})
+	}
+}
+func TestExecutionScopeOrganizationAliasesAndAmbiguityFailClosed(t *testing.T) {
+	for _, ids := range [][]string{{"ORG"}, {"org", "org"}} {
+		t.Run(ids[0]+string(rune('0'+len(ids))), func(t *testing.T) {
+			ctx, db, jobs, binding := sourceTestRepository(t)
+			require.NoError(t, db.Exec("CREATE TABLE organization (org_id TEXT COLLATE NOCASE)").Error)
+			for _, id := range ids {
+				require.NoError(t, db.Exec("INSERT INTO organization (org_id) VALUES (?)", id).Error)
+			}
+			require.NoError(t, db.Model(&model.Project{}).Where("project_id = ?", "project").Update("org_id", "org").Error)
+			require.EqualError(t, jobs.CaptureSourceExpectation(ctx, "pipeline", "run", "job", "agent", binding), "execution organization identity changed")
+			job, err := jobs.GetByJobRunID(ctx, "job")
+			require.NoError(t, err)
+			require.False(t, job.SourceExpectationCaptured)
+			require.Empty(t, job.AgentID)
+		})
+	}
+}
+func TestExecutionScopeLocatorReadsUsePrimary(t *testing.T) {
+	ctx, db, jobs, binding := sourceTestRepository(t)
+	// The replica intentionally has no tables. A locator must not read it.
+	require.NoError(t, db.Use(dbresolver.Register(dbresolver.Config{Replicas: []gorm.Dialector{sqlite.Open(filepath.Join(t.TempDir(), "empty-replica.db"))}})))
+	require.NoError(t, jobs.CaptureSourceExpectation(ctx, "pipeline", "run", "job", "agent", binding))
 }

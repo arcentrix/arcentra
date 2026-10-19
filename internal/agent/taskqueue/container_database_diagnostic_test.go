@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,10 +19,11 @@ import (
 )
 
 // This acceptance-only observer never retains SQL, arguments, error messages,
-// identifiers, or driver objects. Unknown operation/table names are discarded.
+// user identifiers, or driver objects. Only static schema names are retained.
 type containerDatabaseDiagnosticEvent struct {
 	Operation     string
 	Table         string
+	Column        string
 	Class         string
 	MySQLNumber   uint16
 	ElapsedMillis int64
@@ -37,7 +39,7 @@ func containerDatabaseDiagnosticClassify(operation, table string, err error) (co
 		event.Operation = operation
 	}
 	switch table {
-	case "pipeline", "project", "pipeline_run", "job_run", "job_run_generation", "step_run", "project_artifact", "approval_request", "approval_decision", "copilot_conversation", "copilot_turn", "copilot_action_plan", "copilot_execution_intent", "user", "role", "role_grant", "permission", "role_permission_binding":
+	case "audit_log", "step_run_logs", "inbox_delivery", "inbox_work", "inbox_cursor", "inbox_sweep", "pipeline", "project", "pipeline_run", "job_run", "job_run_generation", "step_run", "project_artifact", "approval_request", "approval_decision", "copilot_conversation", "copilot_turn", "copilot_action_plan", "copilot_execution_intent", "user", "role", "role_grant", "permission", "role_permission_binding":
 		event.Table = table
 	}
 	var mysqlErr *mysqldriver.MySQLError
@@ -45,6 +47,24 @@ func containerDatabaseDiagnosticClassify(operation, table string, err error) (co
 	case errors.As(err, &mysqlErr):
 		event.Class = "mysql"
 		event.MySQLNumber = mysqlErr.Number
+		if mysqlErr.Number == 1406 {
+			for _, column := range []string{"reason", "scope_id", "scope_type", "actor_user_id", "result", "action", "resource_id", "resource_type", "log_id", "step_run_id", "plugin_name", "stream", "level", "content", "recipient_id", "source_id", "event_kind", "source_kind", "status", "error_code", "owner_user_id", "request_id", "intent_id", "decision_id"} {
+				suffix, ok := strings.CutPrefix(mysqlErr.Message, "Data too long for column '"+column+"' at row ")
+				if !ok || suffix == "" || len(suffix) > 10 {
+					continue
+				}
+				digits := true
+				for _, c := range suffix {
+					if c < '0' || c > '9' {
+						digits = false
+					}
+				}
+				if digits {
+					event.Column = column
+					break
+				}
+			}
+		}
 	case errors.Is(err, context.Canceled):
 		event.Class = "context_cancelled"
 	case errors.Is(err, context.DeadlineExceeded):
@@ -60,11 +80,12 @@ func containerDatabaseDiagnosticClassify(operation, table string, err error) (co
 }
 
 type containerDatabaseDiagnostics struct {
-	mu              sync.Mutex
-	started         time.Time
-	events          [64]containerDatabaseDiagnosticEvent
-	count           uint64
-	firstContention [2]*containerDatabaseDiagnosticEvent
+	mu                sync.Mutex
+	started           time.Time
+	events            [64]containerDatabaseDiagnosticEvent
+	count             uint64
+	firstContention   [2]*containerDatabaseDiagnosticEvent
+	firstSchemaLength *containerDatabaseDiagnosticEvent
 }
 
 func (d *containerDatabaseDiagnostics) record(operation string, tx *gorm.DB) {
@@ -82,6 +103,10 @@ func (d *containerDatabaseDiagnostics) record(operation string, tx *gorm.DB) {
 	// Preserve the earliest exact deadlock/lock-timeout witness even when later
 	// deliberately failing scenarios fill the rolling window. At most two values.
 	if event.Class == "mysql" {
+		if event.MySQLNumber == 1406 && d.firstSchemaLength == nil {
+			saved := event
+			d.firstSchemaLength = &saved
+		}
 		slot := -1
 		if event.MySQLNumber == 1213 {
 			slot = 0
@@ -153,17 +178,29 @@ func (d *containerDatabaseDiagnostics) contentionSnapshot() []containerDatabaseD
 	return out
 }
 
+func (d *containerDatabaseDiagnostics) schemaLengthSnapshot() *containerDatabaseDiagnosticEvent {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.firstSchemaLength == nil {
+		return nil
+	}
+	copy := *d.firstSchemaLength
+	return &copy
+}
 func (d *containerDatabaseDiagnostics) reportFailure(t *testing.T) {
+	if event := d.schemaLengthSnapshot(); event != nil {
+		t.Errorf("unexpected database schema-length rejection operation=%s table=%s column=%s mysql_number=%d", event.Operation, event.Table, event.Column, event.MySQLNumber)
+	}
 	if !t.Failed() {
 		return
 	}
 	for _, event := range d.contentionSnapshot() {
-		t.Logf("first database contention elapsed_ms=%d operation=%s table=%s class=%s mysql_number=%d", event.ElapsedMillis, event.Operation, event.Table, event.Class, event.MySQLNumber)
+		t.Logf("first database contention elapsed_ms=%d operation=%s table=%s column=%s class=%s mysql_number=%d", event.ElapsedMillis, event.Operation, event.Table, event.Column, event.Class, event.MySQLNumber)
 	}
 	events, dropped := d.snapshot()
 	t.Logf("bounded database diagnostics: retained=%d dropped=%d", len(events), dropped)
 	for _, event := range events {
-		t.Logf("database diagnostic elapsed_ms=%d operation=%s table=%s class=%s mysql_number=%d", event.ElapsedMillis, event.Operation, event.Table, event.Class, event.MySQLNumber)
+		t.Logf("database diagnostic elapsed_ms=%d operation=%s table=%s column=%s class=%s mysql_number=%d", event.ElapsedMillis, event.Operation, event.Table, event.Column, event.Class, event.MySQLNumber)
 	}
 }
 
@@ -247,5 +284,37 @@ func TestContainerDatabaseDiagnosticPreservesFirstContention(t *testing.T) {
 	first := d.contentionSnapshot()
 	if len(first) != 2 || first[0].MySQLNumber != 1213 || first[1].MySQLNumber != 1205 || first[0].Operation != "query" || first[1].Operation != "query" {
 		t.Fatal("first contention witness was replaced")
+	}
+}
+
+func TestContainerDatabaseDiagnosticLengthColumnIsStaticOnly(t *testing.T) {
+	for _, input := range []struct{ message, want string }{
+		{"Data too long for column 'action' at row 1", "action"},
+		{"Data too long for column 'event_kind' at row 99", "event_kind"},
+		{"Data too long for column 'private_secret' at row 1", ""},
+		{"Data too long for column 'action' at row 1 secret", ""},
+		{"secret Data too long for column 'action' at row 1", ""},
+		{"Data too long for column 'action' at row ", ""},
+	} {
+		event, _ := containerDatabaseDiagnosticClassify("create", "audit_log", &mysqldriver.MySQLError{Number: 1406, Message: input.message})
+		if event.Column != input.want || event.Table != "audit_log" {
+			t.Fatal("length diagnostic retained non-static metadata or lost permitted schema")
+		}
+	}
+}
+
+func TestContainerDatabaseDiagnosticSchemaLengthCannotDisappear(t *testing.T) {
+	d := &containerDatabaseDiagnostics{started: time.Now()}
+	d.record("create", &gorm.DB{Error: &mysqldriver.MySQLError{Number: 1406, Message: "Data too long for column 'action' at row 1"}})
+	for n := 0; n < 80; n++ {
+		d.record("query", &gorm.DB{Error: context.Canceled})
+	}
+	first := d.schemaLengthSnapshot()
+	if first == nil || first.MySQLNumber != 1406 || first.Column != "action" {
+		t.Fatal("schema rejection was dropped")
+	}
+	first.Column = "changed"
+	if d.schemaLengthSnapshot().Column != "action" {
+		t.Fatal("diagnostic alias mutation")
 	}
 }

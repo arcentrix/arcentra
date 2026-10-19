@@ -77,12 +77,15 @@ production readiness from unit tests, mocked execution, or a skipped MySQL suite
 ## Concurrent history and execution transactions
 
 Active runtime/input/approval operations acquire a shared identity prefix before
-locking a job: Pipeline, Organization when recorded, Project, PipelineRun, then
+locking a job: Pipeline, optional Organization lookup, Project, PipelineRun, then
 JobRun. Identity locators are read before beginning the transaction and are only
 hints; exact identities and parent links are revalidated with indexed current row
 reads. This avoids a history transaction holding Pipeline while an approval
-observer holds PipelineRun and waits for Pipeline. The prefix does not grant
-permission or require archived resources to become active. Fresh authorization,
+observer holds PipelineRun and waits for Pipeline. Legacy project organization
+IDs may have no Organization row, matching existing project-secret/settings
+behavior. The indexed organization lookup remains locked, rejects ambiguous or
+nonexact rows, and the locked Project must still match its original OrgID.
+Locator reads use the primary before BEGIN. The prefix does not grant permission or require archived resources to become active. Fresh authorization,
 expiry and immutable input checks remain inside the execution transaction.
 
 Modern active operations require an unambiguous stored project scope. Older runs

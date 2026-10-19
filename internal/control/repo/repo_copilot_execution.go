@@ -66,6 +66,19 @@ func executionFind(db *gorm.DB, owner, project, id string, lock bool) (*model.Co
 	}
 	return i, nil
 }
+
+// Read back the durable representation, including database timestamp precision.
+// The caller retains the intent lock and performs final authorization afterwards.
+func executionPersisted(tx *gorm.DB, expected *model.CopilotExecutionIntent, state string, version uint64) (*model.CopilotExecutionIntent, error) {
+	row, err := executionFind(tx, expected.OwnerUserID, expected.ProjectID, expected.IntentID, true)
+	if err != nil {
+		return nil, err
+	}
+	if row.ID != expected.ID || row.IntentDigest != expected.IntentDigest || row.DecisionID != expected.DecisionID || row.State != state || row.Version != version || (state == "submitted" && row.SubmittedAt == nil) || (state == "cancelled" && row.CancelledAt == nil) {
+		return nil, ErrCopilotHistoryConflict
+	}
+	return row, nil
+}
 func executionScope(i *model.CopilotExecutionIntent) CopilotHistoryScope {
 	return CopilotHistoryScope{i.OwnerUserID, i.ProjectID, i.PipelineID, i.RunID}
 }
@@ -130,6 +143,10 @@ func (r *Repositories) CopilotExecutionPrepare(ctx context.Context, in CopilotEx
 		out.IntentDigest = executionDigest(out)
 		if err = tx.Create(out).Error; err != nil {
 			return ErrCopilotHistoryConflict
+		}
+		out, err = executionPersisted(tx, out, "prepared", 1)
+		if err != nil {
+			return err
 		}
 		created = true
 		return nil
@@ -218,10 +235,10 @@ func (r *Repositories) CopilotExecutionCancel(ctx context.Context, in CopilotExe
 		if res.RowsAffected != 1 {
 			return ErrCopilotHistoryConflict
 		}
-		out.State = "cancelled"
-		out.Version++
-		out.CancelledAt = &now
-		out.UpdatedAt = now
+		out, err = executionPersisted(tx, out, "cancelled", in.Version+1)
+		if err != nil {
+			return err
+		}
 		return current(ctx)
 	})
 	if err != nil {
@@ -230,12 +247,10 @@ func (r *Repositories) CopilotExecutionCancel(ctx context.Context, in CopilotExe
 	return out, nil
 }
 
-// Confirm never locks history. Job/domain/authority locks precede the intent
-// lock. The final CAS and the stable vote insertion share one primary commit.
-// Current read authorization also locks pipeline/project/run. Its pipeline-first
-// order can contend with this domain path's run-first locks. MySQL may abort a
-// deadlock victim; callers inspect the durable primary receipt, never blindly
-// retry confirmation or infer that a returned error means no commit occurred.
+// Confirm never locks history. Pipeline, optional organization, project, run,
+// job and authority locks precede the intent lock. The final CAS and stable vote
+// insertion share one primary commit. Callers inspect the durable receipt on an
+// uncertain outcome rather than blindly retrying confirmation.
 func (r *Repositories) CopilotExecutionConfirm(ctx context.Context, in CopilotExecutionMutationInput, authorize CopilotHistoryAuthorize) (*model.CopilotExecutionIntent, error) {
 	db, err := r.historyDB(ctx)
 	if err != nil {
@@ -322,6 +337,10 @@ func (r *Repositories) CopilotExecutionConfirm(ctx context.Context, in CopilotEx
 		if res.RowsAffected != 1 {
 			return ErrCopilotHistoryConflict
 		}
+		out, err = executionPersisted(tx, out, "submitted", in.Version+1)
+		if err != nil {
+			return err
+		}
 		if !historyNow().Before(out.ExpiresAt) || approvalDeadlinePassed(a) {
 			return ErrCopilotHistoryConflict
 		}
@@ -331,10 +350,6 @@ func (r *Repositories) CopilotExecutionConfirm(ctx context.Context, in CopilotEx
 		if err = checkRetryApprovalAuthorizationExpiry(ctx, tx); err != nil {
 			return err
 		}
-		out.State = "submitted"
-		out.Version++
-		out.SubmittedAt = &now
-		out.UpdatedAt = now
 		return nil
 	})
 	if err != nil {
