@@ -49,10 +49,23 @@ func historySeed(t *testing.T, db *gorm.DB, owner, project string) CopilotHistor
 	require.NoError(t, db.Model(&model.Project{}).Where("project_id = ?", project).Count(&n).Error)
 	if n == 0 {
 		require.NoError(t, db.Create(&model.Project{ProjectID: project, OrgID: "org", IsEnabled: 1, Status: model.ProjectStatusActive}).Error)
-		require.NoError(t, db.Create(&model.Pipeline{PipelineID: "pipe-" + project, ProjectID: project, IsEnabled: 1}).Error)
-		require.NoError(t, db.Create(&model.PipelineRun{RunID: "run-" + project, PipelineID: "pipe-" + project, ProjectID: project}).Error)
+		require.NoError(t, db.Create(&model.Pipeline{PipelineID: "pipe-" + project, ProjectID: project, IsEnabled: 1, Metadata: `{}`}).Error)
+		require.NoError(t, db.Create(&model.PipelineRun{RunID: "run-" + project, PipelineID: "pipe-" + project, ProjectID: project, Env: `{}`}).Error)
 	}
 	return CopilotHistoryScope{owner, project, "pipe-" + project, "run-" + project}
+}
+
+// Shared SQLite/MySQL fixtures must use valid JSON objects: SQLite does not
+// enforce the JSON column constraint that the real MySQL gate enforces.
+func TestCopilotHistorySeedHasPortableJSONObjects(t *testing.T) {
+	db := historyTestDB(t)
+	scope := historySeed(t, db, "json-owner", "json-project")
+	var pipeline model.Pipeline
+	require.NoError(t, db.Where("pipeline_id = ?", scope.PipelineID).First(&pipeline).Error)
+	require.JSONEq(t, `{}`, pipeline.Metadata)
+	var run model.PipelineRun
+	require.NoError(t, db.Where("run_id = ?", scope.RunID).First(&run).Error)
+	require.JSONEq(t, `{}`, run.Env)
 }
 func historyConversation(t *testing.T, r *Repositories, s CopilotHistoryScope, id string) *model.CopilotConversation {
 	t.Helper()
