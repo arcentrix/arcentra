@@ -327,11 +327,18 @@ func TestInitialSourceCommitLocalReadPreservesCancellationEvidence(t *testing.T)
 	repository, _, initial := sourceTestRepository(t, "cancel-local-read")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	commit, err := resolveInitialSourceCommit(ctx, repository, os.Environ())
+	git, err := newSourceGit(&taskpayload.SourcePayload{Repo: repository}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer git.close()
+	git.workspace = repository
+	commit, err := git.resolveCommit(ctx)
 	if err != nil || commit != initial {
 		t.Fatalf("completed checkout evidence lost to later cancellation: %s %v", commit, err)
 	}
-	if _, err := resolveInitialSourceCommit(context.Background(), t.TempDir(), os.Environ()); err == nil {
+	git.workspace = t.TempDir()
+	if _, err := git.resolveCommit(context.Background()); err == nil {
 		t.Fatal("nonrepository workspace received an invented source commit")
 	}
 }
