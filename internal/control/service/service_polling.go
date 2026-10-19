@@ -26,7 +26,9 @@ import (
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/polling"
 	"github.com/arcentrix/arcentra/pkg/scm"
+	"github.com/arcentrix/arcentra/pkg/scm/bitbucket"
 	"github.com/arcentrix/arcentra/pkg/scm/gitea"
+	"github.com/arcentrix/arcentra/pkg/scm/gitee"
 	"github.com/arcentrix/arcentra/pkg/scm/github"
 	"github.com/arcentrix/arcentra/pkg/scm/gitlab"
 	"github.com/arcentrix/arcentra/pkg/scm/pollsnapshot"
@@ -73,6 +75,18 @@ func (productionPollingSource) Snapshot(ctx context.Context, p *model.Project, r
 		return reader.Read(ctx, request)
 	case model.RepoTypeGitea:
 		reader, err := gitea.NewSnapshotReader(cfg, nil, pollsnapshot.Limits{})
+		if err != nil {
+			return pollsnapshot.Result{}, err
+		}
+		return reader.Read(ctx, request)
+	case model.RepoTypeGitee:
+		reader, err := gitee.NewSnapshotReader(cfg, nil, pollsnapshot.Limits{})
+		if err != nil {
+			return pollsnapshot.Result{}, err
+		}
+		return reader.Read(ctx, request)
+	case model.RepoTypeBitbucket:
+		reader, err := bitbucket.NewSnapshotReader(cfg, nil, pollsnapshot.Limits{})
 		if err != nil {
 			return pollsnapshot.Result{}, err
 		}
@@ -395,20 +409,51 @@ func snapshotScope(p *model.Project, result pollsnapshot.Result) (polling.Scope,
 	if p.RepoType == model.RepoTypeGitLab {
 		expectedProvider = ""
 	} // Preserve exact legacy v1 evidence.
-	if result.Version != version || result.Provider != expectedProvider || result.APIOrigin != origin || result.Repository != strings.TrimPrefix(u.Path, "/") || result.ProviderProjectID <= 0 {
+	if result.Version != version || result.Provider != expectedProvider || result.APIOrigin != origin || result.Repository != strings.TrimPrefix(u.Path, "/") {
 		return polling.Scope{}, polling.ErrBlocked
 	}
-	scope := polling.Scope{Version: version, ProjectID: p.ProjectID, Provider: p.RepoType, APIOrigin: origin, Repository: repository, ProviderProjectID: strconv.FormatInt(result.ProviderProjectID, 10), Stream: stream}
+	projectKey := strconv.FormatInt(result.ProviderProjectID, 10)
+	if version == polling.ScopeVersion3 {
+		if result.ProviderProjectID != 0 || result.ProviderProjectKey == "" {
+			return polling.Scope{}, polling.ErrBlocked
+		}
+		projectKey = result.ProviderProjectKey
+	} else if result.ProviderProjectID <= 0 || result.ProviderProjectKey != "" {
+		return polling.Scope{}, polling.ErrBlocked
+	}
+	scope := polling.Scope{Version: version, ProjectID: p.ProjectID, Provider: p.RepoType, APIOrigin: origin, Repository: repository, ProviderProjectID: projectKey, Stream: stream}
 	return scope, scope.Validate()
 }
-func snapshotCursor(result pollsnapshot.Result, previous *polling.Cursor) (polling.Cursor, error) {
+func pollingSnapshotObservation(observation pollsnapshot.Observation) polling.Observation {
+	mergedAt := ""
+	if observation.MergedAt != nil {
+		mergedAt = observation.MergedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return polling.Observation{MRID: observation.ID, MRIID: observation.IID, State: observation.State, UpdatedAt: observation.UpdatedAt.UTC().Format(time.RFC3339Nano), MergedAt: mergedAt, MergeSHA: observation.MergeSHA, SquashSHA: observation.SquashSHA, SourceBranch: observation.SourceBranch, TargetBranch: observation.TargetBranch, SourceSHA: observation.SourceSHA, ObservationID: observation.ObservationID, EvidenceVersion: observation.EvidenceVersion, ProviderProjectKey: observation.ProviderProjectKey, SourceProjectKey: observation.SourceProjectKey, MergeEvidence: observation.MergeEvidence, SourceProjectID: observation.SourceProjectID, SourceRepository: observation.SourceRepository, TargetSHA: observation.TargetSHA}
+}
+
+func snapshotCursor(scope polling.Scope, result pollsnapshot.Result, previous *polling.Cursor) (polling.Cursor, error) {
 	next := polling.Cursor{Version: polling.Version, Boundary: result.UpperBound.UTC().Format(time.RFC3339Nano), Complete: true, Observed: map[string]string{}}
 	if previous != nil {
 		for k, v := range previous.Observed {
 			next.Observed[k] = v
 		}
 	}
+	seen := map[int64]bool{}
 	for _, observation := range result.Observations {
+		if observation.UpdatedAt.After(result.UpperBound) {
+			return polling.Cursor{}, polling.ErrBlocked
+		}
+		if scope.Version == polling.ScopeVersion3 && observation.ProviderProjectID != 0 {
+			return polling.Cursor{}, polling.ErrBlocked
+		}
+		if seen[observation.ID] {
+			return polling.Cursor{}, polling.ErrBlocked
+		}
+		seen[observation.ID] = true
+		if err := pollingSnapshotObservation(observation).ValidateForScope(scope); err != nil {
+			return polling.Cursor{}, polling.ErrBlocked
+		}
 		next.Observed[strconv.FormatInt(observation.ID, 10)] = observation.ObservationID
 	}
 	_, e := next.Canonical()
@@ -422,9 +467,16 @@ func (s *PollingService) readSnapshot(ctx context.Context, p *model.Project, sco
 	u, _ := url.Parse(repository)
 	request := pollsnapshot.Request{Repository: strings.TrimPrefix(u.Path, "/"), UpperBound: time.Now().UTC()}
 	if scope != nil {
-		request.ProviderProjectID, e = strconv.ParseInt(scope.ProviderProjectID, 10, 64)
-		if e != nil {
+		if e := scope.Validate(); e != nil {
 			return pollsnapshot.Result{}, e
+		}
+		if scope.Version == polling.ScopeVersion3 {
+			request.ProviderProjectKey = scope.ProviderProjectID
+		} else {
+			request.ProviderProjectID, e = strconv.ParseInt(scope.ProviderProjectID, 10, 64)
+			if e != nil {
+				return pollsnapshot.Result{}, e
+			}
 		}
 	}
 	// 首版每次重新读取有界完整库存，不能仅靠更新时间游标证明延迟可见项不存在
@@ -454,7 +506,7 @@ func (s *PollingService) Baseline(ctx context.Context, actor, projectID string, 
 	if e != nil {
 		return nil, e
 	}
-	cursor, e := snapshotCursor(result, nil)
+	cursor, e := snapshotCursor(scope, result, nil)
 	if e != nil {
 		return nil, e
 	}
@@ -635,14 +687,14 @@ func (s *PollingService) pollStream(ctx context.Context, row *model.SCMPollingSt
 	}
 	var batch *polling.Batch
 	if row.PendingBatchJSON != "" {
-		batch, e = polling.ParseBatch(row.PendingBatchJSON)
+		batch, e = polling.ParseBatchForScope(row.PendingBatchJSON, scope)
 		if e != nil {
 			return e
 		}
 	} else {
 		var observed *polling.ObservedBatch
 		if row.PendingObservationJSON != "" {
-			observed, e = polling.ParseObservedBatch(row.PendingObservationJSON)
+			observed, e = polling.ParseObservedBatchForScope(row.PendingObservationJSON, scope)
 			if e != nil {
 				return e
 			}
@@ -659,8 +711,11 @@ func (s *PollingService) pollStream(ctx context.Context, row *model.SCMPollingSt
 			if e != nil || currentScope != scope {
 				return s.pause(ctx, row, "configuration_changed", polling.ErrBlocked)
 			}
-			next, e := snapshotCursor(snapshot, cursor)
+			next, e := snapshotCursor(scope, snapshot, cursor)
 			if e != nil {
+				if scope.Version == polling.ScopeVersion3 {
+					return s.pause(ctx, row, "provider_incomplete", e)
+				}
 				return e
 			}
 			observed = &polling.ObservedBatch{Version: polling.Version, ID: id.GetUild(), ScopeDigest: row.ScopeDigest, Generation: row.ActivationGeneration, SelectionDigest: row.SelectionDigest, Revision: row.Revision + 1, NextCursor: next, Observations: []polling.Observation{}}
@@ -668,20 +723,16 @@ func (s *PollingService) pollStream(ctx context.Context, row *model.SCMPollingSt
 				if previous, seen := cursor.Observed[strconv.FormatInt(observation.ID, 10)]; seen && previous == observation.ObservationID {
 					continue
 				}
-				mergedAt := ""
-				if observation.MergedAt != nil {
-					mergedAt = observation.MergedAt.UTC().Format(time.RFC3339Nano)
-				}
-				observed.Observations = append(observed.Observations, polling.Observation{MRID: observation.ID, MRIID: observation.IID, State: observation.State, UpdatedAt: observation.UpdatedAt.UTC().Format(time.RFC3339Nano), MergedAt: mergedAt, MergeSHA: observation.MergeSHA, SquashSHA: observation.SquashSHA, SourceBranch: observation.SourceBranch, TargetBranch: observation.TargetBranch, SourceSHA: observation.SourceSHA, ObservationID: observation.ObservationID, SourceProjectID: observation.SourceProjectID, SourceRepository: observation.SourceRepository, TargetSHA: observation.TargetSHA})
+				observed.Observations = append(observed.Observations, pollingSnapshotObservation(observation))
 			}
-			if _, validateErr := observed.Canonical(); validateErr != nil {
+			if _, validateErr := observed.CanonicalForScope(scope); validateErr != nil {
 				return s.pause(ctx, row, "provider_incomplete", polling.ErrBlocked)
 			}
 			row, e = s.repositories.SCMPolling.CaptureObservations(ctx, repo.CaptureObservationsInput{ProjectID: row.ProjectID, ExpectedRevision: row.Revision, ActivationGeneration: row.ActivationGeneration, Batch: *observed})
 			if e != nil {
 				return e
 			}
-			observed, e = polling.ParseObservedBatch(row.PendingObservationJSON)
+			observed, e = polling.ParseObservedBatchForScope(row.PendingObservationJSON, scope)
 			if e != nil {
 				return e
 			}
@@ -746,17 +797,17 @@ func (s *PollingService) pollStream(ctx context.Context, row *model.SCMPollingSt
 					return e
 				}
 
-				batch.Targets = append(batch.Targets, polling.Target{MRID: observation.MRID, MRIID: observation.MRIID, State: observation.State, UpdatedAt: observation.UpdatedAt, MergedAt: observation.MergedAt, MergeSHA: observation.MergeSHA, SquashSHA: observation.SquashSHA, PipelineID: binding.PipelineID, ObservationID: observation.ObservationID, RequestID: requestID, SourceBranch: observation.SourceBranch, TargetBranch: observation.TargetBranch, SourceSHA: observation.SourceSHA, SourceProjectID: observation.SourceProjectID, SourceRepository: observation.SourceRepository, TargetSHA: observation.TargetSHA, DefinitionCommitSHA: loaded.commit, DefinitionPath: binding.DefinitionPath, ResolvedDefinitionDigest: loaded.digest})
+				batch.Targets = append(batch.Targets, polling.Target{MRID: observation.MRID, MRIID: observation.MRIID, State: observation.State, UpdatedAt: observation.UpdatedAt, MergedAt: observation.MergedAt, MergeSHA: observation.MergeSHA, SquashSHA: observation.SquashSHA, PipelineID: binding.PipelineID, ObservationID: observation.ObservationID, RequestID: requestID, SourceBranch: observation.SourceBranch, TargetBranch: observation.TargetBranch, SourceSHA: observation.SourceSHA, EvidenceVersion: observation.EvidenceVersion, ProviderProjectKey: observation.ProviderProjectKey, SourceProjectKey: observation.SourceProjectKey, MergeEvidence: observation.MergeEvidence, SourceProjectID: observation.SourceProjectID, SourceRepository: observation.SourceRepository, TargetSHA: observation.TargetSHA, DefinitionCommitSHA: loaded.commit, DefinitionPath: binding.DefinitionPath, ResolvedDefinitionDigest: loaded.digest})
 			}
 		}
-		if _, validateErr := batch.Canonical(); validateErr != nil {
+		if _, validateErr := batch.CanonicalForScope(scope); validateErr != nil {
 			return s.pause(ctx, row, "definition_rejected", polling.ErrBlocked)
 		}
 		row, e = s.repositories.SCMPolling.CaptureBatch(ctx, repo.CaptureBatchInput{ProjectID: row.ProjectID, ExpectedRevision: row.Revision, ActivationGeneration: row.ActivationGeneration, Batch: *batch})
 		if e != nil {
 			return e
 		}
-		batch, e = polling.ParseBatch(row.PendingBatchJSON)
+		batch, e = polling.ParseBatchForScope(row.PendingBatchJSON, scope)
 		if e != nil {
 			return e
 		}
@@ -846,7 +897,36 @@ func (s *PollingService) pollStream(ctx context.Context, row *model.SCMPollingSt
 	return e
 }
 
+// New providers require explicit operator recovery after invalid identity or
+// evidence. Transient movement/rate/transport failures retain bounded backoff.
+// Legacy provider behavior is unchanged.
+func pollingV3HardEvidenceFailure(scope polling.Scope, cause error) bool {
+	if scope.Version != polling.ScopeVersion3 {
+		return false
+	}
+	var evidence *pollsnapshot.Error
+	if !errors.As(cause, &evidence) {
+		return false
+	}
+	switch evidence.Reason {
+	case pollsnapshot.ReasonConfiguration, pollsnapshot.ReasonRequest,
+		pollsnapshot.ReasonMalformed, pollsnapshot.ReasonIdentity,
+		pollsnapshot.ReasonPagination, pollsnapshot.ReasonUnsupportedEvidence,
+		pollsnapshot.ReasonAuthentication, pollsnapshot.ReasonForbidden:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *PollingService) deferProvider(ctx context.Context, row *model.SCMPollingStream, cause error) error {
+	scope, scopeErr := pollingStoredScope(row)
+	if scopeErr != nil {
+		return scopeErr
+	}
+	if pollingV3HardEvidenceFailure(scope, cause) {
+		return s.pause(ctx, row, "provider_incomplete", cause)
+	}
 	next := time.Now().Add(time.Minute)
 	reason := "provider_unavailable"
 	var legacy *gitlab.SnapshotError
@@ -885,11 +965,12 @@ func (s *PollingService) markUnresolved(ctx context.Context, row *model.SCMPolli
 }
 
 // Gitea's manual merge API may expose the commit author time as merged_at.
-// Its eligibility is based on the observed update, never an inferred merge-action time.
+// Its eligibility, and v3 provider eligibility with incomplete merge evidence, uses
+// the observed update, never an inferred merge-action time.
 // Stable merge identities already seen at baseline remain deduplicated separately.
 func pollingObservationTime(provider string, observation polling.Observation) (time.Time, error) {
 	raw := observation.UpdatedAt
-	if observation.State == "merged" && provider != model.RepoTypeGitea {
+	if observation.State == "merged" && provider != model.RepoTypeGitea && provider != model.RepoTypeGitee && provider != model.RepoTypeBitbucket {
 		raw = observation.MergedAt
 	}
 	return time.Parse(time.RFC3339Nano, raw)

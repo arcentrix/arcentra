@@ -96,6 +96,10 @@ func newRealStackPollingSource(t *testing.T, f *controllerWorkerFixture, directo
 
 func (s *realStackPollingSource) observe(t *testing.T, sha, target string, at time.Time) {
 	t.Helper()
+	if s.snapshotVersion == pollsnapshot.Version3 {
+		s.observeV3(t, sha, target, at, nil, "")
+		return
+	}
 	item := map[string]any{"id": 901, "iid": 17, "project_id": 731, "state": "opened", "source_branch": "feature/observed-mr", "target_branch": target, "sha": sha, "updated_at": at.UTC().Format(time.RFC3339Nano)}
 	if s.provider != model.RepoTypeGitLab {
 		item = map[string]any{
@@ -260,10 +264,10 @@ func realStackPollingActors(t *testing.T, f *controllerWorkerFixture, repositori
 }
 
 // realStackAssertPolling keeps the original GitLab scenario names for existing CI,
-// and exercises GitHub/Gitea through the same infrastructure and execution assertions.
+// and exercises all supported PR readers through the same execution assertions.
 func realStackAssertPolling(t *testing.T, f *controllerWorkerFixture, store realStackPollingDownloads, reference taskpayload.ArtifactReference) {
 	t.Helper()
-	for _, provider := range []string{model.RepoTypeGitLab, model.RepoTypeGitHub, model.RepoTypeGitea} {
+	for _, provider := range []string{model.RepoTypeGitLab, model.RepoTypeGitHub, model.RepoTypeGitea, model.RepoTypeGitee, model.RepoTypeBitbucket} {
 		var priorRuns []model.PipelineRun
 		if err := f.db.WithContext(f.ctx).Where("pipeline_id = ? AND triggered_by = ?", f.pipelineID, polling.Actor).Find(&priorRuns).Error; err != nil {
 			t.Fatal(err)
@@ -313,10 +317,17 @@ func realStackAssertProviderPolling(t *testing.T, f *controllerWorkerFixture, st
 	if provider != model.RepoTypeGitLab {
 		expectedScope.Stream = "pull_requests"
 	}
+	expectedIID := int64(17)
+	if provider == model.RepoTypeBitbucket {
+		expectedScope.ProviderProjectID, expectedIID = realStackBitbucketProjectKey, 901
+	}
 	definition := &spec.Pipeline{Namespace: "controller-agent", Triggers: []*spec.Trigger{{Type: trigger.TriggerTypeEvent, Options: spec.MapAsStruct(map[string]any{trigger.OptionEventType: string(scm.EventTypeMergeRequest), trigger.OptionBranch: "main"})}}, Jobs: []*spec.Job{{Name: "polling-build", Source: &spec.Source{Type: "git", Repo: directory, Branch: "configured-job-source"}, Steps: []*spec.Step{
 		controllerWorkerShell("produce", `set -eu; test "$(cat source.txt)" = 'initial checkout'; printf x >> executions; mkdir -p dist; printf 'polling-configured-pipeline' > dist/polling.txt`),
 		{Name: "publish", Uses: "builtin:artifacts", Action: "upload", RunOnAgent: true, Args: spec.MapAsStruct(map[string]any{"paths": []any{"dist"}, "expireIn": "7d"})},
 	}}}}
+	if source.snapshotVersion == pollsnapshot.Version3 {
+		definition.Triggers = append(definition.Triggers, &spec.Trigger{Type: trigger.TriggerTypeEvent, Options: spec.MapAsStruct(map[string]any{trigger.OptionEventType: string(scm.EventTypeMergeRequestMerged), trigger.OptionBranch: "main"})})
+	}
 	content, err := spec.MarshalProtoByFormat(definition, pipelinev1.SpecFormat_SPEC_FORMAT_JSON, "pipeline.json")
 	if err != nil {
 		t.Fatal(err)
@@ -415,10 +426,15 @@ func realStackAssertProviderPolling(t *testing.T, f *controllerWorkerFixture, st
 		})
 		completed = realStackReadAutomaticEvidence(t, f, run.RunID)
 		provenance, err := polling.ParseRunContext(run.PollingContext)
-		if err != nil || provenance.Scope != expectedScope || provenance.Target.ObservationID != last.Observations[0].ObservationID || provenance.Target.RequestID != expectedRequest || provenance.Target.SourceSHA != observed || provenance.Target.DefinitionCommitSHA != definitionCommit || provenance.Target.DefinitionPath != "pipeline.json" || run.RequestID != expectedRequest || provenance.ActorID != actor || provenance.Target.MRID != 901 || provenance.Target.MRIID != 17 || provenance.Target.State != "opened" || provenance.Target.UpdatedAt == "" || provenance.Target.TargetBranch != "main" || provenance.Target.SourceBranch != "feature/observed-mr" || run.TriggeredBy != polling.Actor || run.CommitSha != observed || run.DefinitionCommitSha != definitionCommit || run.DefinitionPath != "pipeline.json" || run.Branch != "feature/observed-mr" || run.PollingContextDigest == "" || run.StartTime == nil || run.EndTime == nil || len(completed.Jobs) != 1 || len(completed.Steps) != 2 || len(completed.Artifacts) != 1 || engine.submissions != 1 || realStackAutomaticRunCount(t, f) != beforeRuns+1 {
+		if err != nil || provenance.Scope != expectedScope || provenance.Target.ObservationID != last.Observations[0].ObservationID || provenance.Target.RequestID != expectedRequest || provenance.Target.SourceSHA != observed || provenance.Target.DefinitionCommitSHA != definitionCommit || provenance.Target.DefinitionPath != "pipeline.json" || run.RequestID != expectedRequest || provenance.ActorID != actor || provenance.Target.MRID != 901 || provenance.Target.MRIID != expectedIID || provenance.Target.State != "opened" || provenance.Target.UpdatedAt == "" || provenance.Target.TargetBranch != "main" || provenance.Target.SourceBranch != "feature/observed-mr" || run.TriggeredBy != polling.Actor || run.CommitSha != observed || run.DefinitionCommitSha != definitionCommit || run.DefinitionPath != "pipeline.json" || run.Branch != "feature/observed-mr" || run.PollingContextDigest == "" || run.StartTime == nil || run.EndTime == nil || len(completed.Jobs) != 1 || len(completed.Steps) != 2 || len(completed.Artifacts) != 1 || engine.submissions != 1 || realStackAutomaticRunCount(t, f) != beforeRuns+1 {
 			t.Fatalf("configured polling run lost exact identity or execution evidence: %v", err)
 		}
-		if provider != model.RepoTypeGitLab {
+		if source.snapshotVersion == pollsnapshot.Version3 {
+			realStackAssertV3PollingEvidence(t, source, expectedScope, provenance.Target, last)
+			if provenance.Target.MergeSHA != "" || provenance.Target.MergedAt != "" || last.Observations[0].MergedAt != nil || last.Observations[0].MergeSHA != "" || !strings.HasPrefix(last.Observations[0].ObservationID, provider+":pr:v3:") {
+				t.Fatal("open v3 observation acquired synthetic merge evidence")
+			}
+		} else if provider != model.RepoTypeGitLab {
 			if provenance.Target.SourceProjectID != 732 || provenance.Target.SourceRepository != "contributor/source-fork" || provenance.Target.TargetSHA != initial {
 				t.Fatal("persisted PR provenance lost source fork stable identity or target revision")
 			}
@@ -429,32 +445,7 @@ func realStackAssertProviderPolling(t *testing.T, f *controllerWorkerFixture, st
 		} else if provenance.Target.SourceProjectID != 0 || provenance.Target.SourceRepository != "" || provenance.Target.TargetSHA != "" || strings.Contains(run.PollingContext, `"sourceProjectId"`) || strings.Contains(run.PollingContext, `"sourceRepository"`) || strings.Contains(run.PollingContext, `"targetSha"`) {
 			t.Fatal("legacy GitLab provenance unexpectedly acquired v2 PR fields")
 		}
-		job := completed.Jobs[0]
-		if job.Status != model.JobRunStatusSuccess || job.AgentID != f.conf.Agent.ID || job.SourceRepository != directory || job.SourceRef != "configured-job-source" || job.SourceResolvedCommit != initial || job.SourceResolvedCommit == run.CommitSha || job.SourceResolvedCommit == run.DefinitionCommitSha || job.SourceProvenanceState != "reported" || job.SourceBindingDigest == "" {
-			t.Fatal("Agent source evidence confused the observed MR or definition SHA with actual configured checkout")
-		}
-		f.assertReceipt("job", job.JobRunID, job.ClaimID, job.TerminalReportDigest, run.RunID, job.JobRunID)
-		realStackAssertOnce(t, f, run.RunID, job.JobRunID)
-		for _, step := range completed.Steps {
-			if step.Status != 4 || step.Attempt != 1 || step.ExitCode == nil || *step.ExitCode != 0 {
-				t.Fatal("polling step did not finish once")
-			}
-			f.assertReceipt("step", step.StepRunID, step.ClaimID, step.TerminalReportDigest, run.RunID, job.JobRunID)
-		}
-		artifact := completed.Artifacts[0]
-		const want = "polling-configured-pipeline"
-		if artifact.StorageID != reference.StorageID || artifact.StorageFingerprint != reference.Fingerprint || artifact.SHA256 != fmt.Sprintf("%x", sha256.Sum256([]byte(want))) || artifact.Size != int64(len(want)) || artifact.PipelineRunID != run.RunID || artifact.JobRunID != job.JobRunID {
-			t.Fatal("polling artifact lost producing run or storage identity")
-		}
-		reader, err := store.DownloadStream(f.ctx, artifact.StoragePath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		bytes, readErr := io.ReadAll(io.LimitReader(reader, 1024))
-		closeErr := reader.Close()
-		if readErr != nil || closeErr != nil || string(bytes) != want {
-			t.Fatalf("polling uploaded object bytes mismatch: read=%v close=%v", readErr, closeErr)
-		}
+		realStackAssertPollingExecution(t, f, store, reference, completed, directory, initial)
 		assertProgress(t, stream(t), 1, 1)
 		source.mu.Lock()
 		reads, snapshots, definitions := source.requests, source.snapshots, source.definitions
@@ -493,7 +484,100 @@ func realStackAssertProviderPolling(t *testing.T, f *controllerWorkerFixture, st
 	}) {
 		return
 	}
-	t.Run(prefix+"revoke_before_admission", func(t *testing.T) {
+	// Legacy providers retain their exact original one-success/one-rejection
+	// scenario. V3 additionally executes one honest provider merge observation.
+	successfulRuns := 1
+	var mergedCompleted realStackAutomaticEvidence
+	if source.snapshotVersion == pollsnapshot.Version3 {
+		if !t.Run(prefix+"merged_observation_metadata_no_rerun", func(t *testing.T) {
+			mergedAt := time.Now().Add(-time.Minute).UTC()
+			var merged *time.Time
+			mergeSHA := ""
+			if provider == model.RepoTypeGitee {
+				merged = &mergedAt
+			} else {
+				mergeSHA = strings.Repeat("c", 40)
+				if mergeSHA == observed || mergeSHA == initial || mergeSHA == definitionCommit {
+					t.Fatal("fixture merge-result hash must remain distinct from observed, definition, and checkout revisions")
+				}
+			}
+			var frozenBatch string
+			engine.beforeSubmit = func(*model.PipelineRun) error {
+				frozenBatch = stream(t).PendingBatchJSON
+				return nil
+			}
+			source.observeV3(t, observed, "main", time.Now(), merged, mergeSHA)
+			if err := service.PollOnce(f.ctx); err != nil {
+				t.Fatal(err)
+			}
+			engine.beforeSubmit = nil
+			source.mu.Lock()
+			last := source.last
+			reads, snapshots, definitions := source.requests, source.snapshots, source.definitions
+			source.mu.Unlock()
+			if len(last.Observations) != 1 || last.Observations[0].State != "merged" || !strings.HasPrefix(last.Observations[0].ObservationID, provider+":merge:v3:") || last.Observations[0].ObservationID != last.Observations[0].MergeIdentity {
+				t.Fatal("actual reader did not produce stable v3 merged evidence")
+			}
+			requestID, err := polling.EventRequestID(expectedScope, last.Observations[0].ObservationID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var runs []model.PipelineRun
+			if err := f.db.WithContext(f.ctx).Where("pipeline_id = ? AND triggered_by = ? AND request_id = ?", f.pipelineID, polling.Actor, requestID).Find(&runs).Error; err != nil || len(runs) != 1 {
+				t.Fatalf("expected exactly one v3 merged run: rows=%d error=%v", len(runs), err)
+			}
+			run := f.waitRun(runs[0].RunID, model.PipelineStatusSuccess)
+			f.wait("merged polling terminal receipts acknowledged", func() bool {
+				f.worker.reports.mu.Lock()
+				defer f.worker.reports.mu.Unlock()
+				return len(f.worker.reports.entries) == 0
+			})
+			mergedCompleted = realStackReadAutomaticEvidence(t, f, run.RunID)
+			provenance, err := polling.ParseRunContext(run.PollingContext)
+			if err != nil || provenance.Scope != expectedScope || provenance.ActorID != actor || provenance.Target.State != "merged" || provenance.Target.RequestID != requestID || provenance.Target.MRID != 901 || provenance.Target.MRIID != expectedIID || provenance.Target.SourceSHA != observed || provenance.Target.DefinitionCommitSHA != definitionCommit || provenance.Target.DefinitionPath != "pipeline.json" || provenance.Target.SourceBranch != "feature/observed-mr" || provenance.Target.TargetBranch != "main" || run.RequestID != requestID || run.TriggeredBy != polling.Actor || run.CommitSha != observed || run.DefinitionCommitSha != definitionCommit || run.DefinitionPath != "pipeline.json" || run.Branch != "feature/observed-mr" || run.PollingContextDigest == "" || run.StartTime == nil || run.EndTime == nil || engine.submissions != 2 || realStackAutomaticRunCount(t, f) != beforeRuns+2 {
+				t.Fatalf("merged run lost exact immutable provider, definition, or execution identity: %v", err)
+			}
+			realStackAssertV3PollingEvidence(t, source, expectedScope, provenance.Target, last)
+			batch, err := polling.ParseBatchForScope(frozenBatch, expectedScope)
+			if err != nil || len(batch.Targets) != 1 || batch.Targets[0] != provenance.Target {
+				t.Fatalf("merged run differs from its frozen admission batch: %v", err)
+			}
+			if provider == model.RepoTypeGitee {
+				if provenance.Target.MergeSHA != "" || provenance.Target.MergedAt != mergedAt.Format(time.RFC3339Nano) || strings.Contains(run.PollingContext, `"mergeSha"`) {
+					t.Fatal("Gitee merge run invented the unavailable merge-result revision")
+				}
+			} else if provenance.Target.MergedAt != "" || provenance.Target.MergeSHA != mergeSHA || strings.Contains(run.PollingContext, `"mergedAt"`) {
+				t.Fatal("Bitbucket merge run invented the unavailable merge timestamp")
+			}
+			realStackAssertPollingExecution(t, f, store, reference, mergedCompleted, directory, initial)
+			assertProgress(t, stream(t), 1, 1)
+			if !reflect.DeepEqual(completed, realStackReadAutomaticEvidence(t, f, completed.Run.RunID)) {
+				t.Fatal("merged observation rewrote the prior open-observation execution evidence")
+			}
+			// Reconstruct the service to prove deduplication survives restart and is
+			// persisted rather than a transient reader/dispatcher cache.
+			service = controlservice.NewPollingService(repositories, source, func() controlservice.IPipelineEngine { return engine }, nil)
+			for range 2 {
+				source.observeV3(t, observed, "main", time.Now(), merged, mergeSHA)
+				if err := service.PollOnce(f.ctx); err != nil {
+					t.Fatal(err)
+				}
+				assertProgress(t, stream(t), 0, 0)
+			}
+			source.mu.Lock()
+			after := source.last
+			afterReads, afterSnapshots, afterDefinitions := source.requests, source.snapshots, source.definitions
+			source.mu.Unlock()
+			if len(after.Observations) != 1 || after.Observations[0].ObservationID != last.Observations[0].ObservationID || after.Observations[0].MergeIdentity != last.Observations[0].MergeIdentity || after.Observations[0].Fingerprint != last.Observations[0].Fingerprint || !after.Observations[0].UpdatedAt.After(last.Observations[0].UpdatedAt) || afterSnapshots != snapshots+2 || afterReads != reads+2*source.requestsPerSnapshot || afterDefinitions != definitions || engine.submissions != 2 || realStackAutomaticRunCount(t, f) != beforeRuns+2 || !reflect.DeepEqual(mergedCompleted, realStackReadAutomaticEvidence(t, f, run.RunID)) || !reflect.DeepEqual(completed, realStackReadAutomaticEvidence(t, f, completed.Run.RunID)) {
+				t.Fatal("post-merge metadata edits changed stable identity, reran execution, or rewrote immutable evidence after restart")
+			}
+			realStackAssertOnce(t, f, run.RunID, mergedCompleted.Jobs[0].JobRunID)
+		}) {
+			return
+		}
+		successfulRuns++
+	}
+	if !t.Run(prefix+"revoke_before_admission", func(t *testing.T) {
 		before := stream(t)
 		var deniedRunID, frozenBatch string
 		engine.beforeSubmit = func(run *model.PipelineRun) error {
@@ -509,7 +593,7 @@ func realStackAssertProviderPolling(t *testing.T, f *controllerWorkerFixture, st
 		if err := service.PollOnce(f.ctx); err == nil {
 			t.Fatal("revoked live permission was accepted by Process")
 		}
-		if deniedRunID == "" || frozenBatch == "" || engine.submissions != 2 {
+		if deniedRunID == "" || frozenBatch == "" || engine.submissions != successfulRuns+1 {
 			t.Fatal("test did not reach the persisted-run/pre-Process revocation boundary")
 		}
 		after := stream(t)
@@ -517,7 +601,12 @@ func realStackAssertProviderPolling(t *testing.T, f *controllerWorkerFixture, st
 		if err != nil || after.State != polling.StatePaused || after.PauseReason != "authorization_denied" || after.ActivationGeneration <= before.ActivationGeneration || after.CursorJSON != before.CursorJSON || len(batch.Targets) != 1 || len(batch.Results) != 1 || batch.Results[0].RunID != deniedRunID || batch.Results[0].Outcome != polling.OutcomeRejected {
 			t.Fatalf("revocation lost safe paused state, unacknowledged batch, or typed rejection: %v", err)
 		}
-		if provider != model.RepoTypeGitLab && (batch.Targets[0].SourceProjectID != 732 || batch.Targets[0].SourceRepository != "contributor/source-fork" || batch.Targets[0].TargetSHA != initial) {
+		if source.snapshotVersion == pollsnapshot.Version3 {
+			source.mu.Lock()
+			last := source.last
+			source.mu.Unlock()
+			realStackAssertV3PollingEvidence(t, source, expectedScope, batch.Targets[0], last)
+		} else if provider != model.RepoTypeGitLab && (batch.Targets[0].SourceProjectID != 732 || batch.Targets[0].SourceRepository != "contributor/source-fork" || batch.Targets[0].TargetSHA != initial) {
 			t.Fatal("revocation lost frozen PR repository provenance")
 		}
 		denied := realStackReadAutomaticEvidence(t, f, deniedRunID)
@@ -525,7 +614,7 @@ func realStackAssertProviderPolling(t *testing.T, f *controllerWorkerFixture, st
 		if err != nil || deniedProvenance.Scope != expectedScope || deniedProvenance.Target != batch.Targets[0] {
 			t.Fatalf("revoked run lost frozen provider observation evidence: %v", err)
 		}
-		if denied.Run.Status != model.PipelineStatusFailed || denied.Run.StartTime != nil || denied.Run.EndTime == nil || len(denied.Jobs) != 0 || len(denied.Steps) != 0 || len(denied.Artifacts) != 0 || realStackAutomaticRunCount(t, f) != beforeRuns+2 {
+		if denied.Run.Status != model.PipelineStatusFailed || denied.Run.StartTime != nil || denied.Run.EndTime == nil || len(denied.Jobs) != 0 || len(denied.Steps) != 0 || len(denied.Artifacts) != 0 || realStackAutomaticRunCount(t, f) != beforeRuns+int64(successfulRuns)+1 {
 			t.Fatal("revoked pending observation created execution evidence")
 		}
 		realStackAssertNoAutomaticDispatch(t, f, deniedRunID)
@@ -536,9 +625,113 @@ func realStackAssertProviderPolling(t *testing.T, f *controllerWorkerFixture, st
 		if err := service.PollOnce(f.ctx); err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(after, stream(t)) || !reflect.DeepEqual(denied, realStackReadAutomaticEvidence(t, f, deniedRunID)) || !reflect.DeepEqual(completed, realStackReadAutomaticEvidence(t, f, completed.Run.RunID)) || engine.submissions != 2 || realStackAutomaticRunCount(t, f) != beforeRuns+2 {
+		if !reflect.DeepEqual(after, stream(t)) || !reflect.DeepEqual(denied, realStackReadAutomaticEvidence(t, f, deniedRunID)) || !reflect.DeepEqual(completed, realStackReadAutomaticEvidence(t, f, completed.Run.RunID)) || engine.submissions != successfulRuns+1 || realStackAutomaticRunCount(t, f) != beforeRuns+int64(successfulRuns)+1 {
 			t.Fatal("permission restoration resumed polling or rewrote persisted evidence")
 		}
+		if mergedCompleted.Run != nil && !reflect.DeepEqual(mergedCompleted, realStackReadAutomaticEvidence(t, f, mergedCompleted.Run.RunID)) {
+			t.Fatal("revocation rewrote the prior merged-observation execution evidence")
+		}
 		realStackAssertNoAutomaticDispatch(t, f, deniedRunID)
+	}) {
+		return
+	}
+	if source.snapshotVersion != pollsnapshot.Version3 {
+		return
+	}
+	t.Run(prefix+"malformed_evidence_pauses", func(t *testing.T) {
+		// The preceding case restored only this disposable fixture's grant and
+		// proved that doing so could not resume its paused stream. Recovery here
+		// is explicit and cannot authorize or mutate any external user/account.
+		engine.beforeSubmit = nil
+		var priorRuns []model.PipelineRun
+		if err := f.db.WithContext(f.ctx).Where("pipeline_id = ? AND triggered_by = ?", f.pipelineID, polling.Actor).Find(&priorRuns).Error; err != nil {
+			t.Fatal(err)
+		}
+		priorEvidence := make([]realStackAutomaticEvidence, 0, len(priorRuns))
+		for _, run := range priorRuns {
+			priorEvidence = append(priorEvidence, realStackReadAutomaticEvidence(t, f, run.RunID))
+		}
+		source.observe(t, initial, "main", time.Now())
+		baseline, err := service.Baseline(f.ctx, actor, f.projectID, stream(t).Revision, true)
+		if err != nil || baseline == nil || baseline.State != polling.StateBaselined {
+			t.Fatalf("explicit synthetic recovery baseline failed: %v", err)
+		}
+		if _, err := service.Enable(f.ctx, actor, f.projectID, baseline.Revision, baseline.BaselineID, []string{f.pipelineID}); err != nil {
+			t.Fatal(err)
+		}
+		before := stream(t)
+		if before.State != polling.StateEnabled || before.PendingBatchJSON != "" || before.PendingObservationJSON != "" || realStackAutomaticRunCount(t, f) != beforeRuns+int64(successfulRuns)+1 || engine.submissions != successfulRuns+1 {
+			t.Fatal("explicit recovery replayed discarded evidence or created execution")
+		}
+		source.mu.Lock()
+		reads, snapshots, definitions := source.requests, source.snapshots, source.definitions
+		source.mu.Unlock()
+		// Both real adapters reject abbreviated source evidence before a result
+		// exists; neither may acknowledge a partial observation or advance cursor.
+		source.observe(t, "short-hash", "main", time.Now())
+		if err := service.PollOnce(f.ctx); err == nil {
+			t.Fatal("malformed v3 provider evidence unexpectedly completed polling")
+		}
+		after := stream(t)
+		if after.State != polling.StatePaused || after.PauseReason != "provider_incomplete" || after.ActivationGeneration <= before.ActivationGeneration || after.CursorJSON != before.CursorJSON || after.BaselineID != before.BaselineID || after.BaselineDigest != before.BaselineDigest || after.PendingBatchJSON != "" || after.PendingObservationJSON != "" || after.LastCompletedAt != nil || after.LastObservationCount != 0 || after.LastTargetCount != 0 || engine.submissions != successfulRuns+1 || realStackAutomaticRunCount(t, f) != beforeRuns+int64(successfulRuns)+1 {
+			t.Fatal("malformed evidence failed to pause safely without progress or dispatch")
+		}
+		source.mu.Lock()
+		afterReads, afterSnapshots, afterDefinitions := source.requests, source.snapshots, source.definitions
+		source.mu.Unlock()
+		if afterReads != reads+2 || afterSnapshots != snapshots+1 || afterDefinitions != definitions {
+			t.Fatal("malformed inventory made unexpected provider or Git definition reads")
+		}
+		source.observe(t, observed, "main", time.Now())
+		service = controlservice.NewPollingService(repositories, source, func() controlservice.IPipelineEngine { return engine }, nil)
+		if err := service.PollOnce(f.ctx); err != nil {
+			t.Fatal(err)
+		}
+		source.mu.Lock()
+		finalReads, finalSnapshots, finalDefinitions := source.requests, source.snapshots, source.definitions
+		source.mu.Unlock()
+		if !reflect.DeepEqual(after, stream(t)) || finalReads != afterReads || finalSnapshots != afterSnapshots || finalDefinitions != afterDefinitions || engine.submissions != successfulRuns+1 || realStackAutomaticRunCount(t, f) != beforeRuns+int64(successfulRuns)+1 {
+			t.Fatal("valid evidence or service restart automatically resumed the sticky pause")
+		}
+		for _, evidence := range priorEvidence {
+			if !reflect.DeepEqual(evidence, realStackReadAutomaticEvidence(t, f, evidence.Run.RunID)) {
+				t.Fatal("recovery or malformed evidence rewrote prior provider execution evidence")
+			}
+		}
 	})
+}
+
+// realStackAssertPollingExecution checks actual Agent checkout, terminal receipts,
+// once-only shell execution, and bytes read back from the configured object store.
+func realStackAssertPollingExecution(t *testing.T, f *controllerWorkerFixture, store realStackPollingDownloads, reference taskpayload.ArtifactReference, evidence realStackAutomaticEvidence, directory, initial string) {
+	t.Helper()
+	if evidence.Run == nil || len(evidence.Jobs) != 1 || len(evidence.Steps) != 2 || len(evidence.Artifacts) != 1 {
+		t.Fatal("polling lacks exact job, step, or artifact evidence")
+	}
+	job := evidence.Jobs[0]
+	if job.Status != model.JobRunStatusSuccess || job.AgentID != f.conf.Agent.ID || job.SourceRepository != directory || job.SourceRef != "configured-job-source" || job.SourceResolvedCommit != initial || job.SourceResolvedCommit == evidence.Run.CommitSha || job.SourceResolvedCommit == evidence.Run.DefinitionCommitSha || job.SourceProvenanceState != "reported" || job.SourceBindingDigest == "" {
+		t.Fatal("Agent source evidence confused the observed MR or definition SHA with actual configured checkout")
+	}
+	f.assertReceipt("job", job.JobRunID, job.ClaimID, job.TerminalReportDigest, evidence.Run.RunID, job.JobRunID)
+	realStackAssertOnce(t, f, evidence.Run.RunID, job.JobRunID)
+	for _, step := range evidence.Steps {
+		if step.Status != 4 || step.Attempt != 1 || step.ExitCode == nil || *step.ExitCode != 0 {
+			t.Fatal("polling step did not finish once")
+		}
+		f.assertReceipt("step", step.StepRunID, step.ClaimID, step.TerminalReportDigest, evidence.Run.RunID, job.JobRunID)
+	}
+	artifact := evidence.Artifacts[0]
+	const want = "polling-configured-pipeline"
+	if artifact.StorageID != reference.StorageID || artifact.StorageFingerprint != reference.Fingerprint || artifact.SHA256 != fmt.Sprintf("%x", sha256.Sum256([]byte(want))) || artifact.Size != int64(len(want)) || artifact.PipelineRunID != evidence.Run.RunID || artifact.JobRunID != job.JobRunID {
+		t.Fatal("polling artifact lost producing run or storage identity")
+	}
+	reader, err := store.DownloadStream(f.ctx, artifact.StoragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytes, readErr := io.ReadAll(io.LimitReader(reader, 1024))
+	closeErr := reader.Close()
+	if readErr != nil || closeErr != nil || string(bytes) != want {
+		t.Fatalf("polling uploaded object bytes mismatch: read=%v close=%v", readErr, closeErr)
+	}
 }

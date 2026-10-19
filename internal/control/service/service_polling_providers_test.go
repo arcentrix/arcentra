@@ -67,7 +67,7 @@ func TestPollingUnsupportedProviderCannotReadExternalSource(t *testing.T) {
 	for _, p := range []*model.Project{
 		nil,
 		{ProjectID: "p", RepoType: "github", RepoURL: "https://github.enterprise.example/owner/repo", IsEnabled: 1, Status: model.ProjectStatusActive, TriggerMode: model.TriggerModeMR},
-		{ProjectID: "p", RepoType: "gitee", RepoURL: "https://gitee.com/owner/repo", IsEnabled: 1, Status: model.ProjectStatusActive, TriggerMode: model.TriggerModeMR},
+		{ProjectID: "p", RepoType: "gitee", RepoURL: "https://gitee.enterprise.example/owner/repo", IsEnabled: 1, Status: model.ProjectStatusActive, TriggerMode: model.TriggerModeMR},
 		{ProjectID: "p", RepoType: "github", RepoURL: "https://user:synthetic@github.com/owner/repo", IsEnabled: 1, Status: model.ProjectStatusActive, TriggerMode: model.TriggerModeMR},
 	} {
 		require.False(t, pollingProjectEligible(p))

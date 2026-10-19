@@ -26,10 +26,18 @@ type Observation struct {
 	SourceProjectID  int64  `json:"sourceProjectId,omitempty"`
 	SourceRepository string `json:"sourceRepository,omitempty"`
 	TargetSHA        string `json:"targetSha,omitempty"`
+	// Append-only v3 evidence. Zero values keep v1/v2 canonical bytes unchanged.
+	EvidenceVersion    int    `json:"evidenceVersion,omitempty"`
+	ProviderProjectKey string `json:"providerProjectKey,omitempty"`
+	SourceProjectKey   string `json:"sourceProjectKey,omitempty"`
+	MergeEvidence      string `json:"mergeEvidence,omitempty"`
 }
 
-// Validate 校验完整观察身份及时间精度
+// Validate checks structural evidence. Use ValidateForScope at trusted capture/replay boundaries.
 func (o Observation) Validate() error {
+	if o.hasV3Evidence() {
+		return o.validateV3()
+	}
 	if err := validateSourceProvenance(o.SourceProjectID, o.SourceRepository, o.TargetSHA); err != nil {
 		return err
 	}
@@ -58,7 +66,7 @@ func (o Observation) Validate() error {
 
 // Observation 返回目标中不可变的提供方观察证据
 func (t Target) Observation() Observation {
-	return Observation{MRID: t.MRID, MRIID: t.MRIID, State: t.State, UpdatedAt: t.UpdatedAt, MergedAt: t.MergedAt, MergeSHA: t.MergeSHA, SquashSHA: t.SquashSHA, SourceBranch: t.SourceBranch, TargetBranch: t.TargetBranch, SourceSHA: t.SourceSHA, ObservationID: t.ObservationID, SourceProjectID: t.SourceProjectID, SourceRepository: t.SourceRepository, TargetSHA: t.TargetSHA}
+	return Observation{MRID: t.MRID, MRIID: t.MRIID, State: t.State, UpdatedAt: t.UpdatedAt, MergedAt: t.MergedAt, MergeSHA: t.MergeSHA, SquashSHA: t.SquashSHA, SourceBranch: t.SourceBranch, TargetBranch: t.TargetBranch, SourceSHA: t.SourceSHA, ObservationID: t.ObservationID, SourceProjectID: t.SourceProjectID, SourceRepository: t.SourceRepository, TargetSHA: t.TargetSHA, EvidenceVersion: t.EvidenceVersion, ProviderProjectKey: t.ProviderProjectKey, SourceProjectKey: t.SourceProjectKey, MergeEvidence: t.MergeEvidence}
 }
 
 // ObservedBatch 在定义读取前持久保存完整差异及后继库存

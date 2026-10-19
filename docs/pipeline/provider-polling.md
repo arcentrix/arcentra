@@ -10,7 +10,7 @@ Polling is optional and starts disabled. An authorized project operator creates 
 
 Executable pipeline-definition repositories currently require SHA-1 Git object format (40-character definition commits). Snapshot readers can retain a 64-character provider source SHA as evidence, but this does not add SHA-256 repository checkout/definition support.
 
-Projects must be active, enabled, and configured for MR/PR triggers with existing public/token authentication. Gitee and Bitbucket are not yet supported by this bounded polling path. No live customer provider account was configured for implementation tests.
+Projects must be active, enabled, and configured for MR/PR triggers with existing public/token authentication. Gitee.com and Bitbucket Cloud use the separate [version-3 evidence contract](provider-v3-polling.md), including their explicitly unavailable merge fields. No live customer provider account was configured for implementation tests.
 
 ## Observation and execution boundaries
 

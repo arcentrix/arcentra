@@ -81,7 +81,7 @@ func (r *SCMPollingRepo) CaptureObservations(ctx context.Context, in CaptureObse
 			return polling.ErrConflict
 		}
 		b.Revision = s.Revision + 1
-		encoded, e := b.Canonical()
+		encoded, e := b.CanonicalForScope(scope)
 		if e != nil {
 			return e
 		}
