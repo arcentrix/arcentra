@@ -266,3 +266,9 @@ policySyncEnable = true
 [logSpool]
 directory = "./data/build-log-spool/control"
 maxDiskUsageMB = 512
+
+# Private Copilot history is opt-in and requires the existing operator-managed
+# ARCENTRA_SECRET_ENCRYPTION_KEY. No key is generated automatically.
+# Conversation bodies expire after 30 days; review-only plans never execute.
+[copilot.history]
+enabled = false

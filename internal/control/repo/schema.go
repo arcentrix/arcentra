@@ -23,6 +23,9 @@ func MigrateSchema(ctx context.Context, db *gorm.DB) error {
 	if err := preflightInboxSchema(ctx, db); err != nil {
 		return err
 	}
+	if err := preflightCopilotHistorySchema(ctx, db); err != nil {
+		return err
+	}
 	models := schemaModels()
 	if err := db.WithContext(ctx).AutoMigrate(models...); err != nil {
 		return fmt.Errorf("migrate schema: %w", err)
@@ -35,6 +38,7 @@ func MigrateSchema(ctx context.Context, db *gorm.DB) error {
 
 func schemaModels() []any {
 	return []any{
+		&model.CopilotConversation{}, &model.CopilotTurn{}, &model.CopilotActionPlan{},
 		&model.InboxDelivery{}, &model.InboxWork{}, &model.InboxCursor{}, &model.InboxSweep{},
 		&model.Agent{},
 		&model.DeploymentEnvironment{},

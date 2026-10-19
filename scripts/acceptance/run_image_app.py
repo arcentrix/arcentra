@@ -54,6 +54,8 @@ class ImageFixture(actual.Fixture):
     """Override transport only; keep the complete shared build assertions."""
     def __init__(self, args, root, runtime):
         super().__init__(args, root)
+        if self.copilot_history_enabled:
+            raise ValueError("private Copilot model fixture is supported only by the host acceptance profile")
         self.runtime = runtime
         for role in ('control', 'agent', 'cli'):
             for kind in ('config', 'state'):

@@ -379,12 +379,23 @@ jobs:
             python3 scripts/acceptance/verify_inbox_mysql_log.py ".acceptance/evidence/inbox-mysql-$suite.log" "$suite"
           done
 
+      - name: Verify private Copilot history against disposable MySQL
+        timeout-minutes: 4
+        run: |
+          set -o pipefail
+          schema=arcentra_copilot_history_test_ci
+          docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create "$schema"
+          ARCENTRA_REQUIRE_COPILOT_HISTORY_MYSQL=1 \
+          ARCENTRA_COPILOT_HISTORY_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
+            go test -race -v -count=1 -timeout=3m -run '^TestCopilotHistoryMySQLRealRequiredGate$' ./internal/control/repo | tee .acceptance/evidence/copilot-history-mysql.log
+          python3 scripts/acceptance/verify_copilot_history_mysql_log.py .acceptance/evidence/copilot-history-mysql.log
+
       - name: Check out pinned frontend acceptance client
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: 227a38c0c05b49f29c869f0e8d0236ee44ebb231
+          ref: 74b39f506536e48e830cfcbbacf388e6ebd43207
           path: .acceptance/frontend
           persist-credentials: false
 
@@ -410,6 +421,7 @@ jobs:
       - name: Exercise fresh installation through actual browser
         env:
           ARCENTRA_ACCEPTANCE_INBOX_JOURNEY: "1"
+          ARCENTRA_ACCEPTANCE_COPILOT_HISTORY: "1"
         run: |
           python3 scripts/acceptance/run_actual_app.py \
             --visual-editor-acceptance \
@@ -430,6 +442,11 @@ jobs:
             .acceptance/evidence/browser/summary.json
             .acceptance/evidence/browser/project-build-verification.json
             .acceptance/evidence/browser/visual-ci-verification.json
+            .acceptance/evidence/copilot-history-verification.json
+            .acceptance/evidence/copilot-history-create/summary.json
+            .acceptance/evidence/copilot-history-create/copilot-history-receipt.json
+            .acceptance/evidence/copilot-history-resume/summary.json
+            .acceptance/evidence/copilot-history-resume/copilot-history-receipt.json
             .acceptance/evidence/inbox-verification.json
             .acceptance/evidence/inbox-read/*.png
             .acceptance/evidence/inbox-read/summary.json

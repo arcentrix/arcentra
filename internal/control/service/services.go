@@ -28,39 +28,40 @@ import (
 
 // Services 统一管理所有 service
 type Services struct {
-	Inbox             *InboxService
-	Deployment        *DeploymentService
-	Artifact          *ArtifactService
-	User              *UserService
-	Agent             *AgentService
-	Identity          *IdentityService
-	Team              *TeamService
-	Storage           *StorageService
-	Upload            *UploadService
-	Secret            *SecretService
-	Setting           *SettingService
-	Project           *ProjectService
-	Scm               *ScmService
-	Polling           *PollingService
-	UserExt           *UserExt
-	Menu              *MenuService
-	Me                *MeService
-	Role              *RoleService
-	ProjectMemberRepo repo.IProjectMemberRepository
-	TeamMemberRepo    repo.ITeamMemberRepository
-	StepRunRepo       repo.IStepRunRepository
-	ProjectRepo       repo.IProjectRepository
-	PipelineRepo      repo.IPipelineRepository
-	StorageRepo       repo.IStorageRepository
-	LogAggregator     *LogAggregator
-	Approval          *ApprovalService
-	ApprovalPolicy    *ApprovalPolicyService
-	RoleGrant         *RoleGrantService
-	AuditLog          *AuditLogService
-	PipelineTemplate  *PipelineTemplateService
-	RegistrationToken *RegistrationTokenService
-	Authorizer        authz.IAuthorizer
-	repos             *repo.Repositories
+	CopilotHistoryMaintenance *CopilotHistoryMaintenanceService
+	Inbox                     *InboxService
+	Deployment                *DeploymentService
+	Artifact                  *ArtifactService
+	User                      *UserService
+	Agent                     *AgentService
+	Identity                  *IdentityService
+	Team                      *TeamService
+	Storage                   *StorageService
+	Upload                    *UploadService
+	Secret                    *SecretService
+	Setting                   *SettingService
+	Project                   *ProjectService
+	Scm                       *ScmService
+	Polling                   *PollingService
+	UserExt                   *UserExt
+	Menu                      *MenuService
+	Me                        *MeService
+	Role                      *RoleService
+	ProjectMemberRepo         repo.IProjectMemberRepository
+	TeamMemberRepo            repo.ITeamMemberRepository
+	StepRunRepo               repo.IStepRunRepository
+	ProjectRepo               repo.IProjectRepository
+	PipelineRepo              repo.IPipelineRepository
+	StorageRepo               repo.IStorageRepository
+	LogAggregator             *LogAggregator
+	Approval                  *ApprovalService
+	ApprovalPolicy            *ApprovalPolicyService
+	RoleGrant                 *RoleGrantService
+	AuditLog                  *AuditLogService
+	PipelineTemplate          *PipelineTemplateService
+	RegistrationToken         *RegistrationTokenService
+	Authorizer                authz.IAuthorizer
+	repos                     *repo.Repositories
 
 	retryApprovalPolicy  *retryapproval.Policy
 	offlineRuntimePolicy taskqueue.OfflineRuntimePolicy // 仅由启动 provider 注入，零值禁用
@@ -117,38 +118,39 @@ func NewServices(
 	meService := NewMeService(repos.Menu, repos.TeamMember, menuService, authorizer)
 
 	services := &Services{
-		Inbox:             NewInboxService(repos),
-		Deployment:        NewDeploymentService(repos.Deployment, repos.Pipeline, repos.Artifact, NewArtifactService(repos.Artifact, repos.Storage, ""), repos.Approval, nil),
-		Artifact:          NewArtifactService(repos.Artifact, repos.Storage, ""),
-		User:              userService,
-		Agent:             agentService,
-		Identity:          identityService,
-		Team:              teamService,
-		Storage:           storageService,
-		Upload:            uploadService,
-		Secret:            secretService,
-		Setting:           settingService,
-		Project:           projectService,
-		Scm:               scmService,
-		UserExt:           userExt,
-		Menu:              menuService,
-		Me:                meService,
-		Role:              roleService,
-		ProjectMemberRepo: repos.ProjectMember,
-		TeamMemberRepo:    repos.TeamMember,
-		StepRunRepo:       repos.StepRun,
-		ProjectRepo:       repos.Project,
-		PipelineRepo:      repos.Pipeline,
-		StorageRepo:       repos.Storage,
-		LogAggregator:     logAggregator,
-		Approval:          approvalService,
-		ApprovalPolicy:    approvalPolicyService,
-		RoleGrant:         roleGrantService,
-		AuditLog:          auditLogService,
-		PipelineTemplate:  pipelineTemplateService,
-		RegistrationToken: registrationTokenService,
-		Authorizer:        authorizer,
-		repos:             repos,
+		CopilotHistoryMaintenance: NewCopilotHistoryMaintenanceService(repos),
+		Inbox:                     NewInboxService(repos),
+		Deployment:                NewDeploymentService(repos.Deployment, repos.Pipeline, repos.Artifact, NewArtifactService(repos.Artifact, repos.Storage, ""), repos.Approval, nil),
+		Artifact:                  NewArtifactService(repos.Artifact, repos.Storage, ""),
+		User:                      userService,
+		Agent:                     agentService,
+		Identity:                  identityService,
+		Team:                      teamService,
+		Storage:                   storageService,
+		Upload:                    uploadService,
+		Secret:                    secretService,
+		Setting:                   settingService,
+		Project:                   projectService,
+		Scm:                       scmService,
+		UserExt:                   userExt,
+		Menu:                      menuService,
+		Me:                        meService,
+		Role:                      roleService,
+		ProjectMemberRepo:         repos.ProjectMember,
+		TeamMemberRepo:            repos.TeamMember,
+		StepRunRepo:               repos.StepRun,
+		ProjectRepo:               repos.Project,
+		PipelineRepo:              repos.Pipeline,
+		StorageRepo:               repos.Storage,
+		LogAggregator:             logAggregator,
+		Approval:                  approvalService,
+		ApprovalPolicy:            approvalPolicyService,
+		RoleGrant:                 roleGrantService,
+		AuditLog:                  auditLogService,
+		PipelineTemplate:          pipelineTemplateService,
+		RegistrationToken:         registrationTokenService,
+		Authorizer:                authorizer,
+		repos:                     repos,
 	}
 	services.Polling = NewPollingService(repos, nil, services.pipelineEngine.load, pipelineTemplateService)
 	scmService.polling = services.Polling

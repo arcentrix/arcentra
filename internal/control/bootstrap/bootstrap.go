@@ -254,6 +254,9 @@ func runContext(ctx context.Context, app *App, cleanup func(), shutdownTimeout t
 	defer func() {
 		app.ready.Store(false)
 		cancelRun()
+		if app.Services != nil && app.Services.CopilotHistoryMaintenance != nil {
+			app.Services.CopilotHistoryMaintenance.Stop()
+		}
 		// Join Inbox before releasing the database.
 		if app.Services != nil && app.Services.Inbox != nil {
 			app.Services.Inbox.Stop()
@@ -304,6 +307,9 @@ func runContext(ctx context.Context, app *App, cleanup func(), shutdownTimeout t
 	httpListener = &startupListener{Listener: bound, started: make(chan struct{}), onStart: func() { app.ready.Store(true) }}
 	if app.Services != nil && app.Services.Inbox != nil {
 		app.Services.Inbox.Start(ctx)
+	}
+	if app.Services != nil && app.Services.CopilotHistoryMaintenance != nil {
+		app.Services.CopilotHistoryMaintenance.Start(ctx)
 	}
 	// Initialize and start global cron scheduler
 	cron.Init(app.Logger)

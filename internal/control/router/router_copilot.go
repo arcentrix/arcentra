@@ -23,8 +23,14 @@ func (rt *Router) copilotRouter(r fiber.Router, authMW, subjectMW fiber.Handler)
 	var svc *service.CopilotService
 	if rt.Services != nil {
 		svc = service.NewCopilotService(rt.Services.Repos(), rt.Services.Authorizer, rt.Services.Artifact, copilot.NewRegistry(cfg), rt.Services.Secret)
-		if err := svc.ConfigureSourceContext(cfg.SourceContext); err != nil {
+		if err := svc.ConfigureHistory(cfg.History); err != nil {
 			svc = nil
+		}
+		if svc != nil {
+			svc.ConfigureHistoryPlans(rt.Services.Deployment)
+			if err := svc.ConfigureSourceContext(cfg.SourceContext); err != nil {
+				svc = nil
+			}
 		}
 	}
 	registerCopilotRoutes(r, authMW, subjectMW, svc)
@@ -39,6 +45,7 @@ func registerCopilotRoutes(r fiber.Router, authMW, subjectMW fiber.Handler, svc 
 		}
 		return c.Next()
 	})
+	registerCopilotHistoryRoutes(group, svc)
 	group.Get("/status", func(c *fiber.Ctx) error {
 		subject, _ := collectionSubject(c)
 		result, err := svc.Status(c.UserContext(), subject, c.Params("projectID"))
@@ -123,6 +130,14 @@ func copilotHTTPError(c *fiber.Ctx, err error) error {
 	status := fiber.StatusServiceUnavailable
 	message := "Copilot is temporarily unavailable"
 	switch {
+	case errors.Is(err, service.ErrCopilotHistoryConflict), errors.Is(err, service.ErrCopilotHistoryContent), errors.Is(err, service.ErrCopilotPlanUnavailable):
+		status = 409
+		message = err.Error()
+	case errors.Is(err, service.ErrCopilotHistoryTooLarge):
+		status = 400
+		message = err.Error()
+	case errors.Is(err, service.ErrCopilotHistoryUnavailable):
+		message = err.Error()
 	case errors.Is(err, service.ErrCopilotInput):
 		status = 400
 		message = err.Error()
