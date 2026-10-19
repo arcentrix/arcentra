@@ -39,3 +39,6 @@ docs/*.md
 
 # Operator guide for the accepted offline container runtime
 !docs/offline-runtime-acceptance.md
+
+# Bound Copilot retry-approval execution operator guide
+!docs/copilot-bound-retry-execution.md

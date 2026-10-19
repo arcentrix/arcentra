@@ -156,10 +156,19 @@ func (ur *UserRepo) Login(login *model.Login) (*model.User, error) {
 		return db.Table(user.TableName()).Select("user_id, username, full_name, avatar, email, phone, password, is_enabled").Where("is_enabled = ?", 1)
 	}
 
-	err := ur.Database().Scopes(scope).Where(
-		"(username = ? OR email = ?) AND is_enabled = 1",
-		login.Username, login.Email,
-	).First(&user).Error
+	if login == nil || (login.Username == "" && login.Email == "") {
+		return nil, gorm.ErrRecordNotFound
+	}
+	query := ur.Database().Scopes(scope)
+	// Omitted identifiers must never match another account's empty column.
+	// When both identifiers are supplied, they must identify the same row.
+	if login.Username != "" {
+		query = query.Where("username = ?", login.Username)
+	}
+	if login.Email != "" {
+		query = query.Where("email = ?", login.Email)
+	}
+	err := query.First(&user).Error
 	if err != nil {
 		return nil, err
 	}

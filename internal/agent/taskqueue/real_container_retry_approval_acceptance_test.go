@@ -128,10 +128,18 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 				lifecycle.requireNone(t, pendingRecord.Record.Resource.ID)
 				return
 			}
-			// One of two real votes must leave preparation blocked and task-free.
-			if _, err := services.Approval.Decide(f.ctx, approval.ApprovalID, policy.Candidates[0], model.ApprovalDecisionApprove, "synthetic exact plan review"); err != nil {
+			// The gate approves bound execution and its finite retry budget BEFORE
+			// the first command. This is not a manual terminal-job retry endpoint.
+			var copilotExecution *containerCopilotExecution
+			if scenario == "approved-finite-plan" {
+				copilotExecution = prepareContainerCopilotExecution(t, f, services, approval, actor, policy)
+				containerApprovalPending(t, f, jobID)
+				lifecycle.requireNone(t, pendingRecord.Record.Resource.ID)
+				copilotExecution.confirm(t, f, 0)
+			} else if _, err := services.Approval.Decide(f.ctx, approval.ApprovalID, policy.Candidates[0], model.ApprovalDecisionApprove, "synthetic exact plan review"); err != nil {
 				t.Fatal(err)
 			}
+			// One of two real votes must leave preparation blocked and task-free.
 			containerApprovalPending(t, f, jobID)
 			lifecycle.requireNone(t, pendingRecord.Record.Resource.ID)
 			store.mu.Lock()
@@ -270,11 +278,33 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 				f.mu.Unlock()
 			}()
 			// The final vote releases only the existing bounded wait; it does not dispatch a job.
-			if _, err := services.Approval.Decide(f.ctx, approval.ApprovalID, policy.Candidates[1], model.ApprovalDecisionApprove, "synthetic exact plan review"); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := services.Approval.Decide(f.ctx, approval.ApprovalID, policy.Candidates[1], model.ApprovalDecisionApprove, "synthetic exact plan review"); err != nil {
-				t.Fatalf("same committed vote replay: %v", err)
+			if copilotExecution != nil {
+				browserConfirmed := false
+				if !failedStep {
+					enabled, err := containerCopilotBrowserEnabled(os.Getenv)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if enabled && !t.Run("actual-browser-permanent-confirmation", func(t *testing.T) {
+						browserConfirmed = copilotExecution.confirmBrowser(t, f, 1, policy)
+						if !browserConfirmed {
+							t.Fatal("required browser confirmation was skipped")
+						}
+					}) {
+						t.FailNow()
+					}
+				}
+				if !browserConfirmed {
+					copilotExecution.confirm(t, f, 1)
+				}
+				copilotExecution.confirm(t, f, 1)
+			} else {
+				if _, err := services.Approval.Decide(f.ctx, approval.ApprovalID, policy.Candidates[1], model.ApprovalDecisionApprove, "synthetic exact plan review"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := services.Approval.Decide(f.ctx, approval.ApprovalID, policy.Candidates[1], model.ApprovalDecisionApprove, "synthetic exact plan review"); err != nil {
+					t.Fatalf("same committed vote replay: %v", err)
+				}
 			}
 			wanted := model.PipelineStatusSuccess
 			if strings.HasPrefix(scenario, "revoke-") || scenario == "lost-CAS-ACK-then-revoke" {
@@ -287,6 +317,10 @@ func containerAcceptanceRetryApproval(t *testing.T, f *controllerWorkerFixture, 
 			f.afterStepAttempt = nil
 			f.mu.Unlock()
 			containerAcceptanceDrainWithAudit(t, f, retained)
+			if copilotExecution != nil {
+				copilotExecution.verifyTerminal(t, f)
+				containerAcceptanceDrainWithAudit(t, f, retained)
+			}
 			lifecycle.requireStarted(t, pendingRecord.Record.Resource.ID)
 			job, err := f.repos.JobRun.GetByJobRunID(f.ctx, jobID)
 			if err != nil {

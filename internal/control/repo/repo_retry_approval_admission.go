@@ -830,42 +830,7 @@ func (r *ApprovalRepo) decideRetryApproval(ctx context.Context, initial *model.A
 		if err := validateRetryApprovalDecision(ctx, tx, job, a, e, actor, decision); err != nil {
 			return err
 		}
-		vote := &model.ApprovalDecision{DecisionID: uuid.NewString(), ApprovalID: a.ApprovalID, UserID: actor, Decision: decision, Comment: reason}
-		if err := tx.WithContext(ctx).Create(vote).Error; err != nil {
-			return err
-		}
-		approved, rejected := a.ApprovedCount, a.RejectedCount
-		if decision == model.ApprovalDecisionApprove {
-			approved++
-		} else {
-			rejected++
-		}
-		next := model.ApprovalStatusPending
-		if rejected > 0 {
-			next = model.ApprovalStatusRejected
-		} else if approved >= a.RequiredApproverCount {
-			next = model.ApprovalStatusApproved
-		}
-		if approvalDeadlinePassed(a) {
-			return ErrApprovalExpired
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := patchPendingApproval(tx, a, map[string]any{"status": next, "approved_count": approved, "rejected_count": rejected, "approved_by": actor, "reason": reason}); err != nil {
-			return err
-		}
-		a.Status, a.ApprovedCount, a.RejectedCount, a.ApprovedBy, a.Reason = next, approved, rejected, actor, reason
-		if _, err := validateRetryApprovalVotes(ctx, tx, a); err != nil {
-			return err
-		}
-		if err := validateGenerationLive(ctx, tx, job, generationIdentity(job)); err != nil {
-			return err
-		}
-		if approvalDeadlinePassed(a) {
-			return ErrApprovalExpired
-		}
-		return checkRetryApprovalAuthorizationExpiry(ctx, tx)
+		return writeRetryApprovalDecision(ctx, tx, job, a, actor, decision, reason, uuid.NewString())
 	})
 	if errors.Is(err, ErrApprovalExpired) {
 		current, expireErr := r.Expire(ctx, initial.ApprovalID)
@@ -925,4 +890,44 @@ func retryApprovalTerminalVote(ctx context.Context, tx *gorm.DB, job *model.JobR
 		return a, true, ErrApprovalExpired
 	}
 	return a, true, ErrApprovalConflict
+}
+
+// writeRetryApprovalDecision is shared only after all current admission checks.
+func writeRetryApprovalDecision(ctx context.Context, tx *gorm.DB, job *model.JobRun, a *model.ApprovalRequest, actor, decision, reason, decisionID string) error {
+	vote := &model.ApprovalDecision{DecisionID: decisionID, ApprovalID: a.ApprovalID, UserID: actor, Decision: decision, Comment: reason}
+	if err := tx.WithContext(ctx).Create(vote).Error; err != nil {
+		return err
+	}
+	approved, rejected := a.ApprovedCount, a.RejectedCount
+	if decision == model.ApprovalDecisionApprove {
+		approved++
+	} else {
+		rejected++
+	}
+	next := model.ApprovalStatusPending
+	if rejected > 0 {
+		next = model.ApprovalStatusRejected
+	} else if approved >= a.RequiredApproverCount {
+		next = model.ApprovalStatusApproved
+	}
+	if approvalDeadlinePassed(a) {
+		return ErrApprovalExpired
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := patchPendingApproval(tx, a, map[string]any{"status": next, "approved_count": approved, "rejected_count": rejected, "approved_by": actor, "reason": reason}); err != nil {
+		return err
+	}
+	a.Status, a.ApprovedCount, a.RejectedCount, a.ApprovedBy, a.Reason = next, approved, rejected, actor, reason
+	if _, err := validateRetryApprovalVotes(ctx, tx, a); err != nil {
+		return err
+	}
+	if err := validateGenerationLive(ctx, tx, job, generationIdentity(job)); err != nil {
+		return err
+	}
+	if approvalDeadlinePassed(a) {
+		return ErrApprovalExpired
+	}
+	return checkRetryApprovalAuthorizationExpiry(ctx, tx)
 }

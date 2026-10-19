@@ -32,8 +32,14 @@ type Config struct {
 	Enabled           bool                `mapstructure:"enabled" json:"enabled"`
 	AllowedProjectIDs []string            `mapstructure:"allowedProjectIds" json:"allowedProjectIds"`
 	Providers         []ProviderConfig    `mapstructure:"providers" json:"-"`
+	Execution         ExecutionConfig     `mapstructure:"execution" json:"-"`
 	History           HistoryConfig       `mapstructure:"history" json:"-"`
 	SourceContext     SourceContextConfig `mapstructure:"sourceContext" json:"-"`
+}
+
+// ExecutionConfig independently enables explicit, bound retry-plan votes only.
+type ExecutionConfig struct {
+	RetryApprovalEnabled bool `mapstructure:"retryApprovalEnabled" json:"retryApprovalEnabled"`
 }
 
 // HistoryConfig enables private encrypted history only with the managed AES key.
