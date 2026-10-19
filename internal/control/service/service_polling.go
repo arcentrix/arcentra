@@ -26,7 +26,10 @@ import (
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/polling"
 	"github.com/arcentrix/arcentra/pkg/scm"
+	"github.com/arcentrix/arcentra/pkg/scm/gitea"
+	"github.com/arcentrix/arcentra/pkg/scm/github"
 	"github.com/arcentrix/arcentra/pkg/scm/gitlab"
+	"github.com/arcentrix/arcentra/pkg/scm/pollsnapshot"
 	"github.com/bytedance/sonic"
 	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
@@ -35,35 +38,58 @@ import (
 // PollingSource 定义可信服务构造时注入的只读来源，不接受 HTTP 请求指定实现
 // 实际提供方访问与定义读取均在数据库事务外完成
 type PollingSource interface {
-	Snapshot(context.Context, *model.Project, gitlab.SnapshotRequest) (gitlab.SnapshotResult, error)
+	Snapshot(context.Context, *model.Project, pollsnapshot.Request) (pollsnapshot.Result, error)
 	Definition(context.Context, *model.Pipeline, *model.Project, string) (string, string, error)
 }
-type productionPollingSource struct{}
 
-func (productionPollingSource) Snapshot(ctx context.Context, p *model.Project, request gitlab.SnapshotRequest) (gitlab.SnapshotResult, error) {
+// definitionReader is a private trusted-construction test seam; HTTP input cannot set it.
+type productionPollingSource struct{ definitionReader pollingDefinitionReader }
+
+func (productionPollingSource) Snapshot(ctx context.Context, p *model.Project, request pollsnapshot.Request) (pollsnapshot.Result, error) {
+	if !pollingProjectEligible(p) {
+		return pollsnapshot.Result{}, polling.ErrBlocked
+	}
 	repository, e := polling.CanonicalRepository(p.RepoURL)
 	if e != nil {
-		return gitlab.SnapshotResult{}, polling.ErrBlocked
+		return pollsnapshot.Result{}, polling.ErrBlocked
 	}
 	u, _ := url.Parse(repository)
-	cfg := scm.ProviderConfig{Kind: scm.ProviderKindGitLab, BaseURL: u.Scheme + "://" + u.Host}
+	cfg := scm.ProviderConfig{Kind: scm.ProviderKind(p.RepoType), BaseURL: u.Scheme + "://" + u.Host}
 	if p.AuthType == model.AuthTypeToken {
 		cfg.Token = p.Credential
 	}
-	reader, e := gitlab.NewSnapshotReader(cfg, nil, gitlab.SnapshotLimits{})
-	if e != nil {
-		return gitlab.SnapshotResult{}, e
+	switch p.RepoType {
+	case model.RepoTypeGitLab:
+		reader, err := gitlab.NewSnapshotReader(cfg, nil, gitlab.SnapshotLimits{})
+		if err != nil {
+			return pollsnapshot.Result{}, err
+		}
+		return reader.Read(ctx, request)
+	case model.RepoTypeGitHub:
+		reader, err := github.NewSnapshotReader(cfg, nil, pollsnapshot.Limits{})
+		if err != nil {
+			return pollsnapshot.Result{}, err
+		}
+		return reader.Read(ctx, request)
+	case model.RepoTypeGitea:
+		reader, err := gitea.NewSnapshotReader(cfg, nil, pollsnapshot.Limits{})
+		if err != nil {
+			return pollsnapshot.Result{}, err
+		}
+		return reader.Read(ctx, request)
+	default:
+		return pollsnapshot.Result{}, polling.ErrBlocked
 	}
-	return reader.Read(ctx, request)
 }
-func (productionPollingSource) Definition(ctx context.Context, p *model.Pipeline, project *model.Project, commit string) (string, string, error) {
-	if commit == "" {
-		return LoadPollingPipelineDefinition(ctx, p, project)
+func (source productionPollingSource) Definition(ctx context.Context, p *model.Pipeline, project *model.Project, commit string) (string, string, error) {
+	read := source.definitionReader
+	if read == nil {
+		read = scm.ReadHTTPSDefinitionContext
 	}
-	return LoadPipelineDefinitionAtCommit(ctx, p, project, commit)
+	return loadPollingDefinition(ctx, p, project, commit, commit != "", read)
 }
 
-// PollingService 只为已显式激活的 GitLab MR 快照流建立有界派发
+// PollingService 只为已显式激活的受支持 MR/PR 快照流建立有界派发
 type PollingService struct {
 	pollMu       sync.Mutex
 	initErr      error
@@ -197,10 +223,14 @@ func (s *PollingService) Status(ctx context.Context, actor, projectID string) (*
 	repository, e := polling.CanonicalRepository(p.RepoURL)
 	out.Supported = e == nil && pollingProjectEligible(p)
 	if !out.Supported {
-		out.Blocker = "requires_existing_enabled_gitlab_mr_project"
+		out.Blocker = "requires_existing_enabled_supported_pr_project"
 	}
 	if out.Supported {
-		out.Scope = &PollingScopeView{Provider: "gitlab", Repository: repository, Stream: "merge_requests"}
+		_, _, stream, err := polling.ProviderRepository(p.RepoType, repository)
+		if err != nil {
+			return nil, polling.ErrBlocked
+		}
+		out.Scope = &PollingScopeView{Provider: p.RepoType, Repository: repository, Stream: stream}
 	}
 	canUpdate, e := checker.Check(ctx, subject, "project:update", authz.ResourceRef{Type: "project", ID: projectID, ProjectID: projectID, OrgID: p.OrgID})
 	if e != nil {
@@ -348,19 +378,30 @@ func (s *PollingService) Candidates(ctx context.Context, actor, projectID string
 	return nil, fmt.Errorf("polling candidate enumeration exceeds bound")
 }
 
-func snapshotScope(p *model.Project, result gitlab.SnapshotResult) (polling.Scope, error) {
+func snapshotScope(p *model.Project, result pollsnapshot.Result) (polling.Scope, error) {
+	if !pollingProjectEligible(p) {
+		return polling.Scope{}, polling.ErrBlocked
+	}
 	repository, e := polling.CanonicalRepository(p.RepoURL)
 	if e != nil {
 		return polling.Scope{}, e
 	}
-	u, _ := url.Parse(repository)
-	if result.Version != gitlab.SnapshotVersion || result.APIOrigin != u.Scheme+"://"+u.Host || result.Repository != strings.TrimPrefix(u.Path, "/") || result.ProviderProjectID <= 0 {
+	version, origin, stream, e := polling.ProviderRepository(p.RepoType, repository)
+	if e != nil {
 		return polling.Scope{}, polling.ErrBlocked
 	}
-	scope := polling.Scope{Version: polling.Version, ProjectID: p.ProjectID, Provider: "gitlab", APIOrigin: result.APIOrigin, Repository: repository, ProviderProjectID: strconv.FormatInt(result.ProviderProjectID, 10), Stream: "merge_requests"}
+	u, _ := url.Parse(repository)
+	expectedProvider := p.RepoType
+	if p.RepoType == model.RepoTypeGitLab {
+		expectedProvider = ""
+	} // Preserve exact legacy v1 evidence.
+	if result.Version != version || result.Provider != expectedProvider || result.APIOrigin != origin || result.Repository != strings.TrimPrefix(u.Path, "/") || result.ProviderProjectID <= 0 {
+		return polling.Scope{}, polling.ErrBlocked
+	}
+	scope := polling.Scope{Version: version, ProjectID: p.ProjectID, Provider: p.RepoType, APIOrigin: origin, Repository: repository, ProviderProjectID: strconv.FormatInt(result.ProviderProjectID, 10), Stream: stream}
 	return scope, scope.Validate()
 }
-func snapshotCursor(result gitlab.SnapshotResult, previous *polling.Cursor) (polling.Cursor, error) {
+func snapshotCursor(result pollsnapshot.Result, previous *polling.Cursor) (polling.Cursor, error) {
 	next := polling.Cursor{Version: polling.Version, Boundary: result.UpperBound.UTC().Format(time.RFC3339Nano), Complete: true, Observed: map[string]string{}}
 	if previous != nil {
 		for k, v := range previous.Observed {
@@ -373,17 +414,17 @@ func snapshotCursor(result gitlab.SnapshotResult, previous *polling.Cursor) (pol
 	_, e := next.Canonical()
 	return next, e
 }
-func (s *PollingService) readSnapshot(ctx context.Context, p *model.Project, scope *polling.Scope, cursor *polling.Cursor) (gitlab.SnapshotResult, error) {
+func (s *PollingService) readSnapshot(ctx context.Context, p *model.Project, scope *polling.Scope, cursor *polling.Cursor) (pollsnapshot.Result, error) {
 	repository, e := polling.CanonicalRepository(p.RepoURL)
 	if e != nil {
-		return gitlab.SnapshotResult{}, e
+		return pollsnapshot.Result{}, e
 	}
 	u, _ := url.Parse(repository)
-	request := gitlab.SnapshotRequest{Repository: strings.TrimPrefix(u.Path, "/"), UpperBound: time.Now().UTC()}
+	request := pollsnapshot.Request{Repository: strings.TrimPrefix(u.Path, "/"), UpperBound: time.Now().UTC()}
 	if scope != nil {
 		request.ProviderProjectID, e = strconv.ParseInt(scope.ProviderProjectID, 10, 64)
 		if e != nil {
-			return gitlab.SnapshotResult{}, e
+			return pollsnapshot.Result{}, e
 		}
 	}
 	// 首版每次重新读取有界完整库存，不能仅靠更新时间游标证明延迟可见项不存在
@@ -529,7 +570,7 @@ func pollingFailureReason(e error) string {
 	if errors.Is(e, polling.ErrUnresolved) {
 		return "recovery_required"
 	}
-	if errors.Is(e, gitlab.ErrSnapshotIncomplete) {
+	if errors.Is(e, gitlab.ErrSnapshotIncomplete) || errors.Is(e, pollsnapshot.ErrIncomplete) {
 		return "provider_incomplete"
 	}
 	return "unavailable"
@@ -631,7 +672,7 @@ func (s *PollingService) pollStream(ctx context.Context, row *model.SCMPollingSt
 				if observation.MergedAt != nil {
 					mergedAt = observation.MergedAt.UTC().Format(time.RFC3339Nano)
 				}
-				observed.Observations = append(observed.Observations, polling.Observation{MRID: observation.ID, MRIID: observation.IID, State: observation.State, UpdatedAt: observation.UpdatedAt.UTC().Format(time.RFC3339Nano), MergedAt: mergedAt, MergeSHA: observation.MergeSHA, SquashSHA: observation.SquashSHA, SourceBranch: observation.SourceBranch, TargetBranch: observation.TargetBranch, SourceSHA: observation.SourceSHA, ObservationID: observation.ObservationID})
+				observed.Observations = append(observed.Observations, polling.Observation{MRID: observation.ID, MRIID: observation.IID, State: observation.State, UpdatedAt: observation.UpdatedAt.UTC().Format(time.RFC3339Nano), MergedAt: mergedAt, MergeSHA: observation.MergeSHA, SquashSHA: observation.SquashSHA, SourceBranch: observation.SourceBranch, TargetBranch: observation.TargetBranch, SourceSHA: observation.SourceSHA, ObservationID: observation.ObservationID, SourceProjectID: observation.SourceProjectID, SourceRepository: observation.SourceRepository, TargetSHA: observation.TargetSHA})
 			}
 			if _, validateErr := observed.Canonical(); validateErr != nil {
 				return s.pause(ctx, row, "provider_incomplete", polling.ErrBlocked)
@@ -659,15 +700,9 @@ func (s *PollingService) pollStream(ctx context.Context, row *model.SCMPollingSt
 			if cutoffErr != nil {
 				return polling.ErrConflict
 			}
-			observedAt, parseErr := time.Parse(time.RFC3339Nano, observation.UpdatedAt)
+			observedAt, parseErr := pollingObservationTime(scope.Provider, observation)
 			if parseErr != nil {
 				return parseErr
-			}
-			if observation.State == "merged" {
-				observedAt, parseErr = time.Parse(time.RFC3339Nano, observation.MergedAt)
-				if parseErr != nil {
-					return parseErr
-				}
 			}
 			if !observedAt.After(cutoff) {
 				continue
@@ -711,7 +746,7 @@ func (s *PollingService) pollStream(ctx context.Context, row *model.SCMPollingSt
 					return e
 				}
 
-				batch.Targets = append(batch.Targets, polling.Target{MRID: observation.MRID, MRIID: observation.MRIID, State: observation.State, UpdatedAt: observation.UpdatedAt, MergedAt: observation.MergedAt, MergeSHA: observation.MergeSHA, SquashSHA: observation.SquashSHA, PipelineID: binding.PipelineID, ObservationID: observation.ObservationID, RequestID: requestID, SourceBranch: observation.SourceBranch, TargetBranch: observation.TargetBranch, SourceSHA: observation.SourceSHA, DefinitionCommitSHA: loaded.commit, DefinitionPath: binding.DefinitionPath, ResolvedDefinitionDigest: loaded.digest})
+				batch.Targets = append(batch.Targets, polling.Target{MRID: observation.MRID, MRIID: observation.MRIID, State: observation.State, UpdatedAt: observation.UpdatedAt, MergedAt: observation.MergedAt, MergeSHA: observation.MergeSHA, SquashSHA: observation.SquashSHA, PipelineID: binding.PipelineID, ObservationID: observation.ObservationID, RequestID: requestID, SourceBranch: observation.SourceBranch, TargetBranch: observation.TargetBranch, SourceSHA: observation.SourceSHA, SourceProjectID: observation.SourceProjectID, SourceRepository: observation.SourceRepository, TargetSHA: observation.TargetSHA, DefinitionCommitSHA: loaded.commit, DefinitionPath: binding.DefinitionPath, ResolvedDefinitionDigest: loaded.digest})
 			}
 		}
 		if _, validateErr := batch.Canonical(); validateErr != nil {
@@ -814,17 +849,27 @@ func (s *PollingService) pollStream(ctx context.Context, row *model.SCMPollingSt
 func (s *PollingService) deferProvider(ctx context.Context, row *model.SCMPollingStream, cause error) error {
 	next := time.Now().Add(time.Minute)
 	reason := "provider_unavailable"
-	var snapshotErr *gitlab.SnapshotError
-	if errors.As(cause, &snapshotErr) {
+	var legacy *gitlab.SnapshotError
+	var neutral *pollsnapshot.Error
+	var status int
+	var retryAt, resetAt time.Time
+	var remaining *int64
+	if errors.As(cause, &legacy) {
+		status, retryAt, resetAt, remaining = legacy.StatusCode, legacy.RetryAt, legacy.RateLimitResetAt, legacy.RateLimitRemaining
 		reason = "provider_incomplete"
-		if snapshotErr.StatusCode == 429 {
+	} else if errors.As(cause, &neutral) {
+		status, retryAt, resetAt, remaining = neutral.StatusCode, neutral.RetryAt, neutral.RateLimitResetAt, neutral.RateLimitRemaining
+		reason = "provider_incomplete"
+	}
+	if reason == "provider_incomplete" {
+		if status == 429 {
 			reason = "provider_rate_limited"
 		}
-		if snapshotErr.RetryAt.After(next) {
-			next = snapshotErr.RetryAt
+		if retryAt.After(next) {
+			next = retryAt
 		}
-		if snapshotErr.RateLimitResetAt.After(next) && snapshotErr.RateLimitRemaining != nil && *snapshotErr.RateLimitRemaining == 0 {
-			next = snapshotErr.RateLimitResetAt
+		if resetAt.After(next) && remaining != nil && *remaining == 0 {
+			next = resetAt
 		}
 	}
 	if next.After(time.Now().Add(24 * time.Hour)) {
@@ -837,4 +882,15 @@ func (s *PollingService) deferProvider(ctx context.Context, row *model.SCMPollin
 func (s *PollingService) markUnresolved(ctx context.Context, row *model.SCMPollingStream, cause error) error {
 	_, err := s.repositories.SCMPolling.MarkUnresolved(ctx, row.ProjectID, row.Revision, row.ActivationGeneration)
 	return errors.Join(cause, err)
+}
+
+// Gitea's manual merge API may expose the commit author time as merged_at.
+// Its eligibility is based on the observed update, never an inferred merge-action time.
+// Stable merge identities already seen at baseline remain deduplicated separately.
+func pollingObservationTime(provider string, observation polling.Observation) (time.Time, error) {
+	raw := observation.UpdatedAt
+	if observation.State == "merged" && provider != model.RepoTypeGitea {
+		raw = observation.MergedAt
+	}
+	return time.Parse(time.RFC3339Nano, raw)
 }

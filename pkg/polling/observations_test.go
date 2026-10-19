@@ -56,3 +56,27 @@ func TestObservationSeparateMergeAndSquashProvenance(t *testing.T) {
 	o.MergedAt = time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
 	require.Error(t, o.Validate())
 }
+
+func TestOptionalSourceProvenancePreservesLegacyAndRejectsPartial(t *testing.T) {
+	o := Observation{MRID: 7, MRIID: 3, State: "opened", UpdatedAt: "2026-10-16T16:00:00Z", SourceBranch: "feature", TargetBranch: "main", SourceSHA: strings.Repeat("a", 40), ObservationID: "observation"}
+	raw, err := canonical(o)
+	require.NoError(t, err)
+	require.Equal(t, `{"mrId":7,"mrIid":3,"state":"opened","updatedAt":"2026-10-16T16:00:00Z","sourceBranch":"feature","targetBranch":"main","sourceSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","observationId":"observation"}`, raw)
+	require.NoError(t, o.Validate())
+	o.SourceProjectID = 99
+	o.SourceRepository = "fork/repo"
+	o.TargetSHA = strings.Repeat("b", 40)
+	require.NoError(t, o.Validate())
+	raw, err = canonical(o)
+	require.NoError(t, err)
+	var restored Observation
+	require.NoError(t, decode(raw, &restored))
+	require.Equal(t, o, restored)
+	for _, mutate := range []func(*Observation){func(o *Observation) { o.SourceProjectID = 0 }, func(o *Observation) { o.SourceProjectID = -1 }, func(o *Observation) { o.SourceRepository = "" }, func(o *Observation) { o.TargetSHA = "" }, func(o *Observation) { o.TargetSHA = "main" }, func(o *Observation) { o.SourceRepository = "https://evil.example/repo" }, func(o *Observation) { o.SourceRepository = "fork/../repo" }, func(o *Observation) { o.SourceRepository = "fork/repo?token=x" }} {
+		changed := o
+		mutate(&changed)
+		require.Error(t, changed.Validate())
+		target := Target{SourceProjectID: changed.SourceProjectID, SourceRepository: changed.SourceRepository, TargetSHA: changed.TargetSHA}
+		require.Error(t, validateSourceProvenance(target.SourceProjectID, target.SourceRepository, target.TargetSHA))
+	}
+}

@@ -34,6 +34,7 @@ const pollingTestPath = "/project/polling-project/polling"
 const pollingTestRepository = "https://gitlab.example.invalid/group/repository"
 
 type pollingHTTPSource struct {
+	provider    string
 	snapshots   atomic.Int64
 	definitions atomic.Int64
 	onSnapshot  func(context.Context) error
@@ -49,8 +50,17 @@ func (s *pollingHTTPSource) Snapshot(ctx context.Context, project *model.Project
 			return gitlab.SnapshotResult{}, err
 		}
 	}
+	version, origin, resultProvider := gitlab.SnapshotVersion, "https://gitlab.example.invalid", ""
+	if s.provider != "" {
+		var err error
+		version, origin, _, err = polling.ProviderRepository(s.provider, strings.TrimSuffix(project.RepoURL, ".git"))
+		if err != nil {
+			return gitlab.SnapshotResult{}, err
+		}
+		resultProvider = s.provider
+	}
 	return gitlab.SnapshotResult{
-		Version: gitlab.SnapshotVersion, APIOrigin: "https://gitlab.example.invalid", Repository: request.Repository,
+		Version: version, Provider: resultProvider, APIOrigin: origin, Repository: request.Repository,
 		ProviderProjectID: 42, UpperBound: request.UpperBound,
 		Observations: []gitlab.MRSnapshot{{ID: 7, IID: 1, ProviderProjectID: 42, State: "opened",
 			ObservationID: "private-observation-canary", Title: "private-title-canary", ActorName: "private-author-canary",
@@ -511,6 +521,47 @@ func TestPollingHTTPMissingOrMovedSelectionRetainsSafePausedControls(t *testing.
 			require.Equal(t, 200, status, raw)
 			require.Equal(t, polling.StateDisabled, pollingHTTPStatus(t, body).State)
 			require.NotContains(t, raw, "new-owner-selection-name-canary")
+			f.noRuns(t)
+		})
+	}
+}
+
+// Provider configuration uses the same authenticated, explicit activation API.
+// Synthetic source responses exercise HTTP contracts, not remote account access.
+func TestPollingHTTPAdditionalProvidersRequireExplicitAuthorizedActivation(t *testing.T) {
+	for _, provider := range []string{"github", "gitea"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newPollingHTTPFixture(t)
+			f.source.provider = provider
+			origin := "https://github.com"
+			if provider == "gitea" {
+				origin = "https://gitea.example.invalid"
+			}
+			repository := origin + "/group/repository"
+			require.NoError(t, f.db.Model(&model.Project{}).Where("project_id = ?", "polling-project").Updates(map[string]any{"repo_type": provider, "repo_url": repository}).Error)
+			require.NoError(t, f.db.Model(&model.Pipeline{}).Where("project_id = ?", "polling-project").Update("repo_url", repository).Error)
+			status, _, raw := f.request(t, "ordinary", "POST", pollingTestPath+"/baseline", `{"expectedRevision":0}`)
+			require.Equal(t, 403, status, raw)
+			require.Zero(t, f.source.snapshots.Load())
+			state := f.baseline(t, "admin")
+			require.NotNil(t, state.Scope)
+			require.Equal(t, provider, state.Scope.Provider)
+			require.Equal(t, "pull_requests", state.Scope.Stream)
+			require.Equal(t, repository, state.Scope.Repository)
+			status, body, raw := f.request(t, "admin", "POST", pollingTestPath+"/enable", pollingHTTPEnableBody(t, state, "pipeline-a"))
+			require.Equal(t, 200, status, raw)
+			enabled := pollingHTTPStatus(t, body)
+			require.Equal(t, polling.StateEnabled, enabled.State)
+			require.EqualValues(t, 1, f.source.snapshots.Load())
+			status, _, raw = f.request(t, "ordinary", "POST", pollingTestPath+"/disable", fmt.Sprintf(`{"expectedRevision":%d}`, enabled.Revision))
+			require.Equal(t, 403, status, raw)
+			require.Equal(t, polling.StateEnabled, f.stream(t).State)
+			status, _, raw = f.request(t, "admin", "POST", pollingTestPath+"/disable", fmt.Sprintf(`{"expectedRevision":%d}`, enabled.Revision))
+			require.Equal(t, 200, status, raw)
+			require.Equal(t, polling.StateDisabled, f.stream(t).State)
+			for _, secret := range []string{"provider-token-canary", "webhook-secret-canary", "private-observation-canary"} {
+				require.NotContains(t, raw, secret)
+			}
 			f.noRuns(t)
 		})
 	}

@@ -18,8 +18,12 @@ import (
 	"github.com/bytedance/sonic"
 )
 
-// Version 是首版 GitLab MR 快照协议版本
+// Version is the unchanged cursor, selection, batch and run-context protocol version.
 const Version = 1
+
+// ScopeVersion2 namespaces GitHub/Gitea identity without changing legacy wire evidence.
+// Existing scope_json stores this explicit version; no migration or rewrite is needed.
+const ScopeVersion2 = 2
 
 // MaxPayloadBytes 限制每份持久化 JSON 的最大大小
 const MaxPayloadBytes = 1048576
@@ -85,12 +89,53 @@ func CanonicalRepository(raw string) (string, error) {
 	return u.String(), nil
 }
 
-// Validate 校验首版受支持作用域及完整仓库身份
-func (s Scope) Validate() error {
-	repo, err := CanonicalRepository(s.Repository)
+// ProviderRepository validates an already canonical repository and returns its
+// scope policy. It does not discover repository identity or authorize activation.
+func ProviderRepository(provider, repository string) (version int, apiOrigin, stream string, err error) {
+	repo, e := CanonicalRepository(repository)
+	if e != nil || repo != repository {
+		return 0, "", "", fmt.Errorf("invalid polling repository")
+	}
 	u, _ := url.Parse(repo)
+	origin := u.Scheme + "://" + u.Host
+	// Preserve the exact v1 policy, including GitLab nested namespaces.
+	if provider == "gitlab" {
+		return Version, origin, "merge_requests", nil
+	}
+	if provider != "github" && provider != "gitea" {
+		return 0, "", "", fmt.Errorf("unsupported polling provider")
+	}
+	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	if len(parts) != 2 || !repositoryName(parts[0]) || !repositoryName(parts[1]) || u.Hostname() == "" || strings.HasSuffix(u.Hostname(), ".") {
+		return 0, "", "", fmt.Errorf("invalid polling owner/repository")
+	}
+	if provider == "github" {
+		if u.Host != "github.com" {
+			return 0, "", "", fmt.Errorf("only public GitHub is supported")
+		}
+		origin = "https://api.github.com"
+	}
+	return ScopeVersion2, origin, "pull_requests", nil
+}
+
+// repositoryName deliberately accepts a bounded unambiguous ASCII subset.
+func repositoryName(v string) bool {
+	if v == "" || len(v) > 100 || v == "." || v == ".." || strings.HasSuffix(v, ".git") || strings.HasPrefix(v, ".") || strings.HasSuffix(v, ".") {
+		return false
+	}
+	for _, c := range v {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+// Validate checks the explicit provider/version namespace and stable numeric identity.
+func (s Scope) Validate() error {
+	version, origin, stream, err := ProviderRepository(s.Provider, s.Repository)
 	providerID, idErr := strconv.ParseInt(s.ProviderProjectID, 10, 64)
-	if err != nil || idErr != nil || providerID <= 0 || strconv.FormatInt(providerID, 10) != s.ProviderProjectID || s.Version != Version || !identifier(s.ProjectID, 64) || s.Provider != "gitlab" || s.Stream != "merge_requests" || !identifier(s.ProviderProjectID, 128) || repo != s.Repository || s.APIOrigin != u.Scheme+"://"+u.Host {
+	if err != nil || idErr != nil || providerID <= 0 || strconv.FormatInt(providerID, 10) != s.ProviderProjectID || s.Version != version || !identifier(s.ProjectID, 64) || s.Stream != stream || !identifier(s.ProviderProjectID, 128) || s.APIOrigin != origin {
 		return fmt.Errorf("invalid polling scope")
 	}
 	return nil
@@ -215,6 +260,10 @@ type Target struct {
 	DefinitionCommitSHA      string `json:"definitionCommitSha"`
 	DefinitionPath           string `json:"definitionPath"`
 	ResolvedDefinitionDigest string `json:"resolvedDefinitionDigest"`
+	// Append-only optional fields retain v1 JSON byte compatibility.
+	SourceProjectID  int64  `json:"sourceProjectId,omitempty"`
+	SourceRepository string `json:"sourceRepository,omitempty"`
+	TargetSHA        string `json:"targetSha,omitempty"`
 }
 
 // Batch 保存派发前冻结的归一化批次，空目标同样必须带完整后继游标
@@ -279,6 +328,9 @@ func (b Batch) Canonical() (string, error) {
 
 // Validate 检查单一冻结派发目标
 func (t Target) Validate() error {
+	if err := validateSourceProvenance(t.SourceProjectID, t.SourceRepository, t.TargetSHA); err != nil {
+		return err
+	}
 	updated, err := time.Parse(time.RFC3339Nano, t.UpdatedAt)
 	if err != nil || updated.IsZero() || t.MRID <= 0 || t.MRIID <= 0 || (t.State != "opened" && t.State != "merged") || len(t.UpdatedAt) > 35 || len(t.MergedAt) > 35 {
 		return fmt.Errorf("invalid polling observation provenance")

@@ -29,27 +29,32 @@ import (
 	"github.com/arcentrix/arcentra/pkg/polling"
 	"github.com/arcentrix/arcentra/pkg/scm"
 	"github.com/arcentrix/arcentra/pkg/scm/gitlab"
+	"github.com/arcentrix/arcentra/pkg/scm/pollsnapshot"
 	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
 )
 
-// realStackPollingSource 仅将固定合成 GitLab 身份映射到本地 Git 定义仓库
+// realStackPollingSource 仅将固定合成提供方身份映射到本地 Git 定义仓库
 // API 使用真实 SnapshotReader 和受信 TLS；生产 HTTPS Git 加载器另有独立测试
-// 不能把此测试描述为真实 GitLab 账户或远程提供方验收
+// 不能把此测试描述为真实提供方账户或远程提供方验收
 // 定义和作业均经过真实 Git，而非返回预制 protobuf 或伪造定义提交
 // 此注入仅存在于测试文件，不能由 HTTP 请求或项目配置提供
 type realStackPollingSource struct {
-	reader                                       *gitlab.SnapshotReader
-	repository, directory, projectID, pipelineID string
-	mu                                           sync.Mutex
-	body                                         []byte
-	requests, snapshots, definitions             int
-	last                                         gitlab.SnapshotResult
+	reader interface {
+		Read(context.Context, pollsnapshot.Request) (pollsnapshot.Result, error)
+	}
+	repository, directory, projectID, pipelineID   string
+	provider, repositoryName, apiOrigin, targetSHA string
+	snapshotVersion, requestsPerSnapshot           int
+	mu                                             sync.Mutex
+	body                                           []byte
+	requests, snapshots, definitions               int
+	last                                           pollsnapshot.Result
 }
 
 func newRealStackPollingSource(t *testing.T, f *controllerWorkerFixture, directory string) *realStackPollingSource {
 	t.Helper()
-	s := &realStackPollingSource{directory: directory, projectID: f.projectID, pipelineID: f.pipelineID}
+	s := &realStackPollingSource{directory: directory, projectID: f.projectID, pipelineID: f.pipelineID, provider: model.RepoTypeGitLab, snapshotVersion: gitlab.SnapshotVersion, requestsPerSnapshot: 4}
 	const name = "acceptance/nested/configured-repository"
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
@@ -80,6 +85,7 @@ func newRealStackPollingSource(t *testing.T, f *controllerWorkerFixture, directo
 	}))
 	t.Cleanup(server.Close)
 	s.repository = server.URL + "/" + name
+	s.repositoryName, s.apiOrigin = name, server.URL
 	var err error
 	s.reader, err = gitlab.NewSnapshotReader(scm.ProviderConfig{Kind: scm.ProviderKindGitLab, BaseURL: server.URL}, server.Client(), gitlab.SnapshotLimits{})
 	if err != nil {
@@ -90,7 +96,16 @@ func newRealStackPollingSource(t *testing.T, f *controllerWorkerFixture, directo
 
 func (s *realStackPollingSource) observe(t *testing.T, sha, target string, at time.Time) {
 	t.Helper()
-	body, err := sonic.Marshal([]map[string]any{{"id": 901, "iid": 17, "project_id": 731, "state": "opened", "source_branch": "feature/observed-mr", "target_branch": target, "sha": sha, "updated_at": at.UTC().Format(time.RFC3339Nano)}})
+	item := map[string]any{"id": 901, "iid": 17, "project_id": 731, "state": "opened", "source_branch": "feature/observed-mr", "target_branch": target, "sha": sha, "updated_at": at.UTC().Format(time.RFC3339Nano)}
+	if s.provider != model.RepoTypeGitLab {
+		item = map[string]any{
+			"id": 901, "number": 17, "state": "open", "merged": false,
+			"created_at": "2025-01-01T00:00:00Z", "updated_at": at.UTC().Format(time.RFC3339Nano),
+			"head": map[string]any{"ref": "feature/observed-mr", "sha": sha, "repo_id": 732, "repo": map[string]any{"id": 732, "full_name": "contributor/source-fork"}},
+			"base": map[string]any{"ref": target, "sha": s.targetSHA, "repo_id": 731, "repo": map[string]any{"id": 731, "full_name": s.repositoryName}},
+		}
+	}
+	body, err := sonic.Marshal([]map[string]any{item})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,10 +114,10 @@ func (s *realStackPollingSource) observe(t *testing.T, sha, target string, at ti
 	s.mu.Unlock()
 }
 
-// Snapshot 使用真实 GitLab 快照解析器读取本地 TLS 合成响应
-func (s *realStackPollingSource) Snapshot(ctx context.Context, p *model.Project, request gitlab.SnapshotRequest) (gitlab.SnapshotResult, error) {
-	if p == nil || p.ProjectID != s.projectID || p.RepoURL != s.repository || p.RepoType != model.RepoTypeGitLab {
-		return gitlab.SnapshotResult{}, fmt.Errorf("unexpected synthetic project identity")
+// Snapshot 使用真实提供方快照解析器读取本地 TLS 合成响应
+func (s *realStackPollingSource) Snapshot(ctx context.Context, p *model.Project, request pollsnapshot.Request) (pollsnapshot.Result, error) {
+	if p == nil || p.ProjectID != s.projectID || p.RepoURL != s.repository || p.RepoType != s.provider || request.Repository != s.repositoryName {
+		return pollsnapshot.Result{}, fmt.Errorf("unexpected synthetic project identity")
 	}
 	result, err := s.reader.Read(ctx, request)
 	s.mu.Lock()
@@ -116,7 +131,7 @@ func (s *realStackPollingSource) Snapshot(ctx context.Context, p *model.Project,
 
 // Definition 在可信测试映射下克隆真实本地 Git，并读取指定提交的定义 blob
 func (s *realStackPollingSource) Definition(ctx context.Context, p *model.Pipeline, project *model.Project, commit string) (string, string, error) {
-	if p == nil || project == nil || p.PipelineID != s.pipelineID || p.ProjectID != s.projectID || project.ProjectID != s.projectID || p.RepoURL != s.repository || project.RepoURL != s.repository || p.DefaultBranch != "main" || p.PipelineFilePath != "pipeline.json" || project.AuthType != model.AuthTypeNone || project.Credential != "" {
+	if p == nil || project == nil || p.PipelineID != s.pipelineID || p.ProjectID != s.projectID || project.ProjectID != s.projectID || project.RepoType != s.provider || p.RepoURL != s.repository || project.RepoURL != s.repository || p.DefaultBranch != "main" || p.PipelineFilePath != "pipeline.json" || project.AuthType != model.AuthTypeNone || project.Credential != "" {
 		return "", "", fmt.Errorf("unexpected configured definition binding")
 	}
 	dir, err := os.MkdirTemp("", "arcentra-polling-acceptance-definition-*")
@@ -244,14 +259,60 @@ func realStackPollingActors(t *testing.T, f *controllerWorkerFixture, repositori
 	return actor, triggerGrant
 }
 
+// realStackAssertPolling keeps the original GitLab scenario names for existing CI,
+// and exercises GitHub/Gitea through the same infrastructure and execution assertions.
 func realStackAssertPolling(t *testing.T, f *controllerWorkerFixture, store realStackPollingDownloads, reference taskpayload.ArtifactReference) {
+	t.Helper()
+	for _, provider := range []string{model.RepoTypeGitLab, model.RepoTypeGitHub, model.RepoTypeGitea} {
+		var priorRuns []model.PipelineRun
+		if err := f.db.WithContext(f.ctx).Where("pipeline_id = ? AND triggered_by = ?", f.pipelineID, polling.Actor).Find(&priorRuns).Error; err != nil {
+			t.Fatal(err)
+		}
+		priorEvidence := make([]realStackAutomaticEvidence, 0, len(priorRuns))
+		for _, run := range priorRuns {
+			priorEvidence = append(priorEvidence, realStackReadAutomaticEvidence(t, f, run.RunID))
+		}
+		if provider != model.RepoTypeGitLab {
+			// Fixture setup only: remove the prior provider's paused stream. Immutable
+			// run, receipt, checkout and artifact evidence remains available for checks.
+			if err := f.db.WithContext(f.ctx).Where("project_id = ?", f.projectID).Delete(&model.SCMPollingStream{}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+		realStackAssertProviderPolling(t, f, store, reference, provider)
+		if t.Failed() {
+			return
+		}
+		for _, evidence := range priorEvidence {
+			if !reflect.DeepEqual(evidence, realStackReadAutomaticEvidence(t, f, evidence.Run.RunID)) {
+				t.Fatal("switching synthetic provider rewrote earlier provider execution evidence")
+			}
+		}
+	}
+}
+
+func realStackAssertProviderPolling(t *testing.T, f *controllerWorkerFixture, store realStackPollingDownloads, reference taskpayload.ArtifactReference, provider string) {
 	t.Helper()
 	realStackSanitizeGit(t)
 	repositories := repo.NewRepositories(workerTestDatabase{f.db}, nil)
 	actor, triggerGrant := realStackPollingActors(t, f, repositories)
 	directory, initial, observed := controllerCheckoutRepository(t, f.ctx)
 	controllerCheckoutGit(t, f.ctx, directory, "branch", "configured-job-source", initial)
-	source := newRealStackPollingSource(t, f, directory)
+	var source *realStackPollingSource
+	if provider == model.RepoTypeGitLab {
+		source = newRealStackPollingSource(t, f, directory)
+	} else {
+		source = newRealStackPRPollingSource(t, f, directory, provider)
+	}
+	source.targetSHA = initial
+	prefix := "polling_"
+	if provider != model.RepoTypeGitLab {
+		prefix += provider + "_"
+	}
+	expectedScope := polling.Scope{Version: source.snapshotVersion, ProjectID: f.projectID, Provider: provider, APIOrigin: source.apiOrigin, Repository: source.repository, ProviderProjectID: "731", Stream: "merge_requests"}
+	if provider != model.RepoTypeGitLab {
+		expectedScope.Stream = "pull_requests"
+	}
 	definition := &spec.Pipeline{Namespace: "controller-agent", Triggers: []*spec.Trigger{{Type: trigger.TriggerTypeEvent, Options: spec.MapAsStruct(map[string]any{trigger.OptionEventType: string(scm.EventTypeMergeRequest), trigger.OptionBranch: "main"})}}, Jobs: []*spec.Job{{Name: "polling-build", Source: &spec.Source{Type: "git", Repo: directory, Branch: "configured-job-source"}, Steps: []*spec.Step{
 		controllerWorkerShell("produce", `set -eu; test "$(cat source.txt)" = 'initial checkout'; printf x >> executions; mkdir -p dist; printf 'polling-configured-pipeline' > dist/polling.txt`),
 		{Name: "publish", Uses: "builtin:artifacts", Action: "upload", RunOnAgent: true, Args: spec.MapAsStruct(map[string]any{"paths": []any{"dist"}, "expireIn": "7d"})},
@@ -269,7 +330,7 @@ func realStackAssertPolling(t *testing.T, f *controllerWorkerFixture, store real
 	if initial == definitionCommit || observed == definitionCommit {
 		t.Fatal("fixture must distinguish observed MR, definition, and initial source revisions")
 	}
-	if err := repositories.Project.Update(f.ctx, f.projectID, map[string]any{"repo_type": model.RepoTypeGitLab, "repo_url": source.repository, "default_branch": "main", "trigger_mode": model.TriggerModeMR, "is_enabled": 1, "status": model.ProjectStatusActive, "auth_type": model.AuthTypeNone, "credential": ""}); err != nil {
+	if err := repositories.Project.Update(f.ctx, f.projectID, map[string]any{"repo_type": provider, "repo_url": source.repository, "default_branch": "main", "trigger_mode": model.TriggerModeMR, "is_enabled": 1, "status": model.ProjectStatusActive, "auth_type": model.AuthTypeNone, "credential": ""}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repositories.Pipeline.Update(f.ctx, f.pipelineID, map[string]any{"repo_url": source.repository, "default_branch": "main", "pipeline_file_path": "pipeline.json"}); err != nil {
@@ -297,7 +358,7 @@ func realStackAssertPolling(t *testing.T, f *controllerWorkerFixture, store real
 			t.Fatalf("polling did not durably complete the expected bounded batch: observations=%d targets=%d error=%v", row.LastObservationCount, row.LastTargetCount, err)
 		}
 	}
-	if !t.Run("polling_baseline_enable_changed_observation", func(t *testing.T) {
+	if !t.Run(prefix+"baseline_enable_changed_observation", func(t *testing.T) {
 		if err := service.PollOnce(f.ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -332,9 +393,19 @@ func realStackAssertPolling(t *testing.T, f *controllerWorkerFixture, store real
 		if err := service.PollOnce(f.ctx); err != nil {
 			t.Fatal(err)
 		}
+		source.mu.Lock()
+		last := source.last
+		source.mu.Unlock()
+		if len(last.Observations) != 1 {
+			t.Fatalf("expected one real reader observation, got %d", len(last.Observations))
+		}
+		expectedRequest, err := polling.EventRequestID(expectedScope, last.Observations[0].ObservationID)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var runs []model.PipelineRun
-		if err := f.db.WithContext(f.ctx).Where("pipeline_id = ? AND triggered_by = ?", f.pipelineID, polling.Actor).Find(&runs).Error; err != nil || len(runs) != 1 {
-			t.Fatalf("expected exactly one polling run: rows=%d error=%v", len(runs), err)
+		if err := f.db.WithContext(f.ctx).Where("pipeline_id = ? AND triggered_by = ? AND request_id = ?", f.pipelineID, polling.Actor, expectedRequest).Find(&runs).Error; err != nil || len(runs) != 1 {
+			t.Fatalf("expected exactly one provider-scoped polling run: rows=%d error=%v", len(runs), err)
 		}
 		run := f.waitRun(runs[0].RunID, model.PipelineStatusSuccess)
 		f.wait("polling terminal receipts acknowledged", func() bool {
@@ -344,8 +415,19 @@ func realStackAssertPolling(t *testing.T, f *controllerWorkerFixture, store real
 		})
 		completed = realStackReadAutomaticEvidence(t, f, run.RunID)
 		provenance, err := polling.ParseRunContext(run.PollingContext)
-		if err != nil || provenance.ActorID != actor || provenance.Target.MRID != 901 || provenance.Target.MRIID != 17 || provenance.Target.State != "opened" || provenance.Target.UpdatedAt == "" || provenance.Target.TargetBranch != "main" || provenance.Target.SourceBranch != "feature/observed-mr" || run.TriggeredBy != polling.Actor || run.CommitSha != observed || run.DefinitionCommitSha != definitionCommit || run.DefinitionPath != "pipeline.json" || run.Branch != "feature/observed-mr" || run.PollingContextDigest == "" || run.StartTime == nil || run.EndTime == nil || len(completed.Jobs) != 1 || len(completed.Steps) != 2 || len(completed.Artifacts) != 1 || engine.submissions != 1 || realStackAutomaticRunCount(t, f) != beforeRuns+1 {
+		if err != nil || provenance.Scope != expectedScope || provenance.Target.ObservationID != last.Observations[0].ObservationID || provenance.Target.RequestID != expectedRequest || provenance.Target.SourceSHA != observed || provenance.Target.DefinitionCommitSHA != definitionCommit || provenance.Target.DefinitionPath != "pipeline.json" || run.RequestID != expectedRequest || provenance.ActorID != actor || provenance.Target.MRID != 901 || provenance.Target.MRIID != 17 || provenance.Target.State != "opened" || provenance.Target.UpdatedAt == "" || provenance.Target.TargetBranch != "main" || provenance.Target.SourceBranch != "feature/observed-mr" || run.TriggeredBy != polling.Actor || run.CommitSha != observed || run.DefinitionCommitSha != definitionCommit || run.DefinitionPath != "pipeline.json" || run.Branch != "feature/observed-mr" || run.PollingContextDigest == "" || run.StartTime == nil || run.EndTime == nil || len(completed.Jobs) != 1 || len(completed.Steps) != 2 || len(completed.Artifacts) != 1 || engine.submissions != 1 || realStackAutomaticRunCount(t, f) != beforeRuns+1 {
 			t.Fatalf("configured polling run lost exact identity or execution evidence: %v", err)
+		}
+		if provider != model.RepoTypeGitLab {
+			if provenance.Target.SourceProjectID != 732 || provenance.Target.SourceRepository != "contributor/source-fork" || provenance.Target.TargetSHA != initial {
+				t.Fatal("persisted PR provenance lost source fork stable identity or target revision")
+			}
+			observation := last.Observations[0]
+			if last.Provider != provider || last.Version != pollsnapshot.Version || last.APIOrigin != source.apiOrigin || last.Repository != source.repositoryName || last.ProviderProjectID != 731 || !strings.HasPrefix(observation.ObservationID, provider+":pr:v2:") || observation.ProviderProjectID != 731 || observation.SourceProjectID != 732 || observation.SourceRepository != "contributor/source-fork" || observation.SourceSHA != observed || observation.TargetSHA != initial || observation.CreatedAt == nil {
+				t.Fatal("real PR reader lost provider, repository/fork stable IDs or source/target revision evidence")
+			}
+		} else if provenance.Target.SourceProjectID != 0 || provenance.Target.SourceRepository != "" || provenance.Target.TargetSHA != "" || strings.Contains(run.PollingContext, `"sourceProjectId"`) || strings.Contains(run.PollingContext, `"sourceRepository"`) || strings.Contains(run.PollingContext, `"targetSha"`) {
+			t.Fatal("legacy GitLab provenance unexpectedly acquired v2 PR fields")
 		}
 		job := completed.Jobs[0]
 		if job.Status != model.JobRunStatusSuccess || job.AgentID != f.conf.Agent.ID || job.SourceRepository != directory || job.SourceRef != "configured-job-source" || job.SourceResolvedCommit != initial || job.SourceResolvedCommit == run.CommitSha || job.SourceResolvedCommit == run.DefinitionCommitSha || job.SourceProvenanceState != "reported" || job.SourceBindingDigest == "" {
@@ -377,13 +459,13 @@ func realStackAssertPolling(t *testing.T, f *controllerWorkerFixture, store real
 		source.mu.Lock()
 		reads, snapshots, definitions := source.requests, source.snapshots, source.definitions
 		source.mu.Unlock()
-		if snapshots != 3 || reads != 12 || definitions != 2 {
+		if snapshots != 3 || reads != 3*source.requestsPerSnapshot || definitions != 2 {
 			t.Fatalf("expected actual two-pass parser and head/pinned Git reads, got requests=%d snapshots=%d definitions=%d", reads, snapshots, definitions)
 		}
 	}) || completed.Run == nil {
 		return
 	}
-	if !t.Run("polling_duplicate_no_execution", func(t *testing.T) {
+	if !t.Run(prefix+"duplicate_no_execution", func(t *testing.T) {
 		for range 2 {
 			if err := service.PollOnce(f.ctx); err != nil {
 				t.Fatal(err)
@@ -397,7 +479,7 @@ func realStackAssertPolling(t *testing.T, f *controllerWorkerFixture, store real
 	}) {
 		return
 	}
-	if !t.Run("polling_no_eligible_ref_completes", func(t *testing.T) {
+	if !t.Run(prefix+"no_eligible_ref_completes", func(t *testing.T) {
 		before := stream(t)
 		source.observe(t, observed, "release/unselected", time.Now())
 		if err := service.PollOnce(f.ctx); err != nil {
@@ -411,7 +493,7 @@ func realStackAssertPolling(t *testing.T, f *controllerWorkerFixture, store real
 	}) {
 		return
 	}
-	t.Run("polling_revoke_before_admission", func(t *testing.T) {
+	t.Run(prefix+"revoke_before_admission", func(t *testing.T) {
 		before := stream(t)
 		var deniedRunID, frozenBatch string
 		engine.beforeSubmit = func(run *model.PipelineRun) error {
@@ -435,7 +517,14 @@ func realStackAssertPolling(t *testing.T, f *controllerWorkerFixture, store real
 		if err != nil || after.State != polling.StatePaused || after.PauseReason != "authorization_denied" || after.ActivationGeneration <= before.ActivationGeneration || after.CursorJSON != before.CursorJSON || len(batch.Targets) != 1 || len(batch.Results) != 1 || batch.Results[0].RunID != deniedRunID || batch.Results[0].Outcome != polling.OutcomeRejected {
 			t.Fatalf("revocation lost safe paused state, unacknowledged batch, or typed rejection: %v", err)
 		}
+		if provider != model.RepoTypeGitLab && (batch.Targets[0].SourceProjectID != 732 || batch.Targets[0].SourceRepository != "contributor/source-fork" || batch.Targets[0].TargetSHA != initial) {
+			t.Fatal("revocation lost frozen PR repository provenance")
+		}
 		denied := realStackReadAutomaticEvidence(t, f, deniedRunID)
+		deniedProvenance, err := polling.ParseRunContext(denied.Run.PollingContext)
+		if err != nil || deniedProvenance.Scope != expectedScope || deniedProvenance.Target != batch.Targets[0] {
+			t.Fatalf("revoked run lost frozen provider observation evidence: %v", err)
+		}
 		if denied.Run.Status != model.PipelineStatusFailed || denied.Run.StartTime != nil || denied.Run.EndTime == nil || len(denied.Jobs) != 0 || len(denied.Steps) != 0 || len(denied.Artifacts) != 0 || realStackAutomaticRunCount(t, f) != beforeRuns+2 {
 			t.Fatal("revoked pending observation created execution evidence")
 		}

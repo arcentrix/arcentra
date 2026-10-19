@@ -32,7 +32,7 @@ type pollingFixture struct {
 	calls   [][]string
 }
 
-func newPollingFixture(t *testing.T) *pollingFixture {
+func newPollingFixture(t *testing.T, providers ...string) *pollingFixture {
 	t.Helper()
 	db, e := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "polling.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if e != nil {
@@ -49,10 +49,21 @@ func newPollingFixture(t *testing.T) *pollingFixture {
 		t.Fatal(e)
 	}
 	f := &pollingFixture{ctx: ctx, db: db, scope: polling.Scope{Version: 1, ProjectID: "project", Provider: "gitlab", APIOrigin: "https://gitlab.example.com", Repository: "https://gitlab.example.com/group/nested/repo", ProviderProjectID: "42", Stream: "merge_requests"}}
+	if len(providers) > 0 && providers[0] != "gitlab" {
+		f.scope.Provider = providers[0]
+		f.scope.Repository = "https://github.com/owner/repo"
+		if providers[0] == "gitea" {
+			f.scope.Repository = "https://gitea.example.com/owner/repo"
+		}
+		f.scope.Version, f.scope.APIOrigin, f.scope.Stream, e = polling.ProviderRepository(f.scope.Provider, f.scope.Repository)
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
 	f.streams = &SCMPollingRepo{IDatabase: statusTestDB{db}}
 	f.runs = &PipelineRepo{IDatabase: statusTestDB{db}}
 	f.repos = &Repositories{database: statusTestDB{db}}
-	for _, v := range []any{&model.Project{ProjectID: "project", OrgID: "org", RepoType: "gitlab", RepoURL: f.scope.Repository + ".git", DefaultBranch: "main", IsEnabled: 1, Status: model.ProjectStatusActive, TriggerMode: model.TriggerModeMR, Settings: []byte(`{"legacyCursor":"untouched"}`)}, &model.Pipeline{PipelineID: "pipeline", ProjectID: "project", RepoURL: f.scope.Repository, DefaultBranch: "main", PipelineFilePath: "pipeline.yaml", IsEnabled: 1, Metadata: "{}"}, &model.User{UserID: "actor", IsEnabled: 1}} {
+	for _, v := range []any{&model.Project{ProjectID: "project", OrgID: "org", RepoType: f.scope.Provider, RepoURL: f.scope.Repository + ".git", DefaultBranch: "main", IsEnabled: 1, Status: model.ProjectStatusActive, TriggerMode: model.TriggerModeMR, Settings: []byte(`{"legacyCursor":"untouched"}`)}, &model.Pipeline{PipelineID: "pipeline", ProjectID: "project", RepoURL: f.scope.Repository, DefaultBranch: "main", PipelineFilePath: "pipeline.yaml", IsEnabled: 1, Metadata: "{}"}, &model.User{UserID: "actor", IsEnabled: 1}} {
 		if e := db.WithContext(ctx).Create(v).Error; e != nil {
 			t.Fatal(e)
 		}
@@ -109,6 +120,12 @@ func (f *pollingFixture) capture(t *testing.T, s *model.SCMPollingStream, empty 
 		t.Fatal(e)
 	}
 	target := polling.Target{MRID: 7, MRIID: 7, State: "opened", UpdatedAt: "2026-10-16T16:00:00.123456789Z", PipelineID: "pipeline", ObservationID: "mr:7:revision:new", RequestID: key, SourceBranch: "feature", TargetBranch: "main", SourceSHA: strings.Repeat("a", 40), DefinitionCommitSHA: strings.Repeat("b", 40), DefinitionPath: "pipeline.yaml", ResolvedDefinitionDigest: "v1:" + strings.Repeat("c", 64)}
+	if f.scope.Version == polling.ScopeVersion2 {
+		target.SourceProjectID = 99
+		target.SourceRepository = "fork-owner/repo"
+		target.TargetSHA = strings.Repeat("d", 40)
+	}
+
 	targets := []polling.Target{target}
 	if empty {
 		targets = nil
@@ -147,207 +164,249 @@ func (f *pollingFixture) latest(t *testing.T) *model.SCMPollingStream {
 	return s
 }
 func TestPollingBaselineDefaultDisabledAndSeparateEnable(t *testing.T) {
-	f := newPollingFixture(t)
-	s, e := f.streams.GetByProject(f.ctx, "project")
-	if e != nil || s != nil {
-		t.Fatalf("implicit stream %+v %v", s, e)
-	}
-	s = f.baseline(t)
-	if s.State != polling.StateBaselined || s.EnabledBy != "" || s.SelectionJSON != "" {
-		t.Fatalf("baseline enables %+v", s)
-	}
-	var count int64
-	if e := f.db.WithContext(f.ctx).Model(&model.PipelineRun{}).Count(&count).Error; e != nil || count != 0 {
-		t.Fatal("baseline created runs")
-	}
-	var p model.Project
-	if e := f.db.WithContext(f.ctx).Select("settings").Where("project_id = ?", "project").First(&p).Error; e != nil || string(p.Settings) != `{"legacyCursor":"untouched"}` {
-		t.Fatal("settings changed")
-	}
-	for _, ids := range [][]string{nil, {"pipeline", "pipeline"}, {"missing"}} {
-		if _, e := f.streams.Enable(f.ctx, EnableInput{ProjectID: "project", ActorID: "actor", ExpectedRevision: s.Revision, BaselineID: s.BaselineID, PipelineIDs: ids}); e == nil {
-			t.Fatalf("bad selection accepted %v", ids)
-		}
-	}
-	if got := f.latest(t); got.Revision != s.Revision || got.State != polling.StateBaselined {
-		t.Fatal("failed enable mutated baseline")
-	}
-}
-func TestPollingBatchClaimReceiptAndCursorCAS(t *testing.T) {
-	f := newPollingFixture(t)
-	s, run := f.capture(t, f.enable(t), false)
-	before := s.CursorJSON
-	f.create(t, run)
-	if _, e := f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: "project", ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: "batch"}); !errors.Is(e, polling.ErrUnresolved) {
-		t.Fatalf("pending advanced %v", e)
-	}
-	result, e := f.runs.StartPollingRunIfPending(f.ctx, run)
-	if e != nil || !result.ClaimedNow || result.Outcome != polling.OutcomeAdmitted {
-		t.Fatalf("claim %+v %v", result, e)
-	}
-	if _, e := f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: "project", ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: "batch"}); !errors.Is(e, polling.ErrConflict) {
-		t.Fatalf("stale cursor CAS %v", e)
-	}
-	s = f.latest(t)
-	if s.CursorJSON != before || s.PendingBatchJSON == "" {
-		t.Fatal("failed cursor CAS lost batch")
-	}
-	dup, e := f.runs.CreatePollingRun(f.ctx, run)
-	if e != nil || dup.CreatedNow || dup.Outcome != polling.OutcomeAdmitted {
-		t.Fatalf("duplicate %+v %v", dup, e)
-	}
-	again, e := f.runs.StartPollingRunIfPending(f.ctx, run)
-	if e != nil || again.ClaimedNow || again.Outcome != polling.OutcomeAdmitted {
-		t.Fatalf("reclaim %+v %v", again, e)
-	}
-	s = f.latest(t)
-	s, e = f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: "project", ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: "batch"})
-	if e != nil || s.PendingBatchJSON != "" || s.CursorJSON == before {
-		t.Fatalf("ack %+v %v", s, e)
-	}
-}
-func TestPollingPendingDuplicateNeverResubmits(t *testing.T) {
-	f := newPollingFixture(t)
-	_, run := f.capture(t, f.enable(t), false)
-	f.create(t, run)
-	dup, e := f.runs.CreatePollingRun(f.ctx, run)
-	if e != nil || dup.CreatedNow || dup.Outcome != polling.OutcomeUnresolved {
-		t.Fatalf("pending replay %+v %v", dup, e)
-	}
-}
-func TestPollingRevocationPausesAndRetainsPending(t *testing.T) {
-	for _, stage := range []string{"create", "admit"} {
-		t.Run(stage, func(t *testing.T) {
-			f := newPollingFixture(t)
-			s, run := f.capture(t, f.enable(t), false)
-			if stage == "admit" {
-				f.create(t, run)
+	for _, provider := range []string{"gitlab", "github", "gitea"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newPollingFixture(t, provider)
+			s, e := f.streams.GetByProject(f.ctx, "project")
+			if e != nil || s != nil {
+				t.Fatalf("implicit stream %+v %v", s, e)
 			}
-			f.denied = true
-			if stage == "create" {
-				o, e := f.runs.CreatePollingRun(f.ctx, run)
-				if !errors.Is(e, polling.ErrForbidden) || o.CreatedNow {
-					t.Fatalf("revoked create %+v %v", o, e)
-				}
-			} else {
-				o, e := f.runs.StartPollingRunIfPending(f.ctx, run)
-				if !errors.Is(e, polling.ErrForbidden) || o.ClaimedNow {
-					t.Fatalf("revoked admission %+v %v", o, e)
+			s = f.baseline(t)
+			if s.State != polling.StateBaselined || s.EnabledBy != "" || s.SelectionJSON != "" {
+				t.Fatalf("baseline enables %+v", s)
+			}
+			var count int64
+			if e := f.db.WithContext(f.ctx).Model(&model.PipelineRun{}).Count(&count).Error; e != nil || count != 0 {
+				t.Fatal("baseline created runs")
+			}
+			var p model.Project
+			if e := f.db.WithContext(f.ctx).Select("settings").Where("project_id = ?", "project").First(&p).Error; e != nil || string(p.Settings) != `{"legacyCursor":"untouched"}` {
+				t.Fatal("settings changed")
+			}
+			for _, ids := range [][]string{nil, {"pipeline", "pipeline"}, {"missing"}} {
+				if _, e := f.streams.Enable(f.ctx, EnableInput{ProjectID: "project", ActorID: "actor", ExpectedRevision: s.Revision, BaselineID: s.BaselineID, PipelineIDs: ids}); e == nil {
+					t.Fatalf("bad selection accepted %v", ids)
 				}
 			}
-			paused := f.latest(t)
-			if paused.State != polling.StatePaused || paused.PauseReason != "authorization_denied" || paused.PendingBatchJSON == "" || paused.CursorJSON != s.CursorJSON || paused.ActivationGeneration <= s.ActivationGeneration {
-				t.Fatalf("lost pause evidence %+v", paused)
+			if got := f.latest(t); got.Revision != s.Revision || got.State != polling.StateBaselined {
+				t.Fatal("failed enable mutated baseline")
 			}
-			if stage == "admit" {
-				stored, e := f.runs.GetRun(f.ctx, run.RunID)
-				if e != nil || stored.Status != model.PipelineStatusFailed || stored.StartTime != nil || stored.EndTime == nil {
-					t.Fatal("definitive denial left orphan pending")
-				}
-				batch, e := polling.ParseBatch(paused.PendingBatchJSON)
-				if e != nil || len(batch.Results) != 1 || batch.Results[0].Outcome != polling.OutcomeRejected {
-					t.Fatal("denial receipt missing")
-				}
-			}
-			f.denied = false
-			if o, e := f.runs.StartPollingRunIfPending(f.ctx, run); e == nil || o.ClaimedNow {
-				t.Fatal("grant restoration revived paused activation")
-			}
+
 		})
 	}
 }
+
+func TestPollingBatchClaimReceiptAndCursorCAS(t *testing.T) {
+	for _, provider := range []string{"gitlab", "github", "gitea"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newPollingFixture(t, provider)
+			s, run := f.capture(t, f.enable(t), false)
+			before := s.CursorJSON
+			f.create(t, run)
+			if _, e := f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: "project", ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: "batch"}); !errors.Is(e, polling.ErrUnresolved) {
+				t.Fatalf("pending advanced %v", e)
+			}
+			result, e := f.runs.StartPollingRunIfPending(f.ctx, run)
+			if e != nil || !result.ClaimedNow || result.Outcome != polling.OutcomeAdmitted {
+				t.Fatalf("claim %+v %v", result, e)
+			}
+			if _, e := f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: "project", ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: "batch"}); !errors.Is(e, polling.ErrConflict) {
+				t.Fatalf("stale cursor CAS %v", e)
+			}
+			s = f.latest(t)
+			if s.CursorJSON != before || s.PendingBatchJSON == "" {
+				t.Fatal("failed cursor CAS lost batch")
+			}
+			dup, e := f.runs.CreatePollingRun(f.ctx, run)
+			if e != nil || dup.CreatedNow || dup.Outcome != polling.OutcomeAdmitted {
+				t.Fatalf("duplicate %+v %v", dup, e)
+			}
+			again, e := f.runs.StartPollingRunIfPending(f.ctx, run)
+			if e != nil || again.ClaimedNow || again.Outcome != polling.OutcomeAdmitted {
+				t.Fatalf("reclaim %+v %v", again, e)
+			}
+			s = f.latest(t)
+			s, e = f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: "project", ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: "batch"})
+			if e != nil || s.PendingBatchJSON != "" || s.CursorJSON == before {
+				t.Fatalf("ack %+v %v", s, e)
+			}
+
+		})
+	}
+}
+
+func TestPollingPendingDuplicateNeverResubmits(t *testing.T) {
+	for _, provider := range []string{"gitlab", "github", "gitea"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newPollingFixture(t, provider)
+			_, run := f.capture(t, f.enable(t), false)
+			f.create(t, run)
+			dup, e := f.runs.CreatePollingRun(f.ctx, run)
+			if e != nil || dup.CreatedNow || dup.Outcome != polling.OutcomeUnresolved {
+				t.Fatalf("pending replay %+v %v", dup, e)
+			}
+
+		})
+	}
+}
+
+func TestPollingRevocationPausesAndRetainsPending(t *testing.T) {
+	for _, provider := range []string{"gitlab", "github", "gitea"} {
+		t.Run(provider, func(t *testing.T) {
+			for _, stage := range []string{"create", "admit"} {
+				t.Run(stage, func(t *testing.T) {
+					f := newPollingFixture(t, provider)
+					s, run := f.capture(t, f.enable(t), false)
+					if stage == "admit" {
+						f.create(t, run)
+					}
+					f.denied = true
+					if stage == "create" {
+						o, e := f.runs.CreatePollingRun(f.ctx, run)
+						if !errors.Is(e, polling.ErrForbidden) || o.CreatedNow {
+							t.Fatalf("revoked create %+v %v", o, e)
+						}
+					} else {
+						o, e := f.runs.StartPollingRunIfPending(f.ctx, run)
+						if !errors.Is(e, polling.ErrForbidden) || o.ClaimedNow {
+							t.Fatalf("revoked admission %+v %v", o, e)
+						}
+					}
+					paused := f.latest(t)
+					if paused.State != polling.StatePaused || paused.PauseReason != "authorization_denied" || paused.PendingBatchJSON == "" || paused.CursorJSON != s.CursorJSON || paused.ActivationGeneration <= s.ActivationGeneration {
+						t.Fatalf("lost pause evidence %+v", paused)
+					}
+					if stage == "admit" {
+						stored, e := f.runs.GetRun(f.ctx, run.RunID)
+						if e != nil || stored.Status != model.PipelineStatusFailed || stored.StartTime != nil || stored.EndTime == nil {
+							t.Fatal("definitive denial left orphan pending")
+						}
+						batch, e := polling.ParseBatch(paused.PendingBatchJSON)
+						if e != nil || len(batch.Results) != 1 || batch.Results[0].Outcome != polling.OutcomeRejected {
+							t.Fatal("denial receipt missing")
+						}
+					}
+					f.denied = false
+					if o, e := f.runs.StartPollingRunIfPending(f.ctx, run); e == nil || o.ClaimedNow {
+						t.Fatal("grant restoration revived paused activation")
+					}
+				})
+			}
+
+		})
+	}
+}
+
 func TestPollingDisableAndUnknownStoreErrorsCannotClaim(t *testing.T) {
-	f := newPollingFixture(t)
-	s, run := f.capture(t, f.enable(t), false)
-	f.create(t, run)
-	f.failure = fmt.Errorf("authorization store unavailable")
-	o, e := f.runs.StartPollingRunIfPending(f.ctx, run)
-	if e == nil || o.ClaimedNow {
-		t.Fatal("store error claimed")
-	}
-	f.failure = nil
-	s, e = f.streams.Disable(f.ctx, DisableInput{ProjectID: "project", ActorID: "actor", ExpectedRevision: s.Revision})
-	if e != nil {
-		t.Fatal(e)
-	}
-	o, e = f.runs.StartPollingRunIfPending(f.ctx, run)
-	if e == nil || o.ClaimedNow {
-		t.Fatal("disabled generation claimed")
-	}
-	stored, e := f.runs.GetRun(f.ctx, run.RunID)
-	if e != nil || stored.Status != model.PipelineStatusPending || stored.StartTime != nil {
-		t.Fatal("fail closed mutated pending run")
-	}
-	if s.PendingBatchJSON == "" {
-		t.Fatal("disable discarded batch")
+	for _, provider := range []string{"gitlab", "github", "gitea"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newPollingFixture(t, provider)
+			s, run := f.capture(t, f.enable(t), false)
+			f.create(t, run)
+			f.failure = fmt.Errorf("authorization store unavailable")
+			o, e := f.runs.StartPollingRunIfPending(f.ctx, run)
+			if e == nil || o.ClaimedNow {
+				t.Fatal("store error claimed")
+			}
+			f.failure = nil
+			s, e = f.streams.Disable(f.ctx, DisableInput{ProjectID: "project", ActorID: "actor", ExpectedRevision: s.Revision})
+			if e != nil {
+				t.Fatal(e)
+			}
+			o, e = f.runs.StartPollingRunIfPending(f.ctx, run)
+			if e == nil || o.ClaimedNow {
+				t.Fatal("disabled generation claimed")
+			}
+			stored, e := f.runs.GetRun(f.ctx, run.RunID)
+			if e != nil || stored.Status != model.PipelineStatusPending || stored.StartTime != nil {
+				t.Fatal("fail closed mutated pending run")
+			}
+			if s.PendingBatchJSON == "" {
+				t.Fatal("disable discarded batch")
+			}
+
+		})
 	}
 }
+
 func TestPollingRejectIsTypedAndEmptyBatchAdvances(t *testing.T) {
-	t.Run("typed rejection", func(t *testing.T) {
-		f := newPollingFixture(t)
-		_, run := f.capture(t, f.enable(t), false)
-		f.create(t, run)
-		o, e := f.runs.RejectPendingPollingRun(f.ctx, run)
-		if e != nil || o.Outcome != polling.OutcomeRejected || o.ClaimedNow {
-			t.Fatalf("reject %+v %v", o, e)
-		}
-		s := f.latest(t)
-		if _, e := f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: "project", ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: "batch"}); e != nil {
-			t.Fatal(e)
-		}
-	})
-	t.Run("empty", func(t *testing.T) {
-		f := newPollingFixture(t)
-		s, _ := f.capture(t, f.enable(t), true)
-		if _, e := f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: "project", ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: "batch"}); e != nil {
-			t.Fatal(e)
-		}
-	})
-	t.Run("untyped failure", func(t *testing.T) {
-		f := newPollingFixture(t)
-		s, run := f.capture(t, f.enable(t), false)
-		f.create(t, run)
-		if e := f.db.WithContext(f.ctx).Model(&model.PipelineRun{}).Where("run_id = ?", run.RunID).Updates(map[string]any{"status": model.PipelineStatusFailed, "end_time": time.Now()}).Error; e != nil {
-			t.Fatal(e)
-		}
-		if _, e := f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: "project", ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: "batch"}); !errors.Is(e, polling.ErrUnresolved) {
-			t.Fatalf("untyped failure acknowledged %v", e)
-		}
-	})
+	for _, provider := range []string{"gitlab", "github", "gitea"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Run("typed rejection", func(t *testing.T) {
+				f := newPollingFixture(t, provider)
+				_, run := f.capture(t, f.enable(t), false)
+				f.create(t, run)
+				o, e := f.runs.RejectPendingPollingRun(f.ctx, run)
+				if e != nil || o.Outcome != polling.OutcomeRejected || o.ClaimedNow {
+					t.Fatalf("reject %+v %v", o, e)
+				}
+				s := f.latest(t)
+				if _, e := f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: "project", ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: "batch"}); e != nil {
+					t.Fatal(e)
+				}
+			})
+			t.Run("empty", func(t *testing.T) {
+				f := newPollingFixture(t, provider)
+				s, _ := f.capture(t, f.enable(t), true)
+				if _, e := f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: "project", ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: "batch"}); e != nil {
+					t.Fatal(e)
+				}
+			})
+			t.Run("untyped failure", func(t *testing.T) {
+				f := newPollingFixture(t, provider)
+				s, run := f.capture(t, f.enable(t), false)
+				f.create(t, run)
+				if e := f.db.WithContext(f.ctx).Model(&model.PipelineRun{}).Where("run_id = ?", run.RunID).Updates(map[string]any{"status": model.PipelineStatusFailed, "end_time": time.Now()}).Error; e != nil {
+					t.Fatal(e)
+				}
+				if _, e := f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: "project", ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: "batch"}); !errors.Is(e, polling.ErrUnresolved) {
+					t.Fatalf("untyped failure acknowledged %v", e)
+				}
+			})
+
+		})
+	}
 }
+
 func TestPollingGenericCreationAndIdentityChangesRejected(t *testing.T) {
-	f := newPollingFixture(t)
-	_, run := f.capture(t, f.enable(t), false)
-	if e := f.runs.CreateRun(f.ctx, run); e == nil {
-		t.Fatal("generic create forged polling context")
-	}
-	if e := f.runs.CreateRetryApprovalRun(f.ctx, run); e == nil {
-		t.Fatal("retry create forged polling context")
-	}
-	for _, k := range []string{"polling_context", "PollingContext", "polling_context_digest", "PollingContextDigest"} {
-		if e := f.runs.UpdateRun(f.ctx, "run", map[string]any{k: "forged"}); e == nil {
-			t.Fatalf("mutable context %s", k)
-		}
-	}
-	for _, mutate := range []func(*model.PipelineRun){func(r *model.PipelineRun) { r.TriggeredBy = "webhook" }, func(r *model.PipelineRun) { r.TriggerType = 1 }, func(r *model.PipelineRun) { r.RequestID += "x" }, func(r *model.PipelineRun) { r.CommitSha = strings.Repeat("f", 40) }, func(r *model.PipelineRun) { r.PollingContextDigest = "" }, func(r *model.PipelineRun) { r.AllowDeployments = true }} {
-		copy := *run
-		mutate(&copy)
-		if o, e := f.runs.CreatePollingRun(f.ctx, &copy); e == nil || o.CreatedNow {
-			t.Fatal("changed identity created")
-		}
-		if IsAutomaticPipelineRun(&copy) {
-			t.Fatal("polling context accepted as legacy automatic")
-		}
-	}
-	f.create(t, run)
-	for _, mutate := range []func(*model.PipelineRun){func(r *model.PipelineRun) { r.Env = `{"INJECT":"x"}` }, func(r *model.PipelineRun) { r.RunID = "RUN" }} {
-		copy := *run
-		mutate(&copy)
-		if o, e := f.runs.StartPollingRunIfPending(f.ctx, &copy); e == nil && o.ClaimedNow {
-			t.Fatal("changed admission identity claimed")
-		}
+	for _, provider := range []string{"gitlab", "github", "gitea"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newPollingFixture(t, provider)
+			_, run := f.capture(t, f.enable(t), false)
+			if e := f.runs.CreateRun(f.ctx, run); e == nil {
+				t.Fatal("generic create forged polling context")
+			}
+			if e := f.runs.CreateRetryApprovalRun(f.ctx, run); e == nil {
+				t.Fatal("retry create forged polling context")
+			}
+			for _, k := range []string{"polling_context", "PollingContext", "polling_context_digest", "PollingContextDigest"} {
+				if e := f.runs.UpdateRun(f.ctx, "run", map[string]any{k: "forged"}); e == nil {
+					t.Fatalf("mutable context %s", k)
+				}
+			}
+			for _, mutate := range []func(*model.PipelineRun){func(r *model.PipelineRun) { r.TriggeredBy = "webhook" }, func(r *model.PipelineRun) { r.TriggerType = 1 }, func(r *model.PipelineRun) { r.RequestID += "x" }, func(r *model.PipelineRun) { r.CommitSha = strings.Repeat("f", 40) }, func(r *model.PipelineRun) { r.PollingContextDigest = "" }, func(r *model.PipelineRun) { r.AllowDeployments = true }} {
+				copy := *run
+				mutate(&copy)
+				if o, e := f.runs.CreatePollingRun(f.ctx, &copy); e == nil || o.CreatedNow {
+					t.Fatal("changed identity created")
+				}
+				if IsAutomaticPipelineRun(&copy) {
+					t.Fatal("polling context accepted as legacy automatic")
+				}
+			}
+			f.create(t, run)
+			for _, mutate := range []func(*model.PipelineRun){func(r *model.PipelineRun) { r.Env = `{"INJECT":"x"}` }, func(r *model.PipelineRun) { r.RunID = "RUN" }} {
+				copy := *run
+				mutate(&copy)
+				if o, e := f.runs.StartPollingRunIfPending(f.ctx, &copy); e == nil && o.ClaimedNow {
+					t.Fatal("changed admission identity claimed")
+				}
+			}
+
+		})
 	}
 }
+
 func TestPollingUnresolvedPendingPreventsRebaselineDiscard(t *testing.T) {
 	f := newPollingFixture(t)
 	s, run := f.capture(t, f.enable(t), false)
@@ -402,42 +461,48 @@ func unknownCommitPipelineRepo(t *testing.T, f *pollingFixture) *PipelineRepo {
 	return &PipelineRepo{IDatabase: statusTestDB{db}}
 }
 func TestPollingUnknownCommitNeverAuthorizesScheduling(t *testing.T) {
-	for _, stage := range []string{"create", "claim"} {
-		t.Run(stage, func(t *testing.T) {
-			f := newPollingFixture(t)
-			_, run := f.capture(t, f.enable(t), false)
-			uncertain := unknownCommitPipelineRepo(t, f)
-			if stage == "create" {
-				o, e := uncertain.CreatePollingRun(f.ctx, run)
-				if e == nil || o.CreatedNow || o.Outcome != polling.OutcomeUnresolved {
-					t.Fatalf("uncertain create %+v %v", o, e)
-				}
-				stored, e := f.runs.GetRun(f.ctx, run.RunID)
-				if e != nil || stored.Status != model.PipelineStatusPending {
-					t.Fatal("fault did not commit pending row")
-				}
-				dup, e := f.runs.CreatePollingRun(f.ctx, run)
-				if e != nil || dup.CreatedNow || dup.Outcome != polling.OutcomeUnresolved {
-					t.Fatal("lost create replayed pending")
-				}
-			} else {
-				f.create(t, run)
-				o, e := uncertain.StartPollingRunIfPending(f.ctx, run)
-				if e == nil || o.ClaimedNow || o.Outcome != polling.OutcomeUnresolved {
-					t.Fatalf("uncertain claim %+v %v", o, e)
-				}
-				stored, e := f.runs.GetRun(f.ctx, run.RunID)
-				if e != nil || stored.Status != model.PipelineStatusRunning {
-					t.Fatal("fault did not commit claim")
-				}
-				again, e := f.runs.StartPollingRunIfPending(f.ctx, run)
-				if e != nil || again.ClaimedNow || again.Outcome != polling.OutcomeAdmitted {
-					t.Fatal("unknown claim replayed scheduling")
-				}
+	for _, provider := range []string{"gitlab", "github", "gitea"} {
+		t.Run(provider, func(t *testing.T) {
+			for _, stage := range []string{"create", "claim"} {
+				t.Run(stage, func(t *testing.T) {
+					f := newPollingFixture(t, provider)
+					_, run := f.capture(t, f.enable(t), false)
+					uncertain := unknownCommitPipelineRepo(t, f)
+					if stage == "create" {
+						o, e := uncertain.CreatePollingRun(f.ctx, run)
+						if e == nil || o.CreatedNow || o.Outcome != polling.OutcomeUnresolved {
+							t.Fatalf("uncertain create %+v %v", o, e)
+						}
+						stored, e := f.runs.GetRun(f.ctx, run.RunID)
+						if e != nil || stored.Status != model.PipelineStatusPending {
+							t.Fatal("fault did not commit pending row")
+						}
+						dup, e := f.runs.CreatePollingRun(f.ctx, run)
+						if e != nil || dup.CreatedNow || dup.Outcome != polling.OutcomeUnresolved {
+							t.Fatal("lost create replayed pending")
+						}
+					} else {
+						f.create(t, run)
+						o, e := uncertain.StartPollingRunIfPending(f.ctx, run)
+						if e == nil || o.ClaimedNow || o.Outcome != polling.OutcomeUnresolved {
+							t.Fatalf("uncertain claim %+v %v", o, e)
+						}
+						stored, e := f.runs.GetRun(f.ctx, run.RunID)
+						if e != nil || stored.Status != model.PipelineStatusRunning {
+							t.Fatal("fault did not commit claim")
+						}
+						again, e := f.runs.StartPollingRunIfPending(f.ctx, run)
+						if e != nil || again.ClaimedNow || again.Outcome != polling.OutcomeAdmitted {
+							t.Fatal("unknown claim replayed scheduling")
+						}
+					}
+				})
 			}
+
 		})
 	}
 }
+
 func TestPollingBackoffPreservesProgressAndSummaryOnlyAtAck(t *testing.T) {
 	f := newPollingFixture(t)
 	s := f.enable(t)
@@ -696,5 +761,134 @@ func TestPollingNewBaselineClearsOldScopeBackoffAndSummaries(t *testing.T) {
 	due, e := f.streams.ListEnabled(f.ctx)
 	if e != nil || len(due) != 1 || due[0].StreamID != s.StreamID {
 		t.Fatal("new explicit activation inherited stale provider delay", e)
+	}
+}
+
+// These are sequential durable semantics tests, not SQLite concurrency evidence.
+func TestPollingNewProvidersCurrentProjectScopeGuard(t *testing.T) {
+	for _, provider := range []string{"github", "gitea"} {
+		t.Run(provider, func(t *testing.T) {
+			for _, field := range []string{"repo_type", "repo_url", "status"} {
+				t.Run(field, func(t *testing.T) {
+					f := newPollingFixture(t, provider)
+					s, run := f.capture(t, f.enable(t), false)
+					var value any = "gitee"
+					if field == "repo_url" {
+						value = f.scope.Repository + "-different"
+					}
+					if field == "status" {
+						value = model.ProjectStatusArchived
+					}
+					// Deliberately bypass the configuration mutator's proactive pause to prove
+					// the locked current-project check itself prevents stale authorization.
+					if err := f.db.Model(&model.Project{}).Where("project_id = ?", "project").Update(field, value).Error; err != nil {
+						t.Fatal(err)
+					}
+					outcome, err := f.runs.CreatePollingRun(f.ctx, run)
+					if err == nil || outcome.CreatedNow {
+						t.Fatal("changed current project accepted stale scope")
+					}
+					latest := f.latest(t)
+					if latest.CursorJSON != s.CursorJSON || latest.PendingBatchJSON == "" {
+						t.Fatal("scope invalidation lost pending evidence")
+					}
+				})
+			}
+			t.Run("stable_repository_id", func(t *testing.T) {
+				f := newPollingFixture(t, provider)
+				_, run := f.capture(t, f.enable(t), false)
+				evidence, err := polling.ParseRunContext(run.PollingContext)
+				if err != nil {
+					t.Fatal(err)
+				}
+				evidence.Scope.ProviderProjectID = "43"
+				evidence.ScopeDigest, err = evidence.Scope.Digest()
+				if err != nil {
+					t.Fatal(err)
+				}
+				evidence.Target.RequestID, err = polling.EventRequestID(evidence.Scope, evidence.Target.ObservationID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				run.RequestID = evidence.Target.RequestID
+				run.PollingContext, err = evidence.Canonical()
+				if err != nil {
+					t.Fatal(err)
+				}
+				run.PollingContextDigest, err = evidence.Digest()
+				if err != nil {
+					t.Fatal(err)
+				}
+				outcome, err := f.runs.CreatePollingRun(f.ctx, run)
+				if err == nil || outcome.CreatedNow {
+					t.Fatal("changed stable repository identity admitted")
+				}
+			})
+		})
+	}
+}
+
+func TestPollingSourceProvenanceImmutableAcrossDurableAdmission(t *testing.T) {
+	for _, provider := range []string{"github", "gitea"} {
+		t.Run(provider, func(t *testing.T) {
+			f := newPollingFixture(t, provider)
+			stream, run := f.capture(t, f.enable(t), false)
+			batch, err := polling.ParseBatch(stream.PendingBatchJSON)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original, err := polling.ParseRunContext(run.PollingContext)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if batch.Targets[0] != original.Target || original.Target.SourceProjectID != 99 || original.Target.SourceRepository != "fork-owner/repo" || original.Target.TargetSHA != strings.Repeat("d", 40) {
+				t.Fatal("durable batch lost fork/base provenance")
+			}
+			for _, mutate := range []func(*polling.Target){func(t *polling.Target) { t.SourceProjectID = 100 }, func(t *polling.Target) { t.SourceRepository = "different/repo" }, func(t *polling.Target) { t.TargetSHA = strings.Repeat("e", 40) }, func(t *polling.Target) { t.SourceProjectID = 0; t.SourceRepository = ""; t.TargetSHA = "" }} {
+				changed := *original
+				mutate(&changed.Target)
+				copy := *run
+				copy.PollingContext, err = changed.Canonical()
+				if err != nil {
+					t.Fatal(err)
+				}
+				copy.PollingContextDigest, err = changed.Digest()
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err := f.runs.CreatePollingRun(f.ctx, &copy)
+				if err == nil || result.CreatedNow {
+					t.Fatal("mutated provenance created run")
+				}
+			}
+			f.create(t, run)
+			stored, err := f.runs.GetRun(f.ctx, run.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			restored, err := polling.ParseRunContext(stored.PollingContext)
+			if err != nil || restored.Target != original.Target {
+				t.Fatal("stored run lost provenance")
+			}
+			changed := *original
+			changed.Target.SourceProjectID++
+			copy := *run
+			copy.PollingContext, err = changed.Canonical()
+			if err != nil {
+				t.Fatal(err)
+			}
+			copy.PollingContextDigest, err = changed.Digest()
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := f.runs.StartPollingRunIfPending(f.ctx, &copy)
+			if err == nil || result.ClaimedNow {
+				t.Fatal("mutated provenance admitted")
+			}
+			result, err = f.runs.StartPollingRunIfPending(f.ctx, run)
+			if err != nil || !result.ClaimedNow {
+				t.Fatalf("original provenance failed admission: %v", err)
+			}
+		})
 	}
 }

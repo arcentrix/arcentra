@@ -198,11 +198,19 @@ jobs:
               TestRealStackAcceptance/polling_baseline_enable_changed_observation \
               TestRealStackAcceptance/polling_duplicate_no_execution \
               TestRealStackAcceptance/polling_no_eligible_ref_completes \
-              TestRealStackAcceptance/polling_revoke_before_admission
+              TestRealStackAcceptance/polling_revoke_before_admission \
+              TestRealStackAcceptance/polling_github_baseline_enable_changed_observation \
+              TestRealStackAcceptance/polling_github_duplicate_no_execution \
+              TestRealStackAcceptance/polling_github_no_eligible_ref_completes \
+              TestRealStackAcceptance/polling_github_revoke_before_admission \
+              TestRealStackAcceptance/polling_gitea_baseline_enable_changed_observation \
+              TestRealStackAcceptance/polling_gitea_duplicate_no_execution \
+              TestRealStackAcceptance/polling_gitea_no_eligible_ref_completes \
+              TestRealStackAcceptance/polling_gitea_revoke_before_admission
           done
           go test -race -count=1 -timeout=2m -run '^TestRegisterLoginWithRealRedis$' ./internal/control/service
 
-      - name: Verify GitLab polling durable activation with actual MySQL
+      - name: Verify provider polling durable activation with actual MySQL
         timeout-minutes: 5
         run: |
           set -o pipefail
@@ -221,7 +229,27 @@ jobs:
               TestPollingMySQLAcceptance/pipeline_configuration_wins_before_admission \
               TestPollingMySQLAcceptance/admission_wins_and_later_disable_preserves_receipt \
               TestPollingMySQLAcceptance/concurrent_duplicate_creation_has_one_created_now \
-              TestPollingMySQLAcceptance/cursor_cas_failure_replays_without_reclaim
+              TestPollingMySQLAcceptance/cursor_cas_failure_replays_without_reclaim \
+              TestPollingMySQLAcceptance/github/empty_eligible_targets_completes_without_build \
+              TestPollingMySQLAcceptance/github/committed_scope_revocation_defeats_repeatable_read_snapshot \
+              TestPollingMySQLAcceptance/github/disable_wins_before_admission \
+              TestPollingMySQLAcceptance/github/project_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/github/pipeline_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/github/provider_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/github/archive_wins_before_admission \
+              TestPollingMySQLAcceptance/github/admission_wins_and_later_disable_preserves_receipt \
+              TestPollingMySQLAcceptance/github/concurrent_duplicate_creation_has_one_created_now \
+              TestPollingMySQLAcceptance/github/cursor_cas_failure_replays_without_reclaim \
+              TestPollingMySQLAcceptance/gitea/empty_eligible_targets_completes_without_build \
+              TestPollingMySQLAcceptance/gitea/committed_scope_revocation_defeats_repeatable_read_snapshot \
+              TestPollingMySQLAcceptance/gitea/disable_wins_before_admission \
+              TestPollingMySQLAcceptance/gitea/project_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/gitea/pipeline_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/gitea/provider_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/gitea/archive_wins_before_admission \
+              TestPollingMySQLAcceptance/gitea/admission_wins_and_later_disable_preserves_receipt \
+              TestPollingMySQLAcceptance/gitea/concurrent_duplicate_creation_has_one_created_now \
+              TestPollingMySQLAcceptance/gitea/cursor_cas_failure_replays_without_reclaim
           done
 
       - name: Verify scoped membership and archive admission with actual MySQL
@@ -322,7 +350,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: 905bdbaea197b6101a9f302155d5b53712e7e614
+          ref: 2e2914511ab3ec3dfc1225e63027ec5e362d4470
           path: .acceptance/frontend
           persist-credentials: false
 
