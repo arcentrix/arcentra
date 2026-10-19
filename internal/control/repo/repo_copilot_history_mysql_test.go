@@ -193,26 +193,63 @@ func TestCopilotHistoryMySQLRealRequiredGate(t *testing.T) {
 			duplicate.TurnID = "new-unique-id"
 			duplicate.Sequence = 199
 			require.Error(t, db.Create(&duplicate).Error)
-			// Meaningful fixture exercises the owner/project descending keyset index.
+			historyConversationCapacityTest(t, db)
+			t.Logf("history retained owner-cap concurrent proof passed: %s", collation)
+			// Mixed fixture exercises the exact scoped descending candidate query.
 			now := time.Now().UTC()
 			rows := make([]model.CopilotConversation, 0, 4000)
 			for i := 0; i < 4000; i++ {
-				owner := "plan-owner"
+				owner, project, state := "plan-owner", "plan-project", "active"
+				expiry := now.Add(time.Hour)
 				if i%4 != 0 {
-					owner = "irrelevant-owner"
+					owner = fmt.Sprintf("irrelevant-owner-%d", i%4)
+				} else {
+					switch (i / 4) % 10 {
+					case 1:
+						project = "other-project"
+					case 2:
+						state = "deleted"
+					case 3:
+						expiry = now.Add(-time.Hour)
+					}
 				}
 				id := fmt.Sprintf("plan-fixture-%05d", i)
-				rows = append(rows, model.CopilotConversation{ConversationID: id, OwnerUserID: owner, ProjectID: "plan-project", PipelineID: "plan-pipeline", RunID: "plan-run", CreateRequestID: id, CreateFingerprint: id, State: "active", Version: 1, NextSequence: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour), TombstoneUntil: now.Add(24 * time.Hour)})
+				rows = append(rows, model.CopilotConversation{ConversationID: id, OwnerUserID: owner, ProjectID: project, PipelineID: "plan-pipeline", RunID: "plan-run", CreateRequestID: id, CreateFingerprint: id, State: state, Version: 1, NextSequence: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: expiry, TombstoneUntil: now.Add(24 * time.Hour)})
 			}
 			require.NoError(t, db.CreateInBatches(rows, 100).Error)
-			var plan []struct {
-				Key  *string
-				Rows int64
+			// Use the production candidate-page size and full row projection. Do not
+			// force a preferred index or confuse an optimizer estimate with work.
+			const listSQL = "SELECT * FROM copilot_conversation WHERE owner_user_id = ? AND project_id = ? AND id < ? AND state = 'active' AND expires_at > ? ORDER BY id DESC LIMIT 201"
+			cursor := rows[3800].ID
+			args := []any{"plan-owner", "plan-project", cursor, now}
+			var expected []uint64
+			for i := len(rows) - 1; i >= 0 && len(expected) < 201; i-- {
+				row := rows[i]
+				if row.ID < cursor && row.OwnerUserID == "plan-owner" && row.ProjectID == "plan-project" && row.State == "active" && row.ExpiresAt.After(now) {
+					expected = append(expected, uint64(row.ID))
+				}
 			}
-			require.NoError(t, db.Raw("EXPLAIN SELECT id, conversation_id FROM copilot_conversation WHERE owner_user_id = ? AND project_id = ? AND id < ? AND state = 'active' AND expires_at > ? ORDER BY id DESC LIMIT 20", "plan-owner", "plan-project", rows[len(rows)-1].ID, now).Scan(&plan).Error)
-			require.Len(t, plan, 1)
-			require.NotNil(t, plan[0].Key)
-			require.Equal(t, "idx_copilot_conversation_owner", *plan[0].Key)
+			require.Len(t, expected, 201)
+			var planJSON, execution string
+			require.NoError(t, db.Raw("EXPLAIN FORMAT=JSON "+listSQL, args...).Row().Scan(&planJSON))
+			require.LessOrEqual(t, len(planJSON), 16384)
+			t.Logf("synthetic history list plan: %s", planJSON)
+			require.NoError(t, db.Raw("EXPLAIN ANALYZE FORMAT=TREE "+listSQL, args...).Row().Scan(&execution))
+			require.LessOrEqual(t, len(execution), 8192)
+			t.Logf("synthetic history list execution: %s", execution)
+			require.NoError(t, validateHistoryMySQLListPlan(planJSON, execution))
+			var selected []model.CopilotConversation
+			require.NoError(t, db.Raw(listSQL, args...).Scan(&selected).Error)
+			require.Len(t, selected, 201)
+			for i, row := range selected {
+				require.Equal(t, expected[i], uint64(row.ID))
+				require.Less(t, row.ID, cursor)
+				require.Equal(t, "plan-owner", row.OwnerUserID)
+				require.Equal(t, "plan-project", row.ProjectID)
+				require.Equal(t, "active", row.State)
+				require.True(t, row.ExpiresAt.After(now))
+			}
+			t.Logf("history scoped list actual-work and exact 201-row content proof passed: %s", collation)
 			// Current actor state denies reads even though conversation data still exists.
 			require.NoError(t, db.Model(&model.User{}).Where("user_id = ?", c.OwnerUserID).UpdateColumn("is_enabled", 0).Error)
 			_, err = restart.CopilotHistoryGet(ctx, c.OwnerUserID, c.ProjectID, c.ConversationID, historyTestAllow)

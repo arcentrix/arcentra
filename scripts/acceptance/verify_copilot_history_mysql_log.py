@@ -15,6 +15,11 @@ def verify(text):
             raise ValueError('history MySQL case was not run exactly once')
         if len(re.findall(r'^\s*--- PASS: ' + re.escape(name) + r' \(', text, re.MULTILINE)) != 1:
             raise ValueError('history MySQL case did not pass exactly once')
+    for collation in ('utf8mb4_0900_ai_ci', 'utf8mb4_bin'):
+        for label in ('history scoped list actual-work and exact 201-row content proof passed: ', 'history retained owner-cap concurrent proof passed: '):
+            marker = label + collation
+            if len(re.findall(re.escape(marker) + r'$', text, re.MULTILINE)) != 1:
+                raise ValueError('history actual-work/content/cap proof missing or duplicated')
     if not re.search(r'^ok\s+github.com/arcentrix/arcentra/internal/control/repo\s', text, re.MULTILINE):
         raise ValueError('history MySQL package did not complete')
 
