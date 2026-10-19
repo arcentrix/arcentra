@@ -9,6 +9,12 @@ It does not modify host configuration, environment, permissions or trust stores.
 Supported transports:
 - HTTPS with the system trust store and existing `source.auth` credentials. No
   inherited proxy, custom CA environment, headers, helper or redirect settings.
+- Anonymous native `git://host[:port]/repository` using system Git only. No
+  source.auth, URL credentials, custom remote helpers or inherited proxy commands.
+  This transport is unauthenticated and unencrypted: use trusted sources/networks
+  and prefer HTTPS. An explicitly pinned full commit constrains retrieved content;
+  an initial branch checkout does not authenticate the server or its selected SHA.
+  Escaped/ambiguous paths, dot segments and malformed hosts/ports are rejected.
 - Anonymous HTTP to a literal loopback IP, for controlled local acceptance servers.
   The DNS name `localhost` is deliberately not accepted.
 - Absolute local repository paths, for operator-controlled sources and fixtures.

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -58,6 +59,36 @@ func sourceGitTransport(raw string, authenticated bool) (string, error) {
 		return "", fmt.Errorf("unsupported source transport")
 	}
 	switch u.Scheme {
+	case "git":
+		// Native anonymous upload-pack only. Do not admit helper syntax, credentials,
+		// ambiguous URL components or inherited proxy/config transport selection.
+		if authenticated || strings.ContainsAny(raw, "%?#\\ \t\r\n") || u.ForceQuery || u.RawPath != "" || u.Path == "" || u.Path == "/" || !strings.HasPrefix(u.Path, "/") || path.Clean(u.Path) != u.Path || strings.HasSuffix(u.Host, ":") {
+			return "", fmt.Errorf("unsupported source transport")
+		}
+		host := u.Hostname()
+		if strings.Contains(host, ":") {
+			if net.ParseIP(host) == nil || !strings.HasPrefix(u.Host, "[") {
+				return "", fmt.Errorf("unsupported source transport")
+			}
+		} else {
+			for _, label := range strings.Split(host, ".") {
+				if label == "" || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+					return "", fmt.Errorf("unsupported source transport")
+				}
+				for _, c := range label {
+					if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+						return "", fmt.Errorf("unsupported source transport")
+					}
+				}
+			}
+		}
+		if port := u.Port(); port != "" {
+			n, err := strconv.Atoi(port)
+			if err != nil || n < 1 || n > 65535 {
+				return "", fmt.Errorf("unsupported source transport")
+			}
+		}
+		return "git", nil
 	case "https":
 		return "https", nil
 	case "http":
@@ -81,6 +112,9 @@ func newSourceGit(src *taskqueue.SourcePayload, workspace string) (*sourceGit, e
 	protocol, err := sourceGitTransport(src.Repo, password != "" || username != "")
 	if err != nil {
 		return nil, err
+	}
+	if protocol == "git" && len(src.Auth) != 0 {
+		return nil, fmt.Errorf("native git source must be anonymous")
 	}
 	binary, err := os.Stat(sourceGitPath)
 	if err != nil || !binary.Mode().IsRegular() || binary.Mode().Perm()&0111 == 0 || binary.Mode().Perm()&0022 != 0 {
