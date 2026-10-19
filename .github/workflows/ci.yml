@@ -341,6 +341,12 @@ jobs:
               go test -race -v -count=1 -timeout=2m -run '^TestRetryApprovalMySQL' "./internal/control/$suite" | tee ".acceptance/evidence/retry-approval-mysql-$suite.log"
             grep -q '^--- PASS: TestRetryApprovalMySQL' ".acceptance/evidence/retry-approval-mysql-$suite.log"
             if grep -q '^--- SKIP: TestRetryApprovalMySQL' ".acceptance/evidence/retry-approval-mysql-$suite.log"; then exit 1; fi
+            if [ "$suite" = service ]; then
+              audit_test=TestRetryApprovalMySQLLosslessAuditActionsBothCollations
+              python3 scripts/acceptance/verify_containerd_test_log.py ".acceptance/evidence/retry-approval-mysql-$suite.log" 1 \
+                TestRetryApprovalMySQLCanonicalPermissionProjection \
+                "$audit_test" "$audit_test/utf8mb4_0900_ai_ci" "$audit_test/utf8mb4_bin"
+            fi
           done
 
       - name: Verify approved live-step admission with actual MySQL authorization
@@ -360,7 +366,7 @@ jobs:
         timeout-minutes: 5
         run: |
           set -o pipefail
-          for suite in provenance migration service; do
+          for suite in provenance migration audit_action service; do
             if [ "$suite" = service ]; then
               schema=arcentra_retry_approval_test_inbox
               test_name=TestInboxMySQLVerifiedRetryServiceJourney
@@ -368,7 +374,13 @@ jobs:
             else
               schema="arcentra_inbox_test_$suite"
               package=repo
-              if [ "$suite" = provenance ]; then test_name=TestManualInboxMySQLProvenanceBothCollations; else test_name=TestInboxMySQLRealOldShapeMigrationAndLargeHistoryPlans; fi
+              if [ "$suite" = provenance ]; then
+                test_name=TestManualInboxMySQLProvenanceBothCollations
+              elif [ "$suite" = audit_action ]; then
+                test_name=TestAuditActionMySQLLosslessSchema
+              else
+                test_name=TestInboxMySQLRealOldShapeMigrationAndLargeHistoryPlans
+              fi
             fi
             docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create "$schema"
             ARCENTRA_REQUIRE_INBOX_MYSQL=1 \
@@ -376,7 +388,20 @@ jobs:
             ARCENTRA_REQUIRE_RETRY_APPROVAL_MYSQL=1 \
             ARCENTRA_RETRY_APPROVAL_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
               go test -race -v -count=1 -timeout=3m -run "^$test_name$" "./internal/control/$package" | tee ".acceptance/evidence/inbox-mysql-$suite.log"
-            python3 scripts/acceptance/verify_inbox_mysql_log.py ".acceptance/evidence/inbox-mysql-$suite.log" "$suite"
+            if [ "$suite" = audit_action ]; then
+              required=("$test_name")
+              for collation in utf8mb4_0900_ai_ci utf8mb4_bin; do
+                for case in fresh upgrade unrelated_preflight_rejected_before_audit_ddl; do
+                  required+=("$test_name/$collation/$case")
+                done
+                for case in varchar_33 nullable default missing_index wrong_column composite_index unique_index legacy_prefix wrong_longtext_prefix extra_action_index functional_index invisible_index descending_index; do
+                  required+=("$test_name/$collation/unknown_shapes_rejected_before_ddl/$case")
+                done
+              done
+              python3 scripts/acceptance/verify_containerd_test_log.py ".acceptance/evidence/inbox-mysql-$suite.log" 1 "${required[@]}"
+            else
+              python3 scripts/acceptance/verify_inbox_mysql_log.py ".acceptance/evidence/inbox-mysql-$suite.log" "$suite"
+            fi
           done
 
       - name: Verify private Copilot history against disposable MySQL
