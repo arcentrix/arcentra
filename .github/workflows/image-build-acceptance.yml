@@ -141,7 +141,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed image/host acceptance client: immutable cross-repository dependency.
-          ref: e95ef30fa266b624f10a2d8db8d7debaa72e3c9b
+          ref: 905bdbaea197b6101a9f302155d5b53712e7e614
           path: .acceptance/frontend
           persist-credentials: false
 
@@ -194,6 +194,8 @@ jobs:
       - name: Exercise real image-backed installation and compiled artifact download
         id: journey
         timeout-minutes: 9
+        env:
+          ARCENTRA_ACCEPTANCE_INBOX_JOURNEY: "1"
         run: |
           remaining=$((IMAGE_WORK_DEADLINE - $(date +%s)))
           if [ "$remaining" -le 0 ]; then echo 'Image journey work budget exhausted; cleanup reserved' >&2; exit 1; fi
@@ -249,7 +251,7 @@ jobs:
           CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
         run: |
           if [ "$JOURNEY_OUTCOME" != success ] || [ "$CLEANUP_OUTCOME" != success ]; then
-            rm -f -- .acceptance/image-evidence/browser/project-build-verification.json .acceptance/image-evidence/browser/visual-ci-verification.json
+            rm -f -- .acceptance/image-evidence/browser/project-build-verification.json .acceptance/image-evidence/browser/visual-ci-verification.json .acceptance/image-evidence/inbox-verification.json
           fi
 
       - name: Preserve only sanitized image journey evidence
@@ -267,5 +269,10 @@ jobs:
             .acceptance/image-evidence/browser/summary.json
             .acceptance/image-evidence/browser/project-build-verification.json
             .acceptance/image-evidence/browser/visual-ci-verification.json
+            .acceptance/image-evidence/inbox-verification.json
+            .acceptance/image-evidence/inbox-read/*.png
+            .acceptance/image-evidence/inbox-read/summary.json
+            .acceptance/image-evidence/inbox-resume/*.png
+            .acceptance/image-evidence/inbox-resume/summary.json
           if-no-files-found: ignore
           retention-days: 7

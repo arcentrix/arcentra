@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/arcentrix/arcentra/pkg/serde"
 	"maps"
-	"strings"
 
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
@@ -17,7 +16,7 @@ type verifiedPipelineActorKey struct{}
 
 // WithVerifiedPipelineActor 仅由认证 HTTP 入口传入真实人工触发者，不接受请求字段替代
 func WithVerifiedPipelineActor(ctx context.Context, actorID string) context.Context {
-	return context.WithValue(ctx, verifiedPipelineActorKey{}, strings.TrimSpace(actorID))
+	return context.WithValue(ctx, verifiedPipelineActorKey{}, actorID)
 }
 func verifiedPipelineActor(ctx context.Context) string {
 	actor, _ := ctx.Value(verifiedPipelineActorKey{}).(string)

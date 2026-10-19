@@ -17,7 +17,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-var pollingRunColumns = []string{"run_id", "pipeline_id", "project_id", "request_id", "trigger_type", "triggered_by", "definition_commit_sha", "definition_path", "branch", "commit_sha", "env", "status", "start_time", "end_time", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_plan_hash", "deployment_target_fingerprint", "retry_approval_context", "retry_approval_context_digest", "polling_context", "polling_context_digest"}
+var pollingRunColumns = []string{"run_id", "pipeline_id", "project_id", "inbox_actor_id", "inbox_origin", "request_id", "trigger_type", "triggered_by", "definition_commit_sha", "definition_path", "branch", "commit_sha", "env", "status", "start_time", "end_time", "allow_deployments", "deployment_actor_id", "deployment_plan", "deployment_plan_hash", "deployment_target_fingerprint", "retry_approval_context", "retry_approval_context_digest", "polling_context", "polling_context_digest"}
 
 func rejectPollingRunUpdates(updates map[string]any) error {
 	for k := range updates {
@@ -34,7 +34,7 @@ func IsPollingPipelineRun(run *model.PipelineRun) bool {
 	return e == nil
 }
 func pollingRunContext(run *model.PipelineRun) (*polling.RunContext, error) {
-	if run == nil || run.TriggerType != int(pipelinev1.TriggerType_TRIGGER_TYPE_EVENT) || run.TriggeredBy != polling.Actor || run.AllowDeployments || run.DeploymentActorID != "" || run.DeploymentPlan != "" || run.DeploymentPlanHash != "" || run.DeploymentTargetFingerprint != "" || run.RetryApprovalContext != "" || run.RetryApprovalContextDigest != "" {
+	if run == nil || !emptyRunInboxBinding(run) || run.TriggerType != int(pipelinev1.TriggerType_TRIGGER_TYPE_EVENT) || run.TriggeredBy != polling.Actor || run.AllowDeployments || run.DeploymentActorID != "" || run.DeploymentPlan != "" || run.DeploymentPlanHash != "" || run.DeploymentTargetFingerprint != "" || run.RetryApprovalContext != "" || run.RetryApprovalContextDigest != "" {
 		return nil, polling.ErrConflict
 	}
 	c, e := polling.ParseRunContext(run.PollingContext)

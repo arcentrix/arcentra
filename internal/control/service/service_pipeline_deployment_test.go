@@ -174,6 +174,7 @@ func (e *triggerCaptureEngine) ResumeRun(string) error { return nil }
 
 func TestTriggerPipelinePersistsVerifiedImmutableConsentThroughPublicService(t *testing.T) {
 	releases, db, input, adapter := releaseFixture(t)
+	seedManualInboxActor(t, db, "user", "project")
 	binding := releases.targets["staging"]
 	binding.AllowPipelineDeployments = true
 	releases.targets["staging"] = binding

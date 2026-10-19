@@ -181,6 +181,7 @@ level = "INFO"
             directory.mkdir(parents=True, exist_ok=True)
             (directory / 'browser/project-build-verification.json').unlink(missing_ok=True)
             (directory / 'browser/visual-ci-verification.json').unlink(missing_ok=True)
+            (directory / 'inbox-verification.json').unlink(missing_ok=True)
             actual.atomic_json(directory / 'actual-app-result.json', {
                 'status': 'failed', 'error': 'image runtime cleanup or evidence finalization failed',
                 'contract': actual.BUILD_CONTRACT, 'runtime': {'profile': PROFILE, 'cleanup': 'failed'},

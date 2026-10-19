@@ -18,6 +18,8 @@ import (
 func rejectRunProjectUpdates(updates map[string]any) error {
 	for field := range updates {
 		switch strings.ReplaceAll(strings.ToLower(field), "_", "") {
+		case "inboxactorid", "inboxorigin":
+			return errors.New("pipeline run inbox identity is immutable")
 		case "projectid", "pipelineid", "runid":
 			return errors.New("pipeline run project identity is immutable")
 		}

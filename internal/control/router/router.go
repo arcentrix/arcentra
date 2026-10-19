@@ -216,6 +216,7 @@ func (rt *Router) routerGroup(r fiber.Router) {
 
 	// approval
 	rt.approvalRouter(r, auth, subject)
+	rt.inboxRouter(r, auth)
 
 	// approval policies
 	rt.approvalPolicyRouter(r, auth, subject)

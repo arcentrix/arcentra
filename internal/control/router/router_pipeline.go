@@ -371,7 +371,7 @@ func (rt *Router) triggerPipeline(c *fiber.Ctx) error {
 		return http.Err(c, http.Unauthorized.Code, http.Unauthorized.Msg)
 	}
 	// 请求体中的 triggeredBy 仅兼容旧客户端，审计身份始终来自服务端认证。
-	if req.TriggeredBy != "" && strings.TrimSpace(req.TriggeredBy) != subject.UserID {
+	if req.TriggeredBy != "" && req.TriggeredBy != subject.UserID {
 		return http.Err(c, http.BadRequest.Code, "triggeredBy must match the authenticated user")
 	}
 	triggeredBy := subject.UserID

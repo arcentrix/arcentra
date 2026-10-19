@@ -128,5 +128,5 @@ func pinRetryApproval(ctx context.Context, tx *gorm.DB, job *model.JobRun) error
 	if !time.Now().Before(expiry) {
 		return fmt.Errorf("approval deadline expired during input pin")
 	}
-	return nil
+	return enrollInboxApproval(ctx, tx, req)
 }

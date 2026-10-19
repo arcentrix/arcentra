@@ -54,7 +54,7 @@ var approvalDecisionColumns = []string{"decision_id", "approval_id", "user_id", 
 
 // Create 保存经过校验的待审批请求
 func (r *ApprovalRepo) Create(ctx context.Context, req *model.ApprovalRequest) error {
-	if req == nil || req.RetryJobRunID != nil || req.Plugin == retryapproval.Plugin || req.BindingKind != "" || req.EvidenceJSON != "" || !validApprovalID(req.ApprovalID) || !validApprovalID(req.PipelineRunID) || req.Status != model.ApprovalStatusPending || req.ApprovedCount != 0 || req.RejectedCount != 0 {
+	if req == nil || req.InboxOrigin != 0 || req.RetryJobRunID != nil || req.Plugin == retryapproval.Plugin || req.BindingKind != "" || req.EvidenceJSON != "" || !validApprovalID(req.ApprovalID) || !validApprovalID(req.PipelineRunID) || req.Status != model.ApprovalStatusPending || req.ApprovedCount != 0 || req.RejectedCount != 0 {
 		return ErrApprovalInvalid
 	}
 	if _, err := model.ApprovalCandidates(req); err != nil {
