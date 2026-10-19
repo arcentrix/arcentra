@@ -268,6 +268,8 @@ func TestInboxConcurrentWorkersAndReads(t *testing.T) {
 func TestInboxRetryApprovalRealPinTerminalBeforePollAndDeferredCandidate(t *testing.T) {
 	f := gatedPinFixture(t)
 	require.NoError(t, f.db.AutoMigrate(&model.InboxWork{}, &model.InboxDelivery{}, &model.InboxCursor{}, &model.InboxSweep{}, &model.User{}, &model.Project{}, &model.Pipeline{}))
+	require.NoError(t, f.db.AutoMigrate(&model.Organization{}))
+	require.NoError(t, f.db.Create(&model.Organization{OrgID: "org"}).Error)
 	require.NoError(t, inboxSchemaIndexes(f.ctx, f.db))
 	require.NoError(t, f.db.Model(&model.Project{}).Where("project_id = ?", "project").Updates(map[string]any{"org_id": "org", "is_enabled": 1}).Error)
 	require.NoError(t, f.db.Model(&model.Pipeline{}).Where("pipeline_id = ?", "pipeline").Update("is_enabled", 1).Error)

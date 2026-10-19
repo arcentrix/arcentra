@@ -143,7 +143,7 @@ func TestCopilotExecutionMySQLRealRequiredGate(t *testing.T) {
 					require.NoError(t, db.Migrator().DropTable(models[i]))
 				}
 			}()
-			for _, scenario := range []string{"cancel-wins", "confirm-wins", "duplicate-ack", "revocation-wait", "expiry-wait", "ordinary-vote", "plan-cancel-wait", "detached-history", "current-read-denial", "sparse-list", "scope-lock-deadlock", "history-reserve-observe-deadlock", "history-review-observe-deadlock", "username-login-identifiers"} {
+			for _, scenario := range []string{"cancel-wins", "confirm-wins", "duplicate-ack", "revocation-wait", "expiry-wait", "ordinary-vote", "plan-cancel-wait", "detached-history", "current-read-denial", "sparse-list", "scope-lock-contention", "history-reserve-observe-contention", "history-review-observe-contention", "run-cancel-observe-contention", "approval-cancel-observe-contention", "approval-expire-observe-contention", "username-login-identifiers"} {
 				t.Run(scenario, func(t *testing.T) {
 					models := executionMySQLModels()
 					defer func() {
@@ -167,8 +167,12 @@ func TestCopilotExecutionMySQLRealRequiredGate(t *testing.T) {
 						executionMySQLNoVote(t, db)
 						return
 					}
-					if scenario == "history-reserve-observe-deadlock" || scenario == "history-review-observe-deadlock" {
-						historyObserveMySQLDeadlock(t, db, r, in, scenario == "history-review-observe-deadlock")
+					if scenario == "history-reserve-observe-contention" || scenario == "history-review-observe-contention" {
+						historyObserveMySQLContention(t, db, r, in, scenario == "history-review-observe-contention")
+						return
+					}
+					if scenario == "run-cancel-observe-contention" || scenario == "approval-cancel-observe-contention" || scenario == "approval-expire-observe-contention" {
+						executionMySQLObserveLifecycleContention(t, db, scenario)
 						return
 					}
 					v := executionPrepare(t, r, in)
@@ -310,37 +314,24 @@ func TestCopilotExecutionMySQLRealRequiredGate(t *testing.T) {
 						require.Equal(t, target.IntentID, page.List[0].IntentID)
 						t.Log("execution scoped list actual-work and exact one-row content proof passed: " + collation)
 
-					case "scope-lock-deadlock":
-						// Reproduce the documented run -> pipeline / pipeline -> run
-						// cycle. A database rollback is reported; never automatically
-						// resubmit a vote after an uncertain transaction result.
-						holder := db.Begin()
-						require.NoError(t, holder.Error)
-						defer holder.Rollback()
-						require.NoError(t, holder.Model(&model.Pipeline{}).Where("pipeline_id = ?", v.PipelineID).UpdateColumn("id", gorm.Expr("id")).Error)
-						done := make(chan error, 1)
-						go func() { _, e := r.CopilotExecutionConfirm(ctx, mutation, historyTestAllow); done <- e }()
-						executionMySQLWait(t, db, done)
-						holderErr := holder.Model(&model.PipelineRun{}).Where("run_id = ?", v.RunID).UpdateColumn("id", gorm.Expr("id")).Error
-						if holderErr != nil {
-							require.NoError(t, holder.Rollback().Error)
-						} else {
-							require.NoError(t, holder.Commit().Error)
+					case "scope-lock-contention":
+						var job model.JobRun
+						require.NoError(t, db.Where("job_run_id = ?", v.JobRunID).First(&job).Error)
+						historyRead := func(c context.Context) error {
+							_, e := r.CopilotHistoryGet(c, v.OwnerUserID, v.ProjectID, in.ConversationID, historyTestAllow)
+							return e
 						}
-						confirmErr := awaitRetryMySQL(t, done)
-						require.True(t, (holderErr != nil) != (confirmErr != nil), "exactly one transaction must be the deadlock victim")
+						confirm := func(c context.Context) error {
+							_, e := r.CopilotExecutionConfirm(c, mutation, historyTestAllow)
+							return e
+						}
+						executionMySQLPipelineRace(t, ctx, db, &job, historyRead, confirm)
 						got, e := r.CopilotExecutionGet(ctx, v.OwnerUserID, v.ProjectID, v.IntentID, historyTestAllow)
 						require.NoError(t, e)
+						require.Equal(t, "submitted", got.State)
 						var n int64
 						require.NoError(t, db.Model(&model.ApprovalDecision{}).Count(&n).Error)
-						if confirmErr != nil {
-							require.ErrorIs(t, confirmErr, ErrCopilotHistoryUnavailable)
-							require.Equal(t, "prepared", got.State)
-							require.Zero(t, n)
-						} else {
-							require.Equal(t, "submitted", got.State)
-							require.EqualValues(t, 1, n)
-						}
+						require.EqualValues(t, 1, n)
 					case "username-login-identifiers":
 						users := []model.User{
 							{UserID: "login-first", Username: "login-first", Email: "", Password: "first-stored-hash", IsEnabled: 1},

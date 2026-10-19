@@ -73,7 +73,7 @@ func (r *StepRunRepo) PatchReportedStatus(ctx context.Context, expected *model.S
 	if expected == nil || expected.Status < 1 || expected.Status > 3 {
 		return fmt.Errorf("active step snapshot is required")
 	}
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return executionTransaction(ctx, r.Database(), executionStepJobID(expected), func(tx *gorm.DB) error {
 		claim, _ := updates["claim_id"].(string)
 		next, _ := updates["status"].(int)
 		if err := validateRuntimeStepClaim(ctx, tx, expected, claim, next); err != nil {
@@ -132,7 +132,10 @@ func (r *JobRunRepo) PatchReportedStatus(ctx context.Context, expected *model.Jo
 	if expected == nil || expected.Status < 1 || expected.Status > 3 {
 		return fmt.Errorf("active job snapshot is required")
 	}
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return executionTransaction(ctx, r.Database(), expected.JobRunID, func(tx *gorm.DB) error {
+		if _, err := lockExecutionJob(ctx, tx, expected.JobRunID, executionLockLegacy); err != nil {
+			return err
+		}
 		if err := lockReportedJob(ctx, tx, expected); err != nil {
 			return err
 		}

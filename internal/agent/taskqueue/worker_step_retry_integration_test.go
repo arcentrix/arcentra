@@ -108,7 +108,7 @@ func testFailedStepWorkerTLSReplay(t *testing.T, mode string) {
 	jobs := repo.NewJobRunRepo(adapter)
 	steps := repo.NewStepRunRepo(adapter)
 	agents := repo.NewAgentRepo(adapter, nil)
-	for _, row := range []any{&model.Project{ProjectID: "project"}, &model.Pipeline{PipelineID: p.PipelineID, ProjectID: "project", IsEnabled: 1}, &model.PipelineRun{RunID: p.PipelineRunID, PipelineID: p.PipelineID, Status: model.PipelineStatusRunning, Env: "{}"}, &model.Agent{AgentID: p.AgentID, IsEnabled: 1, Status: 1}} {
+	for _, row := range []any{&model.Project{ProjectID: "project"}, &model.Pipeline{PipelineID: p.PipelineID, ProjectID: "project", IsEnabled: 1}, &model.PipelineRun{RunID: p.PipelineRunID, PipelineID: p.PipelineID, ProjectID: "project", Status: model.PipelineStatusRunning, Env: "{}"}, &model.Agent{AgentID: p.AgentID, IsEnabled: 1, Status: 1}} {
 		if err := db.WithContext(ctx).Create(row).Error; err != nil {
 			t.Fatal(err)
 		}

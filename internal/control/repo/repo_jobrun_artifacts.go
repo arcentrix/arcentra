@@ -36,7 +36,10 @@ func (r *JobRunRepo) PatchReportedStatusAndArtifacts(ctx context.Context, expect
 	if expected == nil || expected.Status < 1 || expected.Status > 3 {
 		return fmt.Errorf("active job snapshot is required")
 	}
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return executionTransaction(ctx, r.Database(), expected.JobRunID, func(tx *gorm.DB) error {
+		if _, err := lockExecutionJob(ctx, tx, expected.JobRunID, executionLockLegacy); err != nil {
+			return err
+		}
 		if err := lockReportedJob(ctx, tx, expected); err != nil {
 			return err
 		}

@@ -22,7 +22,7 @@ func ExcludeRuntimeSteps(query *gorm.DB) *gorm.DB {
 
 // ValidateRuntimeStepClaim 原子确认运行时步骤属于正在执行的原作业认领
 func (r *StepRunRepo) ValidateRuntimeStepClaim(ctx context.Context, expected *model.StepRun, claim string, next int) error {
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error { return validateRuntimeStepClaim(ctx, tx, expected, claim, next) })
+	return executionTransaction(ctx, r.Database(), executionStepJobID(expected), func(tx *gorm.DB) error { return validateRuntimeStepClaim(ctx, tx, expected, claim, next) })
 }
 
 func validateRuntimeStepClaim(ctx context.Context, tx *gorm.DB, expected *model.StepRun, claim string, next int) error {
@@ -32,13 +32,18 @@ func validateRuntimeStepClaim(ctx context.Context, tx *gorm.DB, expected *model.
 	if expected.JobRunID == "" {
 		return nil
 	}
-	var parent model.JobRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ?", expected.JobRunID).First(&parent).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	mode := executionLockLegacy
+	if model.IsJobRunTerminal(expected.Status) && next != model.JobRunStatusRunning {
+		mode = executionLockInspect
+	}
+	locked, lockErr := lockExecutionJob(ctx, tx, expected.JobRunID, mode)
+	if err := lockErr; err != nil {
+		if errors.Is(err, errExecutionParentMissing) {
 			return nil
 		} // 历史独立步骤可能没有父作业
 		return err
 	}
+	parent := *locked
 	if emptyRuntime(&parent) {
 		return nil
 	}

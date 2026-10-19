@@ -40,11 +40,13 @@ func (r *JobRunRepo) captureDispatchExpectation(ctx context.Context, pipelineID,
 			return fmt.Errorf("source binding does not match execution identity")
 		}
 	}
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var current model.JobRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ?", jobID).First(&current).Error; err != nil {
-			return err
+	return executionTransaction(ctx, r.Database(), jobID, func(tx *gorm.DB) error {
+		lockMode := executionLockActive
+		lockedJob, lockErr := lockExecutionJob(ctx, tx, jobID, lockMode)
+		if lockErr != nil {
+			return lockErr
 		}
+		current := *lockedJob
 		if !emptyRetryApproval(&current) || !emptyJobGeneration(&current) || !emptyJobInputs(&current) || !emptyRuntime(&current) || current.JobRunID != jobID || current.PipelineID != pipelineID || current.PipelineRunID != runID || current.ClaimID != "" || current.CancellationClaimID != "" || current.TerminalReportDigest != "" || (current.Status != 1 && current.Status != 2) || current.SourceExpectationCaptured || current.SourceBindingDigest != "" || current.SourceType != "" || current.SourceRepository != "" || current.SourceRef != "" || current.SourceResolvedCommit != "" || (current.SourceProvenanceState != "" && current.SourceProvenanceState != "unknown") || (current.AgentID != "" && current.AgentID != agentID) {
 			return fmt.Errorf("source expectation requires an unclaimed uncaptured job")
 		}

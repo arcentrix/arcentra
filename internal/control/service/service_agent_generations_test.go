@@ -84,10 +84,10 @@ func generationServiceFixture(t *testing.T, path string, modes ...string) (*gorm
 	t.Helper()
 	ctx := context.Background()
 	db := generationTestDB(t, path, true)
-	if err := db.WithContext(ctx).AutoMigrate(&model.Agent{}, &model.JobRunGeneration{}); err != nil {
+	if err := db.WithContext(ctx).AutoMigrate(&model.Agent{}, &model.JobRunGeneration{}, &model.Pipeline{}, &model.Project{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range []any{&model.Agent{AgentID: "agent", IsEnabled: 1}, &model.PipelineRun{RunID: "run", PipelineID: "pipeline", Status: model.PipelineStatusRunning}, &model.JobRun{JobRunID: "job", PipelineID: "pipeline", PipelineRunID: "run", Status: 1}} {
+	for _, v := range []any{&model.Project{ProjectID: "project", IsEnabled: 1, Status: model.ProjectStatusActive}, &model.Pipeline{PipelineID: "pipeline", ProjectID: "project", IsEnabled: 1}, &model.Agent{AgentID: "agent", IsEnabled: 1}, &model.PipelineRun{RunID: "run", PipelineID: "pipeline", ProjectID: "project", Status: model.PipelineStatusRunning}, &model.JobRun{JobRunID: "job", PipelineID: "pipeline", PipelineRunID: "run", Status: 1}} {
 		if err := db.WithContext(ctx).Create(v).Error; err != nil {
 			t.Fatal(err)
 		}

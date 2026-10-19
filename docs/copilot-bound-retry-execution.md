@@ -73,3 +73,30 @@ Acceptance requires more than a submitted vote or a successful first attempt:
 
 The default remains off if any acceptance dependency is unavailable. Do not claim
 production readiness from unit tests, mocked execution, or a skipped MySQL suite.
+
+## Concurrent history and execution transactions
+
+Active runtime/input/approval operations acquire a shared identity prefix before
+locking a job: Pipeline, Organization when recorded, Project, PipelineRun, then
+JobRun. Identity locators are read before beginning the transaction and are only
+hints; exact identities and parent links are revalidated with indexed current row
+reads. This avoids a history transaction holding Pipeline while an approval
+observer holds PipelineRun and waits for Pipeline. The prefix does not grant
+permission or require archived resources to become active. Fresh authorization,
+expiry and immutable input checks remain inside the execution transaction.
+
+Modern active operations require an unambiguous stored project scope. Older runs
+without a direct project field may use their valid immutable retry context when
+it exactly matches the locked pipeline and project. Missing or inconsistent scope
+fails closed. Exact historical receipts and structurally legacy operations that
+cannot proceed to shared authorization locks retain narrow receipt semantics;
+they cannot authorize new execution. Locator reads must not establish an older
+repeatable-read snapshot inside a transaction before waiting for a receipt.
+
+Stop all old controllers before upgrading. Mixed controller versions can retain
+opposite lock orders even when one controller is upgraded. Shared scope locking
+serializes these transactions within a pipeline; this change is not a claim that
+all deployment, provider or unrelated database operations are globally deadlock
+free. Tests require actual MySQL lock-wait evidence, successful competing
+operations, exact receipt preservation and the real Agent retry outcome. Retrying
+a failed transaction or disabling approval observation is not acceptance evidence.

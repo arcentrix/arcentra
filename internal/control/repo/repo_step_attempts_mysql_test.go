@@ -62,7 +62,7 @@ func TestStepAttemptMySQLExplicitOptInCASAndCancellation(t *testing.T) {
 	// 每个 JSON 列采用对应生产形状；步骤创建复用生产规范化，策略不能用空对象替代
 	rows := []any{
 		&model.Agent{AgentID: "agent", IsEnabled: 1, Labels: datatypes.JSON(`{}`), RuntimeCapabilities: datatypes.JSON(`{}`)},
-		&model.PipelineRun{RunID: "run", PipelineID: "pipeline", Status: model.PipelineStatusRunning, Env: "{}"},
+		&model.PipelineRun{RunID: "run", PipelineID: "pipeline", ProjectID: "project", Status: model.PipelineStatusRunning, Env: "{}"},
 		&model.Pipeline{PipelineID: "pipeline", ProjectID: "project", Metadata: "{}"},
 		&model.Project{ProjectID: "project", BuildConfig: datatypes.JSON(`{}`), EnvVars: datatypes.JSON(`{}`), Settings: datatypes.JSON(`{}`)},
 	}
@@ -326,7 +326,11 @@ func stepAttemptMySQLConnectionThread(ctx context.Context, tx *gorm.DB) (uint64,
 }
 
 // 唯一已锁定主键证明这些实际记录锁来自目标行，拒绝混入其他行或索引的锁
-func stepAttemptMySQLTargetLockIDs(locks []stepAttemptMySQLHeldLock, rowID uint64, jobID string) ([]string, error) {
+func stepAttemptMySQLTargetLockIDs(locks []stepAttemptMySQLHeldLock, rowID uint64, jobID string, pipeline ...bool) ([]string, error) {
+	businessIndex := "uk_job_run_business_id"
+	if len(pipeline) > 0 && pipeline[0] {
+		businessIndex = "uk_pipeline_business_id"
+	}
 	if rowID == 0 || len(locks) == 0 || len(locks) > 2 {
 		return nil, fmt.Errorf("target row must have a bounded primary/business-key record lock set")
 	}
@@ -346,7 +350,7 @@ func stepAttemptMySQLTargetLockIDs(locks []stepAttemptMySQLHeldLock, rowID uint6
 			if *lock.LockData != strconv.FormatUint(rowID, 10) {
 				return nil, fmt.Errorf("held primary record lock belongs to another job row")
 			}
-		case "uk_job_run_business_id":
+		case businessIndex:
 			key, primary, ok := strings.Cut(*lock.LockData, ", ")
 			if !ok || primary != strconv.FormatUint(rowID, 10) || (key != jobID && key != "'"+jobID+"'" && key != strconv.Quote(jobID)) {
 				return nil, fmt.Errorf("held business-key record lock does not identify the exact target job and primary key: %q", *lock.LockData)
@@ -363,28 +367,79 @@ func stepAttemptMySQLTargetLockIDs(locks []stepAttemptMySQLHeldLock, rowID uint6
 	return ids, nil
 }
 
-func stepAttemptMySQLLockWaitProbe(ctx context.Context, db *gorm.DB, schema string, requesting, blocking uint64, targetLockIDs []string) *gorm.DB {
+func stepAttemptMySQLLockWaitProbe(ctx context.Context, db *gorm.DB, schema string, requesting, blocking uint64, targetLockIDs []string, pipeline ...bool) *gorm.DB {
+	table := (model.JobRun{}).TableName()
+	if len(pipeline) > 0 && pipeline[0] {
+		table = (model.Pipeline{}).TableName()
+	}
 	return db.WithContext(ctx).Table("performance_schema.data_lock_waits AS waits").
 		Select("waits.REQUESTING_ENGINE_LOCK_ID AS requesting_lock_id").
 		Joins("JOIN performance_schema.data_locks AS requested ON requested.ENGINE = waits.ENGINE AND requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID AND requested.THREAD_ID = waits.REQUESTING_THREAD_ID").
 		Joins("JOIN performance_schema.data_locks AS blocking ON blocking.ENGINE = waits.ENGINE AND blocking.ENGINE_LOCK_ID = waits.BLOCKING_ENGINE_LOCK_ID AND blocking.THREAD_ID = waits.BLOCKING_THREAD_ID").
 		Where("waits.ENGINE = ? AND waits.REQUESTING_THREAD_ID = ? AND waits.BLOCKING_THREAD_ID = ?", "INNODB", requesting, blocking).
-		Where("requested.OBJECT_SCHEMA = ? AND requested.OBJECT_NAME = ? AND requested.LOCK_TYPE = ? AND requested.LOCK_STATUS = ?", schema, (model.JobRun{}).TableName(), "RECORD", "WAITING").
-		Where("blocking.OBJECT_SCHEMA = ? AND blocking.OBJECT_NAME = ? AND blocking.LOCK_TYPE = ? AND blocking.LOCK_STATUS = ?", schema, (model.JobRun{}).TableName(), "RECORD", "GRANTED").
+		Where("requested.OBJECT_SCHEMA = ? AND requested.OBJECT_NAME = ? AND requested.LOCK_TYPE = ? AND requested.LOCK_STATUS = ?", schema, table, "RECORD", "WAITING").
+		Where("blocking.OBJECT_SCHEMA = ? AND blocking.OBJECT_NAME = ? AND blocking.LOCK_TYPE = ? AND blocking.LOCK_STATUS = ?", schema, table, "RECORD", "GRANTED").
 		Where("requested.LOCK_MODE LIKE ? AND blocking.LOCK_MODE LIKE ?", "X%", "X%").
 		Where("requested.INDEX_NAME = blocking.INDEX_NAME AND requested.LOCK_DATA = blocking.LOCK_DATA").
 		Where("blocking.ENGINE_LOCK_ID IN ?", targetLockIDs).Limit(1)
 }
 
+// Accept only one typed row with the exact synthetic business identity. History
+// selects []Pipeline while runtime prefix helpers may select *Pipeline.
+func stepAttemptMySQLExactDestination(destination any, field, expected string) bool {
+	value := reflect.ValueOf(destination)
+	for value.IsValid() && value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return false
+		}
+		value = value.Elem()
+	}
+	if value.IsValid() && value.Kind() == reflect.Slice {
+		if value.Len() != 1 {
+			return false
+		}
+		value = value.Index(0)
+		for value.Kind() == reflect.Pointer {
+			if value.IsNil() {
+				return false
+			}
+			value = value.Elem()
+		}
+	}
+	if !value.IsValid() || value.Kind() != reflect.Struct {
+		return false
+	}
+	key := value.FieldByName(field)
+	return key.IsValid() && key.Kind() == reflect.String && key.String() == expected
+}
+
 // 首事务持续持锁，直到服务端确认竞争连接正在等待此事务的同一目标行记录锁
-func stepAttemptMySQLOrderedRace(t *testing.T, f *stepAttemptFixture, schema string, first, second func(context.Context) error) []error {
+func stepAttemptMySQLOrderedRace(t *testing.T, f *stepAttemptFixture, schema string, first, second func(context.Context) error, pipeline ...bool) []error {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 	defer cancel()
-	var target model.JobRun
-	if err := f.db.WithContext(ctx).Select("id", "job_run_id").Where("job_run_id = ?", f.identity.JobRunID).First(&target).Error; err != nil || target.ID == 0 || target.JobRunID != f.identity.JobRunID {
-		t.Fatalf("cannot identify exact target job row: %v", err)
+	usePipeline := len(pipeline) > 0 && pipeline[0]
+	table, keyField := (model.JobRun{}).TableName(), "JobRunID"
+	var targetID uint64
+	targetKey := f.identity.JobRunID
+	if usePipeline {
+		table, keyField = (model.Pipeline{}).TableName(), "PipelineID"
+		var row model.Pipeline
+		if err := f.db.WithContext(ctx).Select("id", "pipeline_id").Where("pipeline_id = ?", f.identity.PipelineID).First(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		targetID, targetKey = row.ID, row.PipelineID
+	} else {
+		var row model.JobRun
+		if err := f.db.WithContext(ctx).Select("id", "job_run_id").Where("job_run_id = ?", f.identity.JobRunID).First(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+		targetID = row.ID
 	}
+	if targetID == 0 || targetKey == "" {
+		t.Fatal("exact shared lock target unavailable")
+	}
+
 	locked, competing := make(chan stepAttemptMySQLLockOwner, 1), make(chan stepAttemptMySQLLockOwner, 1)
 	release := make(chan struct{})
 	var lockOnce, competingOnce, releaseOnce sync.Once
@@ -392,7 +447,7 @@ func stepAttemptMySQLOrderedRace(t *testing.T, f *stepAttemptFixture, schema str
 	beforeName, afterName := "test:mysql-before-"+uuid.NewString(), "test:mysql-after-"+uuid.NewString()
 	isJobLock := func(tx *gorm.DB) bool {
 		lock, ok := tx.Statement.Clauses["FOR"].Expression.(clause.Locking)
-		return tx.Statement.Table == (model.JobRun{}).TableName() && ok && lock.Strength == "UPDATE"
+		return tx.Statement.Table == table && ok && lock.Strength == "UPDATE"
 	}
 	defer func() {
 		releaseOnce.Do(func() { close(release) })
@@ -422,8 +477,7 @@ func stepAttemptMySQLOrderedRace(t *testing.T, f *stepAttemptFixture, schema str
 		if tx.Error == nil && isJobLock(tx) && tx.Statement.Context.Value(stepAttemptMySQLOrderKey{}) == "first" {
 			lockOnce.Do(func() {
 				owner := stepAttemptMySQLLockOwner{}
-				job, ok := tx.Statement.Dest.(*model.JobRun)
-				if !ok || tx.RowsAffected != 1 || job.JobRunID != target.JobRunID {
+				if tx.RowsAffected != 1 || !stepAttemptMySQLExactDestination(tx.Statement.Dest, keyField, targetKey) {
 					owner.err = fmt.Errorf("first locking read did not select exactly the target job")
 				} else {
 					owner.threadID, owner.err = stepAttemptMySQLConnectionThread(ctx, tx)
@@ -432,10 +486,10 @@ func stepAttemptMySQLOrderedRace(t *testing.T, f *stepAttemptFixture, schema str
 					var locks []stepAttemptMySQLHeldLock
 					owner.err = stepAttemptMySQLMetadataRead(ctx, tx).
 						Table("performance_schema.data_locks").Select("ENGINE_LOCK_ID AS engine_lock_id", "INDEX_NAME AS index_name", "LOCK_DATA AS lock_data").
-						Where("ENGINE = ? AND THREAD_ID = ? AND OBJECT_SCHEMA = ? AND OBJECT_NAME = ?", "INNODB", owner.threadID, schema, (model.JobRun{}).TableName()).
+						Where("ENGINE = ? AND THREAD_ID = ? AND OBJECT_SCHEMA = ? AND OBJECT_NAME = ?", "INNODB", owner.threadID, schema, table).
 						Where("LOCK_TYPE = ? AND LOCK_STATUS = ? AND LOCK_MODE LIKE ?", "RECORD", "GRANTED", "X%").Find(&locks).Error
 					if owner.err == nil {
-						owner.lockIDs, owner.err = stepAttemptMySQLTargetLockIDs(locks, target.ID, target.JobRunID)
+						owner.lockIDs, owner.err = stepAttemptMySQLTargetLockIDs(locks, targetID, targetKey, usePipeline)
 					}
 				}
 				locked <- owner
@@ -486,11 +540,11 @@ func stepAttemptMySQLOrderedRace(t *testing.T, f *stepAttemptFixture, schema str
 	defer ticker.Stop()
 	for {
 		var edges []struct{ RequestingLockID string }
-		if err := stepAttemptMySQLLockWaitProbe(ctx, f.db, schema, contender.threadID, owner.threadID, owner.lockIDs).Find(&edges).Error; err != nil {
+		if err := stepAttemptMySQLLockWaitProbe(ctx, f.db, schema, contender.threadID, owner.threadID, owner.lockIDs, usePipeline).Find(&edges).Error; err != nil {
 			t.Fatalf("cannot inspect real MySQL lock waits: %v", err)
 		}
 		if len(edges) == 1 && edges[0].RequestingLockID != "" {
-			t.Logf("observed MySQL waiter thread %d blocked by thread %d on %s.job_run row %d (%s)", contender.threadID, owner.threadID, schema, target.ID, target.JobRunID)
+			t.Logf("observed MySQL waiter thread %d blocked by thread %d on %s.%s row %d (%s)", contender.threadID, owner.threadID, schema, table, targetID, targetKey)
 			break
 		}
 		select {
@@ -635,6 +689,14 @@ func TestStepAttemptMySQLLockWaitProbeIsScopedAndReadOnly(t *testing.T) {
 	if !reflect.DeepEqual(query.Statement.Vars, want) {
 		t.Fatalf("wait probe parameters changed: %#v", query.Statement.Vars)
 	}
+	pipelineQuery := stepAttemptMySQLLockWaitProbe(ctx, db, schema, 202, 101, []string{"held-primary", "held-business"}, true).Find(&edges)
+	pipelineWant := append([]any(nil), want...)
+	pipelineWant[4] = "pipeline"
+	pipelineWant[8] = "pipeline"
+	if pipelineQuery.Error != nil || pipelineQuery.Statement.SQL.String() != sql || !reflect.DeepEqual(pipelineQuery.Statement.Vars, pipelineWant) {
+		t.Fatal("pipeline witness lost exact scoped read-only proof")
+	}
+
 }
 
 func TestStepAttemptMySQLTargetLockProofRejectsForeignOrOpaqueRows(t *testing.T) {
@@ -676,6 +738,34 @@ func TestStepAttemptMySQLTargetLockProofRejectsForeignOrOpaqueRows(t *testing.T)
 	for _, jobID := range []string{"", "target, job", "'target-job'", "target\njob"} {
 		if _, err := stepAttemptMySQLTargetLockIDs([]stepAttemptMySQLHeldLock{primary}, 42, jobID); err == nil {
 			t.Fatal("ambiguous synthetic business key accepted")
+		}
+	}
+}
+
+func TestStepAttemptMySQLPipelineLockProofAndDestinations(t *testing.T) {
+	text := func(s string) *string { return &s }
+	primary := stepAttemptMySQLHeldLock{EngineLockID: "primary", IndexName: "PRIMARY", LockData: text("42")}
+	business := stepAttemptMySQLHeldLock{EngineLockID: "business", IndexName: "uk_pipeline_business_id", LockData: text("target-pipeline, 42")}
+	if ids, err := stepAttemptMySQLTargetLockIDs([]stepAttemptMySQLHeldLock{primary, business}, 42, "target-pipeline", true); err != nil || len(ids) != 2 {
+		t.Fatal("exact pipeline proof rejected")
+	}
+	for _, foreign := range []stepAttemptMySQLHeldLock{
+		{EngineLockID: "foreign", IndexName: "uk_job_run_business_id", LockData: text("target-pipeline, 42")},
+		{EngineLockID: "foreign", IndexName: "uk_pipeline_business_id", LockData: text("other-pipeline, 42")},
+		{EngineLockID: "foreign", IndexName: "uk_pipeline_business_id", LockData: text("target-pipeline, 43")},
+	} {
+		if _, err := stepAttemptMySQLTargetLockIDs([]stepAttemptMySQLHeldLock{primary, foreign}, 42, "target-pipeline", true); err == nil {
+			t.Fatal("foreign pipeline proof accepted")
+		}
+	}
+	for _, destination := range []any{&model.Pipeline{PipelineID: "target-pipeline"}, &[]model.Pipeline{{PipelineID: "target-pipeline"}}, &[]*model.Pipeline{{PipelineID: "target-pipeline"}}} {
+		if !stepAttemptMySQLExactDestination(destination, "PipelineID", "target-pipeline") {
+			t.Fatal("exact typed destination rejected")
+		}
+	}
+	for _, destination := range []any{nil, (*model.Pipeline)(nil), &[]model.Pipeline{}, &[]model.Pipeline{{PipelineID: "target-pipeline"}, {PipelineID: "target-pipeline"}}, &model.Pipeline{PipelineID: "foreign"}, &model.JobRun{JobRunID: "target-pipeline"}, map[string]any{"PipelineID": "target-pipeline"}} {
+		if stepAttemptMySQLExactDestination(destination, "PipelineID", "target-pipeline") {
+			t.Fatal("foreign or ambiguous destination accepted")
 		}
 	}
 }

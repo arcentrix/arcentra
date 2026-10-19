@@ -52,11 +52,13 @@ func (r *JobRunRepo) GetOrRecordJobInputs(ctx context.Context, identity taskqueu
 		return nil, err
 	}
 	var result model.JobRun
-	err := r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var current model.JobRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ?", identity.JobRunID).First(&current).Error; err != nil {
-			return err
+	err := executionTransaction(ctx, r.Database(), identity.JobRunID, func(tx *gorm.DB) error {
+		lockMode := executionLockActive
+		lockedJob, lockErr := lockExecutionJob(ctx, tx, identity.JobRunID, lockMode)
+		if lockErr != nil {
+			return lockErr
 		}
+		current := *lockedJob
 		if err := validateInputExecution(ctx, tx, &current, identity); err != nil {
 			return err
 		}
@@ -163,6 +165,9 @@ func validateInputExecution(ctx context.Context, tx *gorm.DB, job *model.JobRun,
 	} else if job.SourceType != "" || job.SourceRepository != "" || job.SourceRef != "" {
 		return fmt.Errorf("stored source absence is invalid")
 	}
+	if err := requireExecutionScope(tx, job); err != nil {
+		return err
+	}
 	var run model.PipelineRun
 	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("run_id", "pipeline_id", "status").Where("run_id = ?", identity.PipelineRunID).First(&run).Error; err != nil {
 		return err
@@ -186,6 +191,9 @@ func validateRegisteredInputArtifacts(ctx context.Context, tx *gorm.DB, job *mod
 	}
 	if len(inputs.Artifacts) == 0 {
 		return nil
+	}
+	if err := requireExecutionScope(tx, job); err != nil {
+		return err
 	}
 	var pipeline model.Pipeline
 	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("pipeline_id", "project_id").Where("pipeline_id = ? AND is_deleted = ?", job.PipelineID, 0).First(&pipeline).Error; err != nil {

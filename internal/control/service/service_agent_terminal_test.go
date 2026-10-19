@@ -62,7 +62,7 @@ func seedTerminalTestRun(t *testing.T, db *gorm.DB, current int) {
 	for _, value := range []any{
 		&model.Project{ProjectID: "project"},
 		&model.Pipeline{ProjectID: "project", PipelineID: "pipeline"},
-		&model.PipelineRun{RunID: "run", PipelineID: "pipeline", Status: model.PipelineStatusRunning},
+		&model.PipelineRun{RunID: "run", PipelineID: "pipeline", ProjectID: "project", Status: model.PipelineStatusRunning},
 		&model.JobRun{JobRunID: "job", PipelineID: "pipeline", PipelineRunID: "run", AgentID: "agent", ClaimID: claim, Status: current},
 		&model.StepRun{StepRunID: "step", JobRunID: "job", PipelineID: "pipeline", PipelineRunID: "run", AgentID: "agent", ClaimID: claim, Status: current},
 	} {

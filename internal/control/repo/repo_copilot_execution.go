@@ -253,7 +253,7 @@ func (r *Repositories) CopilotExecutionConfirm(ctx context.Context, in CopilotEx
 		return nil, ErrCopilotHistoryUnavailable
 	}
 	var out *model.CopilotExecutionIntent
-	err = db.Transaction(func(tx *gorm.DB) error {
+	err = executionTransaction(ctx, db, executionApprovalJobID(&initial), func(tx *gorm.DB) error {
 		job, err := lockRetryApprovalJob(ctx, tx, &initial)
 		if err != nil {
 			return err

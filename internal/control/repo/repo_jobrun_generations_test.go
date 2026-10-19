@@ -36,7 +36,7 @@ func newGenerationFixture(t *testing.T, configure ...func(*pipelinev1.Retry)) *g
 	if err := db.WithContext(ctx).AutoMigrate(&model.Agent{}, &model.PipelineRun{}, &model.JobRunGeneration{}, &model.Pipeline{}, &model.Project{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range []any{&model.Agent{AgentID: "agent", IsEnabled: 1}, &model.PipelineRun{RunID: "run", PipelineID: "pipeline", Status: model.PipelineStatusRunning}, &model.Pipeline{PipelineID: "pipeline", ProjectID: "project"}, &model.Project{ProjectID: "project"}} {
+	for _, v := range []any{&model.Agent{AgentID: "agent", IsEnabled: 1}} {
 		if err := db.WithContext(ctx).Create(v).Error; err != nil {
 			t.Fatal(err)
 		}

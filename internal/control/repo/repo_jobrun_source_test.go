@@ -22,11 +22,17 @@ func sourceTestRepository(t *testing.T) (context.Context, *gorm.DB, *JobRunRepo,
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	if err := db.WithContext(ctx).AutoMigrate(&model.JobRun{}, &model.StepRun{}, &model.ProjectArtifact{}, &model.PipelineRun{}); err != nil {
+	if err := db.WithContext(ctx).AutoMigrate(&model.JobRun{}, &model.StepRun{}, &model.ProjectArtifact{}, &model.PipelineRun{}, &model.Pipeline{}, &model.Project{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.WithContext(ctx).Create(&model.JobRun{JobRunID: "job", PipelineID: "pipeline", PipelineRunID: "run", Status: 1}).Error; err != nil {
 		t.Fatal(err)
+	}
+	// Modern dispatch has an admitted, explicit project scope.
+	for _, row := range []any{&model.Project{ProjectID: "project"}, &model.Pipeline{PipelineID: "pipeline", ProjectID: "project"}, &model.PipelineRun{RunID: "run", PipelineID: "pipeline", ProjectID: "project", Status: model.PipelineStatusRunning}} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
 	}
 	b, err := sourceprovenance.NewBinding("pipeline", "run", "job", "git", "https://example/Owner/repo.git", "main")
 	if err != nil {
@@ -243,11 +249,16 @@ func TestSourceReportByteExactFenceWithCaseInsensitiveDatabase(t *testing.T) {
 			sqlDB, _ := db.DB()
 			sqlDB.SetMaxOpenConns(1)
 			defer sqlDB.Close()
-			if err := db.WithContext(ctx).AutoMigrate(&caseInsensitiveSourceJob{}, &model.StepRun{}, &model.PipelineRun{}); err != nil {
+			if err := db.WithContext(ctx).AutoMigrate(&caseInsensitiveSourceJob{}, &model.StepRun{}, &model.PipelineRun{}, &model.Pipeline{}, &model.Project{}); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.WithContext(ctx).Create(&model.JobRun{JobRunID: "job", PipelineID: "pipeline", PipelineRunID: "run", Status: 1}).Error; err != nil {
 				t.Fatal(err)
+			}
+			for _, row := range []any{&model.Project{ProjectID: "project"}, &model.Pipeline{PipelineID: "pipeline", ProjectID: "project"}, &model.PipelineRun{RunID: "run", PipelineID: "pipeline", ProjectID: "project", Status: model.PipelineStatusRunning}} {
+				if err := db.Create(row).Error; err != nil {
+					t.Fatal(err)
+				}
 			}
 			r := &JobRunRepo{IDatabase: statusTestDB{db}}
 			b, _ := sourceprovenance.NewBinding("pipeline", "run", "job", "git", "https://example/Owner/repo.git", "main")

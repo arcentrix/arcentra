@@ -530,8 +530,7 @@ func TestStepRetryApprovalMySQLSuccessfulProducerHistoricalReplyLockOrder(t *tes
 					t.Logf("contended query error: owner=%v table=%s lock=%s error=%v", tx.Statement.Context.Value(stepAttemptMySQLOrderKey{}), tx.Statement.Table, lock.Strength, tx.Error)
 				}
 				if tx.Error == nil && tx.Statement.Context.Value(stepAttemptMySQLOrderKey{}) == "second" && tx.Statement.Table == (model.PipelineRun{}).TableName() && ok && lock.Strength == "UPDATE" {
-					run, exact := tx.Statement.Dest.(*model.PipelineRun)
-					if !exact || tx.RowsAffected != 1 || run.RunID != producer.identity.PipelineRunID {
+					if tx.RowsAffected != 1 || !stepAttemptMySQLExactDestination(tx.Statement.Dest, "RunID", producer.identity.PipelineRunID) {
 						_ = tx.AddError(fmt.Errorf("consumer did not lock the exact shared run"))
 						return
 					}

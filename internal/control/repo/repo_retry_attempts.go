@@ -37,7 +37,7 @@ func ensureJobAttemptsTerminal(ctx context.Context, tx *gorm.DB, jobRunID string
 
 // ValidateRetryActivation 校验同认领重复确认仍有活动作业和合法的已提交前序尝试
 func (r *StepRunRepo) ValidateRetryActivation(ctx context.Context, expected *model.StepRun) error {
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error { return validateRetryActivation(ctx, tx, expected) })
+	return executionTransaction(ctx, r.Database(), executionStepJobID(expected), func(tx *gorm.DB) error { return validateRetryActivation(ctx, tx, expected) })
 }
 
 func validateRetryActivation(ctx context.Context, tx *gorm.DB, expected *model.StepRun) error {
@@ -57,10 +57,11 @@ func validateRetryActivation(ctx context.Context, tx *gorm.DB, expected *model.S
 	if policy.Mode != expected.RetryMode || expected.Attempt < 1 || expected.Attempt > int(policy.MaxAttempts) {
 		return fmt.Errorf("attempt is outside its immutable retry policy")
 	}
-	var parent model.JobRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ?", expected.JobRunID).First(&parent).Error; err != nil {
+	locked, err := lockExecutionJob(ctx, tx, expected.JobRunID, executionLockLegacy)
+	if err != nil {
 		return err
 	}
+	parent := *locked
 	if parent.Status != 3 || parent.AgentID != expected.AgentID || parent.PipelineID != expected.PipelineID || parent.PipelineRunID != expected.PipelineRunID {
 		return fmt.Errorf("retry parent job is not active or its ownership changed")
 	}

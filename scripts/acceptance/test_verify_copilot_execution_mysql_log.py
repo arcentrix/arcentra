@@ -16,11 +16,13 @@ class RequiredExecutionMySQLLogTest(unittest.TestCase):
     def test_complete(self):
         verify(self.valid())
 
-    def test_actual_history_observe_characterization_required_in_both_collations(self):
-        self.assertEqual(len(SCENARIOS), 14)
-        self.assertEqual(len(required_names()), 1 + 2 + 14 * 2)
+    def test_actual_history_observe_contention_required_in_both_collations(self):
+        self.assertEqual(len(SCENARIOS), 17)
+        self.assertEqual(len(required_names()), 1 + 2 + 17 * 2)
         for collation in COLLATIONS:
-            for scenario in ("history-reserve-observe-deadlock", "history-review-observe-deadlock"):
+            for scenario in ("history-reserve-observe-contention", "history-review-observe-contention",
+                             "run-cancel-observe-contention", "approval-cancel-observe-contention",
+                             "approval-expire-observe-contention"):
                 name = ROOT + "/" + collation + "/" + scenario
                 self.assertIn(name, required_names())
                 # An older complete 12-case-per-collation log is insufficient.

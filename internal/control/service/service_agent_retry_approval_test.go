@@ -27,7 +27,6 @@ func retryApprovalServiceFixture(t *testing.T) (*gorm.DB, *service.Services, age
 		t.Fatal(err)
 	}
 	for _, value := range []any{
-		&model.Pipeline{PipelineID: "pipeline", ProjectID: "project", IsEnabled: 1}, &model.Project{ProjectID: "project", IsEnabled: 1, Status: model.ProjectStatusActive},
 		&model.User{UserID: "requester", IsEnabled: 1}, &model.User{UserID: "reviewer", IsEnabled: 1}, &model.Role{RoleID: "review-role", Name: "review", IsEnabled: 1},
 		&model.RoleGrant{GrantID: "requester-grant", SubjectType: "user", SubjectID: "requester", RoleID: "review-role", ScopeType: "project", ScopeID: "project", IsEnabled: 1},
 		&model.RoleGrant{GrantID: "reviewer-grant", SubjectType: "user", SubjectID: "reviewer", RoleID: "review-role", ScopeType: "project", ScopeID: "project", IsEnabled: 1},
