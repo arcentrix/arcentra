@@ -7,11 +7,8 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
-	"os/exec"
 	"regexp"
 	"strings"
-	"time"
 
 	agentv1 "github.com/arcentrix/arcentra/api/agent/v1"
 	"github.com/arcentrix/arcentra/pkg/sourceprovenance"
@@ -90,64 +87,27 @@ func handleSourceCloneAtCommit(ctx context.Context, src *taskqueue.SourcePayload
 	if src.BindingDigest != "" && !sourceprovenance.ValidBindingDigest(src.BindingDigest) {
 		return nil, fmt.Errorf("invalid source binding digest")
 	}
-	if err := os.MkdirAll(workspace, 0o755); err != nil {
+	git, err := newSourceGit(src, workspace)
+	if err != nil {
 		return nil, err
 	}
-	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	username, password := src.Auth["username"], src.Auth["password"]
-	if password == "" {
-		password = src.Auth["token"]
-		if password != "" && username == "" {
-			username = "oauth2"
-		}
-	}
-	if password != "" {
-		// 凭据不进入命令行、仓库配置、收据或脚本内容
-		file, err := os.CreateTemp("", "arcentra-askpass-*")
-		if err != nil {
-			return nil, err
-		}
-		name := file.Name()
-		defer func() { _ = os.Remove(name) }()
-		script := "#!/bin/sh\ncase \"$1\" in *Username*) printf '%s\\n' \"$ARCENTRA_GIT_USERNAME\" ;; *) printf '%s\\n' \"$ARCENTRA_GIT_PASSWORD\" ;; esac\n"
-		if _, err := file.WriteString(script); err != nil {
-			_ = file.Close()
-			return nil, err
-		}
-		if err := file.Close(); err != nil {
-			return nil, err
-		}
-		if err := os.Chmod(name, 0o700); err != nil {
-			return nil, err
-		}
-		env = append(env, "GIT_ASKPASS="+name, "ARCENTRA_GIT_USERNAME="+username, "ARCENTRA_GIT_PASSWORD="+password)
-	}
-	run := func(args ...string) error {
-		cmd := exec.CommandContext(ctx, "git", args...)
-		cmd.Dir, cmd.Env = workspace, env
-		cmd.WaitDelay = 2 * time.Second
-		if err := cmd.Run(); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			// Git 输出可能包含源 URL、查询参数或凭据，不进入日志和终态收据
-			return fmt.Errorf("git source operation failed: %w", err)
-		}
-		return nil
-	}
+	defer git.close()
+	run := func(args ...string) error { _, err := git.run(ctx, args...); return err }
 	if pinnedCommit != "" {
-		// 不解析可变分支，即使分支移动或被删除也只获取原提交
-		initArgs := []string{"init", "--object-format=sha1", "."}
+		format := "sha1"
 		if len(pinnedCommit) == 64 {
-			initArgs = []string{"init", "--object-format=sha256", "."}
+			format = "sha256"
 		}
-		for _, args := range [][]string{initArgs, {"remote", "add", "--", "origin", src.Repo}, {"fetch", "--depth", "1", "origin", pinnedCommit}, {"checkout", "--detach", pinnedCommit}} {
+		for _, args := range [][]string{{"init", "--object-format=" + format, "."}, {"remote", "add", "--", "origin", src.Repo}, {"fetch", "--no-recurse-submodules", "--depth", "1", "origin", pinnedCommit}} {
 			if err := run(args...); err != nil {
 				return nil, err
 			}
 		}
 	} else {
-		args := []string{"clone", "--depth", "1"}
+		args := []string{"clone", "--no-checkout", "--no-local", "--no-recurse-submodules"}
+		if git.protocol != "file" {
+			args = append(args, "--depth", "1")
+		}
 		if src.Branch != "" {
 			args = append(args, "--branch", src.Branch)
 		}
@@ -156,20 +116,39 @@ func handleSourceCloneAtCommit(ctx context.Context, src *taskqueue.SourcePayload
 			return nil, err
 		}
 		if src.Commit != "" {
-			if err := run("fetch", "--depth", "1", "origin", src.Commit); err != nil {
-				return nil, err
-			}
-			if err := run("checkout", "--detach", src.Commit); err != nil {
+			if err := run("fetch", "--no-recurse-submodules", "--depth", "1", "origin", src.Commit); err != nil {
 				return nil, err
 			}
 		}
+	}
+	target := pinnedCommit
+	if target == "" {
+		target = src.Commit
+	}
+	if target == "" {
+		target = "HEAD"
+	}
+	// Resolve once, inspect objects without checkout, then materialize that exact tree.
+	resolved, err := git.run(ctx, "rev-parse", "--verify", target+"^{commit}")
+	if err != nil {
+		return nil, err
+	}
+	commit := strings.TrimSpace(string(resolved))
+	if !sourceprovenance.ValidCommit(commit) {
+		return nil, fmt.Errorf("initial source commit is not a full Git object ID")
+	}
+	if err := git.validateTree(ctx, commit); err != nil {
+		return nil, err
+	}
+	if err := run("checkout", "--detach", commit); err != nil {
+		return nil, err
 	}
 
 	// 旧任务没有控制面绑定，不能凭本地观察合成新的证明
 	if src.BindingDigest == "" {
 		return nil, nil
 	}
-	commit, err := resolveInitialSourceCommit(ctx, workspace, env)
+	commit, err = git.resolveCommit(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -177,22 +156,4 @@ func handleSourceCloneAtCommit(ctx context.Context, src *taskqueue.SourcePayload
 		return nil, fmt.Errorf("resolved source commit differs from immutable pin")
 	}
 	return &agentv1.SourceCheckout{BindingDigest: src.BindingDigest, ResolvedCommit: commit}, nil
-}
-
-func resolveInitialSourceCommit(ctx context.Context, workspace string, env []string) (string, error) {
-	// 已成功 checkout 后，即使取消刚到达，也用有界本地只读操作保留已发生的事实
-	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(readCtx, "git", "rev-parse", "--verify", "HEAD^{commit}")
-	cmd.Dir, cmd.Env = workspace, env
-	cmd.WaitDelay = 2 * time.Second
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("resolve initial source commit: %w", err)
-	}
-	commit := strings.TrimSpace(string(output))
-	if !sourceprovenance.ValidCommit(commit) {
-		return "", fmt.Errorf("initial source commit is not a full Git object ID")
-	}
-	return commit, nil
 }
