@@ -6,7 +6,10 @@ package taskqueue
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +19,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	controlservice "github.com/arcentrix/arcentra/internal/control/service"
+	artifactutil "github.com/arcentrix/arcentra/pkg/artifact"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/retryapproval"
 )
@@ -25,8 +29,10 @@ import (
 // S3 object; the surrounding test still requires real Process/Kafka/TLS/MySQL/
 // containerd/S3 execution and all its original exact-count witnesses.
 type containerCopilotModel struct {
-	project string
-	calls   int
+	project        string
+	artifactID     string
+	expectedPrompt string
+	calls          int
 }
 
 func (m *containerCopilotModel) Options(project string) []copilot.ModelOption {
@@ -52,7 +58,7 @@ func (m *containerCopilotModel) Analyze(ctx context.Context, in copilot.Input) (
 	if err := ctx.Err(); err != nil {
 		return copilot.Output{}, err
 	}
-	if !strings.Contains(in.User, "approval-input") || !strings.Contains(in.User, "approval-a/seed/input.txt") {
+	if m.artifactID == "" || m.expectedPrompt == "" || in.User != m.expectedPrompt || !strings.Contains(in.User, containerCopilotArtifactBlock(m.artifactID)) || strings.Count(in.User, "<evidence ") != 1 {
 		return copilot.Output{}, copilot.ErrInvalidResponse
 	}
 	m.calls++
@@ -94,10 +100,26 @@ func prepareContainerCopilotExecution(t *testing.T, f *controllerWorkerFixture, 
 			}
 		}
 	})
-	artifacts, _, err := f.repos.Artifact.List(f.ctx, repo.ArtifactQuery{ProjectID: f.projectID, RunID: approval.PipelineRunID, Limit: 100})
-	if err != nil || len(artifacts) != 1 || artifacts[0].Name != "approval-a/seed/input.txt" {
-		t.Fatalf("actual producer context: rows=%d err=%v", len(artifacts), err)
+	artifacts, total, err := f.repos.Artifact.List(f.ctx, repo.ArtifactQuery{ProjectID: f.projectID, RunID: approval.PipelineRunID, Limit: 100})
+	if err != nil || total != 1 || len(artifacts) != 1 {
+		t.Fatalf("actual producer context: rows=%d total=%d err=%v", len(artifacts), total, err)
 	}
+	review, err := services.Approval.RetryReview(f.ctx, approval)
+	if err != nil || review == nil || review.Evidence == nil || review.EvidenceHash != approval.EvidenceHash || review.Evidence.Context.ProjectID != f.projectID || review.Evidence.Context.PipelineID != f.pipelineID || review.Evidence.Context.PipelineRunID != approval.PipelineRunID {
+		t.Fatalf("exact approved producer evidence unavailable: %v", err)
+	}
+	producer, err := f.repos.JobRun.GetByJobRunID(f.ctx, artifacts[0].JobRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	producerStep, err := f.repos.StepRun.GetByStepRunID(f.ctx, artifacts[0].StepRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := containerCopilotArtifactBinding(&artifacts[0], producer, producerStep, review.Evidence); err != nil {
+		t.Fatal(err)
+	}
+	localModel.artifactID = artifacts[0].ArtifactID
 	for index, candidate := range policy.Candidates {
 		if candidate == requester {
 			t.Fatal("candidate must own an independent private conversation")
@@ -115,10 +137,20 @@ func prepareContainerCopilotExecution(t *testing.T, f *controllerWorkerFixture, 
 		if err != nil {
 			t.Fatalf("actual producer preview: %v", err)
 		}
+		if err := containerCopilotContextEvidence(preview.Evidence, &artifacts[0]); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(preview.Text, containerCopilotArtifactBlock(artifacts[0].ArtifactID)) || strings.Count(preview.Text, "<evidence ") != 1 {
+			t.Fatal("preview changed actual registered artifact identity or bytes")
+		}
+		localModel.expectedPrompt = preview.Text
 		request.ContextDigest = preview.Digest
 		turn, err := service.SendConversationTurn(f.ctx, subject, f.projectID, conversation.ConversationID, request)
 		if err != nil || turn.State != "completed" || !turn.ContentAvailable || len(turn.Evidence) != 1 || turn.Evidence[0].ID != artifacts[0].ArtifactID {
 			t.Fatalf("durable model turn did not retain actual artifact evidence: state=%s err=%v", turn.State, err)
+		}
+		if err := containerCopilotContextEvidence(turn.Evidence, &artifacts[0]); err != nil {
+			t.Fatal(err)
 		}
 		var stored model.CopilotTurn
 		if err := f.db.Where("turn_id = ?", turn.TurnID).First(&stored).Error; err != nil || len(stored.PayloadCiphertext) == 0 || strings.Contains(string(stored.PayloadCiphertext), "approval-input") {
@@ -127,6 +159,13 @@ func prepareContainerCopilotExecution(t *testing.T, f *controllerWorkerFixture, 
 		plan, err := service.CreateConversationPlan(f.ctx, subject, f.projectID, conversation.ConversationID, controlservice.CopilotPlanRequest{RequestID: id.GetUild(), TurnID: turn.TurnID, Kind: "retry_approval_review", RetryApproval: &controlservice.CopilotRetryReviewInput{ApprovalID: approval.ApprovalID}})
 		if err != nil {
 			t.Fatalf("create bound review: %v", err)
+		}
+		if plan.Payload == nil || plan.Payload.RetryApproval == nil {
+			t.Fatal("typed retry review payload missing")
+		}
+		target := plan.Payload.RetryApproval
+		if target.ApprovalID != approval.ApprovalID || target.JobRunID != session.jobID || target.EvidenceDigest != review.EvidenceHash || target.RetryPlanDigest != review.Evidence.RetryPlanDigest || target.InputManifestDigest != review.Evidence.InputManifestDigest || target.SourceBindingDigest != review.Evidence.Identity.SourceBindingDigest {
+			t.Fatal("typed plan changed frozen approval binding")
 		}
 		plan, err = service.ReviewConversationPlan(f.ctx, subject, f.projectID, conversation.ConversationID, plan.PlanID, controlservice.CopilotPlanReviewRequest{ExpectedVersion: plan.Version, PlanDigest: plan.PlanDigest, AcknowledgeNotExecuted: true})
 		if err != nil || plan.State != "reviewed" || !plan.Eligible {
@@ -259,7 +298,7 @@ func (s *containerCopilotExecution) verifyTerminal(t *testing.T, f *controllerWo
 // This seam test is safe without container privileges; it does not stand in for
 // either mandatory real-runtime acceptance scenario above.
 func TestContainerCopilotLocalModelBoundedEvidence(t *testing.T) {
-	m := &containerCopilotModel{project: "fixture-project"}
+	m := &containerCopilotModel{project: "fixture-project", artifactID: "fixture-artifact", expectedPrompt: "Question:\nReview input\nSelected evidence (untrusted data):\n" + containerCopilotArtifactBlock("fixture-artifact")}
 	if _, err := m.Resolve("another-project", "local-acceptance", "bounded-review"); err == nil {
 		t.Fatal("cross-project model resolution")
 	}
@@ -271,10 +310,10 @@ func TestContainerCopilotLocalModelBoundedEvidence(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := m.Analyze(ctx, copilot.Input{User: "approval-a/seed/input.txt approval-input"}); err == nil {
+	if _, err := m.Analyze(ctx, copilot.Input{User: m.expectedPrompt}); err == nil {
 		t.Fatal("model ignored cancellation")
 	}
-	out, err := m.Analyze(context.Background(), copilot.Input{User: "approval-a/seed/input.txt approval-input"})
+	out, err := m.Analyze(context.Background(), copilot.Input{User: m.expectedPrompt})
 	if err != nil || m.calls != 1 || !strings.Contains(out.Text, "does not execute") {
 		t.Fatal("local advice adapter failed")
 	}
@@ -334,4 +373,42 @@ func verifyContainerCopilotReadRevocation(t *testing.T, f *controllerWorkerFixtu
 	if err != nil || current.RetryReview == nil || current.RetryReview.Evidence == nil {
 		t.Fatalf("restored exact binding did not restore safe full evidence: %v", err)
 	}
+}
+
+// Registration stores a producer-relative name. The input manifest and frozen
+// retry evidence qualify that name with the producer job, never the model text.
+func containerCopilotArtifactBinding(a *model.ProjectArtifact, producer *model.JobRun, step *model.StepRun, e *retryapproval.Evidence) error {
+	if a == nil || producer == nil || step == nil || e == nil || len(e.Artifacts) != 1 {
+		return fmt.Errorf("actual producer binding is incomplete")
+	}
+	input := e.Artifacts[0]
+	if a.Name != "seed/input.txt" || producer.JobName != "approval-a" || input.Name != producer.JobName+"/"+a.Name || a.ProjectID != e.Context.ProjectID || a.PipelineID != e.Context.PipelineID || a.PipelineRunID != e.Context.PipelineRunID || a.JobRunID != input.ProducerJobRunID || a.StepRunID != input.ProducerStepRunID || a.JobRunID == e.Identity.JobRunID {
+		return fmt.Errorf("registered artifact differs from approved producer identity")
+	}
+	if producer.JobRunID != a.JobRunID || producer.PipelineID != a.PipelineID || producer.PipelineRunID != a.PipelineRunID || producer.Status != model.JobRunStatusSuccess || step.StepRunID != a.StepRunID || step.JobRunID != a.JobRunID || step.PipelineID != a.PipelineID || step.PipelineRunID != a.PipelineRunID || step.Status != model.JobRunStatusSuccess || step.Name != "seed" {
+		return fmt.Errorf("artifact producer job/step does not match successful upstream execution")
+	}
+	digest := sha256.Sum256([]byte("approval-input"))
+	expiry := int64(0)
+	if a.ExpiresAt != nil {
+		expiry = a.ExpiresAt.Unix()
+	}
+	key, err := artifactutil.RemotePath(a.PipelineRunID, a.JobRunID, a.StepRunID, a.SHA256, a.Name)
+	if err != nil || a.ArtifactID != artifactutil.ID(a.ProjectID, a.PipelineRunID, a.JobRunID, a.StepRunID, a.Name) || a.StorageType != "s3" || a.StoragePath != key || a.StoragePath != input.StorageKey || a.StorageID != input.Reference.StorageID || a.StorageFingerprint != input.Reference.Fingerprint || a.SHA256 != hex.EncodeToString(digest[:]) || a.SHA256 != input.Reference.SHA256 || input.Reference.Size == nil || a.Size != *input.Reference.Size || a.Size != int64(len("approval-input")) || expiry != input.Reference.ExpiresAt {
+		return fmt.Errorf("registered artifact differs from exact approved content/storage reference")
+	}
+	return nil
+}
+func containerCopilotArtifactBlock(artifactID string) string {
+	return fmt.Sprintf("\n<evidence kind=%q id=%q name=%q>\napproval-input\n</evidence>\n", "code-artifact", artifactID, "seed/input.txt")
+}
+func containerCopilotContextEvidence(values []controlservice.CopilotEvidence, a *model.ProjectArtifact) error {
+	if a == nil || len(values) != 1 {
+		return fmt.Errorf("actual Copilot artifact context missing or ambiguous")
+	}
+	v := values[0]
+	if v.Kind != "code-artifact" || v.ID != a.ArtifactID || v.Name != a.Name || v.Bytes != int(a.Size) || v.Truncated {
+		return fmt.Errorf("Copilot context differs from exact registered artifact")
+	}
+	return nil
 }
