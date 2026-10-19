@@ -117,6 +117,31 @@ const inboxWideIntersectPlan = `-> Limit: 100 row(s)  (cost=1.09 rows=2) (actual
                 -> Index range scan on pipeline_run using idx_run_inbox_origin over (inbox_origin = 1 AND 4900 < id <= 10001)  (cost=0.251 rows=4) (actual time=0.0266..0.0293 rows=2 loops=1)
 `
 
+// Same exact five-node/one-leaf shape captured on 8.0.40 with estimated one
+// output row but actual two at every iterator; estimates are not row visits.
+const inboxWideIntersectEstimateOnePlan = `-> Limit: 100 row(s)  (cost=0.7 rows=1) (actual time=15.9..15.9 rows=2 loops=1)
+    -> Sort: pipeline_run.id, limit input to 100 row(s) per chunk  (cost=0.7 rows=1) (actual time=15.9..15.9 rows=2 loops=1)
+        -> Filter: ((pipeline_run.inbox_origin = 1) and (pipeline_run.id > 4900) and (pipeline_run.id <= 10001))  (cost=0.7 rows=1) (actual time=15.8..15.8 rows=2 loops=1)
+            -> Intersect rows sorted by row ID  (cost=0.7 rows=1) (actual time=15.8..15.8 rows=2 loops=1)
+                -> Index range scan on pipeline_run using idx_run_inbox_origin over (inbox_origin = 1 AND 4900 < id <= 10001)  (cost=0.25 rows=2) (actual time=15.8..15.8 rows=2 loops=1)
+`
+
+func TestInboxMySQLBoundedPlanSeparatesEstimateFromActualWork(t *testing.T) {
+	for _, estimate := range []int64{1, 2, 3, 999} {
+		plan := inboxObservedMergeEstimate()
+		plan[0].Rows = estimate
+		require.NoError(t, validateInboxMySQLPlan(plan, inboxWideIntersectEstimateOnePlan, "repair-wide", 2))
+		// A harmless estimated count cannot excuse expanded actual work.
+		require.Error(t, validateInboxMySQLPlan(plan, strings.ReplaceAll(inboxWideIntersectEstimateOnePlan, "rows=2 loops=1", "rows=3 loops=1"), "repair-wide", 2))
+		require.Error(t, validateInboxMySQLPlan(plan, strings.ReplaceAll(inboxWideIntersectEstimateOnePlan, "rows=2 loops=1", "rows=2 loops=2"), "repair-wide", 2))
+	}
+	for _, estimate := range []int64{-1, 0, 1000, 5000} {
+		plan := inboxObservedMergeEstimate()
+		plan[0].Rows = estimate
+		require.Error(t, validateInboxMySQLPlan(plan, inboxWideIntersectEstimateOnePlan, "repair-wide", 2))
+	}
+}
+
 func inboxObservedMergeEstimate() []inboxMySQLQueryPlan {
 	key, possible := "idx_run_inbox_origin,PRIMARY", "PRIMARY,idx_run_inbox_origin,idx_run_inbox_repair"
 	extra := "Using intersect(idx_run_inbox_origin,PRIMARY); Using where; Using filesort"
@@ -171,7 +196,7 @@ func TestInboxMySQLBoundedPlanObservedSingleLeafIntersection(t *testing.T) {
 		func(p *inboxMySQLQueryPlan) { p.Type = "range" },
 		func(p *inboxMySQLQueryPlan) { p.Type = "ALL" },
 		func(p *inboxMySQLQueryPlan) { p.Table = "inbox_work" },
-		func(p *inboxMySQLQueryPlan) { p.Rows = 3 },
+		func(p *inboxMySQLQueryPlan) { p.Rows = 1000 },
 		func(p *inboxMySQLQueryPlan) { p.Filtered = 50 },
 		func(p *inboxMySQLQueryPlan) { p.Key = nil },
 		func(p *inboxMySQLQueryPlan) { *p.Key = "PRIMARY,idx_run_inbox_origin" },

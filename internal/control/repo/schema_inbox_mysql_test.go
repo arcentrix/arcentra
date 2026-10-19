@@ -198,8 +198,11 @@ func validateInboxMySQLPlan(plan []inboxMySQLQueryPlan, execution, kind string, 
 		// filter, not a second retrieval leaf (MySQL Index Merge documentation):
 		// https://dev.mysql.com/doc/refman/8.0/en/index-merge-optimization.html
 		// Do not generalize this exception to unions or multi-leaf intersections.
+		// Estimated Rows is statistical, not actual work: retain the bounded
+		// positive estimate above, but prove exactly two rows at every iterator
+		// below rather than requiring the estimate to equal the actual count.
 		if kind != "repair-wide" || outputRows != 2 || plan[0].Table != "pipeline_run" ||
-			*plan[0].Key != "idx_run_inbox_origin,PRIMARY" || plan[0].Rows != 2 || plan[0].Filtered != 100 ||
+			*plan[0].Key != "idx_run_inbox_origin,PRIMARY" || plan[0].Filtered != 100 ||
 			plan[0].Extra == nil || *plan[0].Extra != "Using intersect(idx_run_inbox_origin,PRIMARY); Using where; Using filesort" ||
 			plan[0].PossibleKeys == nil || *plan[0].PossibleKeys != "PRIMARY,idx_run_inbox_origin,idx_run_inbox_repair" {
 			return fmt.Errorf("unknown index-merge metadata")
