@@ -84,6 +84,12 @@ type CopilotResult struct {
 
 // CopilotStatus 显示实际配置而不宣称已连接或存在对话历史
 type CopilotStatus struct {
+	HistoryEnabled          bool `json:"historyEnabled"`
+	HistoryAvailable        bool `json:"historyAvailable"`
+	HistoryRetentionDays    int  `json:"historyRetentionDays"`
+	HistoryMaxSelectedTurns int  `json:"historyMaxSelectedTurns"`
+	HistoryMaxBytes         int  `json:"historyMaxBytes"`
+
 	SourceContextEnabled bool                  `json:"sourceContextEnabled"`
 	MaxSourceFiles       int                   `json:"maxSourceFiles"`
 	MaxSourceFileBytes   int                   `json:"maxSourceFileBytes"`
@@ -111,6 +117,12 @@ type CopilotSources struct {
 
 // CopilotService 在每次内容读取前校验完整所属链与权限
 type CopilotService struct {
+	historyPlanTargets map[string]copilotPlanTarget
+	historyEnabled     bool
+	historyCipher      *copilotHistoryCipher
+	historyKey         []byte
+	historyPrimary     func(context.Context) (*repo.Repositories, error)
+
 	sourceAllowed map[string]bool
 	sourceReader  copilotSourceReader
 	sourcePrimary func(context.Context) (*repo.Repositories, error)
@@ -188,7 +200,7 @@ func (s *CopilotService) Status(ctx context.Context, subject authz.Subject, proj
 	if s.sourceEnabled(projectID) {
 		codeContext = "registered-text-artifacts-and-selected-github-files"
 	}
-	return CopilotStatus{Configured: len(models) > 0, Models: models, CodeContext: codeContext, SourceContextEnabled: s.sourceEnabled(projectID), MaxSourceFiles: copilotSourceFiles, MaxSourceFileBytes: copilotSourceFileBytes, MaxContextBytes: copilotContextBytes, MaxQuestionBytes: 4096}, nil
+	return CopilotStatus{HistoryEnabled: s.historyEnabled, HistoryAvailable: s.historyReady(), HistoryRetentionDays: copilotHistoryDays, HistoryMaxSelectedTurns: copilotHistoryMaxTurns, HistoryMaxBytes: copilotHistoryMaxBytes, Configured: len(models) > 0, Models: models, CodeContext: codeContext, SourceContextEnabled: s.sourceEnabled(projectID), MaxSourceFiles: copilotSourceFiles, MaxSourceFileBytes: copilotSourceFileBytes, MaxContextBytes: copilotContextBytes, MaxQuestionBytes: 4096}, nil
 }
 
 // Sources 只列出已验证运行下的有限元数据，不将其发送给模型

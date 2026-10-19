@@ -35,6 +35,7 @@ func (r *Repositories) CopilotPrimaryRepositories(ctx context.Context) (*Reposit
 		User:     NewUserRepo(primary, nil), Team: NewTeamRepo(primary), TeamMember: NewTeamMemberRepo(primary),
 		Project: NewProjectRepo(primary), Pipeline: NewPipelineRepo(primary), JobRun: NewJobRunRepo(primary), StepRun: NewStepRunRepo(primary),
 		Secret: NewSecretRepo(primary), Permission: NewPermissionRepo(primary), Role: NewRoleRepo(primary), RoleGrant: NewRoleGrantRepo(primary),
+		Approval: NewApprovalRepo(primary), Deployment: NewDeploymentRepo(primary),
 		Artifact: NewArtifactRepo(primary), Storage: NewStorageRepo(primary, nil), Log: NewLogRepository(primary.Database()), AuditLog: NewAuditLogRepo(primary),
 	}, nil
 }

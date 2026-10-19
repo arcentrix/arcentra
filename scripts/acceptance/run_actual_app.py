@@ -27,6 +27,7 @@ import urllib.parse
 import urllib.request
 
 from inbox_journey import run_personal_inbox
+from copilot_history_journey import run_private_copilot
 
 
 BACKEND_URL = "http://127.0.0.1:18080"
@@ -119,6 +120,13 @@ class Fixture:
         if inbox_mode not in ("0", "1"):
             raise ValueError("invalid Inbox acceptance opt-in")
         self.inbox_enabled = inbox_mode == "1"
+        history_mode = os.environ.get("ARCENTRA_ACCEPTANCE_COPILOT_HISTORY", "0")
+        if history_mode not in ("0", "1"):
+            raise ValueError("invalid private Copilot history acceptance opt-in")
+        self.copilot_history_enabled = history_mode == "1"
+        self.copilot_model = None
+        self.copilot_evidence = None
+        self.control_extra_env = {}
         self.children = []
         self.logs = []
         self.redactions = [PASSWORD, encoded(PASSWORD), DEPENDENCIES["ARCENTRA_TEST_S3_SECRET_KEY"],
@@ -261,7 +269,7 @@ class Fixture:
     def start_control(self, name):
         process = self.start(name, [self.args.control_bin, "-conf", str(self.root / "control.toml"),
                                     "-plugin-conf", str(self.root / "plugins.toml")],
-                             env=self.env | {"ARCENTRA_SECRET_ENCRYPTION_KEY": self.control_secret_key})
+                             env=self.env | {"ARCENTRA_SECRET_ENCRYPTION_KEY": self.control_secret_key} | self.control_extra_env)
         self.wait_until("Control readiness", lambda: self.probe(BACKEND_URL + "/ready") == 200, process)
         return process
 
@@ -625,7 +633,9 @@ class Fixture:
         self.configure_observer()
         self.run_build_browser(control, agent)
         if self.inbox_enabled:
-            run_personal_inbox(self, control, agent, read_json=read_private_json)
+            control = run_personal_inbox(self, control, agent, read_json=read_private_json)
+        if self.copilot_history_enabled:
+            run_private_copilot(self, control, agent, read_json=read_private_json)
 
     def browser_environment(self, phase):
         if phase not in ("preflight", "storage-setup", "build"):
@@ -823,9 +833,14 @@ class Fixture:
         visual_proof_path.unlink(missing_ok=True)
         error = redact_diagnostics(error, self.redactions) if error else error
         self.cleanup_runtime()
+        if self.copilot_model is not None:
+            self.copilot_model.close()
+            self.copilot_model = None
         self.args.evidence_dir.mkdir(parents=True, exist_ok=True)
         inbox_path = self.args.evidence_dir / "inbox-verification.json"
         inbox_path.unlink(missing_ok=True)
+        copilot_path = self.args.evidence_dir / "copilot-history-verification.json"
+        copilot_path.unlink(missing_ok=True)
         for _, handle in self.logs:
             handle.close()
         self.args.evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -859,6 +874,8 @@ class Fixture:
             atomic_json(visual_proof_path, self.visual_proof)
         if not error and self.inbox_evidence is not None:
             atomic_json(inbox_path, self.inbox_evidence)
+        if not error and self.copilot_evidence is not None:
+            atomic_json(copilot_path, self.copilot_evidence)
 
 
 def redact_diagnostics(content, values):

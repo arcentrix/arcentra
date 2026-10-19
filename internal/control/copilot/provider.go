@@ -7,6 +7,10 @@ package copilot
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -28,7 +32,13 @@ type Config struct {
 	Enabled           bool                `mapstructure:"enabled" json:"enabled"`
 	AllowedProjectIDs []string            `mapstructure:"allowedProjectIds" json:"allowedProjectIds"`
 	Providers         []ProviderConfig    `mapstructure:"providers" json:"-"`
+	History           HistoryConfig       `mapstructure:"history" json:"-"`
 	SourceContext     SourceContextConfig `mapstructure:"sourceContext" json:"-"`
+}
+
+// HistoryConfig enables private encrypted history only with the managed AES key.
+type HistoryConfig struct {
+	Enabled bool `mapstructure:"enabled" json:"enabled"`
 }
 
 // SourceContextConfig 独立控制允许读取固定 GitHub 来源的项目，默认关闭
@@ -82,15 +92,20 @@ var (
 
 // Registry 保存固定端点的适配器和模型白名单
 type Registry struct {
-	options   []ModelOption
-	providers map[string]Provider
-	allowed   map[string]bool
-	secrets   []string
+	generation string
+	options    []ModelOption
+	providers  map[string]Provider
+	allowed    map[string]bool
+	secrets    []string
 }
 
 // NewRegistry 创建默认关闭的适配器目录，不发起网络探测
 func NewRegistry(config Config) *Registry {
-	r := &Registry{providers: map[string]Provider{}, allowed: map[string]bool{}}
+	generation := make([]byte, 32)
+	if _, err := rand.Read(generation); err != nil {
+		return &Registry{}
+	}
+	r := &Registry{generation: hex.EncodeToString(generation), providers: map[string]Provider{}, allowed: map[string]bool{}}
 	if !config.Enabled {
 		return r
 	}
@@ -135,6 +150,42 @@ func (r *Registry) Resolve(projectID, providerID, model string) (Provider, error
 		}
 	}
 	return nil, ErrUnconfigured
+}
+
+// Binding is an opaque per-registry generation. A registry/configuration replacement
+// invalidates prior transmission consent without exposing credential fingerprints.
+func (r *Registry) Binding(projectID, providerID, model string) (string, error) {
+	if _, err := r.Resolve(projectID, providerID, model); err != nil {
+		return "", err
+	}
+	if r.generation == "" {
+		return "", ErrUnconfigured
+	}
+	return r.generation, nil
+}
+
+// ConfigurationBinding seals the effective fixed destination/model/credential
+// tuple with a service-owned secret key. It is stable across equal-config
+// instances and exposes neither the tuple nor a standalone credential hash.
+func (r *Registry) ConfigurationBinding(projectID, providerID, model string, key []byte) (string, error) {
+	if len(key) != 32 {
+		return "", ErrUnconfigured
+	}
+	provider, err := r.Resolve(projectID, providerID, model)
+	if err != nil {
+		return "", err
+	}
+	p, ok := provider.(*httpProvider)
+	if !ok {
+		return "", ErrUnconfigured
+	}
+	raw, err := sonic.Marshal([]string{"copilot-provider-binding-v1", projectID, providerID, model, p.kind, p.endpoint, p.apiKey, p.tokenField})
+	if err != nil {
+		return "", ErrUnconfigured
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write(raw)
+	return hex.EncodeToString(mac.Sum(nil)), nil
 }
 
 // Secrets 返回必须从输入和输出中去除的服务端模型凭据副本
