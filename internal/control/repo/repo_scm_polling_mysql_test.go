@@ -152,25 +152,46 @@ func TestPollingMySQLAcceptance(t *testing.T) {
 	}) {
 		return
 	}
-	// No subtest is parallel: catalog current reads deliberately lock the same
-	// permission rows. Each fixture still uses unique, clearly prefixed IDs.
-	t.Run("committed_scope_revocation_defeats_repeatable_read_snapshot", func(t *testing.T) {
-		pollingMySQLScopeRevocation(t, newPollingMySQLFixture(t, db, other))
-	})
-	for _, kind := range []string{"disable", "project_configuration", "pipeline_configuration"} {
-		t.Run(kind+"_wins_before_admission", func(t *testing.T) {
-			pollingMySQLMutationWins(t, newPollingMySQLFixture(t, db, other), kind)
-		})
+	for _, provider := range []string{"gitlab", "github", "gitea"} {
+		run := func(t *testing.T) {
+			// No subtest is parallel: catalog current reads deliberately lock the same
+			// permission rows. Each fixture still uses unique, clearly prefixed IDs.
+			t.Run("empty_eligible_targets_completes_without_build", func(t *testing.T) {
+				f := newPollingMySQLFixture(t, db, other, provider)
+				s, _ := f.prepare(t, true)
+				completed, err := f.streams.AcknowledgeBatch(f.ctx, AcknowledgeBatchInput{ProjectID: f.projectID, ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, BatchID: f.batchID})
+				if err != nil || completed.PendingBatchJSON != "" || completed.LastTargetCount != 0 || completed.LastObservationCount != 1 || completed.CursorJSON == s.CursorJSON {
+					t.Fatalf("empty observation did not complete: %v", err)
+				}
+				var count int64
+				if err := db.Model(&model.PipelineRun{}).Where("pipeline_id = ?", f.pipelineID).Count(&count).Error; err != nil || count != 0 {
+					t.Fatal("empty eligible selection created a run")
+				}
+			})
+			t.Run("committed_scope_revocation_defeats_repeatable_read_snapshot", func(t *testing.T) {
+				pollingMySQLScopeRevocation(t, newPollingMySQLFixture(t, db, other, provider))
+			})
+			for _, kind := range []string{"disable", "project_configuration", "pipeline_configuration", "provider_configuration", "archive"} {
+				t.Run(kind+"_wins_before_admission", func(t *testing.T) {
+					pollingMySQLMutationWins(t, newPollingMySQLFixture(t, db, other, provider), kind)
+				})
+			}
+			t.Run("admission_wins_and_later_disable_preserves_receipt", func(t *testing.T) {
+				pollingMySQLAdmissionWins(t, newPollingMySQLFixture(t, db, other, provider))
+			})
+			t.Run("concurrent_duplicate_creation_has_one_created_now", func(t *testing.T) {
+				pollingMySQLConcurrentCreation(t, newPollingMySQLFixture(t, db, other, provider))
+			})
+			t.Run("cursor_cas_failure_replays_without_reclaim", func(t *testing.T) {
+				pollingMySQLCursorReplay(t, newPollingMySQLFixture(t, db, other, provider))
+			})
+		}
+		if provider == "gitlab" {
+			run(t)
+		} else {
+			t.Run(provider, run)
+		}
 	}
-	t.Run("admission_wins_and_later_disable_preserves_receipt", func(t *testing.T) {
-		pollingMySQLAdmissionWins(t, newPollingMySQLFixture(t, db, other))
-	})
-	t.Run("concurrent_duplicate_creation_has_one_created_now", func(t *testing.T) {
-		pollingMySQLConcurrentCreation(t, newPollingMySQLFixture(t, db, other))
-	})
-	t.Run("cursor_cas_failure_replays_without_reclaim", func(t *testing.T) {
-		pollingMySQLCursorReplay(t, newPollingMySQLFixture(t, db, other))
-	})
 }
 
 func pollingMySQLMigration(t *testing.T, db *gorm.DB) {
@@ -276,7 +297,7 @@ type pollingMySQLFixture struct {
 	scope                 polling.Scope
 }
 
-func newPollingMySQLFixture(t *testing.T, db, other *gorm.DB) *pollingMySQLFixture {
+func newPollingMySQLFixture(t *testing.T, db, other *gorm.DB, providers ...string) *pollingMySQLFixture {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
@@ -287,8 +308,20 @@ func newPollingMySQLFixture(t *testing.T, db, other *gorm.DB) *pollingMySQLFixtu
 	f.streams, f.otherStreams = &SCMPollingRepo{IDatabase: statusTestDB{db}}, &SCMPollingRepo{IDatabase: statusTestDB{other}}
 	f.runs, f.otherRuns = &PipelineRepo{IDatabase: statusTestDB{db}}, &PipelineRepo{IDatabase: statusTestDB{other}}
 	f.scope = polling.Scope{Version: polling.Version, ProjectID: f.projectID, Provider: "gitlab", APIOrigin: "https://gitlab.example.com", Repository: "https://gitlab.example.com/group/nested/" + prefix, ProviderProjectID: "42", Stream: "merge_requests"}
+	if len(providers) > 0 && providers[0] != "gitlab" {
+		f.scope.Provider = providers[0]
+		f.scope.Repository = "https://github.com/owner/" + prefix
+		if providers[0] == "gitea" {
+			f.scope.Repository = "https://gitea.example.com/owner/" + prefix
+		}
+		var err error
+		f.scope.Version, f.scope.APIOrigin, f.scope.Stream, err = polling.ProviderRepository(f.scope.Provider, f.scope.Repository)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	for _, row := range []any{
-		&model.Project{ProjectID: f.projectID, OrgID: prefix + "-org", RepoType: model.RepoTypeGitLab, RepoURL: f.scope.Repository, DefaultBranch: "main", IsEnabled: 1, Status: model.ProjectStatusActive, TriggerMode: model.TriggerModeMR, Settings: datatypes.JSON(`{"legacyCursor":"untouched"}`)},
+		&model.Project{ProjectID: f.projectID, OrgID: prefix + "-org", RepoType: f.scope.Provider, RepoURL: f.scope.Repository, DefaultBranch: "main", IsEnabled: 1, Status: model.ProjectStatusActive, TriggerMode: model.TriggerModeMR, Settings: datatypes.JSON(`{"legacyCursor":"untouched"}`)},
 		&model.Pipeline{PipelineID: f.pipelineID, ProjectID: f.projectID, RepoURL: f.scope.Repository, DefaultBranch: "main", PipelineFilePath: "pipeline.yaml", IsEnabled: 1, Metadata: "{}"},
 		&model.User{UserID: f.actorID, IsEnabled: 1},
 		&model.Role{RoleID: f.roleID, Name: f.roleID, ScopeType: "project", IsEnabled: 1},
@@ -369,7 +402,7 @@ func (f *pollingMySQLFixture) authorize(ctx context.Context, view PollingAuthori
 	return nil
 }
 
-func (f *pollingMySQLFixture) prepare(t *testing.T) (*model.SCMPollingStream, *model.PipelineRun) {
+func (f *pollingMySQLFixture) prepare(t *testing.T, empty ...bool) (*model.SCMPollingStream, *model.PipelineRun) {
 	t.Helper()
 	now := time.Now().UTC()
 	started := now.Add(-2 * time.Second).Truncate(time.Second).Add(123456789 * time.Nanosecond)
@@ -382,6 +415,17 @@ func (f *pollingMySQLFixture) prepare(t *testing.T) (*model.SCMPollingStream, *m
 	if err != nil || roundTrip.BaselineCutoff != started.Format(time.RFC3339Nano) {
 		t.Fatalf("MySQL truncated exact baseline cutoff: %v", err)
 	}
+	if s.State != polling.StateBaselined || s.EnabledBy != "" || s.SelectionJSON != "" {
+		t.Fatal("baseline implicitly activated polling")
+	}
+	var count int64
+	if err := f.db.WithContext(f.ctx).Model(&model.PipelineRun{}).Where("pipeline_id = ?", f.pipelineID).Count(&count).Error; err != nil || count != 0 {
+		t.Fatal("baseline created historical runs")
+	}
+	var project model.Project
+	if err := f.db.WithContext(f.ctx).Where("project_id = ?", f.projectID).First(&project).Error; err != nil || string(project.Settings) != `{"legacyCursor":"untouched"}` {
+		t.Fatal("baseline changed project settings")
+	}
 	s, err = f.streams.Enable(f.ctx, EnableInput{ProjectID: f.projectID, ActorID: f.actorID, ExpectedRevision: s.Revision, BaselineID: s.BaselineID, PipelineIDs: []string{f.pipelineID}})
 	if err != nil {
 		t.Fatal(err)
@@ -391,12 +435,22 @@ func (f *pollingMySQLFixture) prepare(t *testing.T) (*model.SCMPollingStream, *m
 		t.Fatal(err)
 	}
 	target := polling.Target{MRID: 7, MRIID: 7, State: "opened", UpdatedAt: "2026-10-16T16:00:00.123456789Z", PipelineID: f.pipelineID, ObservationID: "mr:7:revision:new", RequestID: requestID, SourceBranch: "feature", TargetBranch: "main", SourceSHA: strings.Repeat("a", 40), DefinitionCommitSHA: strings.Repeat("b", 40), DefinitionPath: "pipeline.yaml", ResolvedDefinitionDigest: "v1:" + strings.Repeat("c", 64)}
+	if f.scope.Version == polling.ScopeVersion2 {
+		target.SourceProjectID = 99
+		target.SourceRepository = "fork-owner/repo"
+		target.TargetSHA = strings.Repeat("d", 40)
+	}
+
 	next := polling.Cursor{Version: polling.Version, Boundary: now.Add(time.Minute).Format(time.RFC3339Nano), Complete: true, Observed: map[string]string{"7": target.ObservationID}}
 	s, err = f.streams.CaptureObservations(f.ctx, CaptureObservationsInput{ProjectID: f.projectID, ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, Batch: polling.ObservedBatch{Version: polling.Version, ID: f.batchID, ScopeDigest: s.ScopeDigest, Generation: s.ActivationGeneration, SelectionDigest: s.SelectionDigest, NextCursor: next, Observations: []polling.Observation{target.Observation()}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err = f.streams.CaptureBatch(f.ctx, CaptureBatchInput{ProjectID: f.projectID, ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, Batch: polling.Batch{Version: polling.Version, ID: f.batchID, ScopeDigest: s.ScopeDigest, Generation: s.ActivationGeneration, SelectionDigest: s.SelectionDigest, NextCursor: next, Targets: []polling.Target{target}, ObservationCount: 1}})
+	targets := []polling.Target{target}
+	if len(empty) > 0 && empty[0] {
+		targets = nil
+	}
+	s, err = f.streams.CaptureBatch(f.ctx, CaptureBatchInput{ProjectID: f.projectID, ExpectedRevision: s.Revision, ActivationGeneration: s.ActivationGeneration, Batch: polling.Batch{Version: polling.Version, ID: f.batchID, ScopeDigest: s.ScopeDigest, Generation: s.ActivationGeneration, SelectionDigest: s.SelectionDigest, NextCursor: next, Targets: targets, ObservationCount: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,6 +661,10 @@ func pollingMySQLMutationWins(t *testing.T, f *pollingMySQLFixture, kind string)
 			_, err = f.otherStreams.Disable(f.ctx, DisableInput{ProjectID: f.projectID, ActorID: f.actorID, ExpectedRevision: s.Revision})
 		case "project_configuration":
 			err = (&ProjectRepo{IDatabase: statusTestDB{f.other}}).Update(f.ctx, f.projectID, map[string]any{"default_branch": "changed"})
+		case "provider_configuration":
+			err = (&ProjectRepo{IDatabase: statusTestDB{f.other}}).Update(f.ctx, f.projectID, map[string]any{"repo_type": "gitee"})
+		case "archive":
+			err = (&ProjectRepo{IDatabase: statusTestDB{f.other}}).Update(f.ctx, f.projectID, map[string]any{"status": model.ProjectStatusArchived})
 		case "pipeline_configuration":
 			err = f.otherRuns.Update(f.ctx, f.pipelineID, map[string]any{"pipeline_file_path": "changed.yaml"})
 		}

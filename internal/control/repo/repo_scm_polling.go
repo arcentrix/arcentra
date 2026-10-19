@@ -204,7 +204,7 @@ func lockPollingStream(ctx context.Context, tx *gorm.DB, projectID string) (*mod
 }
 func pollingReady(p *model.Project, s polling.Scope) error {
 	repository, e := polling.CanonicalRepository(p.RepoURL)
-	if e != nil || s.Validate() != nil || p.ProjectID != s.ProjectID || p.RepoType != model.RepoTypeGitLab || repository != s.Repository || p.IsEnabled != 1 || p.Status != model.ProjectStatusActive || p.TriggerMode&model.TriggerModeMR == 0 {
+	if e != nil || s.Validate() != nil || p.ProjectID != s.ProjectID || p.RepoType != s.Provider || repository != s.Repository || p.IsEnabled != 1 || p.Status != model.ProjectStatusActive || p.TriggerMode&model.TriggerModeMR == 0 {
 		return polling.ErrBlocked
 	}
 	return nil

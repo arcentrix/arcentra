@@ -74,7 +74,7 @@ part of the separate event-delivery work.
 Webhook request IDs still follow the existing normalized event/time scheme and
 cron IDs use the pipeline plus minute slot. Durable admission prevents repeated
 execution of the same persisted run; it does not establish lossless provider
-history or universal webhook/poll cross-channel deduplication. The GitLab-only polling path has its own stable observation identity, bounded
+history or universal webhook/poll cross-channel deduplication. The explicitly activated GitLab/GitHub/Gitea snapshot polling path has its own stable observation identity, bounded
 inventory checks, durable cursor and explicit cutover; these guarantees do not
 extend to legacy webhooks, other providers or cross-channel deduplication.
 

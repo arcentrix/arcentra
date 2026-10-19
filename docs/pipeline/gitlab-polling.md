@@ -1,6 +1,6 @@
 # Explicit GitLab MR snapshot polling
 
-This optional trigger source is disabled until a project operator creates a baseline and explicitly enables a selection of existing pipelines. It supports GitLab merge-request snapshots only. It does not implement GitHub/Gitea polling, historical event replay, webhook deduplication, or lossless event delivery.
+This optional trigger source is disabled until a project operator creates a baseline and explicitly enables a selection of existing pipelines. This page describes the GitLab merge-request adapter. GitHub.com and configured HTTPS Gitea pull-request adapters use the same explicit activation workflow; see [provider polling](provider-polling.md). Historical event replay, webhook deduplication and lossless event delivery are not provided.
 
 ## Before enabling
 

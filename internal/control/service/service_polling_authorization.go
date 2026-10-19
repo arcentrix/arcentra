@@ -143,5 +143,13 @@ func authorizePollingActor(ctx context.Context, repositories *repo.Repositories,
 }
 
 func pollingProjectEligible(project *model.Project) bool {
-	return project != nil && project.ProjectID != "" && project.IsEnabled == 1 && project.Status == model.ProjectStatusActive && project.RepoType == model.RepoTypeGitLab && project.TriggerMode&model.TriggerModeMR != 0 && (project.AuthType == model.AuthTypeToken || project.AuthType == model.AuthTypeNone)
+	if project == nil || project.ProjectID == "" || project.IsEnabled != 1 || project.Status != model.ProjectStatusActive || project.TriggerMode&model.TriggerModeMR == 0 || (project.AuthType != model.AuthTypeToken && project.AuthType != model.AuthTypeNone) {
+		return false
+	}
+	repository, err := polling.CanonicalRepository(project.RepoURL)
+	if err != nil {
+		return false
+	}
+	_, _, _, err = polling.ProviderRepository(project.RepoType, repository)
+	return err == nil
 }

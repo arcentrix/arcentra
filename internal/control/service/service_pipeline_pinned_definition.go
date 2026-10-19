@@ -9,12 +9,13 @@ import (
 	"strings"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/pkg/polling"
 	"github.com/arcentrix/arcentra/pkg/scm"
 )
 
 type pollingDefinitionReader func(context.Context, scm.GitDefinitionRequest) (string, string, error)
 
-// LoadPipelineDefinitionAtCommit 仅从项目已配置的 GitLab HTTPS 仓库读取指定完整提交的定义
+// LoadPipelineDefinitionAtCommit 仅从项目已配置的 受支持的 HTTPS 仓库读取指定完整提交的定义
 // 该函数不会回退到分支最新提交；调用方仍须解析 includes 并验证已保存的解析内容摘要
 func LoadPipelineDefinitionAtCommit(
 	ctx context.Context,
@@ -25,7 +26,7 @@ func LoadPipelineDefinitionAtCommit(
 	return loadPollingDefinition(ctx, pipeline, project, fullSHA, true, scm.ReadHTTPSDefinitionContext)
 }
 
-// LoadPollingPipelineDefinition 从项目已配置的 GitLab HTTPS 仓库读取当前可信分支的有界定义及实际提交
+// LoadPollingPipelineDefinition 从项目已配置的 受支持的 HTTPS 仓库读取当前可信分支的有界定义及实际提交
 // 该函数供轮询的基线和观察使用，不调用旧的工作树检出或 SSH 加载路径
 func LoadPollingPipelineDefinition(
 	ctx context.Context,
@@ -49,8 +50,12 @@ func loadPollingDefinition(
 	if pipeline == nil || project == nil {
 		return "", "", errors.New("pipeline and project are required")
 	}
-	if project.RepoType != model.RepoTypeGitLab {
-		return "", "", errors.New("polling definitions require a configured GitLab project")
+	repository, err := polling.CanonicalRepository(project.RepoURL)
+	if err != nil {
+		return "", "", errors.New("polling definitions require a configured HTTPS repository")
+	}
+	if _, _, _, err := polling.ProviderRepository(project.RepoType, repository); err != nil {
+		return "", "", errors.New("polling definitions require a supported configured provider")
 	}
 	if project.ProjectID == "" || pipeline.ProjectID != project.ProjectID ||
 		normalizedRepository(pipeline.RepoURL) != normalizedRepository(project.RepoURL) {

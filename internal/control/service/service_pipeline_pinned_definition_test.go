@@ -53,7 +53,7 @@ func TestPollingDefinitionBindsProjectRepositoryAndAuthentication(t *testing.T) 
 func TestPollingDefinitionRejectsInvalidBindingBeforeLoading(t *testing.T) {
 	cases := map[string]func(*model.Pipeline, *model.Project){
 		"generic-git":      func(_ *model.Pipeline, p *model.Project) { p.RepoType = "git" },
-		"other-provider":   func(_ *model.Pipeline, p *model.Project) { p.RepoType = "github" },
+		"other-provider":   func(_ *model.Pipeline, p *model.Project) { p.RepoType = "bitbucket" },
 		"other-project":    func(p *model.Pipeline, _ *model.Project) { p.ProjectID = "other-project" },
 		"other-origin":     func(p *model.Pipeline, _ *model.Project) { p.RepoURL = "https://other.invalid/team/app.git" },
 		"other-repository": func(p *model.Pipeline, _ *model.Project) { p.RepoURL = "https://gitlab.invalid/other/app.git" },
@@ -137,5 +137,40 @@ func TestPollingDefinitionPreservesCancellation(t *testing.T) {
 		})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled definition was returned: %v", err)
+	}
+}
+
+func TestProductionPollingDefinitionSupportsBoundProviderCurrentAndPinned(t *testing.T) {
+	for _, provider := range []string{"gitlab", "github", "gitea"} {
+		t.Run(provider, func(t *testing.T) {
+			pipeline, project := pinnedDefinitionModels()
+			origin := "https://" + provider + ".example.invalid"
+			if provider == "github" {
+				origin = "https://github.com"
+			}
+			project.RepoType, project.RepoURL = provider, origin+"/team/app.git"
+			pipeline.RepoURL = strings.TrimSuffix(project.RepoURL, ".git")
+			sha := strings.Repeat("a", 40)
+			calls := 0
+			source := productionPollingSource{definitionReader: func(_ context.Context, req scm.GitDefinitionRequest) (string, string, error) {
+				calls++
+				if req.RepoURL != project.RepoURL || req.Auth.Token != "synthetic-token" || req.Branch != pipeline.DefaultBranch || req.FilePath != pipeline.PipelineFilePath {
+					t.Fatal("production definition changed configured identity")
+				}
+				if calls == 1 && req.CommitSHA != "" || calls == 2 && req.CommitSHA != sha {
+					t.Fatal("production definition did not pin reload")
+				}
+				return "name: provider\n", sha, nil
+			}}
+			for _, commit := range []string{"", sha} {
+				body, actual, err := source.Definition(context.Background(), pipeline, project, commit)
+				if err != nil || actual != sha || body != "name: provider\n" {
+					t.Fatalf("production source definition failed: %v", err)
+				}
+			}
+			if calls != 2 {
+				t.Fatal("reader was not called for both production paths")
+			}
+		})
 	}
 }

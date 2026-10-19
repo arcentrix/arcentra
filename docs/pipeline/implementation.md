@@ -129,7 +129,7 @@ The commands above are instructions, not a passing result for the current offlin
 - Delay-queue scheduling outside the immediate pipeline path has not been comprehensively validated under broker/process failure.
 - The frontend work covers the requested project/pipeline/build/agent integration. Other product areas that were already prototypes are not certified complete by this change.
 
-See [automatic-trigger admission](automatic-trigger-admission.md) for cron/webhook rejection, durable acceptance and unresolved-outcome boundaries. [Explicit GitLab MR snapshot polling](gitlab-polling.md) adds a default-disabled, separately authorized baseline and selected-pipeline dispatch path. Other providers, historical event replay and MR-source validation remain unsupported; observed, definition and actual checkout revisions are distinct. Apply opt-in migration 009 before activation.
+See [automatic-trigger admission](automatic-trigger-admission.md) for cron/webhook rejection, durable acceptance and unresolved-outcome boundaries. [Explicit GitLab MR snapshot polling](gitlab-polling.md) and [GitHub.com/configured HTTPS Gitea PR snapshots](provider-polling.md) provide default-disabled, separately authorized baseline and selected-pipeline dispatch. Gitee/Bitbucket polling and historical event replay remain unsupported. A snapshot-triggered run does not automatically validate the observed MR/PR source; observed, definition and actual checkout revisions are distinct. Apply opt-in migration 009 before activation.
 
 ## Interrupted execution recovery (explicit, offline only)
 
