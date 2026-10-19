@@ -38,8 +38,19 @@ func testRealContainerGenerationCancellationFence(t *testing.T, f *controllerWor
 			runID, jobID, claim := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			ids := []string{uuid.NewString(), uuid.NewString(), uuid.NewString()}
 			agentID := f.conf.Agent.ID
-			if err := f.repos.Pipeline.CreateRun(f.ctx, &model.PipelineRun{RunID: runID, PipelineID: f.pipelineID, PipelineName: "synthetic-generation-cancellation-protocol", Status: model.PipelineStatusRunning}); err != nil {
+			run := &model.PipelineRun{RunID: runID, PipelineID: f.pipelineID, PipelineName: "synthetic-generation-cancellation-protocol", Status: model.PipelineStatusPending}
+			if err := f.repos.Pipeline.CreateRun(f.ctx, run); err != nil {
 				t.Fatal(err)
+			}
+			// Admit through the production boundary before creating protocol jobs;
+			// CreateRun deliberately cannot manufacture the protected project pin.
+			admitted, err := f.repos.Pipeline.(*repo.PipelineRepo).StartManualRunIfPending(f.ctx, run)
+			if err != nil || !admitted {
+				t.Fatalf("synthetic protocol run admission: changed=%t err=%v", admitted, err)
+			}
+			var stored model.PipelineRun
+			if err := f.db.WithContext(f.ctx).Where("run_id = ?", runID).First(&stored).Error; err != nil || stored.ProjectID != f.projectID || stored.Status != model.PipelineStatusRunning || stored.StartTime == nil {
+				t.Fatalf("synthetic protocol run did not acquire its exact project scope: %v", err)
 			}
 			if err := jobs.Create(f.ctx, &model.JobRun{JobRunID: jobID, PipelineID: f.pipelineID, PipelineRunID: runID, JobName: "synthetic-generation-cancellation-protocol", Status: model.JobRunStatusPending}); err != nil {
 				t.Fatal(err)

@@ -64,7 +64,7 @@ func TestRegisterHashesDecodedPasswordForLogin(t *testing.T) {
 		t.Fatalf("real login must pass password/role checks and reach the intentionally absent session store: %v", err)
 	}
 	wrong := base64.StdEncoding.EncodeToString([]byte("wrong-password"))
-	if _, err := svc.Login(&model.Login{Username: register.Username, Password: wrong}, http.Auth{}); err == nil || err.Error() != http.UserIncorrectPassword.Msg {
+	if _, err := svc.Login(&model.Login{Username: register.Username, Password: wrong}, http.Auth{}); err == nil || err.Error() != "Invalid credentials" {
 		t.Fatalf("wrong password passed credential validation: %v", err)
 	}
 }
@@ -91,7 +91,7 @@ func TestRegistrationFixDoesNotRewriteLegacyPasswordHashes(t *testing.T) {
 	if err := db.WithContext(context.Background()).Create(legacy).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Login(&model.Login{Username: legacy.Username, Password: encoded}, http.Auth{}); err == nil || err.Error() != http.UserIncorrectPassword.Msg {
+	if _, err := svc.Login(&model.Login{Username: legacy.Username, Password: encoded}, http.Auth{}); err == nil || err.Error() != "Invalid credentials" {
 		t.Fatalf("legacy invalid hash unexpectedly acquired fallback authentication: %v", err)
 	}
 	saved, err := svc.userRepo.GetUserByUserID(legacy.UserID)

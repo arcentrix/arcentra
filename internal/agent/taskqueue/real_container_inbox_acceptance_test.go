@@ -14,6 +14,8 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	controlservice "github.com/arcentrix/arcentra/internal/control/service"
+	"github.com/arcentrix/arcentra/pkg/retryapproval"
+	taskqueuepkg "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"gorm.io/gorm"
 )
 
@@ -108,16 +110,61 @@ func verifyContainerApprovalInbox(t *testing.T, f *controllerWorkerFixture, serv
 	if got := lookup(); got == nil || got.ReadAt == nil || !got.ReadAt.Equal(marked.ReadAt) {
 		t.Fatal("read state not durable")
 	}
+	// Only notification visibility is revoked. The live worker must retain the
+	// reviewer's approval authority while observing this same pending approval.
+	binding, err := revokeContainerInboxRead(ctx, f.db, grant, reviewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := false
 	restore := func() {
+		if restored {
+			return
+		}
 		cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
 		defer stop()
-		if err := f.db.WithContext(cleanup).Model(&model.RoleGrant{}).Where("grant_id = ?", grant).Update("is_enabled", 1).Error; err != nil {
+		if err := f.db.WithContext(cleanup).Create(&binding).Error; err != nil {
 			t.Error(err)
+			return
 		}
+		restored = true
 	}
 	defer restore()
-	if err := f.db.WithContext(ctx).Model(&model.RoleGrant{}).Where("grant_id = ?", grant).Update("is_enabled", 0).Error; err != nil {
+	checker, err := authz.NewLiveAuthorizer(ctx, f.repos)
+	if err != nil {
 		t.Fatal(err)
+	}
+	for action, expected := range map[string]bool{"approval:read": false, "approval:approve": true, "approval:reject": true, "project:read": true, "pipeline:read": true} {
+		scope := authz.ResourceRef{Type: "pipeline", ID: f.pipelineID, ProjectID: f.projectID}
+		if action == "project:read" {
+			scope.Type, scope.ID = "project", f.projectID
+		}
+		allowed, err := checker.Check(ctx, authz.Subject{UserID: reviewer}, action, scope)
+		if err != nil || allowed != expected {
+			t.Fatalf("notification-only revoke changed %s authority: allowed=%v err=%v", action, allowed, err)
+		}
+	}
+	var job model.JobRun
+	if approval.RetryJobRunID == nil {
+		t.Fatal("missing actual retry job")
+	}
+	if err := f.db.WithContext(ctx).Where("job_run_id = ?", *approval.RetryJobRunID).First(&job).Error; err != nil {
+		t.Fatal(err)
+	}
+	var generation model.JobRunGeneration
+	if err := f.db.WithContext(ctx).Where("generation_id = ?", job.CurrentGenerationID).First(&generation).Error; err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := taskqueuepkg.ParseJobGeneration(generation.GenerationJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := f.repos.JobRun.(interface {
+		ReconcileJobRetryApproval(context.Context, retryapproval.Request) (*retryapproval.Response, error)
+	})
+	observed, err := observer.ReconcileJobRetryApproval(ctx, retryapproval.Request{Version: 1, Operation: "observe", Identity: taskqueuepkg.JobInputIdentity{PipelineID: job.PipelineID, PipelineRunID: job.PipelineRunID, JobRunID: job.JobRunID, AgentID: job.AgentID, ClaimID: job.ClaimID, RuntimeBindingDigest: job.RuntimeBindingDigest, SourceBindingDigest: job.SourceBindingDigest}, GenerationID: generation.GenerationID, GenerationBindingDigest: descriptor.BindingDigest, RetryPlanDigest: job.RetryPlanDigest, InputManifestDigest: job.InputManifestDigest})
+	if err != nil || observed == nil || observed.State != "pending" || observed.ExecutionAllowed || observed.Admission != nil {
+		t.Fatalf("notification-only revoke changed actual observer authority: %v", err)
 	}
 	if got := lookup(); got != nil {
 		t.Fatal("revoked permission exposed approval notification")

@@ -45,7 +45,11 @@ func mysqlAuthGenerationMode(t *testing.T, db *gorm.DB, prefix, pipeline, mode s
 	if err := db.WithContext(ctx).AutoMigrate(&model.Agent{}, &model.JobRunGeneration{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range []any{&model.Agent{AgentID: prefix + "agent", IsEnabled: 1}, &model.PipelineRun{Env: "{}", RunID: prefix + "run", PipelineID: pipeline, Status: model.PipelineStatusRunning}, &model.JobRun{Env: "{}", ArtifactReferences: "{}", ArtifactURIs: "{}", JobRunID: prefix + "job", PipelineID: pipeline, PipelineRunID: prefix + "run", Status: 1}} {
+	var scope model.Pipeline
+	if err := db.Where("pipeline_id = ?", pipeline).First(&scope).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []any{&model.Agent{AgentID: prefix + "agent", IsEnabled: 1}, &model.PipelineRun{Env: "{}", RunID: prefix + "run", PipelineID: pipeline, ProjectID: scope.ProjectID, Status: model.PipelineStatusRunning}, &model.JobRun{Env: "{}", ArtifactReferences: "{}", ArtifactURIs: "{}", JobRunID: prefix + "job", PipelineID: pipeline, PipelineRunID: prefix + "run", Status: 1}} {
 		if err := db.WithContext(ctx).Create(v).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -93,7 +97,6 @@ func mysqlAuthSeed(t *testing.T, db *gorm.DB, prefix, project, pipeline, actor, 
 
 func mysqlAuthSeedMode(t *testing.T, db *gorm.DB, prefix, project, pipeline, actor, voter string, timeout int, expiry time.Time, mode string) *mysqlAuthFixture {
 	t.Helper()
-	admit, manifest := mysqlAuthGenerationMode(t, db, prefix, pipeline, mode)
 	ctx := context.Background()
 	if err := db.AutoMigrate(&model.Pipeline{}, &model.Project{}, &model.User{}, &model.Team{}, &model.TeamMember{}, &model.Role{}, &model.RoleGrant{}, &model.Permission{}, &model.RolePermissionBinding{}, &model.ApprovalRequest{}, &model.ApprovalDecision{}); err != nil {
 		t.Fatal(err)
@@ -109,6 +112,7 @@ func mysqlAuthSeedMode(t *testing.T, db *gorm.DB, prefix, project, pipeline, act
 			t.Fatal(err)
 		}
 	}
+	admit, manifest := mysqlAuthGenerationMode(t, db, prefix, pipeline, mode)
 	for _, action := range []string{"project:read", "pipeline:read", "pipeline:trigger", "approval:approve", "approval:reject"} {
 		parts := strings.SplitN(action, ":", 2)
 		for _, value := range []any{&model.Permission{PermissionID: prefix + action, ResourceType: parts[0], Action: parts[1]}, &model.RolePermissionBinding{RoleID: prefix + "review-role", PermissionID: prefix + action}} {

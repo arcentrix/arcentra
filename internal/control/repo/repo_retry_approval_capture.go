@@ -54,6 +54,9 @@ func (r *PipelineRepo) CreateRetryApprovalRun(ctx context.Context, run *model.Pi
 }
 
 func retryApprovalContextForCapture(ctx context.Context, tx *gorm.DB, job *model.JobRun) (*retryapproval.RunContext, error) {
+	if err := requireExecutionScope(tx, job); err != nil {
+		return nil, err
+	}
 	var run model.PipelineRun
 	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("run_id", "pipeline_id", "triggered_by", "definition_commit_sha", "definition_path", "retry_approval_context", "retry_approval_context_digest").Where("run_id = ?", job.PipelineRunID).Find(&run).Error; err != nil {
 		return nil, err

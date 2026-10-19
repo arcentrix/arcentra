@@ -80,7 +80,7 @@ func TestInviteUserPersistsIdentityRoleAndLoginCredentials(t *testing.T) {
 	}
 	wrong := base64.StdEncoding.EncodeToString([]byte("wrong-synthetic-password"))
 	_, err = svc.Login(&model.Login{Username: user.Username, Password: wrong}, auth)
-	if err == nil || err.Error() != http.UserIncorrectPassword.Msg {
+	if err == nil || err.Error() != "Invalid credentials" {
 		t.Fatalf("invited login accepted a wrong password: %v", err)
 	}
 	if db.Migrator().HasTable(&model.AddUserReq{}) {

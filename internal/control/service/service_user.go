@@ -72,19 +72,23 @@ func NewUserService(
 }
 
 func (ul *UserService) Login(login *model.Login, auth http.Auth) (*model.LoginResp, error) {
+	invalidCredentials := errors.New("Invalid credentials")
+	if login == nil || (login.Username == "" && login.Email == "") {
+		return nil, invalidCredentials
+	}
 	userInfo, err := ul.userRepo.Login(login)
 	if err != nil {
-		log.Errorw("login failed", "username", login.Username, "email", login.Email, "error", err)
-		return nil, err
+		log.Error("login rejected")
+		return nil, invalidCredentials
 	}
 	if userInfo == nil || userInfo.Username == "" {
-		log.Error("userInfo not found")
-		return nil, errors.New(http.UserNotExist.Msg)
+		log.Error("login rejected")
+		return nil, invalidCredentials
 	}
 	// 验证用户名或邮箱匹配（允许使用邮箱登录，或 OAuth 登录时密码为空）
 	if login.Username != "" && userInfo.Username != login.Username {
-		log.Errorw("username mismatch", "expected", login.Username, "got", userInfo.Username)
-		return nil, errors.New(http.UserNotExist.Msg)
+		log.Error("login rejected")
+		return nil, invalidCredentials
 	}
 
 	// 如果提供了密码，则进行密码验证（用于普通登录）
@@ -92,14 +96,14 @@ func (ul *UserService) Login(login *model.Login, auth http.Auth) (*model.LoginRe
 	if login.Password != "" {
 		pwd, decodeErr := base64.StdEncoding.DecodeString(login.Password)
 		if decodeErr != nil {
-			log.Errorw("failed to decode password", "error", decodeErr)
-			return nil, errors.New(http.UserIncorrectPassword.Msg)
+			log.Error("login rejected")
+			return nil, invalidCredentials
 		}
 
 		// compare stored password hash with provided password
 		if !comparePassword(userInfo.Password, string(pwd)) {
-			log.Error("incorrect password provided")
-			return nil, errors.New(http.UserIncorrectPassword.Msg)
+			log.Error("login rejected")
+			return nil, invalidCredentials
 		}
 	}
 

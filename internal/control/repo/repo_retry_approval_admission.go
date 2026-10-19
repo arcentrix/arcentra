@@ -61,17 +61,13 @@ func retryApprovalAuthorizer(tx *gorm.DB) (RetryApprovalAuthorizer, error) {
 	return authorize, nil
 }
 
-// 执行锁始终先锁 job，再锁 run/agent/generation 和 approval
-// failed_step CAS 在 job/generation 后按 step_index/attempt 锁定完整账本
-// 历史或 inspect 回执不取共享 run/agent 锁；仅活动执行路径随后锁 run/agent/approval
-// 输入生产者校验先取 pipeline/project，再取注册制品、生产者 job/step 锁
-// 共享 run/agent 与生产者 job 的跨作业反向等待仍可能触发数据库死锁回滚
-// 因此这里仅保证同作业线性化及当前读取，不宣称整个授权图具有全局无环锁序
-// 权限锁固定为 pipeline -> project -> 排序的全部用户 -> 全部成员关系 -> 团队
-// 此后才进入统一的 permission -> binding -> role -> grant 当前读取
-// 决策与取消必须先锁 job；部署审批仍保留独立的 release-first 路径
-// FOR UPDATE 是 MySQL REPEATABLE READ 下的 current read，不使用早先一致性快照
-// 权限撤销先提交则读取被撤销值；准入先持锁则撤销等待其提交
+// Active runtime/input paths take identity-only Pipeline -> optional Organization
+// -> Project -> Run -> Job before generation/approval and current authority locks.
+// Exact historical receipts and structurally shared-lock-free legacy paths remain
+// Job-only. Shared context/input helpers require transaction-local prefix proof.
+// Producer artifact reads follow the shared prefix before producer Job/Step locks.
+// Existing authority checks and deadlines remain current reads under these locks;
+// this prefix does not itself authorize execution or claim global lock acyclicity.
 type retryApprovalView struct {
 	tx      *gorm.DB
 	expires time.Time
@@ -268,6 +264,9 @@ func retryApprovalContextRead(ctx context.Context, tx *gorm.DB, job *model.JobRu
 	var run model.PipelineRun
 	query := tx.WithContext(ctx)
 	if lockRun {
+		if err := requireExecutionScope(tx, job); err != nil {
+			return nil, err
+		}
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 	}
 	if err := query.Select("run_id", "pipeline_id", "triggered_by", "definition_commit_sha", "definition_path", "retry_approval_context", "retry_approval_context_digest").Where("run_id = ?", job.PipelineRunID).First(&run).Error; err != nil {
@@ -514,11 +513,13 @@ func (r *JobRunRepo) ReconcileJobRetryApproval(ctx context.Context, request retr
 		return nil, err
 	}
 	var result *retryapproval.Response
-	err := r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var job model.JobRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ?", request.Identity.JobRunID).First(&job).Error; err != nil {
-			return err
+	err := executionTransaction(ctx, r.Database(), request.Identity.JobRunID, func(tx *gorm.DB) error {
+		lockMode := executionLockTerminalReceipt
+		lockedJob, lockErr := lockExecutionJob(ctx, tx, request.Identity.JobRunID, lockMode)
+		if lockErr != nil {
+			return lockErr
 		}
+		job := *lockedJob
 		if generationIdentity(&job) != request.Identity || job.RetryPlanDigest != request.RetryPlanDigest || job.InputManifestDigest != request.InputManifestDigest || !job.SourceExpectationCaptured {
 			return fmt.Errorf("retry approval request identity changed")
 		}
@@ -694,14 +695,19 @@ func validateRetryApprovalCommit(ctx context.Context, tx *gorm.DB, job *model.Jo
 	return checkRetryApprovalAuthorizationExpiry(ctx, tx)
 }
 
-func lockRetryApprovalJob(ctx context.Context, tx *gorm.DB, initial *model.ApprovalRequest) (*model.JobRun, error) {
+func lockRetryApprovalJob(ctx context.Context, tx *gorm.DB, initial *model.ApprovalRequest, modes ...executionLockMode) (*model.JobRun, error) {
 	if initial == nil || (initial.BindingKind != retryapproval.Kind && initial.BindingKind != retryapproval.FailedStepKind) || initial.RetryJobRunID == nil || *initial.RetryJobRunID == "" || initial.DeploymentReleaseID != nil {
 		return nil, ErrApprovalInvalid
 	}
-	var job model.JobRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ?", *initial.RetryJobRunID).First(&job).Error; err != nil {
+	mode := executionLockActive
+	if len(modes) > 0 {
+		mode = modes[0]
+	}
+	locked, err := lockExecutionJob(ctx, tx, *initial.RetryJobRunID, mode)
+	if err != nil {
 		return nil, err
 	}
+	job := *locked
 	if job.RetryApprovalID != initial.ApprovalID || job.RetryApprovalEvidenceHash != initial.EvidenceHash {
 		return nil, ErrApprovalConflict
 	}
@@ -715,8 +721,8 @@ func (r *ApprovalRepo) ReadRetryApproval(ctx context.Context, id string) (*retry
 		return nil, err
 	}
 	var result *retryapproval.Review
-	err = r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		job, err := lockRetryApprovalJob(ctx, tx, initial)
+	err = executionTransaction(ctx, r.Database(), executionApprovalJobID(initial), func(tx *gorm.DB) error {
+		job, err := lockRetryApprovalJob(ctx, tx, initial, executionLockInspect)
 		if err != nil {
 			return err
 		}
@@ -778,8 +784,8 @@ func (r *ApprovalRepo) ValidateRetryApprovalDecision(ctx context.Context, id, ac
 	if err != nil {
 		return err
 	}
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		job, err := lockRetryApprovalJob(ctx, tx, initial)
+	return executionTransaction(ctx, r.Database(), executionApprovalJobID(initial), func(tx *gorm.DB) error {
+		job, err := lockRetryApprovalJob(ctx, tx, initial, retryApprovalDecisionLockMode(initial))
 		if err != nil {
 			return err
 		}
@@ -805,8 +811,8 @@ func (r *ApprovalRepo) ValidateRetryApprovalDecision(ctx context.Context, id, ac
 
 func (r *ApprovalRepo) decideRetryApproval(ctx context.Context, initial *model.ApprovalRequest, actor, decision, reason string) (*model.ApprovalRequest, error) {
 	var result *model.ApprovalRequest
-	err := r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		job, err := lockRetryApprovalJob(ctx, tx, initial)
+	err := executionTransaction(ctx, r.Database(), executionApprovalJobID(initial), func(tx *gorm.DB) error {
+		job, err := lockRetryApprovalJob(ctx, tx, initial, retryApprovalDecisionLockMode(initial))
 		if err != nil {
 			return err
 		}
@@ -830,42 +836,7 @@ func (r *ApprovalRepo) decideRetryApproval(ctx context.Context, initial *model.A
 		if err := validateRetryApprovalDecision(ctx, tx, job, a, e, actor, decision); err != nil {
 			return err
 		}
-		vote := &model.ApprovalDecision{DecisionID: uuid.NewString(), ApprovalID: a.ApprovalID, UserID: actor, Decision: decision, Comment: reason}
-		if err := tx.WithContext(ctx).Create(vote).Error; err != nil {
-			return err
-		}
-		approved, rejected := a.ApprovedCount, a.RejectedCount
-		if decision == model.ApprovalDecisionApprove {
-			approved++
-		} else {
-			rejected++
-		}
-		next := model.ApprovalStatusPending
-		if rejected > 0 {
-			next = model.ApprovalStatusRejected
-		} else if approved >= a.RequiredApproverCount {
-			next = model.ApprovalStatusApproved
-		}
-		if approvalDeadlinePassed(a) {
-			return ErrApprovalExpired
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := patchPendingApproval(tx, a, map[string]any{"status": next, "approved_count": approved, "rejected_count": rejected, "approved_by": actor, "reason": reason}); err != nil {
-			return err
-		}
-		a.Status, a.ApprovedCount, a.RejectedCount, a.ApprovedBy, a.Reason = next, approved, rejected, actor, reason
-		if _, err := validateRetryApprovalVotes(ctx, tx, a); err != nil {
-			return err
-		}
-		if err := validateGenerationLive(ctx, tx, job, generationIdentity(job)); err != nil {
-			return err
-		}
-		if approvalDeadlinePassed(a) {
-			return ErrApprovalExpired
-		}
-		return checkRetryApprovalAuthorizationExpiry(ctx, tx)
+		return writeRetryApprovalDecision(ctx, tx, job, a, actor, decision, reason, uuid.NewString())
 	})
 	if errors.Is(err, ErrApprovalExpired) {
 		current, expireErr := r.Expire(ctx, initial.ApprovalID)
@@ -902,12 +873,22 @@ func checkRetryApprovalAuthorizationExpiry(ctx context.Context, tx *gorm.DB) err
 }
 
 // 先锁定持久化终态再选择历史分支，任何请求字段均不能将新决策降级为回执
+func retryApprovalDecisionLockMode(initial *model.ApprovalRequest) executionLockMode {
+	if initial != nil && initial.Status != model.ApprovalStatusPending {
+		return executionLockInspect
+	}
+	return executionLockTerminalReceipt
+}
+
 func retryApprovalTerminalVote(ctx context.Context, tx *gorm.DB, job *model.JobRun, initial *model.ApprovalRequest, actor, decision string) (*model.ApprovalRequest, bool, error) {
 	a, err := lockApproval(tx.WithContext(ctx), initial.ApprovalID)
 	if err != nil {
 		return nil, true, err
 	}
 	if a.Status == model.ApprovalStatusPending {
+		if initial.Status != model.ApprovalStatusPending {
+			return nil, true, ErrApprovalConflict
+		}
 		return nil, false, nil
 	}
 	a, _, err = validateRetryApprovalBindingRead(ctx, tx, job, false)
@@ -925,4 +906,44 @@ func retryApprovalTerminalVote(ctx context.Context, tx *gorm.DB, job *model.JobR
 		return a, true, ErrApprovalExpired
 	}
 	return a, true, ErrApprovalConflict
+}
+
+// writeRetryApprovalDecision is shared only after all current admission checks.
+func writeRetryApprovalDecision(ctx context.Context, tx *gorm.DB, job *model.JobRun, a *model.ApprovalRequest, actor, decision, reason, decisionID string) error {
+	vote := &model.ApprovalDecision{DecisionID: decisionID, ApprovalID: a.ApprovalID, UserID: actor, Decision: decision, Comment: reason}
+	if err := tx.WithContext(ctx).Create(vote).Error; err != nil {
+		return err
+	}
+	approved, rejected := a.ApprovedCount, a.RejectedCount
+	if decision == model.ApprovalDecisionApprove {
+		approved++
+	} else {
+		rejected++
+	}
+	next := model.ApprovalStatusPending
+	if rejected > 0 {
+		next = model.ApprovalStatusRejected
+	} else if approved >= a.RequiredApproverCount {
+		next = model.ApprovalStatusApproved
+	}
+	if approvalDeadlinePassed(a) {
+		return ErrApprovalExpired
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := patchPendingApproval(tx, a, map[string]any{"status": next, "approved_count": approved, "rejected_count": rejected, "approved_by": actor, "reason": reason}); err != nil {
+		return err
+	}
+	a.Status, a.ApprovedCount, a.RejectedCount, a.ApprovedBy, a.Reason = next, approved, rejected, actor, reason
+	if _, err := validateRetryApprovalVotes(ctx, tx, a); err != nil {
+		return err
+	}
+	if err := validateGenerationLive(ctx, tx, job, generationIdentity(job)); err != nil {
+		return err
+	}
+	if approvalDeadlinePassed(a) {
+		return ErrApprovalExpired
+	}
+	return checkRetryApprovalAuthorizationExpiry(ctx, tx)
 }

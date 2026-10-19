@@ -192,51 +192,41 @@ func (a *Authorizer) CheckAny(ctx context.Context, subject Subject, actions []st
 
 // EffectiveActions 返回主体在指定作用域下的有效 action 列表
 func (a *Authorizer) EffectiveActions(ctx context.Context, subject Subject, scopeType, scopeID string) ([]string, error) {
-	key := buildEffectiveActionsCacheKey(subject, scopeType, scopeID)
-	resource, err := a.resolveEffectiveResource(ctx, scopeType, scopeID)
+	// This is a current projection, not execution authority. Never reuse cached
+	// permission IDs or stale grants as effective actions after a revocation.
+	current, err := NewLiveAuthorizer(ctx, a.repos)
 	if err != nil {
 		return nil, err
 	}
-	if actions, ok := getCachedActions(ctx, a.cache, key); ok {
-		containsWildcard := false
-		for _, action := range actions {
-			if action == wildcardActionID {
-				containsWildcard = true
-				break
-			}
-		}
-		// 兼容历史缓存：若缓存未命中通配 action，实时补一次无审计判定
-		if !containsWildcard {
-			wildcardAllowed, err := a.checkNoAudit(subject, wildcardActionID, resource)
-			if err != nil {
-				return nil, err
-			}
-			if wildcardAllowed {
-				actions = append(actions, wildcardActionID)
-				sort.Strings(actions)
-				setCachedActions(ctx, a.cache, key, actions)
-			}
-		}
-		return actions, nil
+	live := current.(*Authorizer)
+	resource, err := live.resolveEffectiveResource(ctx, scopeType, scopeID)
+	if err != nil {
+		return nil, err
 	}
-
-	permissions, err := a.repos.Permission.ListPermissions(ctx)
+	permissions, err := live.repos.Permission.ListPermissions(ctx)
 	if err != nil {
 		return nil, err
 	}
 	set := make(map[string]struct{})
 	for _, permission := range permissions {
-		allowed, checkErr := a.Check(ctx, subject, permission.PermissionID, resource)
+		action, valid := CanonicalPermissionAction(permission)
+		if !valid {
+			continue
+		}
+		if _, exists := set[action]; exists {
+			continue
+		}
+		allowed, checkErr := live.Check(ctx, subject, action, resource)
 		if checkErr != nil {
 			return nil, checkErr
 		}
 		if allowed {
-			set[permission.PermissionID] = struct{}{}
+			set[action] = struct{}{}
 		}
 	}
 	// 超级管理员可能通过通配策略获得权限（不依赖 permission_id 字典项）
 	// 这里显式注入通配 action，供菜单过滤与前端守卫识别
-	wildcardAllowed, wildcardErr := a.Check(ctx, subject, wildcardActionID, resource)
+	wildcardAllowed, wildcardErr := live.Check(ctx, subject, wildcardActionID, resource)
 	if wildcardErr != nil {
 		return nil, wildcardErr
 	}
@@ -248,7 +238,6 @@ func (a *Authorizer) EffectiveActions(ctx context.Context, subject Subject, scop
 		actions = append(actions, action)
 	}
 	sort.Strings(actions)
-	setCachedActions(ctx, a.cache, key, actions)
 	return actions, nil
 }
 

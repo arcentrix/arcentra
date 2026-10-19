@@ -167,11 +167,16 @@ func (r *JobRunRepo) ReconcileJobGeneration(ctx context.Context, request taskque
 		return nil, err
 	}
 	var response *taskqueue.JobGeneration
-	err = r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var job model.JobRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ?", request.Identity.JobRunID).First(&job).Error; err != nil {
-			return err
+	err = executionTransaction(ctx, r.Database(), request.Identity.JobRunID, func(tx *gorm.DB) error {
+		lockMode := executionLockTerminalReceipt
+		if request.Operation == "inspect" {
+			lockMode = executionLockInspect
 		}
+		lockedJob, lockErr := lockExecutionJob(ctx, tx, request.Identity.JobRunID, lockMode)
+		if lockErr != nil {
+			return lockErr
+		}
+		job := *lockedJob
 		if generationIdentity(&job) != request.Identity || !job.SourceExpectationCaptured || job.RetryPlanDigest != request.RetryPlanDigest {
 			return fmt.Errorf("original generation execution identity changed")
 		}

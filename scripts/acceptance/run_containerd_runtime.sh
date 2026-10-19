@@ -16,6 +16,12 @@ source /etc/os-release
 source scripts/acceptance/containerd-pins.env
 EVIDENCE="$PWD/.acceptance/containerd-evidence"
 mkdir -p "$EVIDENCE"
+# Official pinned browser tools are prepared by this workflow before any daemon.
+# No alternate script, inherited token, browser endpoint or remote URL is accepted.
+BROWSER_CWD="$PWD/.acceptance/frontend"
+BROWSER_NODE=$(command -v node)
+[[ $BROWSER_NODE == /* && -x $BROWSER_NODE && ${PLAYWRIGHT_BROWSERS_PATH:-} == /* ]] || exit 1
+[[ -f $BROWSER_CWD/tests/actual-copilot-execution-acceptance.mjs && -f $BROWSER_CWD/node_modules/playwright/package.json ]] || { echo 'Mandatory pinned Copilot browser fixture is missing.' >&2; exit 1; }
 BASE=$(mktemp -d "/tmp/arc-cd.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.XXXXXX")
 SUPERVISOR=''
 finish() {
@@ -88,6 +94,9 @@ TEST_ENV=(env -i
   "ARCENTRA_TEST_CONTAINERD_NAMESPACE=arcentra-containerjob-acceptance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
   "ARCENTRA_TEST_CONTAINERD_ROOT=$BASE/work/job"
   ARCENTRA_REAL_STACK=1 ARCENTRA_REQUIRE_REAL_STACK=1
+  ARCENTRA_COPILOT_EXECUTION_BROWSER=1 ARCENTRA_REQUIRE_COPILOT_EXECUTION_BROWSER=1
+  "ARCENTRA_COPILOT_BROWSER_CWD=$BROWSER_CWD" "ARCENTRA_COPILOT_BROWSER_NODE=$BROWSER_NODE"
+  "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" "ARCENTRA_COPILOT_BROWSER_EVIDENCE=$EVIDENCE/copilot-browser"
   'ARCENTRA_TEST_MYSQL_DSN=root:ci-only-mysql-password@tcp(127.0.0.1:13306)/arcentra_acceptance_containerd?charset=utf8mb4&parseTime=True&loc=UTC'
   ARCENTRA_TEST_KAFKA_BROKERS=127.0.0.1:19092 ARCENTRA_TEST_REDIS_ADDRESS=127.0.0.1:16379
   ARCENTRA_TEST_S3_ENDPOINT=http://127.0.0.1:19000 ARCENTRA_TEST_S3_ACCESS_KEY=ci-only-s3-user ARCENTRA_TEST_S3_SECRET_KEY=ci-only-s3-password
@@ -119,6 +128,7 @@ run_test sandboxexec '^TestLiveStepJournalRestartContainerdAcceptance$' "${SESSI
   TestLiveStepJournalRestartContainerdAcceptance/successor-consumed
 run_test taskqueue '^TestRealContainerJobAcceptance$' 8m full-job 1 TestRealContainerJobAcceptance \
   TestRealContainerJobAcceptance/durable-retry-approval-approved-finite-plan/personal-inbox-request-delivery \
+  TestRealContainerJobAcceptance/durable-retry-approval-approved-finite-plan/actual-browser-permanent-confirmation \
   TestRealContainerJobAcceptance/failed-step-approval/durable-retry-approval-approved-finite-plan/personal-inbox-request-delivery \
   TestRealContainerJobAcceptance/failed-step/same-live-session-immutable-inputs-ack-loss \
   TestRealContainerJobAcceptance/failed-step/earlier-background-refused \

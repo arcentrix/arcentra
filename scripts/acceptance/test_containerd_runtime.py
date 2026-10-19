@@ -237,6 +237,24 @@ class RuntimeGuardTests(unittest.TestCase):
         self.assertIn('sha256sum --check --strict', script)
         self.assertIn('Missing mandatory runtime cleanup receipt', script)
 
+    def test_copilot_browser_is_required_without_extending_runtime_budget(self):
+        script = Path(__file__).with_name("run_containerd_runtime.sh").read_text()
+        workflow = Path(__file__).resolve().parents[2] / ".github/workflows/containerd-acceptance.yml"
+        workflow = workflow.read_text()
+        self.assertIn('ARCENTRA_COPILOT_EXECUTION_BROWSER=1 ARCENTRA_REQUIRE_COPILOT_EXECUTION_BROWSER=1', script)
+        self.assertIn('Mandatory pinned Copilot browser fixture is missing.', script)
+        self.assertLess(script.index('Mandatory pinned Copilot browser fixture is missing.'), script.index('BASE=$(mktemp'))
+        self.assertIn('actual-browser-permanent-confirmation', script)
+        self.assertIn('PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH', script)
+        self.assertIn('timeout-minutes: 25', workflow)
+        self.assertIn('timeout-minutes: 19', workflow)
+        self.assertIn(' 8m full-job 1 TestRealContainerJobAcceptance', script)
+        self.assertIn('pnpm install --frozen-lockfile', workflow)
+        self.assertIn('pnpm exec playwright install --with-deps chromium', workflow)
+        self.assertIn('copilot-browser/summary.json', workflow)
+        self.assertNotIn('copilot-browser/diagnostics.json', workflow)
+        self.assertNotIn('copilot-browser/vite.log', workflow)
+
     def test_shell_repeats_sessions_inside_existing_deadline(self):
         script = Path(__file__).with_name("run_containerd_runtime.sh").read_text()
         self.assertIn('"-test.count=$repetitions"', script)

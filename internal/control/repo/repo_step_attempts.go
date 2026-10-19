@@ -245,11 +245,16 @@ func (r *JobRunRepo) ReconcileStepAttempt(ctx context.Context, request taskqueue
 		return nil, err
 	}
 	var result *taskqueue.StepAttemptResult
-	err = r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var job model.JobRun
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ?", request.Scope.Identity.JobRunID).First(&job).Error; err != nil {
-			return err
+	err = executionTransaction(ctx, r.Database(), request.Scope.Identity.JobRunID, func(tx *gorm.DB) error {
+		lockMode := executionLockTerminalReceipt
+		if request.Operation == "inspect" {
+			lockMode = executionLockInspect
 		}
+		lockedJob, lockErr := lockExecutionJob(ctx, tx, request.Scope.Identity.JobRunID, lockMode)
+		if lockErr != nil {
+			return lockErr
+		}
+		job := *lockedJob
 		if generationIdentity(&job) != request.Scope.Identity || !job.SourceExpectationCaptured || job.RetryPlanDigest != request.Scope.RetryPlanDigest || job.InputManifestDigest != request.Scope.InputManifestDigest {
 			return fmt.Errorf("step attempt original scope changed")
 		}
@@ -260,9 +265,9 @@ func (r *JobRunRepo) ReconcileStepAttempt(ctx context.Context, request taskqueue
 		if plan.Policy.Mode != "failed_step" || plan.Version != 2 || job.CurrentGenerationID == "" {
 			return fmt.Errorf("step attempts require failed_step generation admission")
 		}
-		// 先验证不可变账本；历史/inspect 路径绝不获取共享 run/agent 锁
-		// 消费者可能正持有共享 run 并等待本终态生产者的 job 锁
-		// 只有下面真正申请执行的路径才在父 job 锁内验证当前 run/agent
+		// Exact terminal/inspect receipts remain shared-lock-free. Active paths
+		// already hold the scope prefix before Job; live checks below revalidate
+		// execution authority without introducing reverse shared-row acquisition.
 		record, g, err := loadGenerationRead(ctx, tx, job.CurrentGenerationID, !model.IsJobRunTerminal(job.Status))
 		if err != nil {
 			return err

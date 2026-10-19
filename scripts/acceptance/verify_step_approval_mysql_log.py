@@ -11,7 +11,8 @@ def expected(suite):
             "PendingQuorumAndStartup", "RevocationAndHistoricalACK",
             "CancellationExactLockOrdering", "ExpiryAfterAdmissionWriteRollsBack",
             "AuthorityChangesAcrossExactJobLock", "RevocationBlocksLaterLogicalStep",
-            "SuccessfulProducerHistoricalReplyLockOrder",
+            "SuccessfulProducerHistoricalReplyLockOrder", "ActiveProducerInputLockOrder", "TerminalPublicationInspectWait",
+            "FreshAdmissionInspectWait",
         )]
         names += [prefix + "RevocationAndHistoricalACK/" + subject + "/" + phase
                   for subject in ("actor", "voter")
@@ -24,6 +25,8 @@ def expected(suite):
                   for change in ("requester", "voter", "approval_expiry")]
         names += [prefix + "SuccessfulProducerHistoricalReplyLockOrder/" + operation
                   for operation in ("admit", "inspect", "approval_observe", "approval_admit", "generation_admit")]
+        names += [prefix + "ActiveProducerInputLockOrder/" + ordering
+                  for ordering in ("producer_first", "consumer_first")]
         return names
     if suite == "service":
         prefix = "TestStepRetryApprovalMySQLService"

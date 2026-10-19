@@ -35,7 +35,7 @@ func newStepAttemptFixtureConfigured(t *testing.T, delay string, configure func(
 	if err := db.WithContext(ctx).AutoMigrate(&model.Agent{}, &model.PipelineRun{}, &model.JobRunGeneration{}, &model.Pipeline{}, &model.Project{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range []any{&model.Agent{AgentID: "agent", IsEnabled: 1}, &model.PipelineRun{RunID: "run", PipelineID: "pipeline", Status: model.PipelineStatusRunning}, &model.Pipeline{PipelineID: "pipeline", ProjectID: "project"}, &model.Project{ProjectID: "project"}} {
+	for _, v := range []any{&model.Agent{AgentID: "agent", IsEnabled: 1}} {
 		if err := db.WithContext(ctx).Create(v).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -412,11 +412,21 @@ func TestStepAttemptUploadWinnerIgnoresFutureSkipped(t *testing.T) {
 	}
 	job, _ := f.jobs.GetByJobRunID(f.ctx, "job")
 	ctx := agentidentity.WithGenerationReport(f.ctx, f.generation.GenerationID, f.generation.BindingDigest)
-	if err := validateGenerationArtifact(ctx, f.db, job, "upload-1"); err != nil {
+	if err := executionTransaction(ctx, f.db, job.JobRunID, func(tx *gorm.DB) error {
+		if _, err := lockExecutionJob(ctx, tx, job.JobRunID, executionLockActive); err != nil {
+			return err
+		}
+		return validateGenerationArtifact(ctx, tx, job, "upload-1")
+	}); err != nil {
 		t.Fatal("valid admitted upload shadowed by unused higher slot", err)
 	}
 	for _, id := range []string{"first-1", "first-2", "upload-2", "upload-3"} {
-		if err := validateGenerationArtifact(ctx, f.db, job, id); err == nil {
+		if err := executionTransaction(ctx, f.db, job.JobRunID, func(tx *gorm.DB) error {
+			if _, err := lockExecutionJob(ctx, tx, job.JobRunID, executionLockActive); err != nil {
+				return err
+			}
+			return validateGenerationArtifact(ctx, tx, job, id)
+		}); err == nil {
 			t.Fatalf("non-upload/stale/future winner %s accepted", id)
 		}
 	}

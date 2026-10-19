@@ -23,7 +23,7 @@ func inputRepoFixture(t *testing.T, withSource bool) (context.Context, *gorm.DB,
 	if err := db.WithContext(ctx).AutoMigrate(&model.Agent{}, &model.PipelineRun{}, &model.Pipeline{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []any{&model.Agent{AgentID: "agent", IsEnabled: 1}, &model.PipelineRun{RunID: "run", PipelineID: "pipeline", Status: model.PipelineStatusRunning}, &model.Pipeline{PipelineID: "pipeline", ProjectID: "project"}} {
+	for _, value := range []any{&model.Agent{AgentID: "agent", IsEnabled: 1}} {
 		if err := db.WithContext(ctx).Create(value).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -144,7 +144,7 @@ func seedInputArtifact(t *testing.T, ctx context.Context, db *gorm.DB) (map[stri
 	hash := strings.Repeat("a", 64)
 	key := "artifacts/run/producer/producer-step/" + hash + "/result.txt"
 	size := int64(0)
-	for _, value := range []any{&model.Project{ProjectID: "project"}, &model.Pipeline{PipelineID: "pipeline", ProjectID: "project"}, &model.JobRun{JobRunID: "producer", JobName: "producer", PipelineID: "pipeline", PipelineRunID: "run", Status: 4}, &model.StepRun{StepRunID: "producer-step", JobRunID: "producer", PipelineID: "pipeline", PipelineRunID: "run", Status: 4}, &model.ProjectArtifact{ArtifactID: "artifact", ProjectID: "project", PipelineID: "pipeline", PipelineRunID: "run", JobRunID: "producer", StepRunID: "producer-step", Name: "result.txt", StorageID: "store", StorageFingerprint: strings.Repeat("b", 64), StoragePath: key, Size: size, SHA256: hash}} {
+	for _, value := range []any{&model.JobRun{JobRunID: "producer", JobName: "producer", PipelineID: "pipeline", PipelineRunID: "run", Status: 4}, &model.StepRun{StepRunID: "producer-step", JobRunID: "producer", PipelineID: "pipeline", PipelineRunID: "run", Status: 4}, &model.ProjectArtifact{ArtifactID: "artifact", ProjectID: "project", PipelineID: "pipeline", PipelineRunID: "run", JobRunID: "producer", StepRunID: "producer-step", Name: "result.txt", StorageID: "store", StorageFingerprint: strings.Repeat("b", 64), StoragePath: key, Size: size, SHA256: hash}} {
 		if err := db.WithContext(ctx).Create(value).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -325,7 +325,7 @@ func TestJobInputsPinsOnlyControllerSelectedArtifactSetAndRechecksExpiry(t *test
 		t.Fatal(err)
 	}
 	uris, refs := seedInputArtifact(t, ctx, db)
-	for _, value := range []any{&model.Agent{AgentID: "agent", IsEnabled: 1}, &model.PipelineRun{RunID: "run", PipelineID: "pipeline", Status: model.PipelineStatusRunning}} {
+	for _, value := range []any{&model.Agent{AgentID: "agent", IsEnabled: 1}} {
 		if err := db.WithContext(ctx).Create(value).Error; err != nil {
 			t.Fatal(err)
 		}

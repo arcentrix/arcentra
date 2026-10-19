@@ -335,11 +335,15 @@ func (r *ApprovalRepo) finishPending(ctx context.Context, id string, status int,
 		return nil, err
 	}
 	var result *model.ApprovalRequest
-	err = r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = executionTransaction(ctx, r.Database(), executionApprovalJobID(initial), func(tx *gorm.DB) error {
 		var retryJob *model.JobRun
 		if initial.RetryJobRunID != nil || (initial.BindingKind == retryapproval.Kind || initial.BindingKind == retryapproval.FailedStepKind) {
 			var err error
-			retryJob, err = lockRetryApprovalJob(ctx, tx, initial)
+			mode := executionLockActive
+			if initial.Status != model.ApprovalStatusPending {
+				mode = executionLockInspect
+			}
+			retryJob, err = lockRetryApprovalJob(ctx, tx, initial, mode)
 			if err != nil {
 				return err
 			}
@@ -352,8 +356,14 @@ func (r *ApprovalRepo) finishPending(ctx context.Context, id string, status int,
 		if !sameDeploymentStep(initial.RetryJobRunID, value.RetryJobRunID) || initial.BindingKind != value.BindingKind {
 			return ErrApprovalConflict
 		}
+		if retryJob != nil && (value.ApprovalID != retryJob.RetryApprovalID || value.EvidenceHash != retryJob.RetryApprovalEvidenceHash || value.PipelineRunID != retryJob.PipelineRunID || value.JobName != retryJob.JobName) {
+			return ErrApprovalConflict
+		}
 		if value.Status != model.ApprovalStatusPending {
 			return nil
+		}
+		if retryJob != nil && initial.Status != model.ApprovalStatusPending {
+			return ErrApprovalConflict
 		}
 		if retryJob != nil {
 			if _, _, err := validateRetryApprovalBinding(ctx, tx, retryJob); err != nil {

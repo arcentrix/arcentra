@@ -28,6 +28,7 @@ func (rt *Router) copilotRouter(r fiber.Router, authMW, subjectMW fiber.Handler)
 		}
 		if svc != nil {
 			svc.ConfigureHistoryPlans(rt.Services.Deployment)
+			svc.ConfigureRetryExecution(cfg.Execution)
 			if err := svc.ConfigureSourceContext(cfg.SourceContext); err != nil {
 				svc = nil
 			}
@@ -46,6 +47,7 @@ func registerCopilotRoutes(r fiber.Router, authMW, subjectMW fiber.Handler, svc 
 		return c.Next()
 	})
 	registerCopilotHistoryRoutes(group, svc)
+	registerCopilotExecutionRoutes(group, svc)
 	group.Get("/status", func(c *fiber.Ctx) error {
 		subject, _ := collectionSubject(c)
 		result, err := svc.Status(c.UserContext(), subject, c.Params("projectID"))
