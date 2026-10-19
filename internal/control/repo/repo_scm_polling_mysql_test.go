@@ -6,6 +6,7 @@ package repo
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net"
 	"os"
@@ -404,6 +405,16 @@ func (f *pollingMySQLFixture) authorize(ctx context.Context, view PollingAuthori
 
 func (f *pollingMySQLFixture) prepare(t *testing.T, empty ...bool) (*model.SCMPollingStream, *model.PipelineRun) {
 	t.Helper()
+	// MySQL JSON storage normalizes whitespace. Compare the exact persisted
+	// bytes across Baseline, not database output with the original input literal.
+	var before model.Project
+	if err := f.db.WithContext(f.ctx).Select("project_id", "settings").Where("project_id = ?", f.projectID).Take(&before).Error; err != nil {
+		t.Fatal("read persisted settings before baseline:", err)
+	}
+	var initial map[string]string
+	if err := json.Unmarshal(before.Settings, &initial); err != nil || !reflect.DeepEqual(initial, map[string]string{"legacyCursor": "untouched"}) {
+		t.Fatal("fixture did not persist the expected legacy settings")
+	}
 	now := time.Now().UTC()
 	started := now.Add(-2 * time.Second).Truncate(time.Second).Add(123456789 * time.Nanosecond)
 	s, err := f.streams.Baseline(f.ctx, BaselineInput{ProjectID: f.projectID, ActorID: f.actorID, Scope: f.scope,
@@ -423,8 +434,11 @@ func (f *pollingMySQLFixture) prepare(t *testing.T, empty ...bool) (*model.SCMPo
 		t.Fatal("baseline created historical runs")
 	}
 	var project model.Project
-	if err := f.db.WithContext(f.ctx).Where("project_id = ?", f.projectID).First(&project).Error; err != nil || string(project.Settings) != `{"legacyCursor":"untouched"}` {
-		t.Fatal("baseline changed project settings")
+	if err := f.db.WithContext(f.ctx).Select("project_id", "settings").Where("project_id = ?", f.projectID).Take(&project).Error; err != nil {
+		t.Fatal("read persisted settings after baseline:", err)
+	}
+	if string(project.Settings) != string(before.Settings) {
+		t.Fatal("baseline changed persisted project settings")
 	}
 	s, err = f.streams.Enable(f.ctx, EnableInput{ProjectID: f.projectID, ActorID: f.actorID, ExpectedRevision: s.Revision, BaselineID: s.BaselineID, PipelineIDs: []string{f.pipelineID}})
 	if err != nil {
