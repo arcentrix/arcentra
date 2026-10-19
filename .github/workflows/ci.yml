@@ -206,7 +206,19 @@ jobs:
               TestRealStackAcceptance/polling_gitea_baseline_enable_changed_observation \
               TestRealStackAcceptance/polling_gitea_duplicate_no_execution \
               TestRealStackAcceptance/polling_gitea_no_eligible_ref_completes \
-              TestRealStackAcceptance/polling_gitea_revoke_before_admission
+              TestRealStackAcceptance/polling_gitea_revoke_before_admission \
+              TestRealStackAcceptance/polling_gitee_baseline_enable_changed_observation \
+              TestRealStackAcceptance/polling_gitee_duplicate_no_execution \
+              TestRealStackAcceptance/polling_gitee_no_eligible_ref_completes \
+              TestRealStackAcceptance/polling_gitee_merged_observation_metadata_no_rerun \
+              TestRealStackAcceptance/polling_gitee_revoke_before_admission \
+              TestRealStackAcceptance/polling_gitee_malformed_evidence_pauses \
+              TestRealStackAcceptance/polling_bitbucket_baseline_enable_changed_observation \
+              TestRealStackAcceptance/polling_bitbucket_duplicate_no_execution \
+              TestRealStackAcceptance/polling_bitbucket_no_eligible_ref_completes \
+              TestRealStackAcceptance/polling_bitbucket_merged_observation_metadata_no_rerun \
+              TestRealStackAcceptance/polling_bitbucket_revoke_before_admission \
+              TestRealStackAcceptance/polling_bitbucket_malformed_evidence_pauses
           done
           go test -race -count=1 -timeout=2m -run '^TestRegisterLoginWithRealRedis$' ./internal/control/service
 
@@ -249,7 +261,29 @@ jobs:
               TestPollingMySQLAcceptance/gitea/archive_wins_before_admission \
               TestPollingMySQLAcceptance/gitea/admission_wins_and_later_disable_preserves_receipt \
               TestPollingMySQLAcceptance/gitea/concurrent_duplicate_creation_has_one_created_now \
-              TestPollingMySQLAcceptance/gitea/cursor_cas_failure_replays_without_reclaim
+              TestPollingMySQLAcceptance/gitea/cursor_cas_failure_replays_without_reclaim \
+              TestPollingMySQLAcceptance/gitee/empty_eligible_targets_completes_without_build \
+              TestPollingMySQLAcceptance/gitee/committed_scope_revocation_defeats_repeatable_read_snapshot \
+              TestPollingMySQLAcceptance/gitee/disable_wins_before_admission \
+              TestPollingMySQLAcceptance/gitee/project_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/gitee/pipeline_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/gitee/provider_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/gitee/archive_wins_before_admission \
+              TestPollingMySQLAcceptance/gitee/admission_wins_and_later_disable_preserves_receipt \
+              TestPollingMySQLAcceptance/gitee/concurrent_duplicate_creation_has_one_created_now \
+              TestPollingMySQLAcceptance/gitee/cursor_cas_failure_replays_without_reclaim \
+              TestPollingMySQLAcceptance/gitee/v3_merged_evidence_survives_replay_admission \
+              TestPollingMySQLAcceptance/bitbucket/empty_eligible_targets_completes_without_build \
+              TestPollingMySQLAcceptance/bitbucket/committed_scope_revocation_defeats_repeatable_read_snapshot \
+              TestPollingMySQLAcceptance/bitbucket/disable_wins_before_admission \
+              TestPollingMySQLAcceptance/bitbucket/project_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/bitbucket/pipeline_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/bitbucket/provider_configuration_wins_before_admission \
+              TestPollingMySQLAcceptance/bitbucket/archive_wins_before_admission \
+              TestPollingMySQLAcceptance/bitbucket/admission_wins_and_later_disable_preserves_receipt \
+              TestPollingMySQLAcceptance/bitbucket/concurrent_duplicate_creation_has_one_created_now \
+              TestPollingMySQLAcceptance/bitbucket/cursor_cas_failure_replays_without_reclaim \
+              TestPollingMySQLAcceptance/bitbucket/v3_merged_evidence_survives_replay_admission
           done
 
       - name: Verify scoped membership and archive admission with actual MySQL
@@ -350,7 +384,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: 2e2914511ab3ec3dfc1225e63027ec5e362d4470
+          ref: 227a38c0c05b49f29c869f0e8d0236ee44ebb231
           path: .acceptance/frontend
           persist-credentials: false
 

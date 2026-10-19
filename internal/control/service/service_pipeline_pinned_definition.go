@@ -75,6 +75,11 @@ func loadPollingDefinition(
 		return "", "", err
 	}
 	gitAuth := scm.NewGitAuthFromMap(auth)
+	// Bitbucket Cloud documents token authentication for Git with this fixed
+	// username. Keep credentials in the isolated askpass environment, never URLs.
+	if project.RepoType == model.RepoTypeBitbucket && project.AuthType == model.AuthTypeToken {
+		gitAuth.Username = "x-token-auth"
+	}
 	if project.AuthType != model.AuthTypeNone && gitAuth.Token == "" && gitAuth.Password == "" {
 		return "", "", errors.New("configured definition authentication is unavailable")
 	}

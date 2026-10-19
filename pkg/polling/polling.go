@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"path"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +23,14 @@ const Version = 1
 // ScopeVersion2 namespaces GitHub/Gitea identity without changing legacy wire evidence.
 // Existing scope_json stores this explicit version; no migration or rewrite is needed.
 const ScopeVersion2 = 2
+
+// ScopeVersion3 binds Gitee.com and Bitbucket Cloud evidence capabilities.
+const ScopeVersion3 = 3
+
+const (
+	MergeEvidenceStateTimestamp = "provider_state_timestamp"
+	MergeEvidenceStateCommit    = "provider_state_commit"
+)
 
 // MaxPayloadBytes 限制每份持久化 JSON 的最大大小
 const MaxPayloadBytes = 1048576
@@ -102,7 +109,7 @@ func ProviderRepository(provider, repository string) (version int, apiOrigin, st
 	if provider == "gitlab" {
 		return Version, origin, "merge_requests", nil
 	}
-	if provider != "github" && provider != "gitea" {
+	if provider != "github" && provider != "gitea" && provider != "gitee" && provider != "bitbucket" {
 		return 0, "", "", fmt.Errorf("unsupported polling provider")
 	}
 	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
@@ -114,6 +121,19 @@ func ProviderRepository(provider, repository string) (version int, apiOrigin, st
 			return 0, "", "", fmt.Errorf("only public GitHub is supported")
 		}
 		origin = "https://api.github.com"
+	}
+	if provider == "gitee" || provider == "bitbucket" {
+		if !v3RepositoryPart(parts[0]) || !v3RepositoryPart(parts[1]) {
+			return 0, "", "", fmt.Errorf("invalid polling owner/repository")
+		}
+		host, api := "gitee.com", "https://gitee.com"
+		if provider == "bitbucket" {
+			host, api = "bitbucket.org", "https://api.bitbucket.org"
+		}
+		if u.Host != host {
+			return 0, "", "", fmt.Errorf("unsupported polling provider host")
+		}
+		return ScopeVersion3, api, "pull_requests", nil
 	}
 	return ScopeVersion2, origin, "pull_requests", nil
 }
@@ -131,11 +151,10 @@ func repositoryName(v string) bool {
 	return true
 }
 
-// Validate checks the explicit provider/version namespace and stable numeric identity.
+// Validate checks the explicit provider/version namespace and stable repository identity.
 func (s Scope) Validate() error {
 	version, origin, stream, err := ProviderRepository(s.Provider, s.Repository)
-	providerID, idErr := strconv.ParseInt(s.ProviderProjectID, 10, 64)
-	if err != nil || idErr != nil || providerID <= 0 || strconv.FormatInt(providerID, 10) != s.ProviderProjectID || s.Version != version || !identifier(s.ProjectID, 64) || s.Stream != stream || !identifier(s.ProviderProjectID, 128) || s.APIOrigin != origin {
+	if err != nil || !validProjectKey(s.Provider, s.ProviderProjectID) || s.Version != version || !identifier(s.ProjectID, 64) || s.Stream != stream || !identifier(s.ProviderProjectID, 128) || s.APIOrigin != origin {
 		return fmt.Errorf("invalid polling scope")
 	}
 	return nil
@@ -264,6 +283,11 @@ type Target struct {
 	SourceProjectID  int64  `json:"sourceProjectId,omitempty"`
 	SourceRepository string `json:"sourceRepository,omitempty"`
 	TargetSHA        string `json:"targetSha,omitempty"`
+	// Append-only v3 capability and string-identity lane; never mixed with numeric IDs.
+	EvidenceVersion    int    `json:"evidenceVersion,omitempty"`
+	ProviderProjectKey string `json:"providerProjectKey,omitempty"`
+	SourceProjectKey   string `json:"sourceProjectKey,omitempty"`
+	MergeEvidence      string `json:"mergeEvidence,omitempty"`
 }
 
 // Batch 保存派发前冻结的归一化批次，空目标同样必须带完整后继游标
@@ -326,25 +350,13 @@ func (b Batch) Canonical() (string, error) {
 	return body, err
 }
 
-// Validate 检查单一冻结派发目标
+// Validate checks structural target evidence. Admission requires ValidateForScope.
 func (t Target) Validate() error {
-	if err := validateSourceProvenance(t.SourceProjectID, t.SourceRepository, t.TargetSHA); err != nil {
+	if err := t.Observation().Validate(); err != nil {
 		return err
 	}
-	updated, err := time.Parse(time.RFC3339Nano, t.UpdatedAt)
-	if err != nil || updated.IsZero() || t.MRID <= 0 || t.MRIID <= 0 || (t.State != "opened" && t.State != "merged") || len(t.UpdatedAt) > 35 || len(t.MergedAt) > 35 {
-		return fmt.Errorf("invalid polling observation provenance")
-	}
-	if (t.MergeSHA != "" && !commit(t.MergeSHA)) || (t.SquashSHA != "" && !commit(t.SquashSHA)) {
-		return fmt.Errorf("invalid polling merge provenance")
-	}
-	if t.State == "merged" {
-		merged, err := time.Parse(time.RFC3339Nano, t.MergedAt)
-		if err != nil || merged.IsZero() || merged.After(updated) || (t.MergeSHA == "" && t.SquashSHA == "") {
-			return fmt.Errorf("missing polling merge provenance")
-		}
-	} else if t.MergedAt != "" || t.MergeSHA != "" || t.SquashSHA != "" {
-		return fmt.Errorf("unexpected polling merge provenance")
+	if t.State != "opened" && t.State != "merged" {
+		return fmt.Errorf("invalid polling target state")
 	}
 	if !identifier(t.PipelineID, 64) || !identifier(t.ObservationID, 2048) || !strings.HasPrefix(t.RequestID, "poll:v1:") || len(t.RequestID) != 72 || !identifier(t.SourceBranch, 256) || !identifier(t.TargetBranch, 256) || !commit(t.SourceSHA) || !commit(t.DefinitionCommitSHA) || !definitionPath(t.DefinitionPath) || !validDigest(t.ResolvedDefinitionDigest) {
 		return fmt.Errorf("invalid polling target")
@@ -399,7 +411,7 @@ func (c RunContext) Canonical() (string, error) {
 	if e != nil || re != nil || c.Version != Version || !identifier(c.StreamID, 64) || sd != c.ScopeDigest || !identifier(c.ActorID, 64) || !identifier(c.RunID, 64) || !identifier(c.BatchID, 64) || !validDigest(c.SelectionDigest) || c.ActivationGeneration == 0 || c.BatchRevision == 0 || req != c.Target.RequestID {
 		return "", fmt.Errorf("invalid polling run context")
 	}
-	if e := c.Target.Validate(); e != nil {
+	if e := c.Target.ValidateForScope(c.Scope); e != nil {
 		return "", e
 	}
 	return canonical(c)

@@ -52,8 +52,14 @@ func newPollingFixture(t *testing.T, providers ...string) *pollingFixture {
 	if len(providers) > 0 && providers[0] != "gitlab" {
 		f.scope.Provider = providers[0]
 		f.scope.Repository = "https://github.com/owner/repo"
-		if providers[0] == "gitea" {
+		switch providers[0] {
+		case "gitea":
 			f.scope.Repository = "https://gitea.example.com/owner/repo"
+		case "gitee":
+			f.scope.Repository = "https://gitee.com/owner/repo"
+		case "bitbucket":
+			f.scope.Repository = "https://bitbucket.org/owner/repo"
+			f.scope.ProviderProjectID = "12345678-1234-1234-1234-123456789abc"
 		}
 		f.scope.Version, f.scope.APIOrigin, f.scope.Stream, e = polling.ProviderRepository(f.scope.Provider, f.scope.Repository)
 		if e != nil {
@@ -115,6 +121,10 @@ func (f *pollingFixture) enable(t *testing.T) *model.SCMPollingStream {
 }
 func (f *pollingFixture) capture(t *testing.T, s *model.SCMPollingStream, empty bool) (*model.SCMPollingStream, *model.PipelineRun) {
 	t.Helper()
+	return f.captureState(t, s, empty, "opened")
+}
+func (f *pollingFixture) captureState(t *testing.T, s *model.SCMPollingStream, empty bool, state string) (*model.SCMPollingStream, *model.PipelineRun) {
+	t.Helper()
 	key, e := polling.EventRequestID(f.scope, "mr:7:revision:new")
 	if e != nil {
 		t.Fatal(e)
@@ -124,6 +134,9 @@ func (f *pollingFixture) capture(t *testing.T, s *model.SCMPollingStream, empty 
 		target.SourceProjectID = 99
 		target.SourceRepository = "fork-owner/repo"
 		target.TargetSHA = strings.Repeat("d", 40)
+	}
+	if f.scope.Version == polling.ScopeVersion3 {
+		setV3PollingTarget(&target, f.scope, state)
 	}
 
 	targets := []polling.Target{target}
@@ -164,7 +177,7 @@ func (f *pollingFixture) latest(t *testing.T) *model.SCMPollingStream {
 	return s
 }
 func TestPollingBaselineDefaultDisabledAndSeparateEnable(t *testing.T) {
-	for _, provider := range []string{"gitlab", "github", "gitea"} {
+	for _, provider := range []string{"gitlab", "github", "gitea", "gitee", "bitbucket"} {
 		t.Run(provider, func(t *testing.T) {
 			f := newPollingFixture(t, provider)
 			s, e := f.streams.GetByProject(f.ctx, "project")
@@ -197,7 +210,7 @@ func TestPollingBaselineDefaultDisabledAndSeparateEnable(t *testing.T) {
 }
 
 func TestPollingBatchClaimReceiptAndCursorCAS(t *testing.T) {
-	for _, provider := range []string{"gitlab", "github", "gitea"} {
+	for _, provider := range []string{"gitlab", "github", "gitea", "gitee", "bitbucket"} {
 		t.Run(provider, func(t *testing.T) {
 			f := newPollingFixture(t, provider)
 			s, run := f.capture(t, f.enable(t), false)
@@ -236,7 +249,7 @@ func TestPollingBatchClaimReceiptAndCursorCAS(t *testing.T) {
 }
 
 func TestPollingPendingDuplicateNeverResubmits(t *testing.T) {
-	for _, provider := range []string{"gitlab", "github", "gitea"} {
+	for _, provider := range []string{"gitlab", "github", "gitea", "gitee", "bitbucket"} {
 		t.Run(provider, func(t *testing.T) {
 			f := newPollingFixture(t, provider)
 			_, run := f.capture(t, f.enable(t), false)
@@ -251,7 +264,7 @@ func TestPollingPendingDuplicateNeverResubmits(t *testing.T) {
 }
 
 func TestPollingRevocationPausesAndRetainsPending(t *testing.T) {
-	for _, provider := range []string{"gitlab", "github", "gitea"} {
+	for _, provider := range []string{"gitlab", "github", "gitea", "gitee", "bitbucket"} {
 		t.Run(provider, func(t *testing.T) {
 			for _, stage := range []string{"create", "admit"} {
 				t.Run(stage, func(t *testing.T) {
@@ -298,7 +311,7 @@ func TestPollingRevocationPausesAndRetainsPending(t *testing.T) {
 }
 
 func TestPollingDisableAndUnknownStoreErrorsCannotClaim(t *testing.T) {
-	for _, provider := range []string{"gitlab", "github", "gitea"} {
+	for _, provider := range []string{"gitlab", "github", "gitea", "gitee", "bitbucket"} {
 		t.Run(provider, func(t *testing.T) {
 			f := newPollingFixture(t, provider)
 			s, run := f.capture(t, f.enable(t), false)
@@ -330,7 +343,7 @@ func TestPollingDisableAndUnknownStoreErrorsCannotClaim(t *testing.T) {
 }
 
 func TestPollingRejectIsTypedAndEmptyBatchAdvances(t *testing.T) {
-	for _, provider := range []string{"gitlab", "github", "gitea"} {
+	for _, provider := range []string{"gitlab", "github", "gitea", "gitee", "bitbucket"} {
 		t.Run(provider, func(t *testing.T) {
 			t.Run("typed rejection", func(t *testing.T) {
 				f := newPollingFixture(t, provider)
@@ -369,7 +382,7 @@ func TestPollingRejectIsTypedAndEmptyBatchAdvances(t *testing.T) {
 }
 
 func TestPollingGenericCreationAndIdentityChangesRejected(t *testing.T) {
-	for _, provider := range []string{"gitlab", "github", "gitea"} {
+	for _, provider := range []string{"gitlab", "github", "gitea", "gitee", "bitbucket"} {
 		t.Run(provider, func(t *testing.T) {
 			f := newPollingFixture(t, provider)
 			_, run := f.capture(t, f.enable(t), false)
@@ -461,7 +474,7 @@ func unknownCommitPipelineRepo(t *testing.T, f *pollingFixture) *PipelineRepo {
 	return &PipelineRepo{IDatabase: statusTestDB{db}}
 }
 func TestPollingUnknownCommitNeverAuthorizesScheduling(t *testing.T) {
-	for _, provider := range []string{"gitlab", "github", "gitea"} {
+	for _, provider := range []string{"gitlab", "github", "gitea", "gitee", "bitbucket"} {
 		t.Run(provider, func(t *testing.T) {
 			for _, stage := range []string{"create", "claim"} {
 				t.Run(stage, func(t *testing.T) {

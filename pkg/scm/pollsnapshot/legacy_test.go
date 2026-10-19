@@ -73,3 +73,22 @@ func TestLegacyWireGoldenCompatibility(t *testing.T) {
 		t.Fatal("legacy gained v2 fields")
 	}
 }
+
+func TestVersion2WireGoldenCompatibility(t *testing.T) {
+	raw := []byte(`{"version":2,"apiOrigin":"https://api.github.com","repository":"owner/repo","providerProjectId":11,"lowerBound":"0001-01-01T00:00:00Z","upperBound":"2026-01-03T00:00:00Z","observations":[{"id":101,"iid":7,"providerProjectId":11,"title":"","actorName":"","state":"merged","sourceBranch":"feature","targetBranch":"main","sourceSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","mergeSha":"cccccccccccccccccccccccccccccccccccccccc","updatedAt":"2026-01-02T00:00:00Z","mergedAt":"2026-01-02T00:00:00Z","fingerprint":"v2fingerprint","observationId":"v2observation","mergeIdentity":"v2merge","sourceProjectId":22,"sourceRepository":"fork/repo","targetSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","createdAt":"2026-01-01T00:00:00Z"}],"digest":"v2digest","provider":"github"}`)
+	var current pollsnapshot.Result
+	if err := sonic.Unmarshal(raw, &current); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := sonic.Marshal(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, encoded) {
+		t.Fatalf("Version 2 bytes changed:\n%s", encoded)
+	}
+	o := current.Observations[0]
+	if current.ProviderProjectKey != "" || o.EvidenceVersion != 0 || o.ProviderProjectKey != "" || o.SourceProjectKey != "" || o.MergeEvidence != "" {
+		t.Fatal("v2 gained v3 evidence")
+	}
+}

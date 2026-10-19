@@ -89,7 +89,7 @@ func lockPollingAuthority(ctx context.Context, tx *gorm.DB, c *polling.RunContex
 	if e != nil || !ok || bound != actual.Pipelines[0] || bound.DefinitionPath != c.Target.DefinitionPath {
 		return nil, nil, polling.ErrConflict
 	}
-	batch, e := polling.ParseBatch(s.PendingBatchJSON)
+	batch, e := polling.ParseBatchForScope(s.PendingBatchJSON, scope)
 	if e != nil {
 		return nil, nil, e
 	}
@@ -119,7 +119,11 @@ func recordPollingReceipt(ctx context.Context, tx *gorm.DB, s *model.SCMPollingS
 		return nil
 	}
 	batch.Results = append(batch.Results, polling.TargetResult{PipelineID: run.PipelineID, RequestID: run.RequestID, RunID: run.RunID, Outcome: outcome})
-	body, e := batch.Canonical()
+	scope, e := pollingScope(s)
+	if e != nil {
+		return e
+	}
+	body, e := batch.CanonicalForScope(scope)
 	if e != nil {
 		return e
 	}
@@ -258,7 +262,7 @@ func (r *PipelineRepo) transitionPendingPollingRun(ctx context.Context, run *mod
 					return polling.ErrConflict
 				}
 				batch.Results = append(batch.Results, polling.TargetResult{PipelineID: stored.PipelineID, RequestID: stored.RequestID, RunID: stored.RunID, Outcome: polling.OutcomeRejected})
-				body, err := batch.Canonical()
+				body, err := batch.CanonicalForScope(c.Scope)
 				if err != nil {
 					return err
 				}
@@ -305,7 +309,11 @@ func (r *SCMPollingRepo) AcknowledgeBatch(ctx context.Context, in AcknowledgeBat
 	if e := checkPollingRevision(observed, in.ExpectedRevision); e != nil {
 		return nil, e
 	}
-	before, e := polling.ParseBatch(observed.PendingBatchJSON)
+	beforeScope, e := pollingScope(observed)
+	if e != nil {
+		return nil, e
+	}
+	before, e := polling.ParseBatchForScope(observed.PendingBatchJSON, beforeScope)
 	if e != nil {
 		return nil, e
 	}
@@ -344,7 +352,7 @@ func (r *SCMPollingRepo) AcknowledgeBatch(ctx context.Context, in AcknowledgeBat
 		if e := pollingReady(p, scope); e != nil {
 			return e
 		}
-		batch, e := polling.ParseBatch(s.PendingBatchJSON)
+		batch, e := polling.ParseBatchForScope(s.PendingBatchJSON, scope)
 		if e != nil {
 			return e
 		}

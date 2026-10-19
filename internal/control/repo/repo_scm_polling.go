@@ -358,7 +358,11 @@ func (r *SCMPollingRepo) Baseline(ctx context.Context, in BaselineInput) (*model
 			return polling.ErrUnresolved
 		}
 		if s != nil && s.PendingObservationJSON != "" {
-			if _, err := polling.ParseObservedBatch(s.PendingObservationJSON); err != nil {
+			storedScope, err := pollingScope(s)
+			if err != nil {
+				return err
+			}
+			if _, err := polling.ParseObservedBatchForScope(s.PendingObservationJSON, storedScope); err != nil {
 				return err
 			}
 		}
@@ -366,7 +370,11 @@ func (r *SCMPollingRepo) Baseline(ctx context.Context, in BaselineInput) (*model
 			if !in.DiscardPending {
 				return polling.ErrUnresolved
 			}
-			batch, e := polling.ParseBatch(s.PendingBatchJSON)
+			storedScope, e := pollingScope(s)
+			if e != nil {
+				return e
+			}
+			batch, e := polling.ParseBatchForScope(s.PendingBatchJSON, storedScope)
 			if e != nil {
 				return e
 			}
@@ -562,7 +570,7 @@ func (r *SCMPollingRepo) CaptureBatch(ctx context.Context, in CaptureBatchInput)
 			}
 		}
 		b := in.Batch
-		observed, err := polling.ParseObservedBatch(s.PendingObservationJSON)
+		observed, err := polling.ParseObservedBatchForScope(s.PendingObservationJSON, scope)
 		if err != nil {
 			return err
 		}
@@ -604,7 +612,7 @@ func (r *SCMPollingRepo) CaptureBatch(ctx context.Context, in CaptureBatchInput)
 				return polling.ErrConflict
 			}
 		}
-		body, e := b.Canonical()
+		body, e := b.CanonicalForScope(scope)
 		if e != nil {
 			return e
 		}

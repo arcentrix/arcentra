@@ -153,8 +153,13 @@ func TestPollingMySQLAcceptance(t *testing.T) {
 	}) {
 		return
 	}
-	for _, provider := range []string{"gitlab", "github", "gitea"} {
+	for _, provider := range []string{"gitlab", "github", "gitea", "gitee", "bitbucket"} {
 		run := func(t *testing.T) {
+			if provider == "gitee" || provider == "bitbucket" {
+				t.Run("v3_merged_evidence_survives_replay_admission", func(t *testing.T) {
+					pollingMySQLV3MergeEvidence(t, newPollingMySQLFixture(t, db, other, provider))
+				})
+			}
 			// No subtest is parallel: catalog current reads deliberately lock the same
 			// permission rows. Each fixture still uses unique, clearly prefixed IDs.
 			t.Run("empty_eligible_targets_completes_without_build", func(t *testing.T) {
@@ -312,8 +317,14 @@ func newPollingMySQLFixture(t *testing.T, db, other *gorm.DB, providers ...strin
 	if len(providers) > 0 && providers[0] != "gitlab" {
 		f.scope.Provider = providers[0]
 		f.scope.Repository = "https://github.com/owner/" + prefix
-		if providers[0] == "gitea" {
+		switch providers[0] {
+		case "gitea":
 			f.scope.Repository = "https://gitea.example.com/owner/" + prefix
+		case "gitee":
+			f.scope.Repository = "https://gitee.com/owner/" + prefix
+		case "bitbucket":
+			f.scope.Repository = "https://bitbucket.org/owner/" + prefix
+			f.scope.ProviderProjectID = "12345678-1234-1234-1234-123456789abc"
 		}
 		var err error
 		f.scope.Version, f.scope.APIOrigin, f.scope.Stream, err = polling.ProviderRepository(f.scope.Provider, f.scope.Repository)
@@ -405,6 +416,10 @@ func (f *pollingMySQLFixture) authorize(ctx context.Context, view PollingAuthori
 
 func (f *pollingMySQLFixture) prepare(t *testing.T, empty ...bool) (*model.SCMPollingStream, *model.PipelineRun) {
 	t.Helper()
+	return f.prepareState(t, "opened", empty...)
+}
+func (f *pollingMySQLFixture) prepareState(t *testing.T, state string, empty ...bool) (*model.SCMPollingStream, *model.PipelineRun) {
+	t.Helper()
 	// MySQL JSON storage normalizes whitespace. Compare the exact persisted
 	// bytes across Baseline, not database output with the original input literal.
 	var before model.Project
@@ -453,6 +468,9 @@ func (f *pollingMySQLFixture) prepare(t *testing.T, empty ...bool) (*model.SCMPo
 		target.SourceProjectID = 99
 		target.SourceRepository = "fork-owner/repo"
 		target.TargetSHA = strings.Repeat("d", 40)
+	}
+	if f.scope.Version == polling.ScopeVersion3 {
+		setV3PollingTarget(&target, f.scope, state)
 	}
 
 	next := polling.Cursor{Version: polling.Version, Boundary: now.Add(time.Minute).Format(time.RFC3339Nano), Complete: true, Observed: map[string]string{"7": target.ObservationID}}
