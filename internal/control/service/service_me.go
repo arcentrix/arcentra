@@ -16,6 +16,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sort"
 
 	"github.com/arcentrix/arcentra/internal/control/authz"
@@ -27,10 +28,11 @@ const wildcardActionID = "*:*"
 
 // MeService 提供当前用户权限与路由信息查询
 type MeService struct {
-	menuRepo   repo.IMenuRepository
-	teamRepo   repo.ITeamMemberRepository
-	menuSvc    *MenuService
-	authorizer authz.IAuthorizer
+	menuRepo       repo.IMenuRepository
+	permissionRepo repo.IPermissionRepository
+	teamRepo       repo.ITeamMemberRepository
+	menuSvc        *MenuService
+	authorizer     authz.IAuthorizer
 }
 
 // NewMeService 创建当前用户服务
@@ -39,12 +41,14 @@ func NewMeService(
 	teamRepo repo.ITeamMemberRepository,
 	menuSvc *MenuService,
 	authorizer authz.IAuthorizer,
+	permissionRepo repo.IPermissionRepository,
 ) *MeService {
 	return &MeService{
-		menuRepo:   menuRepo,
-		teamRepo:   teamRepo,
-		menuSvc:    menuSvc,
-		authorizer: authorizer,
+		menuRepo:       menuRepo,
+		permissionRepo: permissionRepo,
+		teamRepo:       teamRepo,
+		menuSvc:        menuSvc,
+		authorizer:     authorizer,
 	}
 }
 
@@ -99,6 +103,21 @@ func (s *MeService) filterMenus(
 		actionSet[action] = struct{}{}
 	}
 
+	// Menus reference dictionary IDs, while effective actions are policy strings.
+	// Missing or malformed dictionary entries never fall back to the raw ID.
+	if s.permissionRepo == nil {
+		return nil, errors.New("permission dictionary unavailable")
+	}
+	permissions, err := s.permissionRepo.ListPermissions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]string, len(permissions))
+	for _, permission := range permissions {
+		if action, valid := authz.CanonicalPermissionAction(permission); valid {
+			byID[permission.PermissionID] = action
+		}
+	}
 	result := make([]model.Menu, 0, len(allMenus))
 	for _, menu := range allMenus {
 		if menu.IsEnabled != model.MenuEnabled {
@@ -111,11 +130,18 @@ func (s *MeService) filterMenus(
 			result = append(result, menu)
 			continue
 		}
+		action, exists := byID[menu.PermissionID]
+		if !exists {
+			continue
+		}
+		// BuildMenuTree exposes this field as permissionAction. Change only the
+		// detached response copy; the stored menu still references its dictionary ID.
+		menu.PermissionID = action
 		if _, ok := actionSet[wildcardActionID]; ok {
 			result = append(result, menu)
 			continue
 		}
-		if _, ok := actionSet[menu.PermissionID]; ok {
+		if _, ok := actionSet[action]; ok {
 			result = append(result, menu)
 		}
 	}

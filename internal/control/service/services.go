@@ -115,7 +115,7 @@ func NewServices(
 	if err != nil {
 		log.Errorw("initialize authorizer failed", "error", err)
 	}
-	meService := NewMeService(repos.Menu, repos.TeamMember, menuService, authorizer)
+	meService := NewMeService(repos.Menu, repos.TeamMember, menuService, authorizer, repos.Permission)
 
 	services := &Services{
 		CopilotHistoryMaintenance: NewCopilotHistoryMaintenanceService(repos),

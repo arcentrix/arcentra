@@ -100,9 +100,11 @@ func (s *containerCopilotExecution) confirmBrowser(t *testing.T, f *controllerWo
 	if err := services.ConfigureRetryApprovalPolicy(policy); err != nil {
 		t.Fatal(err)
 	}
-	if err := services.ConfigureRetryApprovalAuthorization(); err != nil {
-		t.Fatal(err)
-	}
+	// The worker's original Services owns the live authorizer for this sql.DB.
+	// This Redis-backed HTTP facade must not replace that closure: later suites
+	// switch the owner's policy, and a browser-local closure would retain the old
+	// policy after this router shuts down. Repository calls retain the original
+	// transaction-local authorization, including current permissions and expiry.
 	conf := &config.AppConfig{Copilot: copilot.Config{History: copilot.HistoryConfig{Enabled: true}, Execution: copilot.ExecutionConfig{RetryApprovalEnabled: true}}}
 	rt := router.NewRouter(&apphttp.HTTP{ReadTimeout: 10, WriteTimeout: 10, IdleTimeout: 10, Auth: apphttp.Auth{SecretKey: "synthetic-http-" + id.GetUild(), AccessExpire: 5 * time.Minute, RefreshExpire: 5 * time.Minute}}, cacheStore, services, nil, conf)
 	app := rt.Router()
