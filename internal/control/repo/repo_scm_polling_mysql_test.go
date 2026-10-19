@@ -681,6 +681,28 @@ func pollingMySQLScopeRevocation(t *testing.T, f *pollingMySQLFixture) {
 	}
 }
 
+// Configuration contention must perform a genuine identity change. Reusing
+// Gitee as a constant became a no-op when Gitee joined the provider matrix, so
+// the after-update witness correctly never fired. Keep the lock gates and their
+// deadline unchanged; vary only this fixture input.
+func pollingMySQLChangedProvider(current string) string {
+	if current == "gitee" {
+		return "github"
+	}
+	return "gitee"
+}
+
+func TestPollingMySQLProviderMutationChangesEveryFixtureIdentity(t *testing.T) {
+	for _, current := range []string{"gitlab", "github", "gitea", "gitee", "bitbucket"} {
+		t.Run(current, func(t *testing.T) {
+			next := pollingMySQLChangedProvider(current)
+			if next == current || (next != "gitee" && next != "github") {
+				t.Fatalf("provider mutation is not a supported distinct identity: %q -> %q", current, next)
+			}
+		})
+	}
+}
+
 func pollingMySQLMutationWins(t *testing.T, f *pollingMySQLFixture, kind string) {
 	s, run := f.prepare(t)
 	f.create(t, run)
@@ -694,7 +716,7 @@ func pollingMySQLMutationWins(t *testing.T, f *pollingMySQLFixture, kind string)
 		case "project_configuration":
 			err = (&ProjectRepo{IDatabase: statusTestDB{f.other}}).Update(f.ctx, f.projectID, map[string]any{"default_branch": "changed"})
 		case "provider_configuration":
-			err = (&ProjectRepo{IDatabase: statusTestDB{f.other}}).Update(f.ctx, f.projectID, map[string]any{"repo_type": "gitee"})
+			err = (&ProjectRepo{IDatabase: statusTestDB{f.other}}).Update(f.ctx, f.projectID, map[string]any{"repo_type": pollingMySQLChangedProvider(f.scope.Provider)})
 		case "archive":
 			err = (&ProjectRepo{IDatabase: statusTestDB{f.other}}).Update(f.ctx, f.projectID, map[string]any{"status": model.ProjectStatusArchived})
 		case "pipeline_configuration":
