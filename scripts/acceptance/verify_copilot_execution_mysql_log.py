@@ -8,7 +8,10 @@ COLLATIONS = ("utf8mb4_0900_ai_ci", "utf8mb4_bin")
 SCENARIOS = (
     "cancel-wins", "confirm-wins", "duplicate-ack", "revocation-wait",
     "expiry-wait", "ordinary-vote", "plan-cancel-wait", "detached-history",
-    "current-read-denial", "sparse-list", "scope-lock-deadlock", "username-login-identifiers",
+    "current-read-denial", "sparse-list", "scope-lock-deadlock",
+    # Temporary characterization: actual repository paths must witness MySQL 1213.
+    "history-reserve-observe-deadlock", "history-review-observe-deadlock",
+    "username-login-identifiers",
 )
 MARKER = "execution scoped list actual-work and exact one-row content proof passed: "
 PACKAGE = "github.com/arcentrix/arcentra/internal/control/repo"

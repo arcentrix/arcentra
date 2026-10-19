@@ -141,6 +141,8 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	setupCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	db := realStackDatabase(t, setupCtx, settings.stack.dsn)
+	databaseDiagnostics := installContainerDatabaseDiagnostics(t, db)
+	defer databaseDiagnostics.reportFailure(t)
 	store, storageConfig, reference := realStackStorage(t, setupCtx, settings.stack)
 	observedStore := &containerAcceptanceStorage{S3Storage: store, socket: settings.socket, namespace: settings.namespace, journal: journal, workspace: workspace}
 	for _, address := range strings.Split(settings.stack.brokers, ",") {

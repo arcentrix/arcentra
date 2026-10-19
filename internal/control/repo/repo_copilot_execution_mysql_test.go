@@ -143,7 +143,7 @@ func TestCopilotExecutionMySQLRealRequiredGate(t *testing.T) {
 					require.NoError(t, db.Migrator().DropTable(models[i]))
 				}
 			}()
-			for _, scenario := range []string{"cancel-wins", "confirm-wins", "duplicate-ack", "revocation-wait", "expiry-wait", "ordinary-vote", "plan-cancel-wait", "detached-history", "current-read-denial", "sparse-list", "scope-lock-deadlock", "username-login-identifiers"} {
+			for _, scenario := range []string{"cancel-wins", "confirm-wins", "duplicate-ack", "revocation-wait", "expiry-wait", "ordinary-vote", "plan-cancel-wait", "detached-history", "current-read-denial", "sparse-list", "scope-lock-deadlock", "history-reserve-observe-deadlock", "history-review-observe-deadlock", "username-login-identifiers"} {
 				t.Run(scenario, func(t *testing.T) {
 					models := executionMySQLModels()
 					defer func() {
@@ -165,6 +165,10 @@ func TestCopilotExecutionMySQLRealRequiredGate(t *testing.T) {
 						require.NoError(t, holder.Commit().Error)
 						require.Error(t, awaitRetryMySQL(t, done))
 						executionMySQLNoVote(t, db)
+						return
+					}
+					if scenario == "history-reserve-observe-deadlock" || scenario == "history-review-observe-deadlock" {
+						historyObserveMySQLDeadlock(t, db, r, in, scenario == "history-review-observe-deadlock")
 						return
 					}
 					v := executionPrepare(t, r, in)
