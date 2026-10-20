@@ -70,13 +70,17 @@ func (r *StepRunRepo) Create(ctx context.Context, stepRun *model.StepRun) error 
 	if err := normalizeJSONFields(map[string]*string{"retry_policy": &stepRun.RetryPolicy, "args": &stepRun.Args, "env": &stepRun.Env, "secrets": &stepRun.Secrets, "label_selector": &stepRun.LabelSelector}, stepRunJSONDefaults); err != nil {
 		return err
 	}
+	parents, err := locateOrdinaryAttachmentScope(ctx, r.Database(), []string{stepRun.PipelineRunID}, stepRun.JobRunID)
+	if err != nil {
+		return err
+	}
 	return rerunAttachmentTransaction(ctx, r.Database(), func(tx *gorm.DB) error {
-		if err := lockOrdinaryRerunParent(ctx, tx, stepRun.PipelineRunID); err != nil {
+		if err := parents.lockParents(ctx, tx); err != nil {
 			return err
 		}
 		if stepRun.JobRunID != "" {
 			var parent model.JobRun
-			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("copilot_rerun_intent_id", "copilot_rerun_gate_id", "expected_source_commit", "job_run_id", "retry_plan", "retry_plan_digest").Where("job_run_id = ?", stepRun.JobRunID).First(&parent).Error
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("copilot_rerun_intent_id", "copilot_rerun_gate_id", "expected_source_commit", "job_run_id", "pipeline_id", "pipeline_run_id", "retry_plan", "retry_plan_digest").Where("job_run_id = ?", stepRun.JobRunID).First(&parent).Error
 			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
@@ -87,6 +91,13 @@ func (r *StepRunRepo) Create(ctx context.Context, stepRun *model.StepRun) error 
 			}
 			if err == nil && (!emptyJobRerun(&parent) || parent.JobRunID != stepRun.JobRunID || parent.RetryPlan != "" || parent.RetryPlanDigest != "") {
 				return fmt.Errorf("captured retry plan cannot acquire new step allocations")
+			}
+			var current *model.JobRun
+			if err == nil {
+				current = &parent
+			}
+			if err := parents.validateJob(current); err != nil {
+				return err
 			}
 		}
 		return tx.Table(stepRun.TableName()).Create(stepRun).Error

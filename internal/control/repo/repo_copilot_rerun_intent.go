@@ -106,7 +106,19 @@ func lockCopilotRerunSource(ctx context.Context, tx *gorm.DB, jobID, projectID, 
 		return nil, nil, ErrCopilotRerunUnsupported
 	}
 	var jobs []model.JobRun
-	if err := lock().Select("job_run_id").Where("pipeline_run_id = ?", scope.Run.RunID).Limit(2).Find(&jobs).Error; err != nil {
+	jobsQuery := lock()
+	if action == "confirm" {
+		// Confirmation reaches this point in a fresh outer transaction using only
+		// current locking reads (locator reads precede BEGIN). Its first snapshot
+		// therefore includes every attachment committed before the source Run
+		// lock. That Run lock excludes new attachments, and the source Job lock
+		// excludes its removal/move, so this bounded membership read is stable.
+		// Do not next-key-lock the source's secondary-index range: its neighboring
+		// gap can contain the target Run's jobs, reversing the target parent-first
+		// attachment order while confirmation waits to insert the target Run.
+		jobsQuery = tx.WithContext(ctx)
+	}
+	if err := jobsQuery.Select("job_run_id").Where("pipeline_run_id = ?", scope.Run.RunID).Limit(2).Find(&jobs).Error; err != nil {
 		return nil, nil, err
 	}
 	if len(jobs) != 1 || jobs[0].JobRunID != jobID {

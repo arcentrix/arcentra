@@ -55,9 +55,18 @@ func (r *JobRunRepo) Create(ctx context.Context, jobRun *model.JobRun) error {
 	if err := normalizeJSONFields(map[string]*string{"env": &jobRun.Env, "artifact_references": &jobRun.ArtifactReferences, "artifact_uris": &jobRun.ArtifactURIs}, jobRunJSONDefaults); err != nil {
 		return err
 	}
+	parents, err := locateOrdinaryAttachmentScope(ctx, r.Database(), []string{jobRun.PipelineRunID}, jobRun.JobRunID)
+	if err != nil {
+		return err
+	}
 	return rerunAttachmentTransaction(ctx, r.Database(), func(tx *gorm.DB) error {
-		if err := lockOrdinaryRerunParent(ctx, tx, jobRun.PipelineRunID); err != nil {
+		if err := parents.lockParents(ctx, tx); err != nil {
 			return err
+		}
+		if parents.job != nil {
+			if err := parents.lockJob(ctx, tx, jobRun.JobRunID); err != nil {
+				return err
+			}
 		}
 		return tx.Create(jobRun).Error
 	})
@@ -96,8 +105,18 @@ func (r *JobRunRepo) UpdateByJobRunID(ctx context.Context, jobRunID string, upda
 	if err != nil {
 		return err
 	}
+	parents, err := locateOrdinaryAttachmentScope(ctx, r.Database(), []string{target}, jobRunID)
+	if err != nil {
+		return err
+	}
+	if parents.job == nil {
+		return reportedStatusResult(&gorm.DB{})
+	}
 	return rerunAttachmentTransaction(ctx, r.Database(), func(tx *gorm.DB) error {
-		if err := lockOrdinaryRerunParent(ctx, tx, target); err != nil {
+		if err := parents.lockParents(ctx, tx); err != nil {
+			return err
+		}
+		if err := parents.lockJob(ctx, tx, jobRunID); err != nil {
 			return err
 		}
 		query := tx.Model(&model.JobRun{}).Where(ordinaryJobPredicate).Where("job_run_id = ? AND retry_plan = ? AND retry_plan_digest = ?", jobRunID, "", "").Where("retry_approval_required = ? AND retry_approval_id = ? AND retry_approval_evidence_hash = ?", false, "", "")

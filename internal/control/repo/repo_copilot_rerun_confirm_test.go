@@ -250,3 +250,42 @@ func TestCopilotRerunConfirmAndInspectionUsePrimary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, confirmed, observed)
 }
+
+func TestCopilotRerunConfirmSourceMembershipStartsSnapshotAfterLocks(t *testing.T) {
+	r, saved, in := rerunConfirmFixture(t)
+	db := r.database.Database()
+	var firstSnapshot bool
+	var lockedTables []string
+	const name = "confirm-source-first-snapshot"
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register(name, func(tx *gorm.DB) {
+		if _, inside := tx.Statement.ConnPool.(gorm.TxCommitter); !inside || tx.Error != nil {
+			return
+		}
+		if _, locked := tx.Statement.Clauses["FOR"]; locked {
+			if !firstSnapshot {
+				lockedTables = append(lockedTables, tx.Statement.Table)
+			}
+			return
+		}
+		if firstSnapshot {
+			return
+		}
+		firstSnapshot = true
+		require.NoError(t, requireRerunAttachmentTransaction(tx))
+		require.Equal(t, "job_run", tx.Statement.Table)
+		require.Equal(t, []string{"job_run_id"}, tx.Statement.Selects)
+		require.Contains(t, tx.Statement.Vars, saved.OriginalRunID)
+		require.Contains(t, lockedTables, "pipeline")
+		require.Contains(t, lockedTables, "project")
+		require.Contains(t, lockedTables, "pipeline_run")
+		require.Contains(t, lockedTables, "job_run")
+		require.NotContains(t, lockedTables, "copilot_rerun_intent", "source membership precedes Intent and all policy callbacks")
+		var job model.JobRun
+		require.NoError(t, tx.Session(&gorm.Session{NewDB: true}).Where("job_run_id = ?", saved.OriginalJobRunID).First(&job).Error)
+		require.NoError(t, requireExecutionScope(tx, &job))
+	}))
+	defer db.Callback().Query().Remove(name)
+	_, err := r.CopilotRerunConfirm(context.Background(), in, permitRerun, testRerunReview)
+	require.NoError(t, err)
+	require.True(t, firstSnapshot, "the first snapshot must be established beneath the source Run and Job locks")
+}

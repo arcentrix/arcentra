@@ -19,6 +19,20 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+func rerunDispatchMySQLSparseHistory(now time.Time) []model.CopilotRerunSchedule {
+	future, past := now.Add(time.Hour), now.Add(-time.Hour)
+	rows := make([]model.CopilotRerunSchedule, 0, 32*128+24)
+	for batch := 0; batch < 32; batch++ {
+		for i := 0; i < 128; i++ {
+			rows = append(rows, model.CopilotRerunSchedule{ScheduleID: uuid.NewString(), IntentID: uuid.NewString(), OwnerUserID: "synthetic", ProjectID: "synthetic", PipelineID: "synthetic", RunID: uuid.NewString(), JobRunID: uuid.NewString(), State: CopilotRerunSchedulePending, Version: 1, LeaseUntil: &future, CreatedAt: now, ExpiresAt: future})
+		}
+		if batch < 24 {
+			rows = append(rows, model.CopilotRerunSchedule{ScheduleID: uuid.NewString(), IntentID: uuid.NewString(), OwnerUserID: "synthetic", ProjectID: "synthetic", PipelineID: "synthetic", RunID: uuid.NewString(), JobRunID: uuid.NewString(), State: CopilotRerunSchedulePending, Version: 1, CancelRequested: true, CreatedAt: past, ExpiresAt: past})
+		}
+	}
+	return rows
+}
+
 // This uses the same disposable database gate as the existing rerun acceptance
 // lane. EXPLAIN ANALYZE executes the actual captured candidate query; merely
 // finding an index in metadata or seeing LIMIT at the top is insufficient.
@@ -53,21 +67,14 @@ func TestCopilotRerunDispatchMySQLRequiredGate(t *testing.T) {
 				}
 			}()
 			now := time.Now().UTC().Truncate(time.Millisecond)
-			future := now.Add(time.Hour)
 			past := now.Add(-time.Hour)
-			// Sparse due rows among future leases. Expired/cancelled candidates are kept
-			// ahead of the one real work row, so filtering cannot hide a wide index scan.
-			for batch := 0; batch < 32; batch++ {
-				rows := make([]model.CopilotRerunSchedule, 128)
-				for i := range rows {
-					rows[i] = model.CopilotRerunSchedule{ScheduleID: uuid.NewString(), IntentID: uuid.NewString(), OwnerUserID: "synthetic", ProjectID: "synthetic", PipelineID: "synthetic", RunID: uuid.NewString(), JobRunID: uuid.NewString(), State: CopilotRerunSchedulePending, Version: 1, LeaseUntil: &future, CreatedAt: now, ExpiresAt: future}
-				}
-				require.NoError(t, db.Create(&rows).Error)
-			}
-			for i := 0; i < 24; i++ {
-				q := model.CopilotRerunSchedule{ScheduleID: uuid.NewString(), IntentID: uuid.NewString(), OwnerUserID: "synthetic", ProjectID: "synthetic", PipelineID: "synthetic", RunID: uuid.NewString(), JobRunID: uuid.NewString(), State: CopilotRerunSchedulePending, Version: 1, CancelRequested: true, CreatedAt: past, ExpiresAt: past}
-				require.NoError(t, db.Create(&q).Error)
-			}
+			// Cold leases must remain ahead of every NULL-bucket cursor, not just
+			// before the first page. Otherwise a tiny PRIMARY tail legitimately wins
+			// the cost estimate and does not exercise sparse-history index access.
+			// Interleave cancelled/expired due rows and leave 1,024 cold rows before
+			// the real work row; no eligibility filter or index hint alters the query.
+			rows := rerunDispatchMySQLSparseHistory(now)
+			require.NoError(t, db.CreateInBatches(&rows, 128).Error)
 			r, saved, lease, in := rerunSealMySQLSeed(t, db)
 			require.NoError(t, db.Model(&model.CopilotRerunSchedule{}).Where("schedule_id = ?", saved.ScheduleID).Update("lease_until", nil).Error)
 			require.NoError(t, db.Exec("ANALYZE TABLE copilot_rerun_schedule").Error)
@@ -119,6 +126,7 @@ func TestCopilotRerunDispatchMySQLRequiredGate(t *testing.T) {
 					require.NoError(t, err)
 					require.LessOrEqual(t, rows*loops, float64(16), "candidate query examined excessive rows")
 				}
+				t.Logf("dispatch captured candidate query actual work: %s", text)
 			}
 			// Takeover retains exact seal and makes the old controller incapable of
 			// acquiring a fresh publication reference.

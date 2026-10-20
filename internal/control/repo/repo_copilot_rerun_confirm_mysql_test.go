@@ -9,11 +9,13 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/pkg/safe"
 	drivermysql "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
@@ -97,6 +99,38 @@ func rerunMySQLWaitEdge(t *testing.T, db *gorm.DB, holder, waiter uint64, done <
 	}
 	t.Fatal("missing exact server lock wait")
 }
+
+// Every callback must remain registered until all operations using its processor
+// have returned, including fatal assertion/timeout paths. Error channels alone
+// cannot serve as joins because the server-wait probe may consume a failure.
+type rerunMySQLWorkers struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
+	release chan struct{}
+	once    sync.Once
+	group   sync.WaitGroup
+}
+
+func newRerunMySQLWorkers(ctx context.Context) *rerunMySQLWorkers {
+	ctx, cancel := context.WithCancel(ctx)
+	return &rerunMySQLWorkers{ctx: ctx, cancel: cancel, release: make(chan struct{})}
+}
+func (w *rerunMySQLWorkers) start(fn func() error) <-chan error {
+	done := make(chan error, 1)
+	w.group.Add(1)
+	safe.Go(func() {
+		defer w.group.Done()
+		done <- fn()
+	})
+	return done
+}
+func (w *rerunMySQLWorkers) releaseHolder() { w.once.Do(func() { close(w.release) }) }
+func (w *rerunMySQLWorkers) finish() {
+	w.cancel()
+	w.releaseHolder()
+	w.group.Wait()
+}
+
 func TestCopilotRerunConfirmMySQLDSNGuards(t *testing.T) {
 	for _, dsn := range []string{"u@tcp(remote.invalid:3306)/arcentra_copilot_rerun_test", "u@tcp(127.0.0.1:3306)/production", "u@tcp(127.0.0.1:3306)/arcentra_copilot_rerun_testunsafe"} {
 		_, err := rerunConfirmMySQLConfig(dsn)
@@ -146,7 +180,7 @@ func TestCopilotRerunConfirmMySQLRequiredGate(t *testing.T) {
 					require.NoError(t, db.Migrator().DropTable(models[i]))
 				}
 			}()
-			for _, scenario := range []string{"job-attachment-first", "job-confirm-first", "step-attachment-first", "step-confirm-first", "job-move-attachment-first", "job-move-confirm-first", "step-move-attachment-first", "step-move-confirm-first", "step-job-only-attachment-first", "step-job-only-confirm-first", "job-only-run-move", "job-step-index", "duplicate-confirm", "cancel-first", "confirm-first", "revocation-wait", "policy-wait", "expiry-wait", "rollback-inserts", "lost-commit-ack", "canonical-identity"} {
+			for _, scenario := range []string{"source-step-move-attachment-first", "source-step-move-confirm-first", "source-step-job-attachment-first", "source-step-job-confirm-first", "original-job-move-attachment-first", "original-job-move-confirm-first", "original-job-duplicate-attachment-first", "original-job-duplicate-confirm-first", "source-job-attachment-first", "source-job-confirm-first", "source-job-move-attachment-first", "source-job-move-confirm-first", "job-attachment-first", "job-confirm-first", "step-attachment-first", "step-confirm-first", "job-move-attachment-first", "job-move-confirm-first", "step-move-attachment-first", "step-move-confirm-first", "step-job-only-attachment-first", "step-job-only-confirm-first", "job-only-run-move", "job-step-index", "duplicate-confirm", "cancel-first", "confirm-first", "revocation-wait", "policy-wait", "expiry-wait", "rollback-inserts", "lost-commit-ack", "canonical-identity"} {
 				t.Run(scenario, func(t *testing.T) {
 					defer func() {
 						for i := len(models) - 1; i >= 0; i-- {
@@ -165,7 +199,11 @@ func rerunConfirmMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if strings.Contains(scenario, "attachment") || strings.Contains(scenario, "confirm-first") && (strings.HasPrefix(scenario, "job-") || strings.HasPrefix(scenario, "step-")) {
+	if strings.HasPrefix(scenario, "source-job-") {
+		rerunMySQLSourceAttachmentRace(t, ctx, db, r, saved, in, scenario)
+		return
+	}
+	if strings.HasPrefix(scenario, "source-step-") || strings.HasPrefix(scenario, "original-job-") || strings.Contains(scenario, "attachment") || strings.Contains(scenario, "confirm-first") && (strings.HasPrefix(scenario, "job-") || strings.HasPrefix(scenario, "step-")) {
 		rerunMySQLAttachmentRace(t, ctx, db, r, saved, in, scenario)
 		return
 	}
@@ -247,22 +285,37 @@ func rerunConfirmMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved
 
 func rerunMySQLAttachmentRace(t *testing.T, ctx context.Context, db *gorm.DB, r *Repositories, saved *model.CopilotRerunIntent, in CopilotRerunConfirmInput, scenario string) {
 	t.Helper()
+	workers := newRerunMySQLWorkers(ctx)
+	defer workers.cancel()
+	ctx = workers.ctx
 	first, firstID := rerunMySQLConnection(t, db)
 	second, secondID := rerunMySQLConnection(t, db)
 	firstRepo := NewRepositories(statusTestDB{first}, nil)
 	secondRepo := NewRepositories(statusTestDB{second}, nil)
 	attachFirst := strings.HasSuffix(scenario, "attachment-first")
-	isJob := strings.HasPrefix(scenario, "job-")
+	isJob := strings.HasPrefix(scenario, "job-") || strings.HasPrefix(scenario, "original-job-")
+	originalJob := strings.HasPrefix(scenario, "original-job-")
+	sourceJobStep := strings.HasPrefix(scenario, "source-step-job-")
+	sourceStepMove := strings.HasPrefix(scenario, "source-step-move-")
+	var originalSourceJob model.JobRun
+	if originalJob || sourceJobStep {
+		require.NoError(t, db.Where("job_run_id = ?", saved.OriginalJobRunID).First(&originalSourceJob).Error)
+	}
 	jobOnly := strings.Contains(scenario, "job-only")
 	moving := strings.Contains(scenario, "-move-")
-	if moving {
+	if moving && !originalJob {
 		if isJob {
 			require.NoError(t, r.JobRun.Create(ctx, &model.JobRun{JobRunID: "ordinary-child"}))
 		} else {
-			require.NoError(t, r.StepRun.Create(ctx, &model.StepRun{StepRunID: "ordinary-child"}))
+			parent := ""
+			if sourceStepMove {
+				parent = saved.OriginalRunID
+				require.Less(t, saved.NewRunID, parent, "exercise the previous target-gap before source-Run inversion")
+			}
+			require.NoError(t, r.StepRun.Create(ctx, &model.StepRun{StepRunID: "ordinary-child", PipelineRunID: parent}))
 		}
 	}
-	held, release := make(chan struct{}), make(chan struct{})
+	held, release := make(chan struct{}), workers.release
 	var once atomic.Bool
 	name := "rerun-parent-hold"
 	callback := func(tx *gorm.DB) {
@@ -298,12 +351,21 @@ func rerunMySQLAttachmentRace(t *testing.T, ctx context.Context, db *gorm.DB, r 
 	}
 	if attachFirst {
 		require.NoError(t, db.Callback().Query().After("gorm:query").Register(name, callback))
-		defer db.Callback().Query().Remove(name)
+		defer func() { workers.finish(); _ = db.Callback().Query().Remove(name) }()
 	} else {
 		require.NoError(t, db.Callback().Create().After("gorm:create").Register(name, callback))
-		defer db.Callback().Create().Remove(name)
+		defer func() { workers.finish(); _ = db.Callback().Create().Remove(name) }()
 	}
 	attach := func(repos *Repositories) error {
+		if originalJob {
+			if moving {
+				return repos.JobRun.UpdateByJobRunID(ctx, saved.OriginalJobRunID, map[string]any{"pipeline_run_id": saved.NewRunID})
+			}
+			return repos.JobRun.Create(ctx, &model.JobRun{JobRunID: saved.OriginalJobRunID, PipelineRunID: saved.NewRunID})
+		}
+		if sourceJobStep {
+			return repos.StepRun.Create(ctx, &model.StepRun{StepRunID: "ordinary-child", PipelineRunID: saved.NewRunID, JobRunID: saved.OriginalJobRunID})
+		}
 		if moving {
 			if isJob {
 				return repos.JobRun.UpdateByJobRunID(ctx, "ordinary-child", map[string]any{"pipeline_run_id": saved.NewRunID})
@@ -322,14 +384,12 @@ func rerunMySQLAttachmentRace(t *testing.T, ctx context.Context, db *gorm.DB, r 
 		_, err := repos.CopilotRerunConfirm(ctx, in, permitRerun, testRerunReview)
 		return err
 	}
-	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
-	go func() {
+	firstDone := workers.start(func() error {
 		if attachFirst {
-			firstDone <- attach(firstRepo)
-		} else {
-			firstDone <- confirm(firstRepo)
+			return attach(firstRepo)
 		}
-	}()
+		return confirm(firstRepo)
+	})
 	select {
 	case <-held:
 	case err := <-firstDone:
@@ -337,29 +397,50 @@ func rerunMySQLAttachmentRace(t *testing.T, ctx context.Context, db *gorm.DB, r 
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	go func() {
+	secondDone := workers.start(func() error {
 		if attachFirst {
-			secondDone <- confirm(secondRepo)
-		} else {
-			secondDone <- attach(secondRepo)
+			return confirm(secondRepo)
 		}
-	}()
+		return attach(secondRepo)
+	})
 	rerunMySQLWaitEdge(t, db, firstID, secondID, secondDone)
-	close(release)
-	require.NoError(t, awaitRetryMySQL(t, firstDone))
+	workers.releaseHolder()
+	firstErr := awaitRetryMySQL(t, firstDone)
 	err := awaitRetryMySQL(t, secondDone)
-	if attachFirst {
+	if attachFirst && (originalJob || sourceJobStep) {
+		switch {
+		case sourceJobStep:
+			require.EqualError(t, firstErr, "captured retry plan cannot acquire new step allocations")
+		case moving:
+			require.EqualError(t, firstErr, "execution identity or state changed")
+		default:
+			var duplicate *drivermysql.MySQLError
+			require.ErrorAs(t, firstErr, &duplicate)
+			require.EqualValues(t, 1062, duplicate.Number, "a lock timeout/deadlock is not a duplicate-identity rejection")
+		}
+		require.NoError(t, err)
+	} else if attachFirst {
+		require.NoError(t, firstErr)
 		require.ErrorIs(t, err, ErrCopilotRerunConflict)
 	} else {
+		require.NoError(t, firstErr)
 		if jobOnly {
 			require.EqualError(t, err, "captured retry plan cannot acquire new step allocations")
 		} else {
 			require.ErrorIs(t, err, ErrCopilotRerunUnsupported)
 		}
 	}
+	if originalJob || sourceJobStep {
+		var after model.JobRun
+		require.NoError(t, db.Where("job_run_id = ?", saved.OriginalJobRunID).First(&after).Error)
+		require.Equal(t, originalSourceJob, after, "rejected source mutation must leave the exact original Job unchanged")
+		var extraSteps int64
+		require.NoError(t, db.Model(&model.StepRun{}).Where("step_run_id = ?", "ordinary-child").Count(&extraSteps).Error)
+		require.Zero(t, extraSteps)
+	}
 	var parentCount int64
 	require.NoError(t, db.Model(&model.PipelineRun{}).Where("run_id = ?", saved.NewRunID).Count(&parentCount).Error)
-	if attachFirst {
+	if attachFirst && !originalJob && !sourceJobStep {
 		require.Zero(t, parentCount)
 	} else {
 		require.EqualValues(t, 1, parentCount)
@@ -370,6 +451,9 @@ func rerunMySQLAttachmentRace(t *testing.T, ctx context.Context, db *gorm.DB, r 
 
 func rerunMySQLSourceRace(t *testing.T, ctx context.Context, db *gorm.DB, r *Repositories, saved *model.CopilotRerunIntent, in CopilotRerunConfirmInput, scenario string) {
 	t.Helper()
+	workers := newRerunMySQLWorkers(ctx)
+	defer workers.cancel()
+	ctx = workers.ctx
 	first, firstID := rerunMySQLConnection(t, db)
 	second, secondID := rerunMySQLConnection(t, db)
 	other := NewRepositories(statusTestDB{second}, nil)
@@ -395,8 +479,8 @@ func rerunMySQLSourceRace(t *testing.T, ctx context.Context, db *gorm.DB, r *Rep
 				return x, err
 			}
 		}
-		done := make(chan error, 1)
-		go func() { _, err := other.CopilotRerunConfirm(ctx, in, permitRerun, review); done <- err }()
+		defer workers.finish()
+		done := workers.start(func() error { _, err := other.CopilotRerunConfirm(ctx, in, permitRerun, review); return err })
 		rerunMySQLWaitEdge(t, db, firstID, secondID, done)
 		expected := ErrCopilotRerunConflict
 		switch scenario {
@@ -423,7 +507,7 @@ func rerunMySQLSourceRace(t *testing.T, ctx context.Context, db *gorm.DB, r *Rep
 		require.Zero(t, n)
 		return
 	}
-	held, release := make(chan struct{}), make(chan struct{})
+	held, release := make(chan struct{}), workers.release
 	var once atomic.Bool
 	name := "rerun-source-hold"
 	require.NoError(t, db.Callback().Query().After("gorm:query").Register(name, func(tx *gorm.DB) {
@@ -438,18 +522,17 @@ func rerunMySQLSourceRace(t *testing.T, ctx context.Context, db *gorm.DB, r *Rep
 			}
 		}
 	}))
-	defer db.Callback().Query().Remove(name)
+	defer func() { workers.finish(); _ = db.Callback().Query().Remove(name) }()
 	firstRepo := NewRepositories(statusTestDB{first}, nil)
-	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
-	go func() {
+	firstDone := workers.start(func() error {
 		var err error
 		if scenario == "cancel-first" {
 			_, err = firstRepo.CopilotRerunCancelPrepared(ctx, in, permitRerun)
 		} else {
 			_, err = firstRepo.CopilotRerunConfirm(ctx, in, permitRerun, testRerunReview)
 		}
-		firstDone <- err
-	}()
+		return err
+	})
 	select {
 	case <-held:
 	case err := <-firstDone:
@@ -457,19 +540,20 @@ func rerunMySQLSourceRace(t *testing.T, ctx context.Context, db *gorm.DB, r *Rep
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	go func() {
+	secondDone := workers.start(func() error {
 		var err error
 		if scenario == "confirm-first" {
 			_, err = other.CopilotRerunCancelPrepared(ctx, in, permitRerun)
 		} else {
 			_, err = other.CopilotRerunConfirm(ctx, in, permitRerun, testRerunReview)
 		}
-		secondDone <- err
-	}()
+		return err
+	})
 	rerunMySQLWaitEdge(t, db, firstID, secondID, secondDone)
-	close(release)
-	require.NoError(t, awaitRetryMySQL(t, firstDone))
+	workers.releaseHolder()
+	firstErr := awaitRetryMySQL(t, firstDone)
 	err := awaitRetryMySQL(t, secondDone)
+	require.NoError(t, firstErr)
 	if scenario == "duplicate-confirm" {
 		require.NoError(t, err)
 	} else {
@@ -501,4 +585,122 @@ func TestCopilotRerunConfirmMySQLSeedJSONShapes(t *testing.T) {
 			require.NoError(t, retryApprovalMySQLValidateJSON(db, row))
 		}
 	}
+}
+
+func rerunMySQLSourceAttachmentRace(t *testing.T, ctx context.Context, db *gorm.DB, r *Repositories, saved *model.CopilotRerunIntent, in CopilotRerunConfirmInput, scenario string) {
+	t.Helper()
+	workers := newRerunMySQLWorkers(ctx)
+	defer workers.cancel()
+	ctx = workers.ctx
+	first, firstID := rerunMySQLConnection(t, db)
+	second, secondID := rerunMySQLConnection(t, db)
+	firstRepo, secondRepo := NewRepositories(statusTestDB{first}, nil), NewRepositories(statusTestDB{second}, nil)
+	attachFirst := strings.HasSuffix(scenario, "attachment-first")
+	moving := strings.Contains(scenario, "-move-")
+	if moving {
+		require.NoError(t, r.JobRun.Create(ctx, &model.JobRun{JobRunID: "source-ordinary-child"}))
+	}
+	held := make(chan struct{})
+	var once atomic.Bool
+	const name = "rerun-source-membership-holder"
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register(name, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Name != "PipelineRun" {
+			return
+		}
+		if _, locked := tx.Statement.Clauses["FOR"]; !locked {
+			return
+		}
+		for _, arg := range tx.Statement.Vars {
+			if id, ok := arg.(string); ok && id == saved.OriginalRunID && once.CompareAndSwap(false, true) {
+				close(held)
+				select {
+				case <-workers.release:
+				case <-ctx.Done():
+					tx.AddError(ctx.Err())
+				}
+			}
+		}
+	}))
+	defer func() { workers.finish(); _ = db.Callback().Query().Remove(name) }()
+	attach := func(repos *Repositories) error {
+		if moving {
+			return repos.JobRun.UpdateByJobRunID(ctx, "source-ordinary-child", map[string]any{"pipeline_run_id": saved.OriginalRunID})
+		}
+		return repos.JobRun.Create(ctx, &model.JobRun{JobRunID: "source-ordinary-child", PipelineRunID: saved.OriginalRunID})
+	}
+	confirm := func(repos *Repositories) error {
+		_, err := repos.CopilotRerunConfirm(ctx, in, permitRerun, testRerunReview)
+		return err
+	}
+	firstDone := workers.start(func() error {
+		if attachFirst {
+			return attach(firstRepo)
+		}
+		return confirm(firstRepo)
+	})
+	select {
+	case <-held:
+	case err := <-firstDone:
+		t.Fatalf("source operation ended before held boundary: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	secondDone := workers.start(func() error {
+		if attachFirst {
+			return confirm(secondRepo)
+		}
+		return attach(secondRepo)
+	})
+	rerunMySQLWaitEdge(t, db, firstID, secondID, secondDone)
+	workers.releaseHolder()
+	firstErr, secondErr := awaitRetryMySQL(t, firstDone), awaitRetryMySQL(t, secondDone)
+	require.NoError(t, firstErr)
+	var targetCount, sourceCount int64
+	require.NoError(t, db.Model(&model.PipelineRun{}).Where("run_id = ?", saved.NewRunID).Count(&targetCount).Error)
+	require.NoError(t, db.Model(&model.JobRun{}).Where("pipeline_run_id = ?", saved.OriginalRunID).Count(&sourceCount).Error)
+	require.EqualValues(t, 2, sourceCount)
+	var intent model.CopilotRerunIntent
+	require.NoError(t, db.Where("intent_id = ?", saved.IntentID).First(&intent).Error)
+	if attachFirst {
+		require.ErrorIs(t, secondErr, ErrCopilotRerunUnsupported, "the first source snapshot must see the attachment committed after its locator read")
+		require.Zero(t, targetCount)
+		require.Equal(t, CopilotRerunPrepared, intent.State)
+	} else {
+		require.NoError(t, secondErr)
+		require.EqualValues(t, 1, targetCount)
+		require.Equal(t, CopilotRerunConfirmed, intent.State)
+	}
+}
+
+func TestCopilotRerunMySQLWorkersJoinBeforeCallbackRemoval(t *testing.T) {
+	_, db, _, _ := sourceTestRepository(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	workers := newRerunMySQLWorkers(ctx)
+	held := make(chan struct{})
+	var active atomic.Int32
+	const name = "rerun-cleanup-joined-callback"
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register(name, func(*gorm.DB) {
+		active.Add(1)
+		defer active.Add(-1)
+		close(held)
+		<-workers.release
+	}))
+	defer func() { workers.finish(); _ = db.Callback().Query().Remove(name) }()
+	failed := workers.start(func() error { return fmt.Errorf("synthetic first-operation failure") })
+	require.Error(t, awaitRetryMySQL(t, failed), "an error consumed by the observer must not consume the worker join")
+	pending := workers.start(func() error { return db.WithContext(workers.ctx).Find(&[]model.PipelineRun{}).Error })
+	select {
+	case <-held:
+	case <-ctx.Done():
+		t.Fatal("callback was not reached")
+	}
+	workers.finish()
+	require.Zero(t, active.Load())
+	select {
+	case <-pending:
+	default:
+		t.Fatal("worker still using callbacks after join")
+	}
+	require.NoError(t, db.Callback().Query().Remove(name))
 }

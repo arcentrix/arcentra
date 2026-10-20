@@ -12,6 +12,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCopilotRerunArtifactSchemaSessionKeepsModelTypes(t *testing.T) {
+	for _, collation := range []string{"utf8mb4_0900_ai_ci", "utf8mb4_bin"} {
+		t.Run(collation, func(t *testing.T) {
+			db := executionSchemaDB(t)
+			require.NoError(t, db.AutoMigrate(&model.StepRunArtifact{}, &model.ProjectArtifact{}))
+			scoped := rerunSchemaMySQLSession(db, collation)
+			options, ok := scoped.Get("gorm:table_options")
+			require.True(t, ok)
+			require.Equal(t, "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE="+collation, options)
+			// Set alone leaves an initialized statement. Reusing it would apply the
+			// step artifact schema to the project artifact's differently ordered
+			// fields, including binding StorageID's string to the integer size.
+			require.NoError(t, scoped.Create(&model.StepRunArtifact{ArtifactID: "step", JobRunID: "step-job", Size: 17}).Error)
+			require.NoError(t, scoped.Create(&model.ProjectArtifact{ArtifactID: "project", JobRunID: "project-job", StorageID: "store", Size: 23}).Error)
+			for _, entity := range []any{&model.StepRunArtifact{}, &model.ProjectArtifact{}} {
+				var count int64
+				require.NoError(t, db.Model(entity).Count(&count).Error)
+				require.EqualValues(t, 1, count, "each create must target its own artifact table")
+			}
+			var step model.StepRunArtifact
+			require.NoError(t, scoped.Where("artifact_id = ?", "step").First(&step).Error)
+			require.Equal(t, "step-job", step.JobRunID)
+			require.EqualValues(t, 17, step.Size)
+			var project model.ProjectArtifact
+			require.NoError(t, scoped.Where("artifact_id = ?", "project").First(&project).Error)
+			require.Equal(t, "project-job", project.JobRunID)
+			require.Equal(t, "store", project.StorageID)
+			require.EqualValues(t, 23, project.Size)
+			require.Nil(t, scoped.Statement.Model)
+			require.Empty(t, scoped.Statement.Clauses)
+		})
+	}
+}
+
 func TestCopilotRerunArtifactIndexMetadata(t *testing.T) {
 	for _, entry := range []struct {
 		name, kind string

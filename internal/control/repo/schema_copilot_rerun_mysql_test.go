@@ -16,6 +16,12 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+func rerunSchemaMySQLSession(db *gorm.DB, collation string) *gorm.DB {
+	// Keep the DDL setting, but clone a clean statement for each subsequent model
+	// operation. A reusable Set chain otherwise retains the first Create's model.
+	return db.Set("gorm:table_options", "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE="+collation).Session(&gorm.Session{})
+}
+
 // Uses the production explicit migration, never substitutes model-only creation
 // for either fresh migration or upgrade/replay assertions.
 func TestCopilotRerunSchemaMySQLRequiredGate(t *testing.T) {
@@ -49,7 +55,7 @@ func TestCopilotRerunSchemaMySQLRequiredGate(t *testing.T) {
 							require.NoError(t, db.Migrator().DropTable(table))
 						}
 					}()
-					scoped := db.Set("gorm:table_options", "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE="+collation)
+					scoped := rerunSchemaMySQLSession(db, collation)
 					ctx := context.Background()
 					if strings.HasPrefix(scenario, "artifact-") {
 						rerunArtifactSchemaMySQL(t, scoped, scenario, collation)

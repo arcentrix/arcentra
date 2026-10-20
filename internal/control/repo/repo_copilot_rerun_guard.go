@@ -8,7 +8,6 @@ import (
 	"github.com/arcentrix/arcentra/pkg/database"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"sort"
 	"strings"
 )
 
@@ -32,26 +31,31 @@ func sameJobRerun(a, b *model.JobRun) bool {
 const ordinaryRunPredicate = "copilot_rerun_intent_id = '' AND copilot_rerun_gate_id = ''"
 const ordinaryJobPredicate = "copilot_rerun_intent_id = '' AND copilot_rerun_gate_id = '' AND expected_source_commit = ''"
 
-// Generic child mutations lock only parent Run keys/ranges before child writes.
-// They never acquire Pipeline/scope locks afterwards. Missing parents remain
+// Generic child mutations lock parent Run keys/ranges before child writes.
+// Cross-parent child paths first lock their hinted Pipeline prefix; no path
+// acquires a Pipeline after a Run or Job lock. Missing parents remain
 // legacy-compatible, but under MySQL RR their key ranges serialize with future
 // protected parent insertion. Confirm must reject existing children after its
 // parent insertion; neither half alone proves the attachment boundary.
 func lockOrdinaryRerunParent(ctx context.Context, tx *gorm.DB, runID string) error {
+	_, err := lockOrdinaryRerunParentRow(ctx, tx, runID)
+	return err
+}
+func lockOrdinaryRerunParentRow(ctx context.Context, tx *gorm.DB, runID string) (*model.PipelineRun, error) {
 	if runID == "" {
-		return nil
+		return nil, nil
 	}
 	var rows []model.PipelineRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("run_id", "copilot_rerun_intent_id", "copilot_rerun_gate_id").Where("run_id = ?", runID).Limit(2).Find(&rows).Error; err != nil {
-		return err
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select("run_id", "pipeline_id", "copilot_rerun_intent_id", "copilot_rerun_gate_id").Where("run_id = ?", runID).Limit(2).Find(&rows).Error; err != nil {
+		return nil, err
 	}
 	if len(rows) == 0 {
-		return requireRerunAttachmentTransaction(tx)
+		return nil, requireRerunAttachmentTransaction(tx)
 	}
 	if len(rows) > 1 || len(rows) == 1 && (rows[0].RunID != runID || !emptyRunRerun(&rows[0])) {
-		return ErrCopilotRerunUnsupported
+		return nil, ErrCopilotRerunUnsupported
 	}
-	return nil
+	return &rows[0], nil
 }
 func rerunUpdateRunDestination(updates map[string]any) (string, error) {
 	target := ""
@@ -84,31 +88,33 @@ func ordinaryStepMutation(ctx context.Context, db *gorm.DB, stepID string, updat
 	if hint.StepRunID != stepID {
 		return ErrCopilotRerunConflict
 	}
+	parents, err := locateOrdinaryAttachmentScope(ctx, db, []string{hint.PipelineRunID, target}, hint.JobRunID)
+	if err != nil {
+		return err
+	}
 	return rerunAttachmentTransaction(ctx, db, func(tx *gorm.DB) error {
-		parents := []string{hint.PipelineRunID, target}
-		sort.Strings(parents)
-		previous := ""
-		for _, parent := range parents {
-			if parent == "" || parent == previous {
-				continue
-			}
-			if err := lockOrdinaryRerunParent(ctx, tx, parent); err != nil {
-				return err
-			}
-			previous = parent
+		if err := parents.lockParents(ctx, tx); err != nil {
+			return err
 		}
 		if hint.JobRunID != "" {
-			var parents []model.JobRun
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id", "retry_plan", "retry_plan_digest", "copilot_rerun_intent_id", "copilot_rerun_gate_id", "expected_source_commit").Where("job_run_id = ?", hint.JobRunID).Limit(2).Find(&parents).Error; err != nil {
+			var jobs []model.JobRun
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id", "pipeline_id", "pipeline_run_id", "retry_plan", "retry_plan_digest", "copilot_rerun_intent_id", "copilot_rerun_gate_id", "expected_source_commit").Where("job_run_id = ?", hint.JobRunID).Limit(2).Find(&jobs).Error; err != nil {
 				return err
 			}
-			if len(parents) == 0 {
+			if len(jobs) == 0 {
 				if err := requireRerunAttachmentTransaction(tx); err != nil {
 					return err
 				}
 			}
-			if len(parents) > 1 || len(parents) == 1 && (parents[0].JobRunID != hint.JobRunID || !emptyJobRerun(&parents[0]) || parents[0].RetryPlan != "" || parents[0].RetryPlanDigest != "") {
+			if len(jobs) > 1 || len(jobs) == 1 && (jobs[0].JobRunID != hint.JobRunID || !emptyJobRerun(&jobs[0]) || jobs[0].RetryPlan != "" || jobs[0].RetryPlanDigest != "") {
 				return ErrCopilotRerunUnsupported
+			}
+			var current *model.JobRun
+			if len(jobs) == 1 {
+				current = &jobs[0]
+			}
+			if err := parents.validateJob(current); err != nil {
+				return err
 			}
 		}
 		var current model.StepRun

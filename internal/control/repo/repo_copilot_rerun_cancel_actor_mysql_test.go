@@ -79,26 +79,26 @@ func TestCopilotRerunCancelActorMySQLRequiredGate(t *testing.T) {
 					defer cancel()
 					sealed, err := r.CopilotRerunSeal(ctx, lease, sealIn, permitRerun, testRerunSealBuilder)
 					require.NoError(t, err)
-					digest, err := sealed.Binding.Digest()
-					require.NoError(t, err)
-					claim := CopilotRerunClaimInput{AgentID: sealIn.AgentID, PipelineID: saved.PipelineID, RunID: saved.NewRunID, JobRunID: saved.NewJobRunID, GateID: saved.GateID, ScheduleID: saved.ScheduleID, SealID: sealIn.SealID, SealDigest: digest, PayloadDigest: sealed.Binding.PayloadDigest, ClaimID: uuid.NewString(), AdmissionNonce: []byte(strings.Repeat("cancel-test-nonce", 2))}
+					claim := rerunCancelActorClaimInput(t, saved, sealIn, sealed)
 					hint, err := r.LocateCopilotRerunCancellation(ctx, saved.PipelineID, saved.NewRunID)
 					require.NoError(t, err)
 					first, holder := rerunMySQLConnection(t, db)
 					second, waiter := rerunMySQLConnection(t, db)
 					firstRepo, secondRepo := NewRepositories(statusTestDB{first}, nil), NewRepositories(statusTestDB{second}, nil)
-					held, release := make(chan struct{}), make(chan struct{})
+					workers := newRerunMySQLWorkers(ctx)
+					ctx = workers.ctx
+					held, release := make(chan struct{}), workers.release
+					const hook = "cancel-actor-gate-holder"
+					hookRegistered := false
 					defer func() {
-						select {
-						case <-release:
-						default:
-							close(release)
+						workers.finish()
+						if hookRegistered {
+							_ = db.Callback().Query().Remove(hook)
 						}
 					}()
-					firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+					var firstDone <-chan error
 					if scenario == "claim-first" || scenario == "cancel-first" {
 						var once atomic.Bool
-						const hook = "cancel-actor-gate-holder"
 						require.NoError(t, db.Callback().Query().After("gorm:query").Register(hook, func(tx *gorm.DB) {
 							if tx.Statement.Schema == nil || tx.Statement.Schema.Name != "CopilotRerunAdmissionGate" {
 								return
@@ -108,27 +108,31 @@ func TestCopilotRerunCancelActorMySQLRequiredGate(t *testing.T) {
 							}
 							if once.CompareAndSwap(false, true) {
 								close(held)
-								<-release
+								select {
+								case <-release:
+								case <-ctx.Done():
+									tx.AddError(ctx.Err())
+								}
 							}
 						}))
-						defer db.Callback().Query().Remove(hook)
-						go func() {
+						hookRegistered = true
+						firstDone = workers.start(func() error {
 							var err error
 							if scenario == "claim-first" {
 								_, err = firstRepo.CopilotRerunClaim(ctx, claim, permitRerun, testRerunClaimValidator)
 							} else {
 								_, err = firstRepo.CopilotRerunCancelUnclaimedAs(ctx, actor.UserID, hint.Unclaimed, authorize)
 							}
-							firstDone <- err
-						}()
+							return err
+						})
 					} else {
 						if scenario == "grant-expiry-wait" {
 							expiry := time.Now().UTC().Add(time.Second)
 							grant.ExpiresAt = &expiry
 							require.NoError(t, db.Model(&model.RoleGrant{}).Where("grant_id = ?", grant.GrantID).Update("expires_at", expiry).Error)
 						}
-						go func() {
-							firstDone <- first.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+						firstDone = workers.start(func() error {
+							return first.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 								var err error
 								if scenario == "grant-expiry-wait" {
 									err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("schedule_id = ?", saved.ScheduleID).First(&model.CopilotRerunSchedule{}).Error
@@ -148,7 +152,7 @@ func TestCopilotRerunCancelActorMySQLRequiredGate(t *testing.T) {
 								}
 								return nil
 							})
-						}()
+						})
 					}
 					select {
 					case <-held:
@@ -157,22 +161,24 @@ func TestCopilotRerunCancelActorMySQLRequiredGate(t *testing.T) {
 					case <-ctx.Done():
 						t.Fatal("holder deadline")
 					}
-					go func() {
+					secondDone := workers.start(func() error {
 						var err error
 						if scenario == "cancel-first" {
 							_, err = secondRepo.CopilotRerunClaim(ctx, claim, permitRerun, testRerunClaimValidator)
 						} else {
 							_, err = secondRepo.CopilotRerunCancelUnclaimedAs(ctx, actor.UserID, hint.Unclaimed, authorize)
 						}
-						secondDone <- err
-					}()
+						return err
+					})
 					rerunMySQLWaitEdge(t, db, holder, waiter, secondDone)
 					if scenario == "grant-expiry-wait" {
 						time.Sleep(time.Until(*grant.ExpiresAt) + 5*time.Millisecond)
 					}
-					close(release)
-					require.NoError(t, <-firstDone)
-					require.Error(t, <-secondDone)
+					workers.releaseHolder()
+					firstErr := awaitRetryMySQL(t, firstDone)
+					secondErr := awaitRetryMySQL(t, secondDone)
+					require.NoError(t, firstErr)
+					require.Error(t, secondErr)
 					var job model.JobRun
 					require.NoError(t, db.Where("job_run_id = ?", saved.NewJobRunID).First(&job).Error)
 					switch scenario {
@@ -193,4 +199,26 @@ func TestCopilotRerunCancelActorMySQLRequiredGate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func rerunCancelActorClaimInput(t *testing.T, saved *model.CopilotRerunIntent, in CopilotRerunSealInput, sealed *CopilotRerunSealReceipt) CopilotRerunClaimInput {
+	t.Helper()
+	digest, err := sealed.Binding.Digest()
+	require.NoError(t, err)
+	claim := CopilotRerunClaimInput{AgentID: in.AgentID, PipelineID: saved.PipelineID, RunID: saved.NewRunID, JobRunID: saved.NewJobRunID, GateID: saved.GateID, ScheduleID: saved.ScheduleID, SealID: in.SealID, SealDigest: digest, PayloadDigest: sealed.Binding.PayloadDigest, ClaimID: uuid.NewString(), AdmissionNonce: []byte(strings.Repeat("synthetic-nonce!", 2))}
+	_, err = rerunClaimNonceDigest(claim)
+	require.NoError(t, err, "the actor-cancellation competitor must pass request validation before racing")
+	return claim
+}
+
+func TestCopilotRerunCancelActorMySQLClaimFixture(t *testing.T) {
+	r, saved, lease, in := rerunSealFixture(t)
+	ctx := context.Background()
+	sealed, err := r.CopilotRerunSeal(ctx, lease, in, permitRerun, testRerunSealBuilder)
+	require.NoError(t, err)
+	claim := rerunCancelActorClaimInput(t, saved, in, sealed)
+	require.Len(t, claim.AdmissionNonce, 32)
+	result, err := r.CopilotRerunClaim(ctx, claim, permitRerun, testRerunClaimValidator)
+	require.NoError(t, err)
+	require.Equal(t, claim.ClaimID, result.Receipt.ClaimID)
 }

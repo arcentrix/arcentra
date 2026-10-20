@@ -7,6 +7,7 @@ package taskqueue
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,7 +101,7 @@ func (h *terminalRerunHTTP) login(t *testing.T, ctx context.Context, actor strin
 			AccessToken string `json:"accessToken"`
 		} `json:"token"`
 	}
-	h.request(t, ctx, "", "POST", "/users/login", map[string]string{"username": actor, "password": h.passwords[actor]}, &login)
+	h.request(t, ctx, "", "POST", "/users/login", map[string]string{"username": actor, "password": base64.StdEncoding.EncodeToString([]byte(h.passwords[actor]))}, &login)
 	if login.Token.AccessToken == "" {
 		t.Fatal("real login returned no access token")
 	}

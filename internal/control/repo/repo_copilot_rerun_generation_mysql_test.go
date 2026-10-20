@@ -20,6 +20,15 @@ import (
 func rerunGenerationMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *model.CopilotRerunIntent, in CopilotRerunClaimInput, scenario string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	workers := newRerunMySQLWorkers(ctx)
+	ctx = workers.ctx
+	var removeAuthorizer func()
+	defer func() {
+		workers.finish()
+		if removeAuthorizer != nil {
+			removeAuthorizer()
+		}
+	}()
 	_, err := r.CopilotRerunClaim(ctx, in, permitRerun, testRerunClaimValidator)
 	require.NoError(t, err)
 	c, err := retryapproval.ParseRunContext(saved.ReviewedRunContext)
@@ -44,7 +53,7 @@ func rerunGenerationMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, sa
 		}
 		return nil
 	}))
-	defer SetRetryApprovalAuthorizer(r, nil)
+	removeAuthorizer = func() { require.NoError(t, SetRetryApprovalAuthorizer(r, nil)) }
 	jobs := r.JobRun.(*JobRunRepo)
 	job, err := jobs.GetByJobRunID(ctx, in.JobRunID)
 	require.NoError(t, err)
@@ -104,17 +113,9 @@ func rerunGenerationMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, sa
 	}
 	first, holder := rerunMySQLConnection(t, db)
 	second, waiter := rerunMySQLConnection(t, db)
-	held, release := make(chan struct{}), make(chan struct{})
-	defer func() {
-		select {
-		case <-release:
-		default:
-			close(release)
-		}
-	}()
-	holderDone, operationDone := make(chan error, 1), make(chan error, 1)
-	go func() {
-		holderDone <- first.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	held, release := make(chan struct{}), workers.release
+	holderDone := workers.start(func() error {
+		return first.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			var schedule model.CopilotRerunSchedule
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("schedule_id = ?", in.ScheduleID).First(&schedule).Error; err != nil {
 				return err
@@ -126,7 +127,7 @@ func rerunGenerationMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, sa
 			}
 			return nil
 		})
-	}()
+	})
 	select {
 	case <-held:
 	case err := <-holderDone:
@@ -135,22 +136,22 @@ func rerunGenerationMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, sa
 		t.Fatal("holder timeout")
 	}
 	other := NewRepositories(statusTestDB{second}, nil)
-	go func() {
+	operationDone := workers.start(func() error {
 		if scenario == "generation-vote-cancel" {
 			_, err := other.Approval.(*ApprovalRepo).Decide(ctx, job.RetryApprovalID, c.Policy.Candidates[0], model.ApprovalDecisionApprove, "")
-			operationDone <- err
-			return
+			return err
 		}
 		_, err := other.JobRun.(*JobRunRepo).ReconcileJobRetryApproval(ctx, request)
-		operationDone <- err
-	}()
+		return err
+	})
 	rerunMySQLWaitEdge(t, db, holder, waiter, operationDone)
 	if scenario != "generation-vote-cancel" {
 		time.Sleep(time.Until(expiry) + 10*time.Millisecond)
 	}
-	close(release)
-	require.NoError(t, <-holderDone)
-	require.Error(t, <-operationDone)
+	workers.releaseHolder()
+	holderErr, operationErr := awaitRetryMySQL(t, holderDone), awaitRetryMySQL(t, operationDone)
+	require.NoError(t, holderErr)
+	require.Error(t, operationErr)
 	var stored model.JobRunGeneration
 	require.NoError(t, db.Where("generation_id = ?", generation.GenerationID).First(&stored).Error)
 	require.Empty(t, stored.RetryApprovalAdmission)

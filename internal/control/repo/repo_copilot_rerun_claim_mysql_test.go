@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,10 +17,33 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
+
+func rerunClaimMySQLModels() []any {
+	// Input pinning atomically enrolls the new verified-manual approval.
+	return append(rerunConfirmMySQLModels(), &model.Agent{}, &model.RoleGrant{}, &model.StorageConfig{}, &model.ApprovalRequest{}, &model.ApprovalDecision{}, &model.JobRunGeneration{}, &model.TeamMember{}, &model.Team{}, &model.Permission{}, &model.RolePermissionBinding{}, &model.Role{}, &model.InboxWork{})
+}
+
+func TestCopilotRerunClaimFixtureEnrollsInputApproval(t *testing.T) {
+	// Exercise the exact MySQL fixture schema without inheriting the broader
+	// SQLite fixture's tables. This is not MySQL concurrency acceptance.
+	for _, scenario := range []string{"input-pin", "input-rollback", "generation-bootstrap"} {
+		t.Run(scenario, func(t *testing.T) {
+			db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "claim.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+			require.NoError(t, err)
+			pool, err := db.DB()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, pool.Close()) })
+			require.NoError(t, db.AutoMigrate(rerunClaimMySQLModels()...))
+			r, saved, lease, in := rerunSealMySQLSeed(t, db)
+			rerunClaimMySQLScenario(t, db, r, saved, lease, in, scenario)
+		})
+	}
+}
 
 func TestCopilotRerunClaimMySQLRequiredGate(t *testing.T) {
 	required := os.Getenv("ARCENTRA_REQUIRE_COPILOT_RERUN_MYSQL")
@@ -46,7 +70,7 @@ func TestCopilotRerunClaimMySQLRequiredGate(t *testing.T) {
 		t.Run(collation, func(t *testing.T) {
 			for _, scenario := range []string{"claim-first", "cancel-first", "same-incarnation", "different-claim", "restart-nonce", "expiry-wait", "revocation-wait", "rollback", "lost-commit-ack", "schedule-expiry-wait", "schedule-authority-expiry", "schedule-lease-takeover", "storage-pin", "storage-disabled-wait", "storage-rollback", "input-pin", "input-rollback", "input-schedule-expiry", "input-schedule-cancel", "generation-bootstrap", "generation-startup-expiry", "generation-startup-grant-expiry", "generation-vote-cancel"} {
 				t.Run(scenario, func(t *testing.T) {
-					models := append(rerunConfirmMySQLModels(), &model.Agent{}, &model.RoleGrant{}, &model.StorageConfig{}, &model.ApprovalRequest{}, &model.ApprovalDecision{}, &model.JobRunGeneration{}, &model.TeamMember{}, &model.Team{}, &model.Permission{}, &model.RolePermissionBinding{}, &model.Role{})
+					models := rerunClaimMySQLModels()
 					scoped := db.Session(&gorm.Session{NewDB: true}).Set("gorm:table_options", "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE="+collation)
 					require.NoError(t, scoped.AutoMigrate(models...))
 					defer func() {
@@ -64,6 +88,15 @@ func TestCopilotRerunClaimMySQLRequiredGate(t *testing.T) {
 func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *model.CopilotRerunIntent, lease CopilotRerunLeaseToken, sealIn CopilotRerunSealInput, scenario string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	workers := newRerunMySQLWorkers(ctx)
+	ctx = workers.ctx
+	var removeHolderCallback func()
+	defer func() {
+		workers.finish()
+		if removeHolderCallback != nil {
+			removeHolderCallback()
+		}
+	}()
 	if scenario == "expiry-wait" || scenario == "schedule-expiry-wait" || scenario == "input-schedule-expiry" {
 		saved.ExpiresAt = time.Now().UTC().Truncate(time.Millisecond).Add(time.Second)
 		saved.IntentDigest = rerunIntentDigest(saved)
@@ -104,17 +137,9 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 			first, holder := rerunMySQLConnection(t, db)
 			second, waiter := rerunMySQLConnection(t, db)
 			secondStore := NewRepositories(statusTestDB{second}, nil).JobRun.(*JobRunRepo)
-			held, release := make(chan struct{}), make(chan struct{})
-			defer func() {
-				select {
-				case <-release:
-				default:
-					close(release)
-				}
-			}()
-			firstDone, secondDone := make(chan error, 1), make(chan error, 1)
-			go func() {
-				firstDone <- first.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			held, release := make(chan struct{}), workers.release
+			firstDone := workers.start(func() error {
+				return first.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 					var schedule model.CopilotRerunSchedule
 					if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("schedule_id = ?", in.ScheduleID).First(&schedule).Error; err != nil {
 						return err
@@ -126,7 +151,7 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 					}
 					return nil
 				})
-			}()
+			})
 			select {
 			case <-held:
 			case err := <-firstDone:
@@ -134,27 +159,35 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 			case <-ctx.Done():
 				t.Fatal("holder timeout")
 			}
-			go func() {
+			secondDone := workers.start(func() error {
 				_, _, err := secondStore.GetOrRecordJobInputsWithSourceExpectation(ctx, identity, digest, proposed)
-				secondDone <- err
-			}()
+				return err
+			})
 			rerunMySQLWaitEdge(t, db, holder, waiter, secondDone)
 			if scenario == "input-schedule-expiry" {
 				time.Sleep(time.Until(saved.ExpiresAt) + 5*time.Millisecond)
 			}
-			close(release)
-			require.NoError(t, <-firstDone)
-			require.Error(t, <-secondDone)
+			workers.releaseHolder()
+			firstErr, secondErr := awaitRetryMySQL(t, firstDone), awaitRetryMySQL(t, secondDone)
+			require.NoError(t, firstErr)
+			if scenario == "input-schedule-expiry" {
+				require.ErrorIs(t, secondErr, ErrCopilotRerunExpired)
+			} else {
+				require.ErrorIs(t, secondErr, ErrCopilotRerunConflict)
+			}
 		} else if scenario == "input-rollback" {
 			const callback = "rerun-input-approval-rollback"
+			reachedApprovalWrite := false
 			require.NoError(t, db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
 				if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "ApprovalRequest" {
+					reachedApprovalWrite = true
 					tx.AddError(ErrCopilotRerunConflict)
 				}
 			}))
 			got, _, err := store.GetOrRecordJobInputsWithSourceExpectation(ctx, identity, digest, proposed)
 			require.NoError(t, db.Callback().Create().Remove(callback))
-			require.Error(t, err)
+			require.True(t, reachedApprovalWrite)
+			require.ErrorIs(t, err, ErrCopilotRerunConflict)
 			require.Nil(t, got)
 		} else {
 			got, _, err := store.GetOrRecordJobInputsWithSourceExpectation(ctx, identity, digest, proposed)
@@ -168,6 +201,10 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 			require.Equal(t, in.RunID, approval.PipelineRunID)
 			require.Equal(t, in.JobRunID, *approval.RetryJobRunID)
 			require.Equal(t, model.ApprovalStatusPending, approval.Status)
+			require.Equal(t, 1, approval.InboxOrigin)
+			var enrolled int64
+			require.NoError(t, db.Model(&model.InboxWork{}).Where("source_kind = ? AND source_id = ?", "approval", approval.ApprovalID).Count(&enrolled).Error)
+			require.EqualValues(t, 1, enrolled, "input replay must not duplicate approval enrollment")
 			return
 		}
 		var after model.JobRun
@@ -177,6 +214,8 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 		var count int64
 		require.NoError(t, db.Model(&model.ApprovalRequest{}).Count(&count).Error)
 		require.Zero(t, count)
+		require.NoError(t, db.Model(&model.InboxWork{}).Where("source_kind = ?", "approval").Count(&count).Error)
+		require.Zero(t, count, "failed input pin must not leave approval enrollment")
 		return
 	}
 	if scenario == "storage-pin" {
@@ -243,17 +282,9 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 	firstRepo, secondRepo := NewRepositories(statusTestDB{first}, nil), NewRepositories(statusTestDB{second}, nil)
 
 	if scenario == "storage-disabled-wait" {
-		held, release := make(chan struct{}), make(chan struct{})
-		defer func() {
-			select {
-			case <-release:
-			default:
-				close(release)
-			}
-		}()
-		firstDone, secondDone := make(chan error, 1), make(chan error, 1)
-		go func() {
-			firstDone <- first.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		held, release := make(chan struct{}), workers.release
+		firstDone := workers.start(func() error {
+			return first.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 				var storage model.StorageConfig
 				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("storage_id = ?", in.ArtifactStorageID).First(&storage).Error; err != nil {
 					return err
@@ -262,7 +293,7 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 				<-release
 				return tx.Model(&model.StorageConfig{}).Where("storage_id = ?", in.ArtifactStorageID).Update("is_enabled", 0).Error
 			})
-		}()
+		})
 		select {
 		case <-held:
 		case err := <-firstDone:
@@ -270,14 +301,15 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 		case <-ctx.Done():
 			t.Fatal("storage holder timeout")
 		}
-		go func() {
+		secondDone := workers.start(func() error {
 			_, err := secondRepo.CopilotRerunClaim(ctx, in, permitRerun, testRerunClaimValidator)
-			secondDone <- err
-		}()
+			return err
+		})
 		rerunMySQLWaitEdge(t, db, holder, waiter, secondDone)
-		close(release)
-		require.NoError(t, <-firstDone)
-		require.Error(t, <-secondDone)
+		workers.releaseHolder()
+		firstErr, secondErr := awaitRetryMySQL(t, firstDone), awaitRetryMySQL(t, secondDone)
+		require.NoError(t, firstErr)
+		require.Error(t, secondErr)
 		var job model.JobRun
 		require.NoError(t, db.Where("job_run_id = ?", in.JobRunID).First(&job).Error)
 		require.Empty(t, job.ClaimID)
@@ -300,17 +332,9 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 				return testRerunClaimValidator(ctx, view, scope, snapshot, evidence, ids, intent, agent, schedule)
 			}
 		}
-		held, release := make(chan struct{}), make(chan struct{})
-		defer func() {
-			select {
-			case <-release:
-			default:
-				close(release)
-			}
-		}()
-		firstDone, secondDone := make(chan error, 1), make(chan error, 1)
-		go func() {
-			firstDone <- first.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		held, release := make(chan struct{}), workers.release
+		firstDone := workers.start(func() error {
+			return first.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 				var schedule model.CopilotRerunSchedule
 				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("schedule_id = ?", in.ScheduleID).First(&schedule).Error; err != nil {
 					return err
@@ -322,7 +346,7 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 				}
 				return nil
 			})
-		}()
+		})
 		select {
 		case <-held:
 		case err := <-firstDone:
@@ -330,7 +354,10 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 		case <-ctx.Done():
 			t.Fatal("schedule holder timeout")
 		}
-		go func() { _, err := secondRepo.CopilotRerunClaim(ctx, in, permitRerun, validate); secondDone <- err }()
+		secondDone := workers.start(func() error {
+			_, err := secondRepo.CopilotRerunClaim(ctx, in, permitRerun, validate)
+			return err
+		})
 		rerunMySQLWaitEdge(t, db, holder, waiter, secondDone)
 		if scenario == "schedule-expiry-wait" {
 			time.Sleep(time.Until(saved.ExpiresAt) + 5*time.Millisecond)
@@ -338,9 +365,9 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 		if scenario == "schedule-authority-expiry" {
 			time.Sleep(time.Until(expiry) + 5*time.Millisecond)
 		}
-		close(release)
-		require.NoError(t, <-firstDone)
-		err := <-secondDone
+		workers.releaseHolder()
+		firstErr, err := awaitRetryMySQL(t, firstDone), awaitRetryMySQL(t, secondDone)
+		require.NoError(t, firstErr)
 		var job model.JobRun
 		var gate model.CopilotRerunAdmissionGate
 		require.NoError(t, db.Where("job_run_id = ?", in.JobRunID).First(&job).Error)
@@ -357,17 +384,9 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 		return
 	}
 	if scenario == "expiry-wait" || scenario == "revocation-wait" {
-		held, release := make(chan struct{}), make(chan struct{})
-		defer func() {
-			select {
-			case <-release:
-			default:
-				close(release)
-			}
-		}()
-		firstDone, secondDone := make(chan error, 1), make(chan error, 1)
-		go func() {
-			firstDone <- first.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		held, release := make(chan struct{}), workers.release
+		firstDone := workers.start(func() error {
+			return first.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 				var gate model.CopilotRerunAdmissionGate
 				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("gate_id = ?", in.GateID).First(&gate).Error; err != nil {
 					return err
@@ -379,7 +398,7 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 				}
 				return nil
 			})
-		}()
+		})
 		select {
 		case <-held:
 		case err := <-firstDone:
@@ -387,31 +406,25 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 		case <-ctx.Done():
 			t.Fatal("holder timeout")
 		}
-		go func() {
+		secondDone := workers.start(func() error {
 			_, err := secondRepo.CopilotRerunClaim(ctx, in, permitRerun, testRerunClaimValidator)
-			secondDone <- err
-		}()
+			return err
+		})
 		rerunMySQLWaitEdge(t, db, holder, waiter, secondDone)
 		if scenario == "expiry-wait" {
 			time.Sleep(time.Until(saved.ExpiresAt) + 5*time.Millisecond)
 		}
-		close(release)
-		require.NoError(t, <-firstDone)
-		require.Error(t, <-secondDone)
+		workers.releaseHolder()
+		firstErr, secondErr := awaitRetryMySQL(t, firstDone), awaitRetryMySQL(t, secondDone)
+		require.NoError(t, firstErr)
+		require.Error(t, secondErr)
 		var job model.JobRun
 		require.NoError(t, db.Where("job_run_id = ?", in.JobRunID).First(&job).Error)
 		require.Empty(t, job.ClaimID)
 		return
 	}
 
-	held, release := make(chan struct{}), make(chan struct{})
-	defer func() {
-		select {
-		case <-release:
-		default:
-			close(release)
-		}
-	}()
+	held, release := make(chan struct{}), workers.release
 	var once atomic.Bool
 	const name = "rerun-claim-holder"
 	require.NoError(t, db.Callback().Query().After("gorm:query").Register(name, func(tx *gorm.DB) {
@@ -426,17 +439,16 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 			<-release
 		}
 	}))
-	defer func() { require.NoError(t, db.Callback().Query().Remove(name)) }()
-	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
-	go func() {
+	removeHolderCallback = func() { require.NoError(t, db.Callback().Query().Remove(name)) }
+	firstDone := workers.start(func() error {
 		var err error
 		if scenario == "cancel-first" {
 			_, err = firstRepo.CopilotRerunCancelUnclaimed(ctx, cancelIn, permitRerun)
 		} else {
 			_, err = firstRepo.CopilotRerunClaim(ctx, in, permitRerun, testRerunClaimValidator)
 		}
-		firstDone <- err
-	}()
+		return err
+	})
 	select {
 	case <-held:
 	case err := <-firstDone:
@@ -444,7 +456,7 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 	case <-ctx.Done():
 		t.Fatal("holder timeout")
 	}
-	go func() {
+	secondDone := workers.start(func() error {
 		var err error
 		if scenario == "claim-first" {
 			_, err = secondRepo.CopilotRerunCancelUnclaimed(ctx, cancelIn, permitRerun)
@@ -459,12 +471,13 @@ func rerunClaimMySQLScenario(t *testing.T, db *gorm.DB, r *Repositories, saved *
 			}
 			_, err = secondRepo.CopilotRerunClaim(ctx, request, permitRerun, testRerunClaimValidator)
 		}
-		secondDone <- err
-	}()
+		return err
+	})
 	rerunMySQLWaitEdge(t, db, holder, waiter, secondDone)
-	close(release)
-	require.NoError(t, <-firstDone)
-	err = <-secondDone
+	workers.releaseHolder()
+	firstErr, secondErr := awaitRetryMySQL(t, firstDone), awaitRetryMySQL(t, secondDone)
+	require.NoError(t, firstErr)
+	err = secondErr
 	if scenario == "same-incarnation" {
 		require.NoError(t, err)
 	} else {

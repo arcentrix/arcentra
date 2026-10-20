@@ -1,7 +1,7 @@
 """Fail-closed regressions for the complete terminal rerun required-mode log."""
 import unittest
 
-from verify_copilot_rerun_mysql_log import PACKAGE, SCENARIOS, required_names, verify
+from verify_copilot_rerun_mysql_log import PACKAGE, COLLATIONS, SCENARIOS, required_names, verify
 
 
 class RerunMySQLLogTests(unittest.TestCase):
@@ -17,9 +17,9 @@ class RerunMySQLLogTests(unittest.TestCase):
 
     def test_complete_matrix(self):
         self.assertEqual(len(SCENARIOS), 8)
-        self.assertEqual(sum(len(v) for v in SCENARIOS.values()), 84)
-        self.assertEqual(len(required_names()), 196)
-        self.assertEqual(len(set(required_names())), 196)
+        self.assertEqual(sum(len(v) for v in SCENARIOS.values()), 96)
+        self.assertEqual(len(required_names()), 220)
+        self.assertEqual(len(set(required_names())), 220)
         verify(self.valid())
 
     def test_every_run_and_pass_required_exactly_once(self):
@@ -48,6 +48,28 @@ class RerunMySQLLogTests(unittest.TestCase):
                 text = text.replace("--- PASS: " + name + " (0.01s)\n", "")
         with self.assertRaises(ValueError):
             verify(text)
+
+    def test_source_membership_races_required_in_both_collations(self):
+        for collation in COLLATIONS:
+            for scenario in ("source-job-attachment-first", "source-job-confirm-first",
+                             "source-job-move-attachment-first", "source-job-move-confirm-first"):
+                name = "TestCopilotRerunConfirmMySQLRequiredGate/" + collation + "/" + scenario
+                self.assertIn(name, required_names())
+                missing = self.valid().replace("=== RUN   " + name + "\n", "")
+                missing = missing.replace("--- PASS: " + name + " (0.01s)\n", "")
+                with self.subTest(name=name), self.assertRaises(ValueError):
+                    verify(missing)
+
+    def test_cross_parent_races_required_in_both_collations(self):
+        for collation in COLLATIONS:
+            for scenario in ("source-step-move", "source-step-job", "original-job-move", "original-job-duplicate"):
+                for winner in ("attachment-first", "confirm-first"):
+                    name = "TestCopilotRerunConfirmMySQLRequiredGate/" + collation + "/" + scenario + "-" + winner
+                    self.assertIn(name, required_names())
+                    missing = self.valid().replace("=== RUN   " + name + "\n", "")
+                    missing = missing.replace("--- PASS: " + name + " (0.01s)\n", "")
+                    with self.subTest(name=name), self.assertRaises(ValueError):
+                        verify(missing)
 
     def test_reject_failure_skip_panic_race_unknown_case(self):
         for suffix in ("--- SKIP: hidden (0.01s)", "--- FAIL: hidden (0.01s)", "FAIL",

@@ -14,6 +14,29 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestCopilotRerunDispatchSparseHistoryKeepsColdRowsBeyondCursor(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	rows := rerunDispatchMySQLSparseHistory(now)
+	require.Len(t, rows, 32*128+24)
+	cold, due, previousDue := 0, 0, -1
+	for i, row := range rows {
+		require.Equal(t, CopilotRerunSchedulePending, row.State)
+		if row.LeaseUntil != nil {
+			require.True(t, row.LeaseUntil.After(now))
+			cold++
+			continue
+		}
+		require.True(t, row.CancelRequested)
+		require.True(t, row.ExpiresAt.Before(now))
+		require.Equal(t, 129, i-previousDue, "every due candidate must follow cold primary-key history")
+		previousDue = i
+		due++
+	}
+	require.Equal(t, 4096, cold)
+	require.Equal(t, 24, due)
+	require.Equal(t, 1024, len(rows)-previousDue-1, "the final resumed page must still cross cold history to reach real work")
+}
+
 func TestCopilotRerunDispatchReferenceLeaseAndReplay(t *testing.T) {
 	r, saved, lease, in := rerunSealFixture(t)
 	ctx := context.Background()

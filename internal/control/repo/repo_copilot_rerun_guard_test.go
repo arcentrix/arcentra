@@ -114,6 +114,9 @@ func TestCopilotRerunAttachmentLocksParentInWriteTransaction(t *testing.T) {
 						order = append(order, q.Statement.Table)
 					}
 				}
+				if _, inside := q.Statement.ConnPool.(gorm.TxCommitter); !inside {
+					return
+				}
 				if q.DryRun || q.Statement.Table != "pipeline_run" {
 					return
 				}
