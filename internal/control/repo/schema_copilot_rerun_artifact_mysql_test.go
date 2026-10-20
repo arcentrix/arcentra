@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+	"math/big"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,44 +19,80 @@ import (
 	"gorm.io/gorm"
 )
 
-var rerunArtifactActualMetric = regexp.MustCompile(`\(actual time=[0-9.eE+\-]+\.\.[0-9.eE+\-]+ rows=([0-9.eE+\-]+) loops=([0-9.eE+\-]+)\)`)
+// EXPLAIN ANALYZE reports actual rows per iterator and loops, independently of
+// optimizer estimates. Covering changes where values are read, not lookup scope.
+// https://dev.mysql.com/doc/refman/8.0/en/explain.html
+// https://dev.mysql.com/doc/dev/mysql-server/8.0.45/explain__access__path_8cc.html
+const rerunArtifactPlanNumber = `[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]{1,3})?`
+
+var rerunArtifactActualLine = regexp.MustCompile(`^( *)-> (.+)  \(cost=` + rerunArtifactPlanNumber + ` rows=` + rerunArtifactPlanNumber + `\) \(actual time=(` + rerunArtifactPlanNumber + `)\.\.(` + rerunArtifactPlanNumber + `) rows=(` + rerunArtifactPlanNumber + `) loops=(` + rerunArtifactPlanNumber + `)\)$`)
 
 func validateRerunArtifactActualPlan(plan, table, target string) error {
-	lines := strings.Split(strings.TrimSpace(plan), "\n")
-	if len(lines) < 2 || len(lines) > 4 || len(plan) > 8192 {
+	if len(plan) == 0 || len(plan) > 8192 || target == "" || strings.ContainsAny(target, "'\\\r\n") {
+		return fmt.Errorf("unexpected plan or identity bounds")
+	}
+	index := ""
+	switch table {
+	case "step_run_artifact":
+		index = rerunStepArtifactJobIndex
+	case "project_artifact":
+		index = rerunProjectArtifactJobIndex
+	default:
+		return fmt.Errorf("unexpected artifact table")
+	}
+	lines := strings.Split(strings.TrimSuffix(plan, "\n"), "\n")
+	if len(lines) < 2 || len(lines) > 4 {
 		return fmt.Errorf("unexpected iterator shape")
 	}
+	filter := "Filter: (" + table + ".job_run_id = '" + target + "')"
+	lookup := " on " + table + " using " + index + " (job_run_id='" + target + "')"
+	rangeLookup := "Index range scan on " + table + " using " + index + " over (job_run_id = '" + target + "')"
 	var total float64
-	for _, line := range lines {
-		m := rerunArtifactActualMetric.FindStringSubmatch(line)
-		if len(m) != 3 {
-			return fmt.Errorf("missing actual work")
+	for i, line := range lines {
+		m := rerunArtifactActualLine.FindStringSubmatch(line)
+		if m == nil || len(m[1]) != i*4 {
+			return fmt.Errorf("missing actual work or malformed iterator")
 		}
-		rows, e := strconv.ParseFloat(m[1], 64)
-		if e != nil || rows < 0 || rows > 1 || math.Trunc(rows) != rows {
-			return fmt.Errorf("unbounded actual rows")
+		metric := make([]float64, 4)
+		for j := range metric {
+			value, err := strconv.ParseFloat(m[j+3], 64)
+			if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || len(m[j+3]) > 64 {
+				return fmt.Errorf("invalid actual metric")
+			}
+			if j >= 2 {
+				// Bound token/exponent lengths before exact parsing. Float rounding
+				// must not turn fractional work into an allowed zero or one.
+				exact, ok := new(big.Rat).SetString(m[j+3])
+				if !ok || !exact.IsInt() || exact.Sign() < 0 || exact.Cmp(big.NewRat(1, 1)) > 0 || (j == 3 && exact.Sign() == 0) {
+					return fmt.Errorf("unbounded actual rows or loops")
+				}
+			}
+			metric[j] = value
 		}
-		loops, e := strconv.ParseFloat(m[2], 64)
-		if e != nil || loops != 1 {
-			return fmt.Errorf("unbounded actual loops")
+		if metric[1] < metric[0] {
+			return fmt.Errorf("invalid actual timing")
 		}
-		total += rows * loops
+		total += metric[2] * metric[3]
+		switch {
+		case i == 0:
+			if m[2] != "Limit: 1 row(s)" {
+				return fmt.Errorf("missing exact query limit")
+			}
+		case i == len(lines)-1:
+			if m[2] != "Index lookup"+lookup && m[2] != rangeLookup &&
+				!(table == "project_artifact" && m[2] == "Covering index lookup"+lookup) {
+				return fmt.Errorf("missing exact indexed lookup")
+			}
+		default:
+			if m[2] != filter {
+				return fmt.Errorf("unexpected intermediate iterator")
+			}
+		}
 	}
-	leaf := lines[len(lines)-1]
-	if !strings.Contains(leaf, "Index lookup on "+table+" using ") && !strings.Contains(leaf, "Index range scan on "+table+" using ") {
-		return fmt.Errorf("missing indexed lookup")
-	}
-	if !strings.Contains(leaf, "job_run_id") || !strings.Contains(leaf, target) || total > 4 {
-		return fmt.Errorf("missing exact identity bound")
+	if total > 4 {
+		return fmt.Errorf("unbounded total actual work")
 	}
 	return nil
-}
-func TestCopilotRerunArtifactActualWorkBounds(t *testing.T) {
-	good := "-> Limit: 1 row(s) (cost=99 rows=1000000) (actual time=0.01..0.02 rows=0 loops=1)\n -> Index lookup on step_run_artifact using any_job_key (job_run_id='target') (cost=99 rows=1000000) (actual time=0.01..0.02 rows=0 loops=1)"
-	require.NoError(t, validateRerunArtifactActualPlan(good, "step_run_artifact", "target"))
-	for _, bad := range []string{strings.ReplaceAll(good, "rows=0 loops=1", "rows=2000 loops=1"), strings.ReplaceAll(good, "loops=1", "loops=2000"), strings.ReplaceAll(good, "Index lookup", "Table scan"), strings.ReplaceAll(good, "job_run_id", "pipeline_run_id"), strings.ReplaceAll(good, "target", "foreign")} {
-		require.Error(t, validateRerunArtifactActualPlan(bad, "step_run_artifact", "target"))
-	}
 }
 
 func rerunArtifactSchemaMySQL(t *testing.T, db *gorm.DB, scenario, collation string) {

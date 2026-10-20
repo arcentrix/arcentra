@@ -33,6 +33,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/internal/shared/storage"
 	artifactutil "github.com/arcentrix/arcentra/pkg/artifact"
+	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/log"
 	kafkaconfig "github.com/arcentrix/arcentra/pkg/mq/kafka"
@@ -108,6 +109,7 @@ type controllerWorkerFixtureOptions struct {
 	configureAgent        func(*config.AgentConfig)
 	startWorker           func(context.Context, *config.AgentConfig, *agentgrpc.ClientWrapper, *executor.Manager) (nova.TaskQueue, error)
 	processConfig         *controlconfig.AppConfig
+	repositoryCache       cache.ICache
 	configureRepositories func(*repo.Repositories)
 	agentService          func(*repo.Repositories) *controlservice.AgentService
 	afterProcess          func(*controllerWorkerFixture)
@@ -221,7 +223,7 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 		Log: repo.NewLogRepository(db), Artifact: repo.NewArtifactRepo(adapter), Agent: repo.NewAgentRepo(adapter, nil), Storage: repo.NewStorageRepo(adapter, nil),
 	}
 	if fixtureOptions.configureRepositories != nil {
-		repos = repo.NewRepositories(adapter, nil)
+		repos = repo.NewRepositories(adapter, fixtureOptions.repositoryCache)
 		fixtureOptions.configureRepositories(repos)
 	}
 	f := &controllerWorkerFixture{t: t, ctx: ctx, waitTimeout: waitTimeout, db: db, tasks: make(map[string]nova.Task), rerunNotifications: make(map[string]int), rerunReferences: make(map[string]taskpayload.RerunClaimReference), rerunPayloads: make(map[string]taskpayload.JobRunTaskPayload), rerunClaimReceipts: make(map[string]int), rerunClaimFailures: make(map[string]int), repos: repos, projectID: id.GetUild(), pipelineID: id.GetUild(), receipts: make(map[string][]controllerWorkerReceipt), loseProducerACK: loseProducerACK}

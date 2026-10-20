@@ -182,6 +182,9 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	}
 	t.Cleanup(removeObserver)
 	options := controllerWorkerTLS(t)
+	// Repositories, services and HTTP authorization must share the same Redis
+	// session store; injecting it only into services leaves UserRepo unusable.
+	options.repositoryCache = terminalCache
 	options.timeout = 7 * time.Minute
 	options.backend = &controllerWorkerBackend{db: db, brokers: settings.stack.brokers, store: observedStore, storageConfig: storageConfig, reference: reference, logPublisher: publisher, authentication: realStackAuthentication, prepareTopics: func(t *testing.T, ctx context.Context, agentID string) {
 		realStackTopics(t, ctx, settings.stack.brokers, agentID)
