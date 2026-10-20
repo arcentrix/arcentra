@@ -33,9 +33,16 @@ func MigrateSchema(ctx context.Context, db *gorm.DB) error {
 	if err != nil {
 		return err
 	}
-	// All preflights above are read-only. Apply the coupled column/index change
-	// before AutoMigrate can try widening an indexed VARCHAR by itself.
+	rerunMigration, err := preflightCopilotRerunSchema(ctx, db)
+	if err != nil {
+		return err
+	}
+	// Every preflight above is read-only; no migration applies before all pass.
+	// Preserve the coupled audit column/index change before AutoMigrate.
 	if err := auditAction.apply(ctx, db); err != nil {
+		return err
+	}
+	if err := rerunMigration.apply(ctx, db); err != nil {
 		return err
 	}
 	models := schemaModels()
@@ -52,6 +59,7 @@ func schemaModels() []any {
 	return []any{
 		&model.CopilotConversation{}, &model.CopilotTurn{}, &model.CopilotActionPlan{},
 		&model.CopilotExecutionIntent{},
+		&model.CopilotDefinitionSnapshot{}, &model.CopilotRerunIntent{}, &model.CopilotRerunAdmissionGate{}, &model.CopilotRerunSchedule{},
 		&model.InboxDelivery{}, &model.InboxWork{}, &model.InboxCursor{}, &model.InboxSweep{},
 		&model.Agent{},
 		&model.DeploymentEnvironment{},

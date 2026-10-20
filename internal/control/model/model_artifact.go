@@ -14,7 +14,7 @@ type ProjectArtifact struct {
 	ProjectID          string     `gorm:"column:project_id;type:varchar(64);index:idx_project_artifact_project" json:"projectId"`
 	PipelineID         string     `gorm:"column:pipeline_id;type:varchar(64)" json:"pipelineId"`
 	PipelineRunID      string     `gorm:"column:pipeline_run_id;type:varchar(64);index:idx_project_artifact_run" json:"pipelineRunId"`
-	JobRunID           string     `gorm:"column:job_run_id;type:varchar(64)" json:"jobRunId"`
+	JobRunID           string     `gorm:"column:job_run_id;type:varchar(64);index:idx_project_artifact_job_run" json:"jobRunId"`
 	StepRunID          string     `gorm:"column:step_run_id;type:varchar(64)" json:"stepRunId"`
 	Name               string     `gorm:"column:name;type:text" json:"name"`
 	StorageType        string     `gorm:"column:storage_type;type:varchar(32)" json:"storageType"`

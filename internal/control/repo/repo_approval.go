@@ -339,7 +339,7 @@ func (r *ApprovalRepo) finishPending(ctx context.Context, id string, status int,
 		var retryJob *model.JobRun
 		if initial.RetryJobRunID != nil || (initial.BindingKind == retryapproval.Kind || initial.BindingKind == retryapproval.FailedStepKind) {
 			var err error
-			mode := executionLockActive
+			mode := executionLockRerunHumanClose
 			if initial.Status != model.ApprovalStatusPending {
 				mode = executionLockInspect
 			}

@@ -5,10 +5,10 @@ package validation
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/arcentrix/arcentra/pkg/sourceprovenance"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 )
 
@@ -135,9 +135,11 @@ func validateOfflineRuntimeJob(job *spec.Job, policy taskqueue.OfflineRuntimePol
 		return fmt.Errorf("offline runtime reserves its generation environment variable")
 	}
 	if job.Source != nil {
-		parsed, err := url.Parse(job.Source.Repo)
-		if job.Source.Type != "git" || err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "ssh") || parsed.Host == "" {
-			return fmt.Errorf("offline source requires a remote Git URL; host paths are unsupported")
+		auth := job.Source.Auth
+		authenticated := auth != nil && (auth.Username != "" || auth.Password != "" || auth.Token != "")
+		protocol, err := sourceprovenance.GitCheckoutTransport(job.Source.Repo, authenticated)
+		if job.Source.Type != "git" || err != nil || protocol == "file" || (protocol == "git" && auth != nil) {
+			return fmt.Errorf("offline source requires supported HTTPS, anonymous native Git, or anonymous literal-loopback HTTP; SSH and host paths are unsupported")
 		}
 	}
 	steps := make([]taskqueue.StepPayload, 0, len(job.Steps))

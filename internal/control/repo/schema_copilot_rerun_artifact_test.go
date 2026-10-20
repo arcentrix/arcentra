@@ -1,0 +1,102 @@
+// Copyright 2026 Arcentra Authors.
+// SPDX-License-Identifier: Apache-2.0
+package repo
+
+import (
+	"context"
+	"database/sql"
+	"strings"
+	"testing"
+
+	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/stretchr/testify/require"
+)
+
+func TestCopilotRerunArtifactIndexMetadata(t *testing.T) {
+	for _, entry := range []struct {
+		name, kind string
+		prefix     int64
+	}{
+		{rerunStepArtifactJobIndex, "longtext", 191}, {rerunProjectArtifactJobIndex, "varchar(64)", 0},
+	} {
+		t.Run(entry.name, func(t *testing.T) {
+			column := rerunSchemaColumn{ColumnName: "job_run_id", ColumnType: entry.kind, IsNullable: "YES", CollationName: sql.NullString{String: "utf8mb4_bin", Valid: true}}
+			index := rerunSchemaIndex{IndexName: entry.name, NonUnique: 1, SeqInIndex: 1, ColumnName: sql.NullString{String: "job_run_id", Valid: true}, SubPart: sql.NullInt64{Int64: entry.prefix, Valid: entry.prefix > 0}, Collation: sql.NullString{String: "A", Valid: true}, IndexType: "BTREE", IsVisible: "YES"}
+			add, err := validateRerunJobAccessShape(column, nil, entry.name, entry.kind, entry.prefix)
+			require.NoError(t, err)
+			require.True(t, add)
+			add, err = validateRerunJobAccessShape(column, []rerunSchemaIndex{index}, entry.name, entry.kind, entry.prefix)
+			require.NoError(t, err)
+			require.False(t, add)
+			for _, mutate := range []func(*rerunSchemaIndex){
+				func(i *rerunSchemaIndex) { i.IndexName = "unknown_job_index" }, func(i *rerunSchemaIndex) { i.NonUnique = 0 }, func(i *rerunSchemaIndex) { i.SeqInIndex = 2 }, func(i *rerunSchemaIndex) { i.ColumnName.String = "pipeline_run_id" }, func(i *rerunSchemaIndex) { i.SubPart = sql.NullInt64{Int64: 190, Valid: true} }, func(i *rerunSchemaIndex) { i.IsVisible = "NO" }, func(i *rerunSchemaIndex) { i.Expression = sql.NullString{String: "lower(job_run_id)", Valid: true} },
+			} {
+				changed := index
+				mutate(&changed)
+				_, err := validateRerunJobAccessShape(column, []rerunSchemaIndex{changed}, entry.name, entry.kind, entry.prefix)
+				require.ErrorIs(t, err, errRerunSchemaShape)
+			}
+			for _, mutate := range []func(*rerunSchemaColumn){func(c *rerunSchemaColumn) { c.ColumnType = "text" }, func(c *rerunSchemaColumn) { c.IsNullable = "NO" }, func(c *rerunSchemaColumn) { c.ColumnDefault = sql.NullString{Valid: true} }, func(c *rerunSchemaColumn) { c.CollationName.Valid = false }} {
+				changed := column
+				mutate(&changed)
+				_, err := validateRerunJobAccessShape(changed, nil, entry.name, entry.kind, entry.prefix)
+				require.ErrorIs(t, err, errRerunSchemaShape)
+			}
+		})
+	}
+}
+
+func TestCopilotRerunArtifactIndexUpgradeRecovery(t *testing.T) {
+	for mask := 0; mask < 4; mask++ {
+		t.Run(string(rune('0'+mask)), func(t *testing.T) {
+			db := executionSchemaDB(t)
+			rerunSchemaLegacy(t, db)
+			longID := strings.Repeat("历史", 200) + "-tail"
+			require.NoError(t, db.Create(&model.StepRunArtifact{ArtifactID: "old-step", JobRunID: longID}).Error)
+			require.NoError(t, db.Create(&model.ProjectArtifact{ArtifactID: "old-project", JobRunID: "old-job"}).Error)
+			if mask&1 != 0 {
+				require.NoError(t, db.Migrator().CreateIndex(&model.StepRunArtifact{}, rerunStepArtifactJobIndex))
+			}
+			if mask&2 != 0 {
+				require.NoError(t, db.Migrator().CreateIndex(&model.ProjectArtifact{}, rerunProjectArtifactJobIndex))
+			}
+			for n := 0; n < 2; n++ {
+				require.NoError(t, MigrateSchema(context.Background(), db))
+			}
+			require.True(t, db.Migrator().HasIndex(&model.StepRunArtifact{}, rerunStepArtifactJobIndex))
+			require.True(t, db.Migrator().HasIndex(&model.ProjectArtifact{}, rerunProjectArtifactJobIndex))
+			var old model.StepRunArtifact
+			require.NoError(t, db.Where("artifact_id = ?", "old-step").First(&old).Error)
+			require.Equal(t, longID, old.JobRunID)
+			var project model.ProjectArtifact
+			require.NoError(t, db.Where("artifact_id = ?", "old-project").First(&project).Error)
+			require.Equal(t, "old-job", project.JobRunID)
+		})
+	}
+}
+
+func TestCopilotRerunArtifactBadIndexPreflightIsReadOnly(t *testing.T) {
+	for _, table := range []string{"step_run_artifact", "project_artifact"} {
+		t.Run(table, func(t *testing.T) {
+			db := executionSchemaDB(t)
+			rerunSchemaLegacy(t, db)
+			name := rerunStepArtifactJobIndex
+			if table == "project_artifact" {
+				name = rerunProjectArtifactJobIndex
+			}
+			require.NoError(t, db.Exec("CREATE INDEX "+name+" ON "+table+"(pipeline_run_id)").Error)
+			require.ErrorIs(t, MigrateSchema(context.Background(), db), errRerunSchemaShape)
+			require.False(t, db.Migrator().HasIndex(&model.StepRun{}, rerunStepJobIndex))
+			require.False(t, db.Migrator().HasTable(&model.CopilotRerunIntent{}))
+		})
+	}
+}
+
+func TestCopilotRerunArtifactIndexFresh(t *testing.T) {
+	db := executionSchemaDB(t)
+	for i := 0; i < 2; i++ {
+		require.NoError(t, MigrateSchema(context.Background(), db))
+	}
+	require.True(t, db.Migrator().HasIndex(&model.StepRunArtifact{}, rerunStepArtifactJobIndex))
+	require.True(t, db.Migrator().HasIndex(&model.ProjectArtifact{}, rerunProjectArtifactJobIndex))
+}

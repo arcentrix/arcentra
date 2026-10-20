@@ -16,13 +16,14 @@ import (
 
 // ExcludeRuntimeSteps 禁止旧单步派发接口读取需要完整容器作业的命令及环境
 func ExcludeRuntimeSteps(query *gorm.DB) *gorm.DB {
-	runtimeJobs := query.Session(&gorm.Session{NewDB: true}).Model(&model.JobRun{}).Select("job_run_id").Where("runtime_type <> ? OR runtime_image <> ? OR runtime_cpu <> ? OR runtime_memory <> ? OR runtime_binding_digest <> ?", "", "", "", "", "")
-	return query.Where("job_run_id NOT IN (?)", runtimeJobs)
+	runtimeJobs := query.Session(&gorm.Session{NewDB: true}).Model(&model.JobRun{}).Select("job_run_id").Where("runtime_type <> ? OR runtime_image <> ? OR runtime_cpu <> ? OR runtime_memory <> ? OR runtime_binding_digest <> ? OR copilot_rerun_intent_id <> ? OR copilot_rerun_gate_id <> ? OR expected_source_commit <> ?", "", "", "", "", "", "", "", "")
+	runs := query.Session(&gorm.Session{NewDB: true}).Model(&model.PipelineRun{}).Select("run_id").Where("copilot_rerun_intent_id <> ? OR copilot_rerun_gate_id <> ?", "", "")
+	return query.Where("job_run_id NOT IN (?)", runtimeJobs).Where("(pipeline_run_id IS NULL OR pipeline_run_id NOT IN (?))", runs)
 }
 
 // ValidateRuntimeStepClaim 原子确认运行时步骤属于正在执行的原作业认领
 func (r *StepRunRepo) ValidateRuntimeStepClaim(ctx context.Context, expected *model.StepRun, claim string, next int) error {
-	return executionTransaction(ctx, r.Database(), executionStepJobID(expected), func(tx *gorm.DB) error { return validateRuntimeStepClaim(ctx, tx, expected, claim, next) })
+	return executionAttachmentTransaction(ctx, r.Database(), executionStepJobID(expected), func(tx *gorm.DB) error { return validateRuntimeStepClaim(ctx, tx, expected, claim, next) })
 }
 
 func validateRuntimeStepClaim(ctx context.Context, tx *gorm.DB, expected *model.StepRun, claim string, next int) error {
@@ -30,16 +31,31 @@ func validateRuntimeStepClaim(ctx context.Context, tx *gorm.DB, expected *model.
 		return fmt.Errorf("step snapshot is required")
 	}
 	if expected.JobRunID == "" {
-		return nil
+		return lockOrdinaryRerunParent(ctx, tx, expected.PipelineRunID)
 	}
 	mode := executionLockLegacy
 	if model.IsJobRunTerminal(expected.Status) && next != model.JobRunStatusRunning {
 		mode = executionLockInspect
 	}
-	locked, lockErr := lockExecutionJob(ctx, tx, expected.JobRunID, mode)
+	// Missing-parent legacy fallback must lock the expected Run before the Job
+	// absence probe; it must never introduce a Job -> Run locking suffix.
+	if value, ok := tx.Statement.Settings.Load(executionScopeLocatorKey); ok {
+		if locator, valid := value.(executionScopeLocator); valid && errors.Is(locator.jobErr, errExecutionParentMissing) {
+			if err := lockOrdinaryRerunParent(ctx, tx, expected.PipelineRunID); err != nil {
+				return err
+			}
+		}
+	}
+	var locked *model.JobRun
+	var lockErr error
+	if _, protected := rerunProtectedLocator(tx); protected {
+		locked, lockErr = lockCopilotRerunStepOperation(ctx, tx, expected, claim, next)
+	} else {
+		locked, lockErr = lockExecutionJob(ctx, tx, expected.JobRunID, mode)
+	}
 	if err := lockErr; err != nil {
 		if errors.Is(err, errExecutionParentMissing) {
-			return nil
+			return requireRerunAttachmentTransaction(tx) // Both absent parent keys remain protected until commit.
 		} // 历史独立步骤可能没有父作业
 		return err
 	}

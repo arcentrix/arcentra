@@ -33,6 +33,10 @@ import (
 
 func (rt *Router) pipelineRouter(r fiber.Router, authMiddleware fiber.Handler, subjectMiddleware fiber.Handler) {
 	pipeline := r.Group("/pipelines")
+	stop := rt.stopPipeline
+	if rt.Services != nil && rt.Services.ProtectedRunCancellation() != nil {
+		stop = ProtectedPipelineStopHandler(rt.pipelineService(), rt.Services.ProtectedRunCancellation())
+	}
 	{
 		pipeline.Post("/",
 			authMiddleware, subjectMiddleware,
@@ -95,7 +99,7 @@ func (rt *Router) pipelineRouter(r fiber.Router, authMiddleware fiber.Handler, s
 		pipeline.Post("/:pipelineID/runs/:runID/stop",
 			authMiddleware, subjectMiddleware,
 			rt.permission("pipeline:cancel", middleware.ResolveFromPathPipelineID("pipelineID", rt)),
-			rt.stopPipeline,
+			stop,
 		)
 		pipeline.Post("/:pipelineID/runs/:runID/pause",
 			authMiddleware, subjectMiddleware,

@@ -140,11 +140,11 @@ func (r *DeploymentRepo) CreateRelease(ctx context.Context, value *model.Deploym
 				return ErrDeploymentConflict
 			}
 			var run model.PipelineRun
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("run_id").Where("run_id = ? AND pipeline_id = ? AND status = ? AND allow_deployments = ? AND deployment_actor_id = ? AND deployment_plan_hash = ? AND definition_commit_sha = ? AND deployment_target_fingerprint = ?", value.PipelineRunID, value.PipelineID, model.PipelineStatusRunning, true, value.CreatedBy, value.DeploymentPlanHash, value.CommitSHA, value.TargetFingerprint).First(&run).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("run_id").Where(ordinaryRunPredicate).Where("run_id = ? AND pipeline_id = ? AND status = ? AND allow_deployments = ? AND deployment_actor_id = ? AND deployment_plan_hash = ? AND definition_commit_sha = ? AND deployment_target_fingerprint = ?", value.PipelineRunID, value.PipelineID, model.PipelineStatusRunning, true, value.CreatedBy, value.DeploymentPlanHash, value.CommitSHA, value.TargetFingerprint).First(&run).Error; err != nil {
 				return ErrDeploymentConflict
 			}
 			var job model.JobRun
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id").Where("job_run_id = ? AND pipeline_run_id = ? AND pipeline_id = ? AND status = ? AND (agent_id = ? OR agent_id IS NULL)", value.ExecutionJobRunID, value.PipelineRunID, value.PipelineID, model.JobRunStatusRunning, "").First(&job).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id").Where(ordinaryJobPredicate).Where("job_run_id = ? AND pipeline_run_id = ? AND pipeline_id = ? AND status = ? AND (agent_id = ? OR agent_id IS NULL)", value.ExecutionJobRunID, value.PipelineRunID, value.PipelineID, model.JobRunStatusRunning, "").First(&job).Error; err != nil {
 				return ErrDeploymentConflict
 			}
 			link := tx.Model(&model.StepRun{}).Where("step_run_id = ? AND job_run_id = ? AND pipeline_run_id = ? AND pipeline_id = ? AND status = ? AND created_by = ?", *value.ExecutionStepRunID, value.ExecutionJobRunID, value.PipelineRunID, value.PipelineID, 3, value.CreatedBy).Where("deployment_release_id IS NULL OR deployment_release_id = ?", "").Update("deployment_release_id", value.ReleaseID)

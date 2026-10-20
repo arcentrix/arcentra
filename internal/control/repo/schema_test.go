@@ -59,21 +59,50 @@ func TestMySQLIndexedStringsHaveBoundedTypes(t *testing.T) {
 					continue
 				}
 				kind := strings.ToLower(dialect.DataTypeOf(field.Field))
-				if kind == "longtext" && parsed.Table == "audit_log" && field.DBName == "action" && index.Name == auditActionIndex && field.Length == 191 {
-					total += field.Length * 4
+				bytes, err := mysqlIndexedStringBytes(kind, field.Length)
+				if err != nil {
+					t.Errorf("%s.%s index %s: %v", parsed.Table, field.Name, index.Name, err)
+
 					continue
 				}
-				var size int
-				if _, err := fmt.Sscanf(kind, "varchar(%d)", &size); err != nil || !strings.HasPrefix(kind, "varchar(") {
-					t.Errorf("%s.%s index %s uses unbounded type %s", parsed.Table, field.Name, index.Name, kind)
-					continue
-				}
-				total += size * 4
+				total += bytes
 			}
 			if total > 3072 {
 				t.Errorf("%s index %s exceeds MySQL utf8mb4 limit: %d", parsed.Table, index.Name, total)
 			}
 		}
+	}
+}
+
+// LONGTEXT remains valid only with an explicit bounded character prefix. The
+// caller still counts every component against the total utf8mb4 index budget.
+func mysqlIndexedStringBytes(kind string, prefix int) (int, error) {
+	if kind == "longtext" {
+		if prefix <= 0 || prefix > 3072/4 {
+			return 0, fmt.Errorf("unbounded or oversized %s index prefix %d", kind, prefix)
+		}
+		return prefix * 4, nil
+	}
+	var size int
+	if _, err := fmt.Sscanf(kind, "varchar(%d)", &size); err != nil || !strings.HasPrefix(kind, "varchar(") || size <= 0 {
+		return 0, fmt.Errorf("unbounded type %s", kind)
+	}
+	return size * 4, nil
+}
+func TestMySQLIndexedLongtextRequiresBoundedPrefix(t *testing.T) {
+	for _, prefix := range []int{-1, 0, 769, 1000000} {
+		if _, err := mysqlIndexedStringBytes("longtext", prefix); err == nil {
+			t.Fatalf("unsafe prefix %d accepted", prefix)
+		}
+	}
+	for _, prefix := range []int{1, 191, 768} {
+		got, err := mysqlIndexedStringBytes("longtext", prefix)
+		if err != nil || got != prefix*4 {
+			t.Fatalf("bounded prefix %d: %d %v", prefix, got, err)
+		}
+	}
+	if _, err := mysqlIndexedStringBytes("text", 0); err == nil {
+		t.Fatal("unbounded text accepted")
 	}
 }
 
@@ -122,7 +151,14 @@ func TestTerminalReceiptMigrationAddsEmptyReceiptWithoutAcknowledgingHistory(t *
 			t.Fatal(err)
 		}
 	}
-	if err := db.WithContext(ctx).Model(&model.JobRun{}).Omit("TerminalReportDigest").Create(&model.JobRun{JobRunID: "old-job", Status: 5, ClaimID: "old-claim"}).Error; err != nil {
+	// This fixture predates rerun authority columns as well as terminal receipts.
+	jobFields := []string{"TerminalReportDigest", "CopilotRerunIntentID", "CopilotRerunGateID", "ExpectedSourceCommit"}
+	for _, field := range jobFields[1:] {
+		if err := db.Migrator().DropColumn(&model.JobRun{}, field); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.WithContext(ctx).Model(&model.JobRun{}).Omit(jobFields...).Create(&model.JobRun{JobRunID: "old-job", Status: 5, ClaimID: "old-claim"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.WithContext(ctx).Model(&model.StepRun{}).Omit("TerminalReportDigest").Create(&model.StepRun{StepRunID: "old-step", Status: 4, ClaimID: "old-claim"}).Error; err != nil {
@@ -134,7 +170,7 @@ func TestTerminalReceiptMigrationAddsEmptyReceiptWithoutAcknowledgingHistory(t *
 		}
 	}
 	job, err := (&JobRunRepo{IDatabase: statusTestDB{db}}).GetByJobRunID(ctx, "old-job")
-	if err != nil || job.Status != 5 || job.ClaimID != "old-claim" || job.TerminalReportDigest != "" {
+	if err != nil || job.Status != 5 || job.ClaimID != "old-claim" || job.TerminalReportDigest != "" || !emptyJobRerun(job) {
 		t.Fatalf("migration synthesized job receipt: %+v %v", job, err)
 	}
 	step, err := (&StepRunRepo{IDatabase: statusTestDB{db}}).GetByStepRunID(ctx, "old-step")
@@ -154,7 +190,8 @@ func TestSourceProvenanceMigrationDoesNotInventHistoricalCheckout(t *testing.T) 
 	if err := db.WithContext(ctx).AutoMigrate(&model.JobRun{}); err != nil {
 		t.Fatal(err)
 	}
-	fields := []string{"SourceExpectationCaptured", "SourceType", "SourceRepository", "SourceRef", "SourceBindingDigest", "SourceResolvedCommit", "SourceProvenanceState"}
+	// Historical checkout rows also predate the later rerun authority markers.
+	fields := []string{"SourceExpectationCaptured", "SourceType", "SourceRepository", "SourceRef", "SourceBindingDigest", "SourceResolvedCommit", "SourceProvenanceState", "CopilotRerunIntentID", "CopilotRerunGateID", "ExpectedSourceCommit"}
 	for _, field := range fields {
 		if err := db.Migrator().DropColumn(&model.JobRun{}, field); err != nil {
 			t.Fatal(err)
@@ -173,7 +210,7 @@ func TestSourceProvenanceMigrationDoesNotInventHistoricalCheckout(t *testing.T) 
 	if err := db.WithContext(ctx).Select(append(jobSnapshotColumns, "id")).Where("job_run_id = ?", "historical").First(&got).Error; err != nil {
 		t.Fatal(err)
 	}
-	if got.SourceExpectationCaptured || got.SourceType != "" || got.SourceRepository != "" || got.SourceRef != "" || got.SourceBindingDigest != "" || got.SourceResolvedCommit != "" || got.SourceProvenanceState != "unknown" {
+	if !emptyJobRerun(&got) || got.SourceExpectationCaptured || got.SourceType != "" || got.SourceRepository != "" || got.SourceRef != "" || got.SourceBindingDigest != "" || got.SourceResolvedCommit != "" || got.SourceProvenanceState != "unknown" {
 		t.Fatalf("migration inferred checkout %+v", got)
 	}
 	if got.Status != 4 || got.ClaimID != "original" || got.TerminalReportDigest != old.TerminalReportDigest {

@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -29,7 +30,9 @@ import (
 	controlservice "github.com/arcentrix/arcentra/internal/control/service"
 	"github.com/arcentrix/arcentra/internal/shared/agentidentity"
 	"github.com/arcentrix/arcentra/internal/shared/executor"
+	agentgrpc "github.com/arcentrix/arcentra/internal/shared/grpc"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
+	"github.com/arcentrix/arcentra/pkg/cache"
 	"github.com/arcentrix/arcentra/pkg/id"
 	"github.com/arcentrix/arcentra/pkg/logstream"
 	kafkaconfig "github.com/arcentrix/arcentra/pkg/mq/kafka"
@@ -38,6 +41,7 @@ import (
 	"github.com/arcentrix/arcentra/pkg/sandbox"
 	taskpayload "github.com/arcentrix/arcentra/pkg/taskqueue"
 	"github.com/bytedance/sonic"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -154,6 +158,22 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	}
 	t.Cleanup(publisher.Close)
 	approvalPolicy := &retryapproval.Policy{ID: "approval-" + id.GetUild(), Candidates: []string{"reviewer-a-" + id.GetUild(), "reviewer-b-" + id.GetUild()}, Mode: "all", RequiredApproverCount: 2, TimeoutSeconds: 60}
+	terminalEnabled := os.Getenv("ARCENTRA_REQUIRE_TERMINAL_RERUN_ACCEPTANCE") != ""
+	var terminalCache cache.ICache
+	if terminalEnabled {
+		if !taskpayload.TerminalRerunAllowed(policy) {
+			t.Fatal("explicit terminal rerun acceptance prerequisites are incomplete")
+		}
+		address := os.Getenv("ARCENTRA_TEST_REDIS_ADDRESS")
+		realStackLoopback(t, address, "terminal rerun Redis")
+		client := redis.NewClient(&redis.Options{Addr: address, DialTimeout: 3 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second})
+		t.Cleanup(func() { _ = client.Close() })
+		if err := client.Ping(setupCtx).Err(); err != nil {
+			t.Fatal("terminal rerun Redis unavailable")
+		}
+		terminalCache = cache.NewRedisCache(client)
+		t.Setenv("ARCENTRA_SECRET_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString([]byte("01234567890123456789012345678901")))
+	}
 	var approvalServices *controlservice.Services
 	lifecycleAudit := &containerApprovalLifecycle{calls: make(map[string]map[string]int)}
 	removeObserver, err := sandbox.ObserveAcceptanceLifecycle(settings.namespace, lifecycleAudit.record)
@@ -170,9 +190,18 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 		conf.Agent.Mode = "sandbox"
 		conf.Agent.WorkspaceDir = workspace
 		conf.Agent.Sandbox = config.SandboxConfig{Enable: true, Runtime: "containerd", Containerd: config.ContainerdConfig{Policy: policy, Namespace: settings.namespace, JournalDir: journal, User: fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid()), Network: "none", UnixSocket: settings.socket, RuntimeRoot: settings.runtimeRoot, FIFODir: settings.fifoDir}}
+		conf.Agent.Sandbox.Containerd.TerminalRerunEnabled = terminalEnabled
 	}
 	options.configureRepositories = func(repositories *repo.Repositories) {
-		approvalServices = controlservice.NewServices(workerTestDatabase{db}, nil, repositories)
+		if terminalEnabled {
+			var err error
+			approvalServices, err = controlservice.ProvideServices(workerTestDatabase{db}, terminalCache, repositories, policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			approvalServices = controlservice.NewServices(workerTestDatabase{db}, nil, repositories)
+		}
 		if err := approvalServices.ConfigureRetryApprovalPolicy(approvalPolicy); err != nil {
 			t.Fatal(err)
 		}
@@ -180,9 +209,42 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	terminalEvents := &containerAcceptanceStepRuntimeEvents{}
 	options.startWorker = startContainerAcceptanceWorker
+	if terminalEnabled {
+		options.startWorker = func(ctx context.Context, conf *config.AgentConfig, client *agentgrpc.ClientWrapper, manager *executor.Manager) (nova.TaskQueue, error) {
+			// Install once before any worker/outbox can read the interface. Later
+			// fault activation only mutates the observer under its own mutex.
+			client.AgentClient = &terminalRerunLostClaim{AgentServiceClient: client.AgentClient}
+			observer := terminalEvents.observer()
+			observer.AfterResume = nil
+			return startContainerAcceptanceWorkerObserved(ctx, conf, client, manager, observer)
+		}
+	}
 	if taskpayload.OfflineRuntimeAccepted {
 		options.processConfig = &controlconfig.AppConfig{Pipeline: controlconfig.PipelineConfig{OfflineRuntime: policy, RetryApproval: approvalPolicy}}
+	}
+	if terminalEnabled {
+		options.processConfig.Copilot.Execution.TerminalRerunEnabled = true
+		options.agentService = func(*repo.Repositories) *controlservice.AgentService { return approvalServices.Agent }
+		options.afterProcess = func(f *controllerWorkerFixture) {
+			if err := approvalServices.BindPipelineEngine(f.engine); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.engine.BindTerminalRerunServices(approvalServices, true); err != nil {
+				t.Fatal(err)
+			}
+			if err := approvalServices.StartTerminalRerun(f.ctx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		options.stopProcessServices = func(*controllerWorkerFixture) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := approvalServices.StopTerminalRerun(ctx); err != nil {
+				t.Error(err)
+			}
+		}
 	}
 	var f *controllerWorkerFixture
 	t.Cleanup(func() {
@@ -442,6 +504,11 @@ func TestRealContainerJobAcceptance(t *testing.T) {
 	containerAcceptanceArtifactChain(t, f, settings, observedStore)
 	containerAcceptanceWholeJobRetry(t, f, settings, observedStore, retainedAudit)
 	containerAcceptanceRetryApproval(t, f, settings, observedStore, retainedAudit, approvalServices, approvalPolicy, lifecycleAudit)
+	if terminalEnabled && !t.Run("terminal-whole-job-new-execution", func(t *testing.T) {
+		containerAcceptanceTerminalRerun(t, f, settings, approvalServices, terminalCache, options.processConfig, approvalPolicy, observedStore, lifecycleAudit, terminalEvents, retainedAudit, publisher)
+	}) {
+		return
+	}
 	testRealContainerGenerationCancellationFence(t, f)
 	if !t.Run("failed-step", func(t *testing.T) {
 		containerAcceptanceFailedStepRetry(t, f, settings, observedStore, publisher, retainedAudit)

@@ -44,7 +44,7 @@ func TestAgentRetryRealProcessRPCAndSQLite(t *testing.T) {
 			sqlDB, _ := db.DB()
 			defer sqlDB.Close()
 			sqlDB.SetMaxOpenConns(1)
-			if err = db.WithContext(ctx).AutoMigrate(&model.JobRun{}, &model.StepRun{}); err != nil {
+			if err = db.WithContext(ctx).AutoMigrate(&model.PipelineRun{}, &model.JobRun{}, &model.StepRun{}); err != nil {
 				t.Fatal(err)
 			}
 			jobs, steps := repo.NewJobRunRepo(workerTestDatabase{db}), repo.NewStepRunRepo(workerTestDatabase{db})

@@ -61,6 +61,11 @@ jobs:
       - name: Verify visual CI fixture boundaries
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/acceptance -p 'test_visual*.py'
 
+      - name: Verify terminal rerun evidence and workflow boundaries
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/acceptance -p 'test_verify_copilot_rerun_mysql_log.py'
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/acceptance -p 'test_terminal_rerun_workflow.py'
+
       - name: Build all commands
         run: go build ./cmd/...
 
@@ -426,12 +431,23 @@ jobs:
             go test -race -v -count=1 -timeout=3m -run '^TestCopilotExecutionMySQLRealRequiredGate$' ./internal/control/repo | tee .acceptance/evidence/copilot-execution-mysql.log
           python3 scripts/acceptance/verify_copilot_execution_mysql_log.py .acceptance/evidence/copilot-execution-mysql.log
 
+      - name: Verify terminal rerun durable boundaries against disposable MySQL
+        timeout-minutes: 9
+        run: |
+          set -o pipefail
+          schema=arcentra_copilot_rerun_test_ci
+          docker compose -f scripts/acceptance/compose.yml exec -T -e MYSQL_PWD=ci-only-mysql-password mysql mysqladmin -uroot create "$schema"
+          ARCENTRA_REQUIRE_COPILOT_RERUN_MYSQL=1 \
+          ARCENTRA_COPILOT_RERUN_MYSQL_DSN="root:ci-only-mysql-password@tcp(127.0.0.1:13306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC" \
+            go test -race -v -count=1 -timeout=8m -run '^TestCopilotRerun(Confirm|Schema|Seal|Claim|Reports|Expiry|Dispatch|CancelActor)MySQLRequiredGate$' ./internal/control/repo | tee .acceptance/evidence/copilot-rerun-mysql.log
+          python3 scripts/acceptance/verify_copilot_rerun_mysql_log.py .acceptance/evidence/copilot-rerun-mysql.log
+
       - name: Check out pinned frontend acceptance client
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arcentrix/arcentra-web
           # Reviewed acceptance client: immutable cross-repository dependency.
-          ref: 360e6365028ea31ba04dc19a26e6acd27f774d61
+          ref: 98937d83bb30e1df9c00bd23246e850440d000af
           path: .acceptance/frontend
           persist-credentials: false
 

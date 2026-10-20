@@ -226,6 +226,7 @@ func TestRetryApprovalRunDedicatedCreateIsImmutable(t *testing.T) {
 
 func TestRetryApprovalMigrationDoesNotInventLegacyAuthority(t *testing.T) {
 	ctx, db, jobs, _ := sourceTestRepository(t)
+	removeLaterRerunColumnsForMigration(t, db)
 	for _, field := range []string{"retry_approval_required", "retry_approval_id", "retry_approval_evidence_hash"} {
 		if err := db.WithContext(ctx).Migrator().DropColumn(&model.JobRun{}, field); err != nil {
 			t.Fatal(err)

@@ -177,8 +177,7 @@ func (tf *TaskFramework) prepare(_ context.Context, task *Task) error {
 		artifactEnv["ARTIFACT_"+strings.NewReplacer("/", "_", "-", "_", ".", "_").Replace(key)] = uri
 	}
 	maps.Copy(tf.execCtx.Env, artifactEnv)
-	tf.execCtx.Env = tf.execCtx.ResolveStepEnv(task.Job, nil)
-	tf.execCtx.jobEnvResolved = true
+	tf.execCtx.PrepareJobEnvironment(task.Job)
 	// 登记产物键在作业快照中优先，避免步骤重新应用作业覆盖造成分歧
 	maps.Copy(tf.execCtx.Env, artifactEnv)
 
@@ -295,47 +294,11 @@ func (tf *TaskFramework) queue(ctx context.Context, task *Task) error {
 			return err
 		}
 	}
-	steps := make([]taskqueue.StepPayload, 0, len(task.Job.Steps))
-	for i, step := range task.Job.Steps {
-		if step == nil {
-			continue
-		}
-		stepRunID := tf.execCtx.StepRunIDs[step.Name]
-		stepCtx := tf.execCtx.forStep(task.Job, step)
-		steps = append(steps, taskqueue.StepPayload{AttemptRunIDs: tf.execCtx.StepAttemptIDs[step.Name], Name: step.Name, StepIndex: int32(i), StepRunID: stepRunID, Uses: step.Uses, Action: step.Action,
-			Args: stepCtx.ResolveVariables(spec.StructAsMap(step.Args)), Env: maps.Clone(stepCtx.Env), ContinueOnError: step.ContinueOnError, Timeout: step.Timeout, When: step.When})
-	}
-	artifactURIs, artifactReferences := tf.execCtx.ArtifactInputSnapshot()
-	payload := &taskqueue.JobRunTaskPayload{PipelineID: tf.execCtx.PipelineIDRef, PipelineRunID: tf.execCtx.PipelineRunID,
-		JobRunID: tf.execCtx.JobRunID, JobName: task.Job.Name, AgentID: agentID, Steps: steps, Retry: task.Job.Retry,
-		Env: tf.execCtx.ResolveStepEnv(task.Job, nil), Variables: tf.execCtx.Pipeline.Variables,
-		Timeout: task.Job.Timeout, ArtifactURIs: artifactURIs, ArtifactReferences: artifactReferences}
-	payload.Source = source
-	payload.RetryApprovalRequired = validation.IsDurableRetryApproval(task.Job, tf.execCtx.RuntimePolicy)
-	if payload.RetryApprovalRequired {
-		payload.RetryApprovalTimeoutSeconds = tf.execCtx.RetryApprovalTimeoutSeconds
+	payload, err := tf.execCtx.buildAgentJobPayload(task.Job, agentID, source)
+	if err != nil {
+		return err
 	}
 	if tf.execCtx.Runtime != nil {
-		runtime := *tf.execCtx.Runtime
-		runtime.BindingDigest, err = taskqueue.RuntimeBindingDigest(payload.PipelineID, payload.PipelineRunID, payload.JobRunID, payload.AgentID, &runtime)
-		if err != nil {
-			return err
-		}
-		payload.Runtime = &runtime
-		if payload.Retry != nil {
-			plan, planErr := taskqueue.NewJobRetryPlan(payload)
-			if planErr != nil {
-				return planErr
-			}
-			payload.RetryPlan = plan
-			payload.RetryPlanDigest, planErr = plan.Digest(payload.PipelineID, payload.PipelineRunID, payload.JobRunID, payload.AgentID, payload.Runtime.BindingDigest)
-			if planErr != nil {
-				return planErr
-			}
-		}
-		if err := taskqueue.ValidateJobRuntime(payload, tf.execCtx.RuntimePolicy); err != nil {
-			return err
-		}
 		if payload.RetryApprovalRequired {
 			capture, ok := tf.getJobRunStore().(interface {
 				CaptureRuntimeRetryApprovalExpectation(context.Context, string, string, string, string, *sourceprovenance.Binding, *taskqueue.RuntimeRequest, map[string]string, map[string]taskqueue.ArtifactReference, *taskqueue.JobRetryPlan) error

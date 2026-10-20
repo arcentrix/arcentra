@@ -37,7 +37,11 @@ func (r *JobRunRepo) PatchReportedStatusAndArtifacts(ctx context.Context, expect
 		return fmt.Errorf("active job snapshot is required")
 	}
 	return executionTransaction(ctx, r.Database(), expected.JobRunID, func(tx *gorm.DB) error {
-		if _, err := lockExecutionJob(ctx, tx, expected.JobRunID, executionLockLegacy); err != nil {
+		if _, protected := rerunProtectedLocator(tx); protected {
+			if err := lockCopilotRerunReportedJob(ctx, tx, expected, updates); err != nil {
+				return err
+			}
+		} else if _, err := lockExecutionJob(ctx, tx, expected.JobRunID, executionLockLegacy); err != nil {
 			return err
 		}
 		if err := lockReportedJob(ctx, tx, expected); err != nil {
@@ -90,7 +94,10 @@ func (r *JobRunRepo) PatchReportedStatusAndArtifacts(ctx context.Context, expect
 
 // ValidateCompletedArtifacts 校验重复终态回执完全一致，拒绝追加或改变已有制品
 func (r *JobRunRepo) ValidateCompletedArtifacts(ctx context.Context, jobRunID string, artifacts []*model.ProjectArtifact) error {
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return executionTransaction(ctx, r.Database(), jobRunID, func(tx *gorm.DB) error {
+		if hint, protected := rerunProtectedLocator(tx); protected {
+			return validateCopilotRerunCompletedArtifacts(ctx, tx, &hint, artifacts)
+		}
 		var count int64
 		if err := tx.WithContext(ctx).Model(&model.ProjectArtifact{}).Where("job_run_id = ?", jobRunID).Count(&count).Error; err != nil {
 			return err

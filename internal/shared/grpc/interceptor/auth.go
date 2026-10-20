@@ -36,6 +36,7 @@ var excludedAuthMethods = map[string]bool{
 
 // Agent 凭证仅允许执行工作协议；管理 API 通过 HTTP 用户权限校验
 var agentUnaryMethods = map[string]bool{
+	"/agent.v1.AgentService/ClaimAndFetchCopilotRerun": true,
 	"/agent.v1.AgentService/ReconcileStepAttempt":      true,
 	"/agent.v1.AgentService/ReconcileJobRetryApproval": true,
 	"/agent.v1.AgentService/ReconcileJobGeneration":    true,

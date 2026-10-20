@@ -41,7 +41,7 @@ func TestPersistedClaimResponseLossDoesNotDropOrRepeatExecution(t *testing.T) {
 			}
 			defer sqlDB.Close()
 			sqlDB.SetMaxOpenConns(1)
-			if err := db.WithContext(ctx).AutoMigrate(&model.JobRun{}, &model.StepRun{}); err != nil {
+			if err := db.WithContext(ctx).AutoMigrate(&model.PipelineRun{}, &model.JobRun{}, &model.StepRun{}); err != nil {
 				t.Fatal(err)
 			}
 			jobRepo, stepRepo := repo.NewJobRunRepo(workerTestDatabase{db}), repo.NewStepRunRepo(workerTestDatabase{db})

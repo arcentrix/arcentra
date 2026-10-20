@@ -109,6 +109,9 @@ type controllerWorkerFixtureOptions struct {
 	startWorker           func(context.Context, *config.AgentConfig, *agentgrpc.ClientWrapper, *executor.Manager) (nova.TaskQueue, error)
 	processConfig         *controlconfig.AppConfig
 	configureRepositories func(*repo.Repositories)
+	agentService          func(*repo.Repositories) *controlservice.AgentService
+	afterProcess          func(*controllerWorkerFixture)
+	stopProcessServices   func(*controllerWorkerFixture)
 	timeout               time.Duration
 }
 
@@ -134,6 +137,11 @@ type controllerWorkerFixture struct {
 	client              *agentgrpc.ClientWrapper
 	producer            nova.TaskQueue
 	tasks               map[string]nova.Task
+	rerunNotifications  map[string]int
+	rerunReferences     map[string]taskpayload.RerunClaimReference
+	rerunPayloads       map[string]taskpayload.JobRunTaskPayload
+	rerunClaimReceipts  map[string]int
+	rerunClaimFailures  map[string]int
 	beforeTerminal      func(context.Context, proto.Message) error
 	observeTerminal     func(context.Context, proto.Message, any, error)
 	observeRequest      func(context.Context, any)
@@ -216,7 +224,7 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 		repos = repo.NewRepositories(adapter, nil)
 		fixtureOptions.configureRepositories(repos)
 	}
-	f := &controllerWorkerFixture{t: t, ctx: ctx, waitTimeout: waitTimeout, db: db, tasks: make(map[string]nova.Task), repos: repos, projectID: id.GetUild(), pipelineID: id.GetUild(), receipts: make(map[string][]controllerWorkerReceipt), loseProducerACK: loseProducerACK}
+	f := &controllerWorkerFixture{t: t, ctx: ctx, waitTimeout: waitTimeout, db: db, tasks: make(map[string]nova.Task), rerunNotifications: make(map[string]int), rerunReferences: make(map[string]taskpayload.RerunClaimReference), rerunPayloads: make(map[string]taskpayload.JobRunTaskPayload), rerunClaimReceipts: make(map[string]int), rerunClaimFailures: make(map[string]int), repos: repos, projectID: id.GetUild(), pipelineID: id.GetUild(), receipts: make(map[string][]controllerWorkerReceipt), loseProducerACK: loseProducerACK}
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(os.TempDir(), "pipelines", f.pipelineID)) })
 	if err := db.WithContext(ctx).Create(&model.Project{ProjectID: f.projectID, IsEnabled: 1, Status: model.ProjectStatusActive}).Error; err != nil {
 		t.Fatal(err)
@@ -322,6 +330,26 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 			}
 		}
 		response, err := handler(ctx, request)
+		if req, ok := request.(*agentv1.ClaimAndFetchCopilotRerunRequest); ok && status.Code(err) == codes.FailedPrecondition && req.GetReference() != nil {
+			// A definite authenticated server rejection, not an unknown storage or client/network
+			// timeout. Store only the public Job ID and count; never nonce or payload.
+			f.mu.Lock()
+			f.rerunClaimFailures[req.Reference.JobRunId]++
+			f.mu.Unlock()
+		}
+		// Observe only an already authorized response. Never retain the nonce,
+		// log executable bytes, or synthesize a protected task.
+		if value, ok := response.(*agentv1.ClaimAndFetchCopilotRerunResponse); ok && err == nil && value != nil {
+			var payload taskpayload.JobRunTaskPayload
+			if decodeErr := sonic.Unmarshal(value.PayloadJson, &payload); decodeErr != nil {
+				return nil, status.Error(codes.Internal, "fixture claim response malformed")
+			}
+			f.mu.Lock()
+			f.rerunPayloads[payload.JobRunID] = payload
+			f.rerunClaimReceipts[payload.JobRunID]++
+			f.mu.Unlock()
+		}
+
 		if generationRequest, ok := request.(*agentv1.ReconcileJobGenerationRequest); ok {
 			f.mu.Lock()
 			hook := f.afterGeneration
@@ -415,9 +443,47 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 		}
 		return response, nil
 	})
+	var stopServicesOnce sync.Once
+	stopServices := func() {
+		stopServicesOnce.Do(func() {
+			if fixtureOptions.stopProcessServices != nil {
+				fixtureOptions.stopProcessServices(f)
+			}
+		})
+	}
+	startProcess := func() {
+		producer, err := process.ProvideTaskQueueProducer(&controlconfig.AppConfig{
+			MessageQueue: controlconfig.MessageQueueConfig{Kafka: kafkaconfig.Config{BootstrapServers: brokers, SecurityProtocol: "PLAINTEXT"}},
+			TaskQueue:    nova.TaskQueueConfig{MessageFormat: "sonic", MessageCodec: "sonic"},
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = producer.Stop() })
+		f.producer = producer
+		f.engine = process.NewProcess(repos, nil, &controllerWorkerRecordingQueue{TaskQueue: producer, fixture: f}, nil, &log.Logger{SugaredLogger: zap.NewNop().Sugar()}, fixtureOptions.processConfig, nil)
+		t.Cleanup(f.engine.Stop)
+		if fixtureOptions.stopProcessServices != nil {
+			t.Cleanup(stopServices)
+		}
+		if fixtureOptions.afterProcess != nil {
+			fixtureOptions.afterProcess(f)
+		}
+	}
+	// Explicit terminal fixtures bind the production bundle before listeners.
+	if fixtureOptions.afterProcess != nil {
+		startProcess()
+	}
 	serverOptions = append(serverOptions, grpc.ChainUnaryInterceptor(interceptors...))
 	server := grpc.NewServer(serverOptions...)
-	agentv1.RegisterAgentServiceServer(server, controlservice.NewAgentServiceImpl(controlservice.NewAgentService(repos.Agent, repos.StepRun, nil, repos.JobRun), repos.Storage))
+	agentService := controlservice.NewAgentService(repos.Agent, repos.StepRun, nil, repos.JobRun)
+	if fixtureOptions.agentService != nil {
+		agentService = fixtureOptions.agentService(repos)
+		if agentService == nil {
+			t.Fatal("fixture requires exact configured Agent service")
+		}
+	}
+	agentv1.RegisterAgentServiceServer(server, controlservice.NewAgentServiceImpl(agentService, repos.Storage))
 	safe.Go(func() { _ = server.Serve(listener) })
 	t.Cleanup(server.Stop)
 	client, err := agentgrpc.NewGrpcClient(agentgrpc.ClientConf{ServerAddr: listener.Addr().String(), Token: authToken, ReadWriteTimeout: 2, TLS: fixtureOptions.clientTLS})
@@ -458,17 +524,12 @@ func newControllerWorkerFixture(t *testing.T, loseProducerACK bool, options ...c
 			t.Error(err)
 		}
 	})
-	producer, err := process.ProvideTaskQueueProducer(&controlconfig.AppConfig{
-		MessageQueue: controlconfig.MessageQueueConfig{Kafka: kafkaconfig.Config{BootstrapServers: brokers, SecurityProtocol: "PLAINTEXT"}},
-		TaskQueue:    nova.TaskQueueConfig{MessageFormat: "sonic", MessageCodec: "sonic"},
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
+	if fixtureOptions.afterProcess == nil {
+		startProcess()
 	}
-	t.Cleanup(func() { _ = producer.Stop() })
-	f.producer = producer
-	f.engine = process.NewProcess(repos, nil, &controllerWorkerRecordingQueue{TaskQueue: producer, fixture: f}, nil, &log.Logger{SugaredLogger: zap.NewNop().Sugar()}, fixtureOptions.processConfig, nil)
-	t.Cleanup(f.engine.Stop)
+	if fixtureOptions.stopProcessServices != nil {
+		t.Cleanup(stopServices)
+	}
 	return f
 }
 
