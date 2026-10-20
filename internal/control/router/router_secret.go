@@ -73,7 +73,7 @@ func (rt *Router) createSecret(c *fiber.Ctx) error {
 
 	secret := input.Secret
 	secret.SecretValue = input.Value
-	if err := secretService.CreateSecret(c.Context(), &secret, claims.UserID); err != nil {
+	if err := secretService.CreateSecret(c.UserContext(), &secret, claims.UserID); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
@@ -102,12 +102,12 @@ func (rt *Router) updateSecret(c *fiber.Ctx) error {
 
 	secret := input.Secret
 	secret.SecretValue = input.Value
-	if err := secretService.UpdateSecret(c.Context(), secretID, &secret); err != nil {
+	if err := secretService.UpdateSecret(c.UserContext(), secretID, &secret); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
 	// get updated secret (masked)
-	updatedSecret, err := secretService.GetSecretByID(c.Context(), secretID)
+	updatedSecret, err := secretService.GetSecretByID(c.UserContext(), secretID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -124,7 +124,7 @@ func (rt *Router) getSecret(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "secretID is required")
 	}
 
-	secret, err := secretService.GetSecretByID(c.Context(), secretID)
+	secret, err := secretService.GetSecretByID(c.UserContext(), secretID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -144,7 +144,7 @@ func (rt *Router) getSecretValue(c *fiber.Ctx) error {
 	// TODO: Add additional permission check here
 	// Only users with specific permissions should be able to get decrypted values
 
-	value, err := secretService.GetSecretValue(c.Context(), secretID)
+	value, err := secretService.GetSecretValue(c.UserContext(), secretID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -167,7 +167,7 @@ func (rt *Router) getSecretList(c *fiber.Ctx) error {
 	scopeID := c.Query("scopeID", "")
 	createdBy := c.Query("createdBy", "")
 
-	secrets, total, err := secretService.GetSecretList(c.Context(), pageNum, pageSize, secretType, scope, scopeID, createdBy)
+	secrets, total, err := secretService.GetSecretList(c.UserContext(), pageNum, pageSize, secretType, scope, scopeID, createdBy)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -192,7 +192,7 @@ func (rt *Router) deleteSecret(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "secretID is required")
 	}
 
-	if err := secretService.DeleteSecret(c.Context(), secretID); err != nil {
+	if err := secretService.DeleteSecret(c.UserContext(), secretID); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
@@ -210,7 +210,7 @@ func (rt *Router) getSecretsByScope(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "scope and scopeID are required")
 	}
 
-	secrets, err := secretService.GetSecretsByScope(c.Context(), scope, scopeID)
+	secrets, err := secretService.GetSecretsByScope(c.UserContext(), scope, scopeID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}

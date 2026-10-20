@@ -15,13 +15,22 @@
 package middleware
 
 import (
+	"context"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
 
-// RequestMiddleware set request id
+// RequestMiddleware 设置请求标识并管理独立的请求上下文生命周期
 func RequestMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// fasthttp.RequestCtx 虽然实现 context.Context，但会在请求结束后复用，
+		// 不能传给可能异步读取上下文的数据库驱动或其他下游组件
+		// UserContext 默认使用 background，并保留上游设置的值、截止时间及取消信号
+		ctx, cancel := context.WithCancel(c.UserContext())
+		defer cancel()
+		c.SetUserContext(ctx)
+
 		requestID := c.Request().Header.Peek("X-Request-Id")
 		if len(requestID) == 0 {
 			requestID = []byte(uuid.New().String())

@@ -15,8 +15,8 @@
 package inject
 
 import (
-	"context"
 	"fmt"
+	"net/textproto"
 	"time"
 
 	tracecontext "github.com/arcentrix/arcentra/pkg/trace/context"
@@ -34,20 +34,17 @@ var (
 	fiberPropagator = otel.GetTextMapPropagator()
 )
 
-// FiberMiddleware returns a Fiber middleware for OpenTelemetry tracing
+// FiberMiddleware 传播独立于 fasthttp 请求对象的 OpenTelemetry 链路上下文
 func FiberMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		// UserContext 未设置时由 Fiber 返回非 nil 的 background context
+		// 不要使用会被复用的 RequestCtx 作为链路或数据库上下文的父级
 		ctx := c.UserContext()
-		if ctx == nil {
-			// Fiber 的 Context() 返回 *fasthttp.RequestCtx，不实现 context.Context
-			// 为了链路串联，这里默认使用 background context
-			ctx = context.Background()
-		}
 
 		// Extract trace context from HTTP headers
 		headers := make(map[string]string)
 		for key, value := range c.Request().Header.All() {
-			headers[string(key)] = string(value)
+			headers[textproto.CanonicalMIMEHeaderKey(string(key))] = string(value)
 		}
 		ctx = fiberPropagator.Extract(ctx, &headerCarrier{headers: headers})
 
@@ -134,11 +131,11 @@ type headerCarrier struct {
 }
 
 func (c *headerCarrier) Get(key string) string {
-	return c.headers[key]
+	return c.headers[textproto.CanonicalMIMEHeaderKey(key)]
 }
 
 func (c *headerCarrier) Set(key, value string) {
-	c.headers[key] = value
+	c.headers[textproto.CanonicalMIMEHeaderKey(key)] = value
 }
 
 func (c *headerCarrier) Keys() []string {

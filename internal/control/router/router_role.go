@@ -141,7 +141,7 @@ func (rt *Router) createRole(c *fiber.Ctx) error {
 		OrgID:       req.OrgID,
 		IsEnabled:   req.IsEnabled,
 	}
-	role, err := rt.Services.Role.CreateRole(c.Context(), createReq)
+	role, err := rt.Services.Role.CreateRole(c.UserContext(), createReq)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -170,7 +170,7 @@ func (rt *Router) listRole(c *fiber.Ctx) error {
 		pageSize = 10
 	}
 
-	roles, count, err := roleLogic.ListRoles(c.Context(), pageNum, pageSize)
+	roles, count, err := roleLogic.ListRoles(c.UserContext(), pageNum, pageSize)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -179,7 +179,7 @@ func (rt *Router) listRole(c *fiber.Ctx) error {
 	for i := range roles {
 		roleIDs = append(roleIDs, roles[i].RoleID)
 	}
-	bindings, err := rt.Services.Repos().Permission.ListRoleBindings(c.Context(), roleIDs)
+	bindings, err := rt.Services.Repos().Permission.ListRoleBindings(c.UserContext(), roleIDs)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -208,7 +208,7 @@ func (rt *Router) getRole(c *fiber.Ctx) error {
 	if roleID == "" {
 		return http.Err(c, http.BadRequest.Code, "role id is required")
 	}
-	role, err := rt.Services.Role.GetRoleByRoleID(c.Context(), roleID)
+	role, err := rt.Services.Role.GetRoleByRoleID(c.UserContext(), roleID)
 	if err != nil {
 		return http.Err(c, http.NotFound.Code, "role not found")
 	}
@@ -239,7 +239,7 @@ func (rt *Router) updateRole(c *fiber.Ctx) error {
 		OrgID:       req.OrgID,
 		IsEnabled:   req.IsEnabled,
 	}
-	if err := rt.Services.Role.UpdateRoleByRoleID(c.Context(), roleID, updateReq); err != nil {
+	if err := rt.Services.Role.UpdateRoleByRoleID(c.UserContext(), roleID, updateReq); err != nil {
 		return http.Err(c, http.NotFound.Code, "role not found")
 	}
 	if req.Permissions != nil {
@@ -247,7 +247,7 @@ func (rt *Router) updateRole(c *fiber.Ctx) error {
 			return http.Err(c, http.Failed.Code, err.Error())
 		}
 	}
-	role, err := rt.Services.Role.GetRoleByRoleID(c.Context(), roleID)
+	role, err := rt.Services.Role.GetRoleByRoleID(c.UserContext(), roleID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -264,7 +264,7 @@ func (rt *Router) toggleRole(c *fiber.Ctx) error {
 	if roleID == "" {
 		return http.Err(c, http.BadRequest.Code, "role id is required")
 	}
-	role, err := rt.Services.Role.GetRoleByRoleID(c.Context(), roleID)
+	role, err := rt.Services.Role.GetRoleByRoleID(c.UserContext(), roleID)
 	if err != nil {
 		return http.Err(c, http.NotFound.Code, "role not found")
 	}
@@ -273,10 +273,10 @@ func (rt *Router) toggleRole(c *fiber.Ctx) error {
 		next = 1
 	}
 	updateReq := &model.UpdateRoleReq{IsEnabled: &next}
-	if err = rt.Services.Role.UpdateRoleByRoleID(c.Context(), roleID, updateReq); err != nil {
+	if err = rt.Services.Role.UpdateRoleByRoleID(c.UserContext(), roleID, updateReq); err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
-	updated, err := rt.Services.Role.GetRoleByRoleID(c.Context(), roleID)
+	updated, err := rt.Services.Role.GetRoleByRoleID(c.UserContext(), roleID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -317,7 +317,7 @@ func (rt *Router) updateRolePermissions(c *fiber.Ctx) error {
 	if err := rt.replaceRolePermissions(c, roleID, req.Permissions); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
-	role, err := rt.Services.Role.GetRoleByRoleID(c.Context(), roleID)
+	role, err := rt.Services.Role.GetRoleByRoleID(c.UserContext(), roleID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -330,7 +330,7 @@ func (rt *Router) deleteRole(c *fiber.Ctx) error {
 	if roleID == "" {
 		return http.Err(c, http.BadRequest.Code, "role id is required")
 	}
-	if err := rt.Services.Role.DeleteRoleByRoleID(c.Context(), roleID); err != nil {
+	if err := rt.Services.Role.DeleteRoleByRoleID(c.UserContext(), roleID); err != nil {
 		return http.Err(c, http.NotFound.Code, "role not found")
 	}
 	return http.Operation(c)
@@ -338,7 +338,7 @@ func (rt *Router) deleteRole(c *fiber.Ctx) error {
 
 // loadRolePermissions 查询角色权限ID列表
 func (rt *Router) loadRolePermissions(c *fiber.Ctx, roleID string) ([]string, error) {
-	bindings, err := rt.Services.Repos().Permission.ListRoleBindings(c.Context(), []string{roleID})
+	bindings, err := rt.Services.Repos().Permission.ListRoleBindings(c.UserContext(), []string{roleID})
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +352,7 @@ func (rt *Router) loadRolePermissions(c *fiber.Ctx, roleID string) ([]string, er
 // replaceRolePermissions 用入参覆盖角色的权限绑定
 func (rt *Router) replaceRolePermissions(c *fiber.Ctx, roleID string, permissions []string) error {
 	repos := rt.Services.Repos()
-	if err := repos.Permission.DeleteRoleBindingsByRole(c.Context(), roleID); err != nil {
+	if err := repos.Permission.DeleteRoleBindingsByRole(c.UserContext(), roleID); err != nil {
 		return err
 	}
 	if len(permissions) == 0 {
@@ -368,11 +368,11 @@ func (rt *Router) replaceRolePermissions(c *fiber.Ctx, roleID string, permission
 			PermissionID: permID,
 		})
 	}
-	if err := repos.Permission.BatchUpsertRoleBindings(c.Context(), bindings); err != nil {
+	if err := repos.Permission.BatchUpsertRoleBindings(c.UserContext(), bindings); err != nil {
 		return err
 	}
 	if rt.Services.Authorizer != nil {
-		_ = rt.Services.Authorizer.Reload(c.Context())
+		_ = rt.Services.Authorizer.Reload(c.UserContext())
 	}
 	return nil
 }

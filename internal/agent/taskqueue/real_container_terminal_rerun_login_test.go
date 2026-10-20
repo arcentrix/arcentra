@@ -74,3 +74,28 @@ func TestContainerTerminalRerunLoginRequestEncoding(t *testing.T) {
 		})
 	}
 }
+
+// TestContainerTerminalRerunHTTPFailureDiagnostics 保留真实错误码但不泄露响应中的秘密
+func TestContainerTerminalRerunHTTPFailureDiagnostics(t *testing.T) {
+	for _, test := range []struct {
+		status     int
+		body, want string
+	}{
+		{403, `{"code":403,"errMsg":"not eligible to decide this approval","detail":{"token":"secret-canary"}}`, "code=403 error=approval_forbidden"},
+		{403, `{"errMsg":"secret-canary"}`, "code=missing error=redacted"},
+		{503, `{"code":500,"errMsg":"SQL password=secret-canary"}`, "code=500 error=redacted"},
+		{403, `{"code":403,"errMsg":{"token":"secret-canary"}}`, "code=403 error=redacted"},
+		{403, `<html>secret-canary</html>`, "envelope=malformed"},
+		{403, `{"code":200,"detail":{"token":"secret-canary"}}`, "code=200 error=redacted"},
+		{200, `{"code":401,"errMsg":"secret-canary"}`, "code=401 error=redacted"},
+	} {
+		detail, diagnostic := terminalRerunHTTPResult(test.status, []byte(test.body))
+		if len(detail) != 0 || !strings.Contains(diagnostic, test.want) || strings.Contains(diagnostic, "secret-canary") {
+			t.Fatalf("unsafe or inaccurate failure diagnostic: %q", diagnostic)
+		}
+	}
+	detail, diagnostic := terminalRerunHTTPResult(200, []byte(`{"code":200,"detail":{"ok":true}}`))
+	if diagnostic != "" || string(detail) != `{"ok":true}` {
+		t.Fatal("success envelope changed")
+	}
+}

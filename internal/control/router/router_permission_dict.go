@@ -46,7 +46,7 @@ type permissionDictItem struct {
 
 // listPermissions GET /api/v1/permissions - 返回权限字典并按 resourceType 分组
 func (rt *Router) listPermissions(c *fiber.Ctx) error {
-	permissions, err := rt.Services.Repos().Permission.ListPermissions(c.Context())
+	permissions, err := rt.Services.Repos().Permission.ListPermissions(c.UserContext())
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -116,11 +116,11 @@ func (rt *Router) createPermission(c *fiber.Ctx) error {
 		Description:  req.Description,
 		IsSystem:     0,
 	}
-	if err := rt.Services.Repos().Permission.CreatePermission(c.Context(), permission); err != nil {
+	if err := rt.Services.Repos().Permission.CreatePermission(c.UserContext(), permission); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if rt.Services.Authorizer != nil {
-		_ = rt.Services.Authorizer.Reload(c.Context())
+		_ = rt.Services.Authorizer.Reload(c.UserContext())
 	}
 	return http.Detail(c, permission)
 }
@@ -131,7 +131,7 @@ func (rt *Router) getPermission(c *fiber.Ctx) error {
 	if permissionID == "" {
 		return http.Err(c, http.BadRequest.Code, "permission id is required")
 	}
-	permission, err := rt.Services.Repos().Permission.GetByPermissionID(c.Context(), permissionID)
+	permission, err := rt.Services.Repos().Permission.GetByPermissionID(c.UserContext(), permissionID)
 	if err != nil {
 		return http.Err(c, http.NotFound.Code, "permission not found")
 	}
@@ -144,7 +144,7 @@ func (rt *Router) updatePermission(c *fiber.Ctx) error {
 	if permissionID == "" {
 		return http.Err(c, http.BadRequest.Code, "permission id is required")
 	}
-	existing, err := rt.Services.Repos().Permission.GetByPermissionID(c.Context(), permissionID)
+	existing, err := rt.Services.Repos().Permission.GetByPermissionID(c.UserContext(), permissionID)
 	if err != nil {
 		return http.Err(c, http.NotFound.Code, "permission not found")
 	}
@@ -171,13 +171,13 @@ func (rt *Router) updatePermission(c *fiber.Ctx) error {
 	if len(updates) == 0 {
 		return http.Detail(c, existing)
 	}
-	if err = rt.Services.Repos().Permission.UpdatePermission(c.Context(), permissionID, updates); err != nil {
+	if err = rt.Services.Repos().Permission.UpdatePermission(c.UserContext(), permissionID, updates); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if rt.Services.Authorizer != nil {
-		_ = rt.Services.Authorizer.Reload(c.Context())
+		_ = rt.Services.Authorizer.Reload(c.UserContext())
 	}
-	updated, err := rt.Services.Repos().Permission.GetByPermissionID(c.Context(), permissionID)
+	updated, err := rt.Services.Repos().Permission.GetByPermissionID(c.UserContext(), permissionID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -190,21 +190,21 @@ func (rt *Router) deletePermission(c *fiber.Ctx) error {
 	if permissionID == "" {
 		return http.Err(c, http.BadRequest.Code, "permission id is required")
 	}
-	existing, err := rt.Services.Repos().Permission.GetByPermissionID(c.Context(), permissionID)
+	existing, err := rt.Services.Repos().Permission.GetByPermissionID(c.UserContext(), permissionID)
 	if err != nil {
 		return http.Err(c, http.NotFound.Code, "permission not found")
 	}
 	if existing.IsSystem == 1 {
 		return http.Err(c, http.Forbidden.Code, "system permission cannot be deleted")
 	}
-	if err := rt.Services.Repos().Permission.DeleteRoleBindingsByPermission(c.Context(), permissionID); err != nil {
+	if err := rt.Services.Repos().Permission.DeleteRoleBindingsByPermission(c.UserContext(), permissionID); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
-	if err := rt.Services.Repos().Permission.DeletePermission(c.Context(), permissionID); err != nil {
+	if err := rt.Services.Repos().Permission.DeletePermission(c.UserContext(), permissionID); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	if rt.Services.Authorizer != nil {
-		_ = rt.Services.Authorizer.Reload(c.Context())
+		_ = rt.Services.Authorizer.Reload(c.UserContext())
 	}
 	return http.Operation(c)
 }

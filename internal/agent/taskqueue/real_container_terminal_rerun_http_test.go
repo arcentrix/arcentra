@@ -61,8 +61,9 @@ func newTerminalRerunHTTP(t *testing.T, f *controllerWorkerFixture, services *co
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := f.db.Model(&model.User{}).Where("user_id = ?", actor).Updates(map[string]any{"username": actor, "password": string(hash)}).Error; err != nil {
-			t.Fatal(err)
+		updated := f.db.WithContext(f.ctx).Model(&model.User{}).Where("user_id = ?", actor).Updates(map[string]any{"username": actor, "password": string(hash)})
+		if updated.Error != nil || updated.RowsAffected != 1 {
+			t.Fatal("fixture login requires exactly one disposable actor identity")
 		}
 		h.passwords[actor] = password
 	}
@@ -139,16 +140,55 @@ func (h *terminalRerunHTTP) request(t *testing.T, ctx context.Context, actor, me
 	if err != nil || len(raw) > 1024*1024 {
 		t.Fatal("unbounded fixture HTTP response")
 	}
-	var envelope struct {
-		Code   int             `json:"code"`
-		Detail json.RawMessage `json:"detail"`
+	detail, diagnostic := terminalRerunHTTPResult(response.StatusCode, raw)
+	if diagnostic != "" {
+		t.Fatalf("production fixture HTTP %s %s rejected: %s", method, path, diagnostic)
 	}
-	if response.StatusCode != http.StatusOK || json.Unmarshal(raw, &envelope) != nil || envelope.Code != 200 {
-		t.Fatalf("production fixture HTTP %s %s rejected: status=%d code=%d", method, path, response.StatusCode, envelope.Code)
-	}
-	if out != nil && json.Unmarshal(envelope.Detail, out) != nil {
+	if out != nil && json.Unmarshal(detail, out) != nil {
 		t.Fatal("production fixture HTTP detail malformed")
 	}
+}
+
+// Decode failed HTTP responses too. Never log raw bodies, arbitrary server
+// messages, request headers, passwords or tokens. Only fixed error categories
+// and actual decoded numeric status survive into public fixture diagnostics.
+func terminalRerunHTTPResult(status int, raw []byte) (json.RawMessage, string) {
+	var envelope struct {
+		Code   *int            `json:"code"`
+		Detail json.RawMessage `json:"detail"`
+		Error  json.RawMessage `json:"errMsg"`
+	}
+	if len(raw) > 1024*1024 || json.Unmarshal(raw, &envelope) != nil {
+		return nil, fmt.Sprintf("status=%d envelope=malformed bytes=%d", status, len(raw))
+	}
+	if status == http.StatusOK && envelope.Code != nil && *envelope.Code == 200 {
+		return envelope.Detail, ""
+	}
+	code := "missing"
+	if envelope.Code != nil {
+		code = strconv.Itoa(*envelope.Code)
+	}
+	category := "redacted"
+	var message string
+	if json.Unmarshal(envelope.Error, &message) == nil {
+		switch message {
+		case "not eligible to decide this approval":
+			category = "approval_forbidden"
+		case "approval decision conflicts with current state":
+			category = "approval_conflict"
+		case "approval has expired":
+			category = "approval_expired"
+		case "approval not found":
+			category = "approval_not_found"
+		case "invalid approval request":
+			category = "approval_invalid"
+		case "approval is currently unavailable":
+			category = "approval_unavailable"
+		case "access denied":
+			category = "access_denied"
+		}
+	}
+	return nil, fmt.Sprintf("status=%d code=%s error=%s bytes=%d", status, code, category, len(raw))
 }
 
 // Child ACK/receipt means only this UI phase completed. Authoritative runtime,

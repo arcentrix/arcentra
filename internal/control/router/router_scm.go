@@ -44,7 +44,7 @@ func (rt *Router) handleScmWebhook(c *fiber.Ctx) error {
 	}
 	body := c.Body()
 
-	events, err := rt.Services.Scm.HandleWebhook(c.Context(), projectID, headers, body)
+	events, err := rt.Services.Scm.HandleWebhook(c.UserContext(), projectID, headers, body)
 	if err != nil {
 		log.Warnw("scm webhook handle failed", "projectID", projectID, "error", err)
 		return http.Err(c, http.Failed.Code, err.Error())

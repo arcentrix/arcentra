@@ -27,7 +27,7 @@ jobs:
       ARCENTRA_REAL_STACK: "1"
       ARCENTRA_REQUIRE_REAL_STACK: "1"
       # Same literal as the pinned frontend checkout; verified before any browser/daemon.
-      ARCENTRA_COPILOT_BROWSER_FRONTEND_COMMIT: a70ab0c866135f95d74ae89f44e7405053d3f061
+      ARCENTRA_COPILOT_BROWSER_FRONTEND_COMMIT: 04c209e3769d100bbee1e5f258ad1f9c5d19d05c
       ARCENTRA_TEST_S3_ENDPOINT: http://127.0.0.1:19000
       ARCENTRA_TEST_S3_ACCESS_KEY: ci-only-s3-user
       ARCENTRA_TEST_S3_SECRET_KEY: ci-only-s3-password
@@ -54,7 +54,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed execution-enabled client: immutable cross-repository dependency.
-          ref: a70ab0c866135f95d74ae89f44e7405053d3f061
+          ref: 04c209e3769d100bbee1e5f258ad1f9c5d19d05c
           path: .acceptance/frontend
           persist-credentials: false
 

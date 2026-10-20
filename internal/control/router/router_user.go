@@ -134,7 +134,7 @@ func (rt *Router) addUser(c *fiber.Ctx) error {
 	if claims, err := auth.ParseAuthorizationToken(c, rt.HTTP.Auth.SecretKey); err == nil {
 		invitedBy = claims.UserID
 	}
-	userID, err := rt.Services.User.InviteUser(c.Context(), req.Email, req.Role, invitedBy)
+	userID, err := rt.Services.User.InviteUser(c.UserContext(), req.Email, req.Role, invitedBy)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -365,7 +365,7 @@ func (rt *Router) uploadAvatar(c *fiber.Ctx) error {
 	}
 
 	// upload avatar to object storage
-	response, err := uploadService.UploadAvatar(c.Context(), file, claims.UserID)
+	response, err := uploadService.UploadAvatar(c.UserContext(), file, claims.UserID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}

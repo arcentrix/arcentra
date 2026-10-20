@@ -114,7 +114,7 @@ func (rt *Router) registerTemplateLibrary(c *fiber.Ctx) error {
 		CreatedBy:    auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey),
 	}
 
-	if err := rt.Services.PipelineTemplate.RegisterLibrary(c.Context(), lib); err != nil {
+	if err := rt.Services.PipelineTemplate.RegisterLibrary(c.UserContext(), lib); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
@@ -132,7 +132,7 @@ func (rt *Router) listTemplateLibraries(c *fiber.Ctx) error {
 		Page:     maxIntWithOne(rt.HTTP.QueryInt(c, "page")),
 		PageSize: maxIntWithOne(rt.HTTP.QueryInt(c, "pageSize")),
 	}
-	list, total, err := rt.Services.PipelineTemplate.ListLibraries(c.Context(), query)
+	list, total, err := rt.Services.PipelineTemplate.ListLibraries(c.UserContext(), query)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -149,7 +149,7 @@ func (rt *Router) getTemplateLibrary(c *fiber.Ctx) error {
 	if libraryID == "" {
 		return http.Err(c, http.BadRequest.Code, "library id is required")
 	}
-	lib, err := rt.Services.PipelineTemplate.GetLibrary(c.Context(), libraryID)
+	lib, err := rt.Services.PipelineTemplate.GetLibrary(c.UserContext(), libraryID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -201,7 +201,7 @@ func (rt *Router) updateTemplateLibrary(c *fiber.Ctx) error {
 		updates["is_enabled"] = *req.IsEnabled
 	}
 
-	if err := rt.Services.PipelineTemplate.UpdateLibrary(c.Context(), libraryID, updates); err != nil {
+	if err := rt.Services.PipelineTemplate.UpdateLibrary(c.UserContext(), libraryID, updates); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	return http.Operation(c)
@@ -212,7 +212,7 @@ func (rt *Router) deleteTemplateLibrary(c *fiber.Ctx) error {
 	if libraryID == "" {
 		return http.Err(c, http.BadRequest.Code, "library id is required")
 	}
-	if err := rt.Services.PipelineTemplate.DeleteLibrary(c.Context(), libraryID); err != nil {
+	if err := rt.Services.PipelineTemplate.DeleteLibrary(c.UserContext(), libraryID); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	return http.Operation(c)
@@ -223,7 +223,7 @@ func (rt *Router) syncTemplateLibrary(c *fiber.Ctx) error {
 	if libraryID == "" {
 		return http.Err(c, http.BadRequest.Code, "library id is required")
 	}
-	if err := rt.Services.PipelineTemplate.SyncLibrary(c.Context(), libraryID); err != nil {
+	if err := rt.Services.PipelineTemplate.SyncLibrary(c.UserContext(), libraryID); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	return http.Operation(c)
@@ -242,7 +242,7 @@ func (rt *Router) listTemplates(c *fiber.Ctx) error {
 		Page:     maxIntWithOne(rt.HTTP.QueryInt(c, "page")),
 		PageSize: maxIntWithOne(rt.HTTP.QueryInt(c, "pageSize")),
 	}
-	list, total, err := rt.Services.PipelineTemplate.ListTemplates(c.Context(), query)
+	list, total, err := rt.Services.PipelineTemplate.ListTemplates(c.UserContext(), query)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -259,7 +259,7 @@ func (rt *Router) getTemplate(c *fiber.Ctx) error {
 	if templateID == "" {
 		return http.Err(c, http.BadRequest.Code, "template id is required")
 	}
-	t, err := rt.Services.PipelineTemplate.GetTemplate(c.Context(), templateID)
+	t, err := rt.Services.PipelineTemplate.GetTemplate(c.UserContext(), templateID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -271,7 +271,7 @@ func (rt *Router) listTemplateVersions(c *fiber.Ctx) error {
 	if templateID == "" {
 		return http.Err(c, http.BadRequest.Code, "template id is required")
 	}
-	versions, err := rt.Services.PipelineTemplate.ListTemplateVersions(c.Context(), templateID)
+	versions, err := rt.Services.PipelineTemplate.ListTemplateVersions(c.UserContext(), templateID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -279,7 +279,7 @@ func (rt *Router) listTemplateVersions(c *fiber.Ctx) error {
 }
 
 func (rt *Router) listTemplateCategories(c *fiber.Ctx) error {
-	categories, err := rt.Services.PipelineTemplate.ListCategories(c.Context())
+	categories, err := rt.Services.PipelineTemplate.ListCategories(c.UserContext())
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -299,7 +299,7 @@ func (rt *Router) instantiateTemplate(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "templateId is required")
 	}
 
-	rendered, err := rt.Services.PipelineTemplate.InstantiateTemplate(c.Context(), service.InstantiateRequest{
+	rendered, err := rt.Services.PipelineTemplate.InstantiateTemplate(c.UserContext(), service.InstantiateRequest{
 		TemplateID: strings.TrimSpace(req.TemplateID),
 		Version:    strings.TrimSpace(req.Version),
 		Params:     req.Params,
@@ -334,7 +334,7 @@ func (rt *Router) saveTemplate(c *fiber.Ctx) error {
 		editor = auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
 	}
 
-	commitSha, err := rt.Services.PipelineTemplate.SaveTemplate(c.Context(), service.SaveTemplateRequest{
+	commitSha, err := rt.Services.PipelineTemplate.SaveTemplate(c.UserContext(), service.SaveTemplateRequest{
 		TemplateID:    templateID,
 		SpecContent:   req.SpecContent,
 		Name:          req.Name,
@@ -375,7 +375,7 @@ func (rt *Router) createTemplateInLibrary(c *fiber.Ctx) error {
 		editor = auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
 	}
 
-	t, err := rt.Services.PipelineTemplate.CreateTemplateInLibrary(c.Context(), service.CreateTemplateRequest{
+	t, err := rt.Services.PipelineTemplate.CreateTemplateInLibrary(c.UserContext(), service.CreateTemplateRequest{
 		LibraryID:     libraryID,
 		Name:          strings.TrimSpace(req.Name),
 		Description:   strings.TrimSpace(req.Description),
@@ -411,7 +411,7 @@ func (rt *Router) deleteTemplate(c *fiber.Ctx) error {
 		editor = auth.CurrentUserID(c, rt.HTTP.Auth.SecretKey)
 	}
 
-	if err := rt.Services.PipelineTemplate.DeleteTemplateFromLibrary(c.Context(), templateID, req.CommitMessage, editor); err != nil {
+	if err := rt.Services.PipelineTemplate.DeleteTemplateFromLibrary(c.UserContext(), templateID, req.CommitMessage, editor); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	return http.Operation(c)

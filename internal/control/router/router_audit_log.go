@@ -33,7 +33,7 @@ func (rt *Router) listAuditLogs(c *fiber.Ctx) error {
 	action := c.Query("action")
 	actorUserID := c.Query("actorUserId")
 
-	list, total, err := rt.Services.AuditLog.List(c.Context(), action, actorUserID, pageNum, pageSize)
+	list, total, err := rt.Services.AuditLog.List(c.UserContext(), action, actorUserID, pageNum, pageSize)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
