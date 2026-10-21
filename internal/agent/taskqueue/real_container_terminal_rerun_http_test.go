@@ -45,6 +45,15 @@ type terminalRerunHTTP struct {
 // uses disposable fixture users and the production Redis-backed auth routes.
 func newTerminalRerunHTTP(t *testing.T, f *controllerWorkerFixture, services *controlservice.Services, store cache.ICache, conf *controlconfig.AppConfig, actors []string) *terminalRerunHTTP {
 	t.Helper()
+	// Direct fixture seeding bypasses the production role-management reload.
+	// Refresh the existing shared snapshot after seeding, without replacing the
+	// runtime owner's authorizer or adding permissions to any actor.
+	if services == nil || services.Authorizer == nil {
+		t.Fatal("terminal HTTP fixture requires the shared production authorizer")
+	}
+	if err := services.Authorizer.Reload(f.ctx); err != nil {
+		t.Fatal("terminal HTTP fixture authorization reload failed")
+	}
 	h := &terminalRerunHTTP{client: &http.Client{Timeout: 10 * time.Second}, passwords: map[string]string{}, tokens: map[string]string{}}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

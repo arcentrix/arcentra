@@ -17,12 +17,16 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	"github.com/arcentrix/arcentra/internal/control/repo"
 	artifactutil "github.com/arcentrix/arcentra/pkg/artifact"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type copilotProjectRepo struct{ repo.IProjectRepository }
 
 func (copilotProjectRepo) Get(ctx context.Context, id string) (*model.Project, error) {
-	return &model.Project{ProjectID: id, OrgID: "org"}, nil
+	return &model.Project{ProjectID: id, OrgID: "org", IsEnabled: 1, Status: model.ProjectStatusActive}, nil
 }
 
 type copilotPipelineRepo struct{ repo.IPipelineRepository }
@@ -35,7 +39,7 @@ func (copilotPipelineRepo) Get(ctx context.Context, id string) (*model.Pipeline,
 	if id == "pipe-foreign" {
 		project = "other"
 	}
-	return &model.Pipeline{PipelineID: id, ProjectID: project}, nil
+	return &model.Pipeline{PipelineID: id, ProjectID: project, IsEnabled: 1}, nil
 }
 
 type copilotStepRepo struct{ repo.IStepRunRepository }
@@ -78,6 +82,9 @@ func (r *copilotSecretRepo) List(_ context.Context, _, _ int, _, scope, _, _ str
 	return []*model.Secret{{SecretID: "secret"}}, 1, nil
 }
 func (r *copilotSecretRepo) GetValue(context.Context, string) (string, error) { return r.secret, nil }
+func (r *copilotSecretRepo) GetCopilotSecretValue(context.Context, string) (string, error) {
+	return r.secret, nil
+}
 
 type copilotAuthz struct {
 	authz.IAuthorizer
@@ -136,6 +143,36 @@ func copilotFixture(t *testing.T) (*CopilotService, *copilotFakeProvider, *copil
 	logs := &copilotLogRepo{content: "failure registered-secret opaque-env-v9WjKx provider-secret\npassword=inline-secret"}
 	provider := &copilotFakeProvider{}
 	s := NewCopilotService(&repo.Repositories{Project: copilotProjectRepo{}, Pipeline: copilotPipelineRepo{}, StepRun: copilotStepRepo{}, Log: logs, Secret: secrets}, copilotAuthz{}, nil, nil, secretService)
+	// Keep content-reader fault seams while using real current identity, role,
+	// membership and expiry queries for this service's authorization boundary.
+	authDB, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "copilot-auth.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	pool, err := authDB.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = pool.Close() })
+	require.NoError(t, authDB.AutoMigrate(&model.User{}, &model.Team{}, &model.TeamMember{}, &model.Role{}, &model.RoleGrant{}, &model.Permission{}, &model.RolePermissionBinding{}, &model.AuditLog{}))
+	for _, row := range []any{
+		&model.User{UserID: "owner", IsEnabled: 1},
+		&model.Role{RoleID: "reader", Name: "reader", IsEnabled: 1},
+		&model.RoleGrant{GrantID: "grant", SubjectType: "user", SubjectID: "owner", RoleID: "reader", ScopeType: "project", ScopeID: "p", IsEnabled: 1},
+		&model.Permission{PermissionID: "project:read", ResourceType: "project", Action: "read"},
+		&model.Permission{PermissionID: "pipeline:read", ResourceType: "pipeline", Action: "read"},
+		&model.RolePermissionBinding{RoleID: "reader", PermissionID: "project:read"},
+		&model.RolePermissionBinding{RoleID: "reader", PermissionID: "pipeline:read"},
+	} {
+		require.NoError(t, authDB.Create(row).Error)
+	}
+	authRepos := repo.NewRepositories(artifactServiceDatabase{authDB}, nil)
+	s.contextPrimary = func(context.Context) (*repo.Repositories, error) {
+		view := *s.repos
+		view.User, view.Team, view.TeamMember = authRepos.User, authRepos.Team, authRepos.TeamMember
+		view.Permission, view.Role, view.RoleGrant = authRepos.Permission, authRepos.Role, authRepos.RoleGrant
+		view.AuditLog = authRepos.AuditLog
+		if s.artifacts != nil {
+			view.Artifact = s.artifacts.artifacts
+		}
+		return &view, nil
+	}
 	s.registry = copilotFakeRegistry{provider: provider, enabled: true}
 	in := CopilotRequest{RequestID: "request-1234567890", RunID: "run", ProviderID: "test", Model: "model", Question: "why did this fail?", Context: CopilotSelection{StepRunIDs: []string{"step"}}, ShareSelectedContext: true}
 	return s, provider, logs, in
