@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
@@ -123,7 +124,11 @@ func validateManualInboxCapture(run *model.PipelineRun, actor, projectID string)
 // On uncertain commit the caller must reconcile the stable request/run ID from
 // the primary and never submit execution merely because an error was returned.
 func (r *PipelineRepo) CreateVerifiedManualTriggerRun(ctx context.Context, actor string, run *model.PipelineRun, authorize VerifiedManualTriggerAuthorize) error {
-	if run == nil || authorize == nil || !manualInboxID(actor, 64) || !emptyRunInboxBinding(run) ||
+	return r.createVerifiedManualTriggerRun(ctx, actor, run, authorize, nil)
+}
+
+func (r *PipelineRepo) createVerifiedManualTriggerRun(ctx context.Context, actor string, run *model.PipelineRun, authorize VerifiedManualTriggerAuthorize, definition *model.CopilotDefinitionSnapshot) error {
+	if !emptyRunRerun(run) || authorize == nil || !manualInboxID(actor, 64) || !emptyRunInboxBinding(run) ||
 		!manualInboxID(run.RunID, 64) || !manualInboxID(run.PipelineID, 64) ||
 		run.RequestID != "" && !manualInboxID(run.RequestID, 128) || run.ID != 0 ||
 		run.TriggerType != int(pipelinev1.TriggerType_TRIGGER_TYPE_MANUAL) || run.TriggeredBy != actor ||
@@ -136,8 +141,14 @@ func (r *PipelineRepo) CreateVerifiedManualTriggerRun(ctx context.Context, actor
 		return err
 	}
 	err := r.Database().WithContext(ctx).Clauses(database.Write()).Transaction(func(tx *gorm.DB) error {
+		pipelineFields := []string{"pipeline_id", "project_id", "is_enabled", "is_deleted"}
+		projectFields := []string{"project_id", "org_id", "is_enabled", "status"}
+		if definition != nil {
+			pipelineFields = append(pipelineFields, "repo_url", "default_branch", "pipeline_file_path")
+			projectFields = append(projectFields, "repo_url", "repo_type")
+		}
 		var pipelines []model.Pipeline
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("pipeline_id", "project_id", "is_enabled", "is_deleted").Where("LOWER(pipeline_id) = LOWER(?)", stored.PipelineID).Limit(2).Find(&pipelines).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select(pipelineFields).Where("LOWER(pipeline_id) = LOWER(?)", stored.PipelineID).Limit(2).Find(&pipelines).Error; err != nil {
 			return err
 		}
 		if len(pipelines) != 1 || pipelines[0].PipelineID != stored.PipelineID || pipelines[0].IsEnabled != 1 || pipelines[0].IsDeleted != 0 || !manualInboxID(pipelines[0].ProjectID, 64) {
@@ -145,7 +156,7 @@ func (r *PipelineRepo) CreateVerifiedManualTriggerRun(ctx context.Context, actor
 		}
 		pipeline := &pipelines[0]
 		var projects []model.Project
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("project_id", "org_id", "is_enabled", "status").Where("LOWER(project_id) = LOWER(?)", pipeline.ProjectID).Limit(2).Find(&projects).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select(projectFields).Where("LOWER(project_id) = LOWER(?)", pipeline.ProjectID).Limit(2).Find(&projects).Error; err != nil {
 			return err
 		}
 		if len(projects) != 1 || projects[0].ProjectID != pipeline.ProjectID || projects[0].IsEnabled != 1 || projects[0].Status != model.ProjectStatusActive {
@@ -163,6 +174,11 @@ func (r *PipelineRepo) CreateVerifiedManualTriggerRun(ctx context.Context, actor
 		}
 		if err := authorize(ctx, view, &projects[0], pipeline, actor); err != nil {
 			return ErrManualTriggerForbidden
+		}
+		if definition != nil {
+			if err := validateCopilotDefinitionCapture(definition, &stored, pipeline, &projects[0], time.Now()); err != nil {
+				return err
+			}
 		}
 		// A binary database must not turn case aliases into separate stable
 		// business identities. Request lookup stays bounded to the locked
@@ -188,8 +204,14 @@ func (r *PipelineRepo) CreateVerifiedManualTriggerRun(ctx context.Context, actor
 		if err := tx.Create(&stored).Error; err != nil {
 			return err
 		}
+		if err := insertCopilotDefinitionSnapshotTx(tx, definition); err != nil {
+			return err
+		}
 		if err := enrollInboxWork(tx, "run", stored.RunID); err != nil {
 			return err
+		}
+		if definition != nil && !time.Now().Before(definition.ExpiresAt) {
+			return ErrCopilotRerunInvalid
 		}
 		return current(ctx)
 	})

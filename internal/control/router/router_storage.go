@@ -58,7 +58,7 @@ func (rt *Router) uploadFile(c *fiber.Ctx) error {
 	customPath := c.Query("path")
 
 	// upload file
-	response, err := uploadService.UploadFile(c.Context(), file, "", customPath)
+	response, err := uploadService.UploadFile(c.UserContext(), file, "", customPath)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -86,7 +86,7 @@ func (rt *Router) uploadFileWithStorage(c *fiber.Ctx) error {
 	customPath := c.Query("path")
 
 	// upload file
-	response, err := uploadService.UploadFile(c.Context(), file, storageID, customPath)
+	response, err := uploadService.UploadFile(c.UserContext(), file, storageID, customPath)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -103,7 +103,7 @@ func (rt *Router) createStorageConfig(c *fiber.Ctx) error {
 		return sensitiveError(c, 400, "invalid request body")
 	}
 
-	storageConfig, err := storageService.CreateStorageConfig(c.Context(), &req)
+	storageConfig, err := storageService.CreateStorageConfig(c.UserContext(), &req)
 	if err != nil {
 		return storageConfigError(c, err)
 	}
@@ -115,7 +115,7 @@ func (rt *Router) createStorageConfig(c *fiber.Ctx) error {
 func (rt *Router) listStorageConfigs(c *fiber.Ctx) error {
 	storageService := rt.Services.Storage
 
-	storageConfigs, err := storageService.ListStorageConfigs(c.Context())
+	storageConfigs, err := storageService.ListStorageConfigs(c.UserContext())
 	if err != nil {
 		return storageConfigError(c, err)
 	}
@@ -136,7 +136,7 @@ func (rt *Router) getStorageConfig(c *fiber.Ctx) error {
 		return sensitiveError(c, 400, "storage id is required")
 	}
 
-	storageConfig, err := storageService.GetStorageConfig(c.Context(), storageID)
+	storageConfig, err := storageService.GetStorageConfig(c.UserContext(), storageID)
 	if err != nil {
 		return storageConfigError(c, err)
 	}
@@ -162,7 +162,7 @@ func (rt *Router) updateStorageConfig(c *fiber.Ctx) error {
 		return sensitiveError(c, 400, "storage id must match the path")
 	}
 	req.StorageID = storageID
-	storageConfig, err := storageService.UpdateStorageConfig(c.Context(), &req)
+	storageConfig, err := storageService.UpdateStorageConfig(c.UserContext(), &req)
 	if err != nil {
 		return storageConfigError(c, err)
 	}
@@ -179,7 +179,7 @@ func (rt *Router) deleteStorageConfig(c *fiber.Ctx) error {
 		return sensitiveError(c, 400, "storage id is required")
 	}
 
-	err := storageService.DeleteStorageConfig(c.Context(), storageID)
+	err := storageService.DeleteStorageConfig(c.UserContext(), storageID)
 	if err != nil {
 		return storageConfigError(c, err)
 	}
@@ -196,7 +196,7 @@ func (rt *Router) setDefaultStorageConfig(c *fiber.Ctx) error {
 		return sensitiveError(c, 400, "storage id is required")
 	}
 
-	err := storageService.SetDefaultStorageConfig(c.Context(), storageID)
+	err := storageService.SetDefaultStorageConfig(c.UserContext(), storageID)
 	if err != nil {
 		return storageConfigError(c, err)
 	}
@@ -208,7 +208,7 @@ func (rt *Router) setDefaultStorageConfig(c *fiber.Ctx) error {
 func (rt *Router) getDefaultStorageConfig(c *fiber.Ctx) error {
 	storageService := rt.Services.Storage
 
-	storageConfig, err := storageService.GetDefaultStorageConfig(c.Context())
+	storageConfig, err := storageService.GetDefaultStorageConfig(c.UserContext())
 	if err != nil {
 		return storageConfigError(c, err)
 	}

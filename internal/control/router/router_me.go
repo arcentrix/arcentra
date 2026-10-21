@@ -37,7 +37,7 @@ func (rt *Router) getMyMenus(c *fiber.Ctx) error {
 	}
 	scopeType := c.Query("scopeType")
 	scopeID := c.Query("scopeId")
-	menus, err := rt.Services.Me.GetMenus(c.Context(), claims.UserID, scopeType, scopeID)
+	menus, err := rt.Services.Me.GetMenus(c.UserContext(), claims.UserID, scopeType, scopeID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -51,7 +51,7 @@ func (rt *Router) getMyRoutes(c *fiber.Ctx) error {
 	}
 	scopeType := c.Query("scopeType")
 	scopeID := c.Query("scopeId")
-	routes, err := rt.Services.Me.GetRoutes(c.Context(), claims.UserID, scopeType, scopeID)
+	routes, err := rt.Services.Me.GetRoutes(c.UserContext(), claims.UserID, scopeType, scopeID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -65,7 +65,7 @@ func (rt *Router) getMyEffectiveActions(c *fiber.Ctx) error {
 	}
 	scopeType := c.Query("scopeType")
 	scopeID := c.Query("scopeId")
-	actions, err := rt.Services.Me.GetEffectiveActions(c.Context(), claims.UserID, scopeType, scopeID)
+	actions, err := rt.Services.Me.GetEffectiveActions(c.UserContext(), claims.UserID, scopeType, scopeID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}

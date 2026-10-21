@@ -40,9 +40,7 @@ func TestDurableTerminalReplayAfterCommittedAckLossAndRestart(t *testing.T) {
 			}
 			defer sqlDB.Close()
 			sqlDB.SetMaxOpenConns(1)
-			if err := db.WithContext(ctx).AutoMigrate(&model.JobRun{}, &model.StepRun{}); err != nil {
-				t.Fatal(err)
-			}
+			setupWorkerRunFixture(t, ctx, db, "run")
 			jobRepo, stepRepo := repo.NewJobRunRepo(workerTestDatabase{db}), repo.NewStepRunRepo(workerTestDatabase{db})
 			const agentID = "agent"
 			jobID := "durable-" + lostKind

@@ -419,6 +419,10 @@ func (q *TaskQueueImpl) handleBatchMessage(ctx context.Context, msg *Message) er
 
 // sendTask sends a single task
 func (q *TaskQueueImpl) sendTask(task *Task, queueName string, priority Priority) (*Result, error) {
+	return q.sendTaskContext(q.ctx, task, queueName, priority)
+}
+
+func (q *TaskQueueImpl) sendTaskContext(ctx context.Context, task *Task, queueName string, priority Priority) (*Result, error) {
 	taskMsg := &TaskMessage{
 		TaskID:   generateTaskID(),
 		Task:     task,
@@ -437,7 +441,7 @@ func (q *TaskQueueImpl) sendTask(task *Task, queueName string, priority Priority
 		"task_type": task.Type,
 	}
 
-	if err := q.broker.ProducerMessage(q.ctx, queueName, taskMsg.TaskID, msgData, headers); err != nil {
+	if err := q.broker.ProducerMessage(ctx, queueName, taskMsg.TaskID, msgData, headers); err != nil {
 		return nil, fmt.Errorf("failed to send message: %w", err)
 	}
 

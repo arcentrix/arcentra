@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -593,15 +594,23 @@ func seedContainerApprovalActors(t *testing.T, f *controllerWorkerFixture, actor
 		t.Fatal(err)
 	}
 	users := append([]string{actor}, reviewers...)
+	ownedUsers := []string{}
 	roles := []string{}
 	grants := []string{}
 	permissions := []string{}
 	for index, user := range users {
+		created, err := ensureContainerApprovalActor(f.ctx, f.db, user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if created {
+			ownedUsers = append(ownedUsers, user)
+		}
 		role := "role-" + id.GetUild()
 		grant := "grant-" + id.GetUild()
 		roles = append(roles, role)
 		grants = append(grants, grant)
-		for _, row := range []any{&model.User{UserID: user, IsEnabled: 1}, &model.Role{RoleID: role, Name: role, IsEnabled: 1}, &model.RoleGrant{GrantID: grant, SubjectType: "user", SubjectID: user, RoleID: role, ScopeType: "project", ScopeID: f.projectID, IsEnabled: 1}} {
+		for _, row := range []any{&model.Role{RoleID: role, Name: role, IsEnabled: 1}, &model.RoleGrant{GrantID: grant, SubjectType: "user", SubjectID: user, RoleID: role, ScopeType: "project", ScopeID: f.projectID, IsEnabled: 1}} {
 			if err := f.db.Create(row).Error; err != nil {
 				t.Fatal(err)
 			}
@@ -666,13 +675,40 @@ func seedContainerApprovalActors(t *testing.T, f *controllerWorkerFixture, actor
 			entity any
 			column string
 			ids    []string
-		}{{&model.RolePermissionBinding{}, "role_id", roles}, {&model.RoleGrant{}, "grant_id", grants}, {&model.Role{}, "role_id", roles}, {&model.Permission{}, "permission_id", permissions}, {&model.User{}, "user_id", users}} {
-			if err := f.db.WithContext(ctx).Where(item.column+" IN ?", item.ids).Delete(item.entity).Error; err != nil {
-				t.Error(err)
+		}{{&model.RolePermissionBinding{}, "role_id", roles}, {&model.RoleGrant{}, "grant_id", grants}, {&model.Role{}, "role_id", roles}, {&model.Permission{}, "permission_id", permissions}, {&model.User{}, "user_id", ownedUsers}} {
+			if len(item.ids) > 0 {
+				if err := f.db.WithContext(ctx).Where(item.column+" IN ?", item.ids).Delete(item.entity).Error; err != nil {
+					t.Error(err)
+				}
 			}
 		}
 	})
 	return grants
+}
+
+// The whole-job and terminal suites share policy candidates, while their cleanup
+// belongs to different testing scopes. Reuse one existing enabled identity, never
+// insert a second user row: transactional retry authorization rejects ambiguity.
+// Only the scope that created an identity owns deletion. Disabled or ambiguous
+// users fail closed instead of being silently repaired by this fixture helper.
+func ensureContainerApprovalActor(ctx context.Context, db *gorm.DB, user string) (bool, error) {
+	if user == "" || len(user) > 64 || strings.TrimSpace(user) != user {
+		return false, fmt.Errorf("invalid disposable approval actor")
+	}
+	var existing []model.User
+	if err := db.WithContext(ctx).Select("user_id", "is_enabled").Where("user_id = ?", user).Limit(2).Find(&existing).Error; err != nil {
+		return false, err
+	}
+	if len(existing) == 1 && existing[0].IsEnabled == 1 {
+		return false, nil
+	}
+	if len(existing) != 0 {
+		return false, fmt.Errorf("disposable approval actor is disabled or ambiguous")
+	}
+	if err := db.WithContext(ctx).Create(&model.User{UserID: user, IsEnabled: 1}).Error; err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Counts are captured before each real SDK RPC, including failed attempts.

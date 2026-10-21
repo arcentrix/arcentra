@@ -20,7 +20,7 @@ func TestAtomicStatusRejectsLateAndDuplicateClaims(t *testing.T) {
 	}
 	sqlDB, _ := db.DB()
 	defer sqlDB.Close()
-	if err := db.AutoMigrate(&model.JobRun{}, &model.StepRun{}); err != nil {
+	if err := db.AutoMigrate(&model.PipelineRun{}, &model.JobRun{}, &model.StepRun{}); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()

@@ -52,6 +52,9 @@ func (Pipeline) TableName() string {
 
 // PipelineRun 流水线执行记录表
 type PipelineRun struct {
+	CopilotRerunIntentID string `gorm:"type:varchar(64);not null;default:''" json:"-"`
+	CopilotRerunGateID   string `gorm:"type:varchar(64);not null;default:''" json:"-"`
+
 	// Set only by verified manual creation; never serialized or backfilled.
 	InboxActorID string `gorm:"column:inbox_actor_id;type:varchar(64);not null;default:''" json:"-"`
 	InboxOrigin  int    `gorm:"column:inbox_origin;not null;default:0;index:idx_run_inbox_origin,priority:1" json:"-"`

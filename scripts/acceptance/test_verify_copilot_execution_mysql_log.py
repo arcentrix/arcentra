@@ -6,6 +6,56 @@ from verify_copilot_execution_mysql_log import (
 )
 
 
+def workflow_step(workflow, name):
+    """Find exactly one named step in this workflow's six-space steps layout."""
+    matches = list(re.finditer(r"^      - name: " + re.escape(name) + r"[ \t]*$",
+                               workflow, re.MULTILINE))
+    if len(matches) != 1:
+        raise ValueError(f"expected exactly one workflow step {name!r}, found {len(matches)}")
+    match = matches[0]
+    # Stop at any sibling (including an unnamed step) or enclosing job boundary,
+    # never at step-like text nested inside a run block. Ignore blank/comment lines.
+    boundary = re.compile(r"^ {0,6}[^ \t\r\n#]", re.MULTILINE).search(workflow, match.end())
+    end = boundary.start() if boundary else len(workflow)
+    return match.start(), workflow[match.start():end]
+
+
+class WorkflowStepExtractionTest(unittest.TestCase):
+    def test_adjacent_steps_do_not_contaminate_named_step(self):
+        before = "      - name: Previous MySQL gate\n        run: mysqladmin -uroot create previous\n\n"
+        wanted = ("      - name: Execution MySQL gate\n"
+                  "        run: |\n"
+                  "          mysqladmin -uroot create execution\n"
+                  "          # Nested step-like text must not end the run block.\n"
+                  "          - name: Example in run block\n\n")
+        for following in ("name: Terminal MySQL gate", "uses: example/action@revision",
+                          "id: terminal_mysql", "run: echo next"):
+            after = ("      - " + following + "\n"
+                     "        run: mysqladmin -uroot create terminal\n"
+                     "        env:\n"
+                     "          ARCENTRA_REQUIRE_COPILOT_EXECUTION_MYSQL: adjacent-only\n")
+            with self.subTest(following=following):
+                start, step = workflow_step(before + wanted + after, "Execution MySQL gate")
+                self.assertEqual(start, len(before))
+                self.assertEqual(step, wanted)
+                self.assertEqual(step.count("mysqladmin -uroot create"), 1)
+                self.assertNotIn("ARCENTRA_REQUIRE_COPILOT_EXECUTION_MYSQL", step)
+
+    def test_last_step_ends_at_job_boundary_or_end_of_file(self):
+        wanted = "      - name: Execution MySQL gate\n        run: echo execution\n"
+        for tail in ("", "  another_job:\n    steps:\n      - run: echo other\n"):
+            with self.subTest(tail=tail):
+                self.assertEqual(workflow_step(wanted + tail, "Execution MySQL gate"), (0, wanted))
+
+    def test_missing_or_duplicate_exact_step_fails(self):
+        wanted = "      - name: Execution MySQL gate\n        run: echo execution\n"
+        for bad in ("", wanted.replace("Execution MySQL gate", "Execution MySQL gate extra"),
+                    wanted.replace("      - name:", "          - name:"), wanted + wanted,
+                    wanted + "  another_job:\n    steps:\n" + wanted):
+            with self.subTest(workflow=bad), self.assertRaisesRegex(ValueError, "expected exactly one workflow step"):
+                workflow_step(bad, "Execution MySQL gate")
+
+
 class RequiredExecutionMySQLLogTest(unittest.TestCase):
     def valid(self):
         lines = ["=== RUN   " + name for name in required_names()]
@@ -68,12 +118,11 @@ class RequiredExecutionMySQLLogTest(unittest.TestCase):
     def test_workflow_required_gate_contract(self):
         root = Path(__file__).resolve().parents[2]
         workflow = (root / ".github/workflows/ci.yml").read_text()
-        history = workflow.index("      - name: Verify private Copilot history against disposable MySQL")
-        execution = workflow.index("      - name: Verify bound Copilot execution against disposable MySQL")
-        frontend = workflow.index("      - name: Check out pinned frontend acceptance client")
+        history, _ = workflow_step(workflow, "Verify private Copilot history against disposable MySQL")
+        execution, step = workflow_step(workflow, "Verify bound Copilot execution against disposable MySQL")
+        frontend, _ = workflow_step(workflow, "Check out pinned frontend acceptance client")
         self.assertLess(history, execution)
         self.assertLess(execution, frontend)
-        step = workflow[execution:frontend]
         for exact in (
             "timeout-minutes: 4", "set -o pipefail", "schema=arcentra_copilot_execution_test_ci",
             "ARCENTRA_REQUIRE_COPILOT_EXECUTION_MYSQL=1", "@tcp(127.0.0.1:13306)/$schema?",

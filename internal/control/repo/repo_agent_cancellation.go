@@ -30,7 +30,7 @@ func (r *JobRunRepo) CancelAgentJobIfCurrent(ctx context.Context, runID string, 
 			Where("job_run_id = ? AND status = ?", runID, current).First(&job).Error; err != nil {
 			return err
 		}
-		if job.JobRunID != runID {
+		if !emptyJobRerun(&job) || job.JobRunID != runID {
 			return fmt.Errorf("exact job identity is required")
 		}
 		if job.AgentID == "" && job.ClaimID != "" {
@@ -76,7 +76,12 @@ func (r *JobRunRepo) CommitCancellationReceiptWithSource(ctx context.Context, ex
 	if err := validateSourceReportUpdates(expected, updates, true); err != nil {
 		return err
 	}
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	run := func(tx *gorm.DB) error {
+		if !emptyJobRerun(expected) {
+			if _, _, _, err := lockCopilotRerunOperation(ctx, tx, generationIdentity(expected), executionLockRerunJobCancelReceipt); err != nil {
+				return err
+			}
+		}
 		if err := lockReportedJob(ctx, tx, expected); err != nil {
 			return err
 		}
@@ -89,7 +94,11 @@ func (r *JobRunRepo) CommitCancellationReceiptWithSource(ctx context.Context, ex
 		return reportedStatusResult(reportedJobQuery(tx.Model(&model.JobRun{}), expected).
 			Where("cancellation_claim_id = ?", expected.CancellationClaimID).
 			Updates(updates))
-	})
+	}
+	if !emptyJobRerun(expected) {
+		return executionTransaction(ctx, r.Database(), expected.JobRunID, run)
+	}
+	return r.Database().WithContext(ctx).Transaction(run)
 }
 
 // CommitCancellationReceipt 只确认原步骤或可验证的未开始尝试取消回执，不制造执行认领
@@ -104,12 +113,20 @@ func (r *StepRunRepo) CommitCancellationReceipt(ctx context.Context, expected *m
 	if claim != want {
 		return fmt.Errorf("original step or parent claim required")
 	}
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return executionTransaction(ctx, r.Database(), expected.JobRunID, func(tx *gorm.DB) error {
+		if hint, protected := rerunProtectedLocator(tx); protected {
+			if _, _, _, err := lockCopilotRerunOperation(ctx, tx, generationIdentity(&hint), executionLockRerunStepCancelReceipt); err != nil {
+				return err
+			}
+		}
 		var parent model.JobRun
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).
 			Where("job_run_id = ? AND pipeline_id = ? AND pipeline_run_id = ? AND agent_id = ?", expected.JobRunID, expected.PipelineID, expected.PipelineRunID, expected.AgentID).
 			Where("status = ? AND claim_id = ? AND cancellation_claim_id = ?", model.JobRunStatusCancelled, expected.CancellationClaimID, expected.CancellationClaimID).First(&parent).Error; err != nil {
 			return err
+		}
+		if !emptyJobRerun(&parent) && requireCopilotRerunOperationProof(tx, &parent, executionLockRerunStepCancelReceipt) != nil {
+			return ErrCopilotRerunUnsupported
 		}
 		if err := validateGenerationCancellationReceipt(ctx, tx, &parent, expected); err != nil {
 			return err

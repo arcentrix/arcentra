@@ -302,12 +302,8 @@ func (s *CopilotService) prepareScope(ctx context.Context, subject authz.Subject
 		}
 		return local, state.project, state.run, state, nil
 	}
-	project, err := s.project(ctx, subject, projectID)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	run, err := s.run(ctx, subject, project, in.RunID)
-	return s, project, run, nil, err
+	local, project, run, err := s.liveScope(ctx, subject, projectID, in.RunID, s.contextPrimary)
+	return local, project, run, nil, err
 }
 
 func (s *CopilotService) sourceSecretSnapshot(ctx context.Context, project *model.Project, run *model.PipelineRun) ([]string, error) {

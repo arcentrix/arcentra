@@ -37,8 +37,9 @@ type Config struct {
 	SourceContext     SourceContextConfig `mapstructure:"sourceContext" json:"-"`
 }
 
-// ExecutionConfig independently enables explicit, bound retry-plan votes only.
+// ExecutionConfig independently enables explicit, bound execution capabilities.
 type ExecutionConfig struct {
+	TerminalRerunEnabled bool `mapstructure:"terminalRerunEnabled" json:"terminalRerunEnabled"`
 	RetryApprovalEnabled bool `mapstructure:"retryApprovalEnabled" json:"retryApprovalEnabled"`
 }
 

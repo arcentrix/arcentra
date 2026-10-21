@@ -42,3 +42,6 @@ docs/*.md
 
 # Bound Copilot retry-approval execution operator guide
 !docs/copilot-bound-retry-execution.md
+
+# Terminal whole-job new-execution operator and user guide
+!docs/copilot-terminal-whole-job-execution.md

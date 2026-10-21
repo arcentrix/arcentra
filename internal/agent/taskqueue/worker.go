@@ -94,6 +94,13 @@ func StartWorker(
 	if grpcClient == nil || grpcClient.AgentClient == nil {
 		return nil, fmt.Errorf("agent must connect before starting workers")
 	}
+	var incarnation *rerunIncarnation
+	if agentConf.Agent.Sandbox.Containerd.TerminalRerunEnabled {
+		incarnation, err = newRerunIncarnation(1024)
+		if err != nil {
+			return nil, err
+		}
+	}
 	reportDirectory := filepath.Join(agentConf.Agent.WorkspaceDir, ".terminal-report-outbox")
 	reports, err := newTerminalOutbox(workerCtx, reportDirectory, agentConf.Agent.ID, agentConf.Grpc.ServerAddr)
 	if err != nil {
@@ -146,7 +153,7 @@ func StartWorker(
 		return nil, taskqueue.WrapStartupError("create task queue", err)
 	}
 
-	handler := newWorkerHandler(workerCtx, agentConf, grpcClient, execManager, reports)
+	handler := newWorkerHandler(workerCtx, agentConf, grpcClient, execManager, reports, incarnation)
 	handler = observeAcceptanceWorkerHandler(workerCtx, handler)
 
 	controlOptions := append([]nova.QueueOption{}, options...)
@@ -181,7 +188,7 @@ func StartWorker(
 	}
 	runCtx, cancelReports := context.WithCancel(workerCtx)
 	runCtx = observeAcceptanceWorkerReplay(runCtx)
-	result := &workerQueues{offline: offline, TaskQueue: queue, control: control, reports: reports, cancelReports: cancelReports, reportsDone: make(chan struct{})}
+	result := &workerQueues{incarnation: incarnation, offline: offline, TaskQueue: queue, control: control, reports: reports, cancelReports: cancelReports, reportsDone: make(chan struct{})}
 	started = true
 	safe.Go(func() {
 		defer close(result.reportsDone)
@@ -214,7 +221,8 @@ func StartWorker(
 }
 
 type workerQueues struct {
-	offline *durableOfflineRuntime
+	incarnation *rerunIncarnation
+	offline     *durableOfflineRuntime
 	nova.TaskQueue
 	control       nova.TaskQueue
 	reports       *terminalOutbox
@@ -454,6 +462,25 @@ func CancelJobRun(jobRunID string) bool {
 
 // executeJobRun 顺序执行作业步骤，完整报告未执行步骤与作业的终态
 func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper, execManager *executor.Manager, payload *taskqueue.JobRunTaskPayload) error {
+	if payload != nil && payload.SourceExpectation != nil {
+		return grpcstatus.Error(codes.FailedPrecondition, "protected rerun requires dedicated admission")
+	}
+	return executeJobRunBody(ctx, agentConf, grpcClient, execManager, payload, nil)
+}
+
+// executeJobRunBody preserves the ordinary execution/report ordering. Only a
+// manager-owned, consumed-once token may skip the generic first claim.
+func executeJobRunBody(ctx context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper, execManager *executor.Manager, payload *taskqueue.JobRunTaskPayload, token *rerunStartToken) error {
+	if token != nil {
+		claim, err := token.consume(payload)
+		if err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, receiptJobClaimContextKey{}, receiptJobClaim{runID: payload.JobRunID, claimID: claim})
+	} else if payload != nil && payload.SourceExpectation != nil {
+		return errRerunIncarnationInvalid
+	}
+
 	ctx = withTerminalSecrets(ctx, agentConf, payload, nil)
 	if payload != nil {
 		if pending, ok := pendingJobReports.Load(receiptKey(ctx, "job", payload.JobRunID)); ok {
@@ -499,16 +526,24 @@ func executeJobRun(ctx context.Context, agentConf *config.AgentConfig, grpcClien
 	storageMu.RLock()
 	st, reference := storageInstance, storageReference
 	storageMu.RUnlock()
+	if token != nil {
+		st, reference = nil, taskqueue.ArtifactReference{}
+		if token.artifacts != nil {
+			st, reference = token.artifacts.instance, token.artifacts.reference
+		}
+	}
 	artifacts := &artifactExecutor{job: payload, storage: st, reference: reference, uploaded: make(map[string]string)}
 	start := time.Now()
 	// 即使控制消息先到，也先确认原作业认领；已终态且未认领的任务不能产生收据
-	if err := reportJobRunStatus(ctx, grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_BUSY, int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING), "", start, 0, artifacts); err != nil {
-		// 确定拒绝且即将消费的任务没有执行权，不保留无用认领；不确定响应仍复用原身份
-		switch grpcstatus.Code(err) {
-		case codes.FailedPrecondition, codes.PermissionDenied, codes.InvalidArgument, codes.NotFound:
-			completeExecutionClaim(ctx, "job", payload.JobRunID)
+	if token == nil {
+		if err := reportJobRunStatus(ctx, grpcClient, agentConf, payload.JobRunID, agentv1.AgentStatus_AGENT_STATUS_BUSY, int32(steprunv1.StepRunStatus_STEP_RUN_STATUS_RUNNING), "", start, 0, artifacts); err != nil {
+			// 确定拒绝且即将消费的任务没有执行权，不保留无用认领；不确定响应仍复用原身份
+			switch grpcstatus.Code(err) {
+			case codes.FailedPrecondition, codes.PermissionDenied, codes.InvalidArgument, codes.NotFound:
+				completeExecutionClaim(ctx, "job", payload.JobRunID)
+			}
+			return fmt.Errorf("claim job run: %w", err)
 		}
-		return fmt.Errorf("claim job run: %w", err)
 	}
 	jobErr := localRuntimeErr
 	if jobErr == nil {
@@ -891,6 +926,9 @@ func ValidateExecutionConfig(conf *config.AgentConfig) error {
 		return fmt.Errorf("agent configuration is required")
 	}
 	mode := strings.ToLower(strings.TrimSpace(conf.Agent.Mode))
+	if conf.Agent.Sandbox.Containerd.TerminalRerunEnabled && (mode != "sandbox" || !conf.Agent.Sandbox.Enable || !taskqueue.TerminalRerunAllowed(conf.Agent.Sandbox.Containerd.Policy)) {
+		return fmt.Errorf("terminal whole-job new execution is not accepted or configured")
+	}
 	if mode == "sandbox" && conf.Agent.Sandbox.Enable {
 		if conf.Agent.Sandbox.Runtime != "containerd" {
 			return fmt.Errorf("sandbox runtime must be containerd")

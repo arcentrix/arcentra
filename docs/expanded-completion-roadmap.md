@@ -13,7 +13,7 @@ configuration and require their own acceptance.
 | Inbox and notifications | Durable personal inbox/read state, trusted event production and delivery history | Designed; implementation pending |
 | Visual CI | Real DSL-backed graph editing, validation, advanced-field preservation/raw-mode fallback | Designed; implementation pending |
 | Provider polling | Extend beyond current opt-in GitLab MR snapshots with provider-specific durable cursor semantics | Pending |
-| Copilot | Authorized durable conversation history and explicit bounded action plans with approval | Pending; current capability remains read-only analysis |
+| Copilot | Authorized durable conversation history and explicit bounded action plans with approval | Private history and separately gated retry-approval execution implemented; [terminal whole-job new-execution wiring](copilot-terminal-whole-job-execution.md) implemented conditionally, release gate closed and operator settings default off; hosted acceptance pending |
 | Network, OCI, parallel containers | Explicit egress/build/push policy and independent parallel job identities | Pending design and capability-specific acceptance; offline constrained runtime remains supported |
 | Kubernetes delivery | Scoped YAML/Helm plans and explicit, auditable rollback | Pending; current existing-Deployment container release remains supported |
 | Recovery and HA | Durable leases/fencing, ownership-safe adoption and explicitly supported resume boundaries | Pending; no transparent or exactly-once external-effect guarantee |

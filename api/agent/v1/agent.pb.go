@@ -735,6 +735,7 @@ func (x *TaskStatus) GetMetrics() map[string]string {
 // RuntimeCapabilities reports authenticated Agent readiness, independently of editable labels.
 type RuntimeCapabilities struct {
 	state                               protoimpl.MessageState `protogen:"open.v1"`
+	CopilotWholeJobRerunPreparationV1   bool                   `protobuf:"varint,22,opt,name=copilot_whole_job_rerun_preparation_v1,json=copilotWholeJobRerunPreparationV1,proto3" json:"copilot_whole_job_rerun_preparation_v1,omitempty"`       // Explicit opt-in, accepted runtime, fresh worker incarnation only
 	ContainerdFailedStepRetryApprovalV1 bool                   `protobuf:"varint,21,opt,name=containerd_failed_step_retry_approval_v1,json=containerdFailedStepRetryApprovalV1,proto3" json:"containerd_failed_step_retry_approval_v1,omitempty"` // Independent acceptance, operator policy and live step readiness required
 	ContainerdRetryApprovalV1           bool                   `protobuf:"varint,4,opt,name=containerd_retry_approval_v1,json=containerdRetryApprovalV1,proto3" json:"containerd_retry_approval_v1,omitempty"`                                    // Durable exact-content retry approval protocol readiness
 	ContainerdOfflineV1                 bool                   `protobuf:"varint,1,opt,name=containerd_offline_v1,json=containerdOfflineV1,proto3" json:"containerd_offline_v1,omitempty"`
@@ -773,6 +774,13 @@ func (x *RuntimeCapabilities) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RuntimeCapabilities.ProtoReflect.Descriptor instead.
 func (*RuntimeCapabilities) Descriptor() ([]byte, []int) {
 	return file_agent_v1_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RuntimeCapabilities) GetCopilotWholeJobRerunPreparationV1() bool {
+	if x != nil {
+		return x.CopilotWholeJobRerunPreparationV1
+	}
+	return false
 }
 
 func (x *RuntimeCapabilities) GetContainerdFailedStepRetryApprovalV1() bool {
@@ -3031,9 +3039,11 @@ type GetOrRecordJobInputsRequest struct {
 	RuntimeBindingDigest string                 `protobuf:"bytes,6,opt,name=runtime_binding_digest,json=runtimeBindingDigest,proto3" json:"runtime_binding_digest,omitempty"`
 	SourceBindingDigest  string                 `protobuf:"bytes,7,opt,name=source_binding_digest,json=sourceBindingDigest,proto3" json:"source_binding_digest,omitempty"`
 	// Empty reads the current manifest; nonempty records canonical v1 JSON once.
-	ManifestJson  string `protobuf:"bytes,8,opt,name=manifest_json,json=manifestJson,proto3" json:"manifest_json,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ManifestJson string `protobuf:"bytes,8,opt,name=manifest_json,json=manifestJson,proto3" json:"manifest_json,omitempty"`
+	// Required only for sealed rerun expectations; includes the exact claim identity.
+	SourceExpectationDigest string `protobuf:"bytes,9,opt,name=source_expectation_digest,json=sourceExpectationDigest,proto3" json:"source_expectation_digest,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *GetOrRecordJobInputsRequest) Reset() {
@@ -3122,13 +3132,23 @@ func (x *GetOrRecordJobInputsRequest) GetManifestJson() string {
 	return ""
 }
 
+func (x *GetOrRecordJobInputsRequest) GetSourceExpectationDigest() string {
+	if x != nil {
+		return x.SourceExpectationDigest
+	}
+	return ""
+}
+
 type GetOrRecordJobInputsResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	State          string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"` // unknown or pinned; legacy terminal observations are never promoted
 	ManifestJson   string                 `protobuf:"bytes,2,opt,name=manifest_json,json=manifestJson,proto3" json:"manifest_json,omitempty"`
 	ManifestDigest string                 `protobuf:"bytes,3,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Expected checkout is separate from an observed/pinned manifest.
+	SourceExpectationJson   string `protobuf:"bytes,4,opt,name=source_expectation_json,json=sourceExpectationJson,proto3" json:"source_expectation_json,omitempty"`
+	SourceExpectationDigest string `protobuf:"bytes,5,opt,name=source_expectation_digest,json=sourceExpectationDigest,proto3" json:"source_expectation_digest,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *GetOrRecordJobInputsResponse) Reset() {
@@ -3178,6 +3198,20 @@ func (x *GetOrRecordJobInputsResponse) GetManifestJson() string {
 func (x *GetOrRecordJobInputsResponse) GetManifestDigest() string {
 	if x != nil {
 		return x.ManifestDigest
+	}
+	return ""
+}
+
+func (x *GetOrRecordJobInputsResponse) GetSourceExpectationJson() string {
+	if x != nil {
+		return x.SourceExpectationJson
+	}
+	return ""
+}
+
+func (x *GetOrRecordJobInputsResponse) GetSourceExpectationDigest() string {
+	if x != nil {
+		return x.SourceExpectationDigest
 	}
 	return ""
 }
@@ -3481,6 +3515,327 @@ func (x *ReconcileStepAttemptResponse) GetExecutionAllowed() bool {
 	return false
 }
 
+// Never log these messages: generated String includes private wire fields.
+type CopilotRerunClaimReference struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	PipelineId    string                 `protobuf:"bytes,2,opt,name=pipeline_id,json=pipelineId,proto3" json:"pipeline_id,omitempty"`
+	RunId         string                 `protobuf:"bytes,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	JobRunId      string                 `protobuf:"bytes,4,opt,name=job_run_id,json=jobRunId,proto3" json:"job_run_id,omitempty"`
+	GateId        string                 `protobuf:"bytes,5,opt,name=gate_id,json=gateId,proto3" json:"gate_id,omitempty"`
+	ScheduleId    string                 `protobuf:"bytes,6,opt,name=schedule_id,json=scheduleId,proto3" json:"schedule_id,omitempty"`
+	SealId        string                 `protobuf:"bytes,7,opt,name=seal_id,json=sealId,proto3" json:"seal_id,omitempty"`
+	SealDigest    string                 `protobuf:"bytes,8,opt,name=seal_digest,json=sealDigest,proto3" json:"seal_digest,omitempty"`
+	PayloadDigest string                 `protobuf:"bytes,9,opt,name=payload_digest,json=payloadDigest,proto3" json:"payload_digest,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CopilotRerunClaimReference) Reset() {
+	*x = CopilotRerunClaimReference{}
+	mi := &file_agent_v1_agent_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CopilotRerunClaimReference) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CopilotRerunClaimReference) ProtoMessage() {}
+
+func (x *CopilotRerunClaimReference) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CopilotRerunClaimReference.ProtoReflect.Descriptor instead.
+func (*CopilotRerunClaimReference) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *CopilotRerunClaimReference) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *CopilotRerunClaimReference) GetPipelineId() string {
+	if x != nil {
+		return x.PipelineId
+	}
+	return ""
+}
+
+func (x *CopilotRerunClaimReference) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *CopilotRerunClaimReference) GetJobRunId() string {
+	if x != nil {
+		return x.JobRunId
+	}
+	return ""
+}
+
+func (x *CopilotRerunClaimReference) GetGateId() string {
+	if x != nil {
+		return x.GateId
+	}
+	return ""
+}
+
+func (x *CopilotRerunClaimReference) GetScheduleId() string {
+	if x != nil {
+		return x.ScheduleId
+	}
+	return ""
+}
+
+func (x *CopilotRerunClaimReference) GetSealId() string {
+	if x != nil {
+		return x.SealId
+	}
+	return ""
+}
+
+func (x *CopilotRerunClaimReference) GetSealDigest() string {
+	if x != nil {
+		return x.SealDigest
+	}
+	return ""
+}
+
+func (x *CopilotRerunClaimReference) GetPayloadDigest() string {
+	if x != nil {
+		return x.PayloadDigest
+	}
+	return ""
+}
+
+type ClaimAndFetchCopilotRerunRequest struct {
+	state                      protoimpl.MessageState      `protogen:"open.v1"`
+	Reference                  *CopilotRerunClaimReference `protobuf:"bytes,1,opt,name=reference,proto3" json:"reference,omitempty"`
+	ClaimId                    string                      `protobuf:"bytes,2,opt,name=claim_id,json=claimId,proto3" json:"claim_id,omitempty"`
+	AdmissionNonce             []byte                      `protobuf:"bytes,3,opt,name=admission_nonce,json=admissionNonce,proto3" json:"admission_nonce,omitempty"`
+	ArtifactStorageId          string                      `protobuf:"bytes,4,opt,name=artifact_storage_id,json=artifactStorageId,proto3" json:"artifact_storage_id,omitempty"`
+	ArtifactStorageFingerprint string                      `protobuf:"bytes,5,opt,name=artifact_storage_fingerprint,json=artifactStorageFingerprint,proto3" json:"artifact_storage_fingerprint,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
+}
+
+func (x *ClaimAndFetchCopilotRerunRequest) Reset() {
+	*x = ClaimAndFetchCopilotRerunRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClaimAndFetchCopilotRerunRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClaimAndFetchCopilotRerunRequest) ProtoMessage() {}
+
+func (x *ClaimAndFetchCopilotRerunRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClaimAndFetchCopilotRerunRequest.ProtoReflect.Descriptor instead.
+func (*ClaimAndFetchCopilotRerunRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *ClaimAndFetchCopilotRerunRequest) GetReference() *CopilotRerunClaimReference {
+	if x != nil {
+		return x.Reference
+	}
+	return nil
+}
+
+func (x *ClaimAndFetchCopilotRerunRequest) GetClaimId() string {
+	if x != nil {
+		return x.ClaimId
+	}
+	return ""
+}
+
+func (x *ClaimAndFetchCopilotRerunRequest) GetAdmissionNonce() []byte {
+	if x != nil {
+		return x.AdmissionNonce
+	}
+	return nil
+}
+
+func (x *ClaimAndFetchCopilotRerunRequest) GetArtifactStorageId() string {
+	if x != nil {
+		return x.ArtifactStorageId
+	}
+	return ""
+}
+
+func (x *ClaimAndFetchCopilotRerunRequest) GetArtifactStorageFingerprint() string {
+	if x != nil {
+		return x.ArtifactStorageFingerprint
+	}
+	return ""
+}
+
+type CopilotRerunClaimReceipt struct {
+	state                      protoimpl.MessageState      `protogen:"open.v1"`
+	Reference                  *CopilotRerunClaimReference `protobuf:"bytes,1,opt,name=reference,proto3" json:"reference,omitempty"`
+	ClaimId                    string                      `protobuf:"bytes,2,opt,name=claim_id,json=claimId,proto3" json:"claim_id,omitempty"`
+	ClaimedAtUnixMilli         int64                       `protobuf:"varint,3,opt,name=claimed_at_unix_milli,json=claimedAtUnixMilli,proto3" json:"claimed_at_unix_milli,omitempty"`
+	ArtifactStorageId          string                      `protobuf:"bytes,4,opt,name=artifact_storage_id,json=artifactStorageId,proto3" json:"artifact_storage_id,omitempty"`
+	ArtifactStorageFingerprint string                      `protobuf:"bytes,5,opt,name=artifact_storage_fingerprint,json=artifactStorageFingerprint,proto3" json:"artifact_storage_fingerprint,omitempty"`
+	ArtifactStorageType        string                      `protobuf:"bytes,6,opt,name=artifact_storage_type,json=artifactStorageType,proto3" json:"artifact_storage_type,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
+}
+
+func (x *CopilotRerunClaimReceipt) Reset() {
+	*x = CopilotRerunClaimReceipt{}
+	mi := &file_agent_v1_agent_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CopilotRerunClaimReceipt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CopilotRerunClaimReceipt) ProtoMessage() {}
+
+func (x *CopilotRerunClaimReceipt) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CopilotRerunClaimReceipt.ProtoReflect.Descriptor instead.
+func (*CopilotRerunClaimReceipt) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *CopilotRerunClaimReceipt) GetReference() *CopilotRerunClaimReference {
+	if x != nil {
+		return x.Reference
+	}
+	return nil
+}
+
+func (x *CopilotRerunClaimReceipt) GetClaimId() string {
+	if x != nil {
+		return x.ClaimId
+	}
+	return ""
+}
+
+func (x *CopilotRerunClaimReceipt) GetClaimedAtUnixMilli() int64 {
+	if x != nil {
+		return x.ClaimedAtUnixMilli
+	}
+	return 0
+}
+
+func (x *CopilotRerunClaimReceipt) GetArtifactStorageId() string {
+	if x != nil {
+		return x.ArtifactStorageId
+	}
+	return ""
+}
+
+func (x *CopilotRerunClaimReceipt) GetArtifactStorageFingerprint() string {
+	if x != nil {
+		return x.ArtifactStorageFingerprint
+	}
+	return ""
+}
+
+func (x *CopilotRerunClaimReceipt) GetArtifactStorageType() string {
+	if x != nil {
+		return x.ArtifactStorageType
+	}
+	return ""
+}
+
+type ClaimAndFetchCopilotRerunResponse struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	Receipt       *CopilotRerunClaimReceipt `protobuf:"bytes,1,opt,name=receipt,proto3" json:"receipt,omitempty"`
+	PayloadJson   []byte                    `protobuf:"bytes,2,opt,name=payload_json,json=payloadJson,proto3" json:"payload_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClaimAndFetchCopilotRerunResponse) Reset() {
+	*x = ClaimAndFetchCopilotRerunResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClaimAndFetchCopilotRerunResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClaimAndFetchCopilotRerunResponse) ProtoMessage() {}
+
+func (x *ClaimAndFetchCopilotRerunResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClaimAndFetchCopilotRerunResponse.ProtoReflect.Descriptor instead.
+func (*ClaimAndFetchCopilotRerunResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *ClaimAndFetchCopilotRerunResponse) GetReceipt() *CopilotRerunClaimReceipt {
+	if x != nil {
+		return x.Receipt
+	}
+	return nil
+}
+
+func (x *ClaimAndFetchCopilotRerunResponse) GetPayloadJson() []byte {
+	if x != nil {
+		return x.PayloadJson
+	}
+	return nil
+}
+
 var File_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_agent_v1_agent_proto_rawDesc = "" +
@@ -3530,8 +3885,9 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\ametrics\x18\x06 \x03(\v2!.agent.v1.TaskStatus.MetricsEntryR\ametrics\x1a:\n" +
 	"\fMetricsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x90\x03\n" +
-	"\x13RuntimeCapabilities\x12U\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe3\x03\n" +
+	"\x13RuntimeCapabilities\x12Q\n" +
+	"&copilot_whole_job_rerun_preparation_v1\x18\x16 \x01(\bR!copilotWholeJobRerunPreparationV1\x12U\n" +
 	"(containerd_failed_step_retry_approval_v1\x18\x15 \x01(\bR#containerdFailedStepRetryApprovalV1\x12?\n" +
 	"\x1ccontainerd_retry_approval_v1\x18\x04 \x01(\bR\x19containerdRetryApprovalV1\x122\n" +
 	"\x15containerd_offline_v1\x18\x01 \x01(\bR\x13containerdOfflineV1\x12%\n" +
@@ -3761,7 +4117,7 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x16runtime_binding_digest\x18\x04 \x01(\tR\x14runtimeBindingDigest\"Q\n" +
 	"\x1bInspectJobExecutionResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\x05R\x06status\x12\x1a\n" +
-	"\bterminal\x18\x02 \x01(\bR\bterminal\"\xda\x02\n" +
+	"\bterminal\x18\x02 \x01(\bR\bterminal\"\x96\x03\n" +
 	"\x1bGetOrRecordJobInputsRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1f\n" +
 	"\vpipeline_id\x18\x02 \x01(\tR\n" +
@@ -3772,11 +4128,14 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x11original_claim_id\x18\x05 \x01(\tR\x0foriginalClaimId\x124\n" +
 	"\x16runtime_binding_digest\x18\x06 \x01(\tR\x14runtimeBindingDigest\x122\n" +
 	"\x15source_binding_digest\x18\a \x01(\tR\x13sourceBindingDigest\x12#\n" +
-	"\rmanifest_json\x18\b \x01(\tR\fmanifestJson\"\x82\x01\n" +
+	"\rmanifest_json\x18\b \x01(\tR\fmanifestJson\x12:\n" +
+	"\x19source_expectation_digest\x18\t \x01(\tR\x17sourceExpectationDigest\"\xf6\x01\n" +
 	"\x1cGetOrRecordJobInputsResponse\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\tR\x05state\x12#\n" +
 	"\rmanifest_json\x18\x02 \x01(\tR\fmanifestJson\x12'\n" +
-	"\x0fmanifest_digest\x18\x03 \x01(\tR\x0emanifestDigest\"c\n" +
+	"\x0fmanifest_digest\x18\x03 \x01(\tR\x0emanifestDigest\x126\n" +
+	"\x17source_expectation_json\x18\x04 \x01(\tR\x15sourceExpectationJson\x12:\n" +
+	"\x19source_expectation_digest\x18\x05 \x01(\tR\x17sourceExpectationDigest\"c\n" +
 	"\x1dReconcileJobGenerationRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12'\n" +
 	"\x0ftransition_json\x18\x02 \x01(\tR\x0etransitionJson\"I\n" +
@@ -3792,7 +4151,37 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x0ftransition_json\x18\x02 \x01(\tR\x0etransitionJson\"r\n" +
 	"\x1cReconcileStepAttemptResponse\x12%\n" +
 	"\x0eadmission_json\x18\x01 \x01(\tR\radmissionJson\x12+\n" +
-	"\x11execution_allowed\x18\x02 \x01(\bR\x10executionAllowed*Q\n" +
+	"\x11execution_allowed\x18\x02 \x01(\bR\x10executionAllowed\"\xa8\x02\n" +
+	"\x1aCopilotRerunClaimReference\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1f\n" +
+	"\vpipeline_id\x18\x02 \x01(\tR\n" +
+	"pipelineId\x12\x15\n" +
+	"\x06run_id\x18\x03 \x01(\tR\x05runId\x12\x1c\n" +
+	"\n" +
+	"job_run_id\x18\x04 \x01(\tR\bjobRunId\x12\x17\n" +
+	"\agate_id\x18\x05 \x01(\tR\x06gateId\x12\x1f\n" +
+	"\vschedule_id\x18\x06 \x01(\tR\n" +
+	"scheduleId\x12\x17\n" +
+	"\aseal_id\x18\a \x01(\tR\x06sealId\x12\x1f\n" +
+	"\vseal_digest\x18\b \x01(\tR\n" +
+	"sealDigest\x12%\n" +
+	"\x0epayload_digest\x18\t \x01(\tR\rpayloadDigest\"\x9c\x02\n" +
+	" ClaimAndFetchCopilotRerunRequest\x12B\n" +
+	"\treference\x18\x01 \x01(\v2$.agent.v1.CopilotRerunClaimReferenceR\treference\x12\x19\n" +
+	"\bclaim_id\x18\x02 \x01(\tR\aclaimId\x12'\n" +
+	"\x0fadmission_nonce\x18\x03 \x01(\fR\x0eadmissionNonce\x12.\n" +
+	"\x13artifact_storage_id\x18\x04 \x01(\tR\x11artifactStorageId\x12@\n" +
+	"\x1cartifact_storage_fingerprint\x18\x05 \x01(\tR\x1aartifactStorageFingerprint\"\xd2\x02\n" +
+	"\x18CopilotRerunClaimReceipt\x12B\n" +
+	"\treference\x18\x01 \x01(\v2$.agent.v1.CopilotRerunClaimReferenceR\treference\x12\x19\n" +
+	"\bclaim_id\x18\x02 \x01(\tR\aclaimId\x121\n" +
+	"\x15claimed_at_unix_milli\x18\x03 \x01(\x03R\x12claimedAtUnixMilli\x12.\n" +
+	"\x13artifact_storage_id\x18\x04 \x01(\tR\x11artifactStorageId\x12@\n" +
+	"\x1cartifact_storage_fingerprint\x18\x05 \x01(\tR\x1aartifactStorageFingerprint\x122\n" +
+	"\x15artifact_storage_type\x18\x06 \x01(\tR\x13artifactStorageType\"\x84\x01\n" +
+	"!ClaimAndFetchCopilotRerunResponse\x12<\n" +
+	"\areceipt\x18\x01 \x01(\v2\".agent.v1.CopilotRerunClaimReceiptR\areceipt\x12!\n" +
+	"\fpayload_json\x18\x02 \x01(\fR\vpayloadJson*Q\n" +
 	"\tAckStatus\x12\x1a\n" +
 	"\x16ACK_STATUS_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rACK_STATUS_OK\x10\x01\x12\x15\n" +
@@ -3807,9 +4196,9 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\x1bPLUGIN_LOCATION_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16PLUGIN_LOCATION_SERVER\x10\x01\x12\x1b\n" +
 	"\x17PLUGIN_LOCATION_STORAGE\x10\x02\x12\x1c\n" +
-	"\x18PLUGIN_LOCATION_REGISTRY\x10\x032\xd9\n" +
-	"\n" +
+	"\x18PLUGIN_LOCATION_REGISTRY\x10\x032\xcf\v\n" +
 	"\fAgentService\x12t\n" +
+	"\x19ClaimAndFetchCopilotRerun\x12*.agent.v1.ClaimAndFetchCopilotRerunRequest\x1a+.agent.v1.ClaimAndFetchCopilotRerunResponse\x12t\n" +
 	"\x19ReconcileJobRetryApproval\x12*.agent.v1.ReconcileJobRetryApprovalRequest\x1a+.agent.v1.ReconcileJobRetryApprovalResponse\x12m\n" +
 	"\x16ReconcileJobGeneration\x12'.agent.v1.ReconcileJobGenerationRequest\x1a(.agent.v1.ReconcileJobGenerationResponse\"\x00\x12g\n" +
 	"\x14ReconcileStepAttempt\x12%.agent.v1.ReconcileStepAttemptRequest\x1a&.agent.v1.ReconcileStepAttemptResponse\"\x00\x12g\n" +
@@ -3842,7 +4231,7 @@ func file_agent_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_agent_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
+var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 58)
 var file_agent_v1_agent_proto_goTypes = []any{
 	(AckStatus)(0),                            // 0: agent.v1.AckStatus
 	(AgentStatus)(0),                          // 1: agent.v1.AgentStatus
@@ -3891,18 +4280,22 @@ var file_agent_v1_agent_proto_goTypes = []any{
 	(*ReconcileJobRetryApprovalResponse)(nil), // 44: agent.v1.ReconcileJobRetryApprovalResponse
 	(*ReconcileStepAttemptRequest)(nil),       // 45: agent.v1.ReconcileStepAttemptRequest
 	(*ReconcileStepAttemptResponse)(nil),      // 46: agent.v1.ReconcileStepAttemptResponse
-	nil,                                       // 47: agent.v1.TaskStatus.MetricsEntry
-	nil,                                       // 48: agent.v1.RegisterRequest.LabelsEntry
-	nil,                                       // 49: agent.v1.RegisterResponse.LabelsEntry
-	nil,                                       // 50: agent.v1.StepRun.EnvEntry
-	nil,                                       // 51: agent.v1.StepRun.SecretsEntry
-	nil,                                       // 52: agent.v1.ReportStepRunStatusRequest.MetricsEntry
-	nil,                                       // 53: agent.v1.UpdateLabelsRequest.LabelsEntry
-	nil,                                       // 54: agent.v1.UpdateLabelsResponse.LabelsEntry
-	nil,                                       // 55: agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
-	nil,                                       // 56: agent.v1.AgentSelector.MatchLabelsEntry
-	(v1.StepRunStatus)(0),                     // 57: steprun.v1.StepRunStatus
-	(*structpb.Struct)(nil),                   // 58: google.protobuf.Struct
+	(*CopilotRerunClaimReference)(nil),        // 47: agent.v1.CopilotRerunClaimReference
+	(*ClaimAndFetchCopilotRerunRequest)(nil),  // 48: agent.v1.ClaimAndFetchCopilotRerunRequest
+	(*CopilotRerunClaimReceipt)(nil),          // 49: agent.v1.CopilotRerunClaimReceipt
+	(*ClaimAndFetchCopilotRerunResponse)(nil), // 50: agent.v1.ClaimAndFetchCopilotRerunResponse
+	nil,                     // 51: agent.v1.TaskStatus.MetricsEntry
+	nil,                     // 52: agent.v1.RegisterRequest.LabelsEntry
+	nil,                     // 53: agent.v1.RegisterResponse.LabelsEntry
+	nil,                     // 54: agent.v1.StepRun.EnvEntry
+	nil,                     // 55: agent.v1.StepRun.SecretsEntry
+	nil,                     // 56: agent.v1.ReportStepRunStatusRequest.MetricsEntry
+	nil,                     // 57: agent.v1.UpdateLabelsRequest.LabelsEntry
+	nil,                     // 58: agent.v1.UpdateLabelsResponse.LabelsEntry
+	nil,                     // 59: agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
+	nil,                     // 60: agent.v1.AgentSelector.MatchLabelsEntry
+	(v1.StepRunStatus)(0),   // 61: steprun.v1.StepRunStatus
+	(*structpb.Struct)(nil), // 62: google.protobuf.Struct
 }
 var file_agent_v1_agent_proto_depIdxs = []int32{
 	5,  // 0: agent.v1.ConnectRequest.heartbeat:type_name -> agent.v1.ConnectHeartbeat
@@ -3914,66 +4307,71 @@ var file_agent_v1_agent_proto_depIdxs = []int32{
 	10, // 6: agent.v1.ConnectHeartbeat.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
 	20, // 7: agent.v1.TaskDispatch.step_runs:type_name -> agent.v1.StepRun
 	0,  // 8: agent.v1.TaskAck.status:type_name -> agent.v1.AckStatus
-	57, // 9: agent.v1.TaskStatus.status:type_name -> steprun.v1.StepRunStatus
-	47, // 10: agent.v1.TaskStatus.metrics:type_name -> agent.v1.TaskStatus.MetricsEntry
+	61, // 9: agent.v1.TaskStatus.status:type_name -> steprun.v1.StepRunStatus
+	51, // 10: agent.v1.TaskStatus.metrics:type_name -> agent.v1.TaskStatus.MetricsEntry
 	1,  // 11: agent.v1.HeartbeatRequest.status:type_name -> agent.v1.AgentStatus
 	10, // 12: agent.v1.HeartbeatRequest.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
-	48, // 13: agent.v1.RegisterRequest.labels:type_name -> agent.v1.RegisterRequest.LabelsEntry
+	52, // 13: agent.v1.RegisterRequest.labels:type_name -> agent.v1.RegisterRequest.LabelsEntry
 	10, // 14: agent.v1.RegisterRequest.runtime_capabilities:type_name -> agent.v1.RuntimeCapabilities
-	49, // 15: agent.v1.RegisterResponse.labels:type_name -> agent.v1.RegisterResponse.LabelsEntry
+	53, // 15: agent.v1.RegisterResponse.labels:type_name -> agent.v1.RegisterResponse.LabelsEntry
 	15, // 16: agent.v1.RegisterResponse.storage:type_name -> agent.v1.StorageConfig
 	20, // 17: agent.v1.FetchStepRunResponse.step_runs:type_name -> agent.v1.StepRun
-	58, // 18: agent.v1.StepRun.args:type_name -> google.protobuf.Struct
-	50, // 19: agent.v1.StepRun.env:type_name -> agent.v1.StepRun.EnvEntry
-	51, // 20: agent.v1.StepRun.secrets:type_name -> agent.v1.StepRun.SecretsEntry
+	62, // 18: agent.v1.StepRun.args:type_name -> google.protobuf.Struct
+	54, // 19: agent.v1.StepRun.env:type_name -> agent.v1.StepRun.EnvEntry
+	55, // 20: agent.v1.StepRun.secrets:type_name -> agent.v1.StepRun.SecretsEntry
 	21, // 21: agent.v1.StepRun.artifacts:type_name -> agent.v1.ArtifactConfig
 	34, // 22: agent.v1.StepRun.agent_selector:type_name -> agent.v1.AgentSelector
 	36, // 23: agent.v1.StepRun.plugins:type_name -> agent.v1.PluginInfo
-	57, // 24: agent.v1.ReportStepRunStatusRequest.status:type_name -> steprun.v1.StepRunStatus
-	52, // 25: agent.v1.ReportStepRunStatusRequest.metrics:type_name -> agent.v1.ReportStepRunStatusRequest.MetricsEntry
-	53, // 26: agent.v1.UpdateLabelsRequest.labels:type_name -> agent.v1.UpdateLabelsRequest.LabelsEntry
-	54, // 27: agent.v1.UpdateLabelsResponse.labels:type_name -> agent.v1.UpdateLabelsResponse.LabelsEntry
-	55, // 28: agent.v1.ReportJobRunStatusRequest.artifact_uris:type_name -> agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
+	61, // 24: agent.v1.ReportStepRunStatusRequest.status:type_name -> steprun.v1.StepRunStatus
+	56, // 25: agent.v1.ReportStepRunStatusRequest.metrics:type_name -> agent.v1.ReportStepRunStatusRequest.MetricsEntry
+	57, // 26: agent.v1.UpdateLabelsRequest.labels:type_name -> agent.v1.UpdateLabelsRequest.LabelsEntry
+	58, // 27: agent.v1.UpdateLabelsResponse.labels:type_name -> agent.v1.UpdateLabelsResponse.LabelsEntry
+	59, // 28: agent.v1.ReportJobRunStatusRequest.artifact_uris:type_name -> agent.v1.ReportJobRunStatusRequest.ArtifactUrisEntry
 	30, // 29: agent.v1.ReportJobRunStatusRequest.artifacts:type_name -> agent.v1.ArtifactResult
 	29, // 30: agent.v1.ReportJobRunStatusRequest.source_checkout:type_name -> agent.v1.SourceCheckout
-	56, // 31: agent.v1.AgentSelector.match_labels:type_name -> agent.v1.AgentSelector.MatchLabelsEntry
+	60, // 31: agent.v1.AgentSelector.match_labels:type_name -> agent.v1.AgentSelector.MatchLabelsEntry
 	35, // 32: agent.v1.AgentSelector.match_expressions:type_name -> agent.v1.LabelExpression
 	2,  // 33: agent.v1.PluginInfo.location:type_name -> agent.v1.PluginLocation
-	43, // 34: agent.v1.AgentService.ReconcileJobRetryApproval:input_type -> agent.v1.ReconcileJobRetryApprovalRequest
-	41, // 35: agent.v1.AgentService.ReconcileJobGeneration:input_type -> agent.v1.ReconcileJobGenerationRequest
-	45, // 36: agent.v1.AgentService.ReconcileStepAttempt:input_type -> agent.v1.ReconcileStepAttemptRequest
-	39, // 37: agent.v1.AgentService.GetOrRecordJobInputs:input_type -> agent.v1.GetOrRecordJobInputsRequest
-	37, // 38: agent.v1.AgentService.InspectJobExecution:input_type -> agent.v1.InspectJobExecutionRequest
-	11, // 39: agent.v1.AgentService.Heartbeat:input_type -> agent.v1.HeartbeatRequest
-	13, // 40: agent.v1.AgentService.Register:input_type -> agent.v1.RegisterRequest
-	16, // 41: agent.v1.AgentService.Unregister:input_type -> agent.v1.UnregisterRequest
-	18, // 42: agent.v1.AgentService.FetchStepRun:input_type -> agent.v1.FetchStepRunRequest
-	22, // 43: agent.v1.AgentService.ReportStepRunStatus:input_type -> agent.v1.ReportStepRunStatusRequest
-	28, // 44: agent.v1.AgentService.ReportJobRunStatus:input_type -> agent.v1.ReportJobRunStatusRequest
-	24, // 45: agent.v1.AgentService.CancelStepRun:input_type -> agent.v1.CancelStepRunRequest
-	32, // 46: agent.v1.AgentService.CancelJobRun:input_type -> agent.v1.CancelJobRunRequest
-	26, // 47: agent.v1.AgentService.UpdateLabels:input_type -> agent.v1.UpdateLabelsRequest
-	3,  // 48: agent.v1.AgentService.Connect:input_type -> agent.v1.ConnectRequest
-	44, // 49: agent.v1.AgentService.ReconcileJobRetryApproval:output_type -> agent.v1.ReconcileJobRetryApprovalResponse
-	42, // 50: agent.v1.AgentService.ReconcileJobGeneration:output_type -> agent.v1.ReconcileJobGenerationResponse
-	46, // 51: agent.v1.AgentService.ReconcileStepAttempt:output_type -> agent.v1.ReconcileStepAttemptResponse
-	40, // 52: agent.v1.AgentService.GetOrRecordJobInputs:output_type -> agent.v1.GetOrRecordJobInputsResponse
-	38, // 53: agent.v1.AgentService.InspectJobExecution:output_type -> agent.v1.InspectJobExecutionResponse
-	12, // 54: agent.v1.AgentService.Heartbeat:output_type -> agent.v1.HeartbeatResponse
-	14, // 55: agent.v1.AgentService.Register:output_type -> agent.v1.RegisterResponse
-	17, // 56: agent.v1.AgentService.Unregister:output_type -> agent.v1.UnregisterResponse
-	19, // 57: agent.v1.AgentService.FetchStepRun:output_type -> agent.v1.FetchStepRunResponse
-	23, // 58: agent.v1.AgentService.ReportStepRunStatus:output_type -> agent.v1.ReportStepRunStatusResponse
-	31, // 59: agent.v1.AgentService.ReportJobRunStatus:output_type -> agent.v1.ReportJobRunStatusResponse
-	25, // 60: agent.v1.AgentService.CancelStepRun:output_type -> agent.v1.CancelStepRunResponse
-	33, // 61: agent.v1.AgentService.CancelJobRun:output_type -> agent.v1.CancelJobRunResponse
-	27, // 62: agent.v1.AgentService.UpdateLabels:output_type -> agent.v1.UpdateLabelsResponse
-	4,  // 63: agent.v1.AgentService.Connect:output_type -> agent.v1.ConnectResponse
-	49, // [49:64] is the sub-list for method output_type
-	34, // [34:49] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	34, // [34:34] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	47, // 34: agent.v1.ClaimAndFetchCopilotRerunRequest.reference:type_name -> agent.v1.CopilotRerunClaimReference
+	47, // 35: agent.v1.CopilotRerunClaimReceipt.reference:type_name -> agent.v1.CopilotRerunClaimReference
+	49, // 36: agent.v1.ClaimAndFetchCopilotRerunResponse.receipt:type_name -> agent.v1.CopilotRerunClaimReceipt
+	48, // 37: agent.v1.AgentService.ClaimAndFetchCopilotRerun:input_type -> agent.v1.ClaimAndFetchCopilotRerunRequest
+	43, // 38: agent.v1.AgentService.ReconcileJobRetryApproval:input_type -> agent.v1.ReconcileJobRetryApprovalRequest
+	41, // 39: agent.v1.AgentService.ReconcileJobGeneration:input_type -> agent.v1.ReconcileJobGenerationRequest
+	45, // 40: agent.v1.AgentService.ReconcileStepAttempt:input_type -> agent.v1.ReconcileStepAttemptRequest
+	39, // 41: agent.v1.AgentService.GetOrRecordJobInputs:input_type -> agent.v1.GetOrRecordJobInputsRequest
+	37, // 42: agent.v1.AgentService.InspectJobExecution:input_type -> agent.v1.InspectJobExecutionRequest
+	11, // 43: agent.v1.AgentService.Heartbeat:input_type -> agent.v1.HeartbeatRequest
+	13, // 44: agent.v1.AgentService.Register:input_type -> agent.v1.RegisterRequest
+	16, // 45: agent.v1.AgentService.Unregister:input_type -> agent.v1.UnregisterRequest
+	18, // 46: agent.v1.AgentService.FetchStepRun:input_type -> agent.v1.FetchStepRunRequest
+	22, // 47: agent.v1.AgentService.ReportStepRunStatus:input_type -> agent.v1.ReportStepRunStatusRequest
+	28, // 48: agent.v1.AgentService.ReportJobRunStatus:input_type -> agent.v1.ReportJobRunStatusRequest
+	24, // 49: agent.v1.AgentService.CancelStepRun:input_type -> agent.v1.CancelStepRunRequest
+	32, // 50: agent.v1.AgentService.CancelJobRun:input_type -> agent.v1.CancelJobRunRequest
+	26, // 51: agent.v1.AgentService.UpdateLabels:input_type -> agent.v1.UpdateLabelsRequest
+	3,  // 52: agent.v1.AgentService.Connect:input_type -> agent.v1.ConnectRequest
+	50, // 53: agent.v1.AgentService.ClaimAndFetchCopilotRerun:output_type -> agent.v1.ClaimAndFetchCopilotRerunResponse
+	44, // 54: agent.v1.AgentService.ReconcileJobRetryApproval:output_type -> agent.v1.ReconcileJobRetryApprovalResponse
+	42, // 55: agent.v1.AgentService.ReconcileJobGeneration:output_type -> agent.v1.ReconcileJobGenerationResponse
+	46, // 56: agent.v1.AgentService.ReconcileStepAttempt:output_type -> agent.v1.ReconcileStepAttemptResponse
+	40, // 57: agent.v1.AgentService.GetOrRecordJobInputs:output_type -> agent.v1.GetOrRecordJobInputsResponse
+	38, // 58: agent.v1.AgentService.InspectJobExecution:output_type -> agent.v1.InspectJobExecutionResponse
+	12, // 59: agent.v1.AgentService.Heartbeat:output_type -> agent.v1.HeartbeatResponse
+	14, // 60: agent.v1.AgentService.Register:output_type -> agent.v1.RegisterResponse
+	17, // 61: agent.v1.AgentService.Unregister:output_type -> agent.v1.UnregisterResponse
+	19, // 62: agent.v1.AgentService.FetchStepRun:output_type -> agent.v1.FetchStepRunResponse
+	23, // 63: agent.v1.AgentService.ReportStepRunStatus:output_type -> agent.v1.ReportStepRunStatusResponse
+	31, // 64: agent.v1.AgentService.ReportJobRunStatus:output_type -> agent.v1.ReportJobRunStatusResponse
+	25, // 65: agent.v1.AgentService.CancelStepRun:output_type -> agent.v1.CancelStepRunResponse
+	33, // 66: agent.v1.AgentService.CancelJobRun:output_type -> agent.v1.CancelJobRunResponse
+	27, // 67: agent.v1.AgentService.UpdateLabels:output_type -> agent.v1.UpdateLabelsResponse
+	4,  // 68: agent.v1.AgentService.Connect:output_type -> agent.v1.ConnectResponse
+	53, // [53:69] is the sub-list for method output_type
+	37, // [37:53] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_agent_v1_agent_proto_init() }
@@ -3996,7 +4394,7 @@ func file_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_v1_agent_proto_rawDesc), len(file_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   54,
+			NumMessages:   58,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

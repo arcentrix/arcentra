@@ -28,11 +28,79 @@ import (
 	"google.golang.org/grpc/status"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type workerTestDatabase struct{ db *gorm.DB }
 
 func (d workerTestDatabase) Database() *gorm.DB { return d.db }
+
+func setupWorkerRunFixture(t *testing.T, ctx context.Context, db *gorm.DB, runID string) {
+	t.Helper()
+	if err := db.WithContext(ctx).AutoMigrate(&model.Project{}, &model.Pipeline{}, &model.PipelineRun{}, &model.JobRun{}, &model.StepRun{}); err != nil {
+		t.Fatal(err)
+	}
+	// Worker execution contracts use the same parent chain as admitted jobs.
+	// Keep the Pipeline schema too: legacy missing-Run attachments lock its prefix.
+	if err := db.WithContext(ctx).Create(&model.Project{ProjectID: "project", IsEnabled: 1, Status: model.ProjectStatusActive}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WithContext(ctx).Create(&model.Pipeline{PipelineID: "pipeline", ProjectID: "project", IsEnabled: 1, Metadata: "{}"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.WithContext(ctx).Create(&model.PipelineRun{RunID: runID, PipelineID: "pipeline", ProjectID: "project", Status: model.PipelineStatusRunning, Env: "{}"}).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestWorkerRunFixturePreservesMissingParents 验证完整夹具保留无父记录的兼容路径
+func TestWorkerRunFixturePreservesMissingParents(t *testing.T) {
+	ctx := context.Background()
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "legacy-parents.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+	sqlDB.SetMaxOpenConns(1)
+	setupWorkerRunFixture(t, ctx, db, "run")
+	jobs, steps := repo.NewJobRunRepo(workerTestDatabase{db}), repo.NewStepRunRepo(workerTestDatabase{db})
+	if err := jobs.Create(ctx, &model.JobRun{JobRunID: "legacy-job", PipelineID: "legacy-pipeline", PipelineRunID: "legacy-run", Status: 2}); err != nil {
+		t.Fatal(err)
+	}
+	var queries []string
+	if err := db.Callback().Query().After("gorm:query").Register("test-worker-parent-prefix", func(tx *gorm.DB) {
+		query := tx.Statement.Table
+		if lock, ok := tx.Statement.Clauses["FOR"].Expression.(clause.Locking); ok {
+			query += "/" + lock.Strength
+		}
+		queries = append(queries, query)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Callback().Query().Remove("test-worker-parent-prefix"); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := steps.Create(ctx, &model.StepRun{StepRunID: "legacy-step", JobRunID: "legacy-job", PipelineID: "legacy-pipeline", PipelineRunID: "legacy-run", Status: 2}); err != nil {
+		t.Fatal(err)
+	}
+	// Locator reads precede the locked Pipeline -> Run -> Job attachment prefix.
+	if got := strings.Join(queries, ","); got != "pipeline_run,job_run,pipeline/UPDATE,pipeline_run/UPDATE,job_run/UPDATE" {
+		t.Fatalf("legacy attachment did not query the full parent prefix: %s", got)
+	}
+	var parentCount int64
+	if err := db.WithContext(ctx).Model(&model.PipelineRun{}).Where("run_id = ?", "legacy-run").Count(&parentCount).Error; err != nil || parentCount != 0 {
+		t.Fatalf("legacy allocation synthesized a missing Run: count=%d err=%v", parentCount, err)
+	}
+	if err := db.WithContext(ctx).Model(&model.Pipeline{}).Where("pipeline_id = ?", "legacy-pipeline").Count(&parentCount).Error; err != nil || parentCount != 0 {
+		t.Fatalf("legacy allocation synthesized a missing Pipeline: count=%d err=%v", parentCount, err)
+	}
+}
 
 type capturedLogs struct {
 	mu      sync.Mutex
@@ -72,9 +140,7 @@ func TestJobExecutionControlPlaneContract(t *testing.T) {
 			}
 			defer sqlDB.Close()
 			sqlDB.SetMaxOpenConns(1)
-			if err := db.WithContext(ctx).AutoMigrate(&model.JobRun{}, &model.StepRun{}); err != nil {
-				t.Fatal(err)
-			}
+			setupWorkerRunFixture(t, ctx, db, "run")
 			jobRepo, stepRepo := repo.NewJobRunRepo(workerTestDatabase{db}), repo.NewStepRunRepo(workerTestDatabase{db})
 			agentID, jobID := "test-agent", "job-"+tc.name
 			if err := jobRepo.Create(ctx, &model.JobRun{JobRunID: jobID, PipelineID: "pipeline", PipelineRunID: "run", AgentID: agentID, Status: 2}); err != nil {

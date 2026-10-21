@@ -452,7 +452,11 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 		// Definition revision is not proof of the separately cloned source revision.
 		run.CommitSha = ""
 	}
-	if err := createPipelineTriggerRun(ctx, s.pipelineRepo, run); err != nil {
+	snapshot, captureReason, captureErr := s.prospectiveDefinitionCapture(ctx, req, pipeline, project, run, parsedSpec, originalContent, content)
+	if captureErr != nil {
+		return &pipelinev1.TriggerPipelineResponse{Success: false, Message: "prospective definition capture unavailable", Error: s.error(503, "prospective definition capture unavailable", "unavailable", nil)}, nil
+	}
+	if err := createPipelineTriggerRunWithDefinition(ctx, s.pipelineRepo, run, snapshot); err != nil {
 		// Duplicate insert and lost commit acknowledgement both reconcile from
 		// the primary. A found run is returned, never submitted a second time.
 		{
@@ -505,9 +509,13 @@ func (s *PipelineServiceImpl) TriggerPipeline(
 		return &pipelinev1.TriggerPipelineResponse{Success: false, RunId: run.RunID, Message: "pipeline could not be scheduled", Error: s.error(503, err.Error(), "unavailable", nil)}, nil
 	}
 
+	message := "pipeline triggered"
+	if captureReason != "" && captureReason != "capture_disabled" {
+		message += "; prospective re-execution unavailable: " + captureReason
+	}
 	return &pipelinev1.TriggerPipelineResponse{
 		Success: true,
-		Message: "pipeline triggered",
+		Message: message,
 		RunId:   run.RunID,
 	}, nil
 }

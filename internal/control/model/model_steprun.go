@@ -29,7 +29,7 @@ type StepRun struct {
 	PipelineRunID           string     `gorm:"column:pipeline_run_id;type:varchar(64);index:idx_step_run_pipeline_run" json:"pipelineRunId"`
 	StageID                 string     `gorm:"column:stage_id" json:"stageId"`
 	JobID                   string     `gorm:"column:job_id" json:"jobId"`
-	JobRunID                string     `gorm:"column:job_run_id" json:"jobRunId"`
+	JobRunID                string     `gorm:"column:job_run_id;type:longtext;index:idx_step_run_job_run,length:191" json:"jobRunId"`
 	Attempt                 int        `gorm:"column:attempt;not null;default:1" json:"attempt"`
 	RetryPolicy             string     `gorm:"column:retry_policy;type:json" json:"-"`
 	RetryMode               string     `gorm:"column:retry_mode;type:varchar(32)" json:"retryMode"`
@@ -80,7 +80,7 @@ type StepRunArtifact struct {
 	BaseModel
 	ArtifactID    string     `gorm:"column:artifact_id" json:"artifactId"`
 	StepRunID     string     `gorm:"column:step_run_id" json:"stepRunId"`
-	JobRunID      string     `gorm:"column:job_run_id" json:"jobRunId"`
+	JobRunID      string     `gorm:"column:job_run_id;type:longtext;index:idx_step_run_artifact_job_run,length:191" json:"jobRunId"`
 	PipelineRunID string     `gorm:"column:pipeline_run_id" json:"pipelineRunId"`
 	Name          string     `gorm:"column:name" json:"name"`
 	Path          string     `gorm:"column:path" json:"path"`

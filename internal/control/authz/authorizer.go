@@ -87,7 +87,23 @@ func newAuthorizer(ctx context.Context, repos *repo.Repositories, ch cache.ICach
 }
 
 // Reload 重新加载权限策略到 Casbin
-func (a *Authorizer) Reload(ctx context.Context) error {
+func (a *Authorizer) Reload(ctx context.Context) (err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	// ClearPolicy does not clear Casbin's role-manager links. Block readers for
+	// the complete reload and discard both layers, including on any read error,
+	// so old grants cannot authorize a new policy or survive a failed refresh.
+	a.enforcer.ClearPolicy()
+	if err = a.enforcer.BuildRoleLinks(); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			a.enforcer.ClearPolicy()
+			_ = a.enforcer.BuildRoleLinks()
+		}
+	}()
+
 	permissions, err := a.repos.Permission.ListPermissions(ctx)
 	if err != nil {
 		return err
@@ -115,11 +131,6 @@ func (a *Authorizer) Reload(ctx context.Context) error {
 		}
 	}
 
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	a.enforcer.ClearPolicy()
-
 	missing := make(map[string]struct{})
 	for _, binding := range bindings {
 		permDef, ok := permMap[binding.PermissionID]
@@ -127,7 +138,9 @@ func (a *Authorizer) Reload(ctx context.Context) error {
 			missing[binding.PermissionID] = struct{}{}
 			continue
 		}
-		_, _ = a.enforcer.AddPolicy(binding.RoleID, permDef.ResourceType, permDef.Action, "*")
+		if _, err = a.enforcer.AddPolicy(binding.RoleID, permDef.ResourceType, permDef.Action, "*"); err != nil {
+			return err
+		}
 	}
 	if len(missing) > 0 {
 		ids := make([]string, 0, len(missing))
@@ -143,7 +156,9 @@ func (a *Authorizer) Reload(ctx context.Context) error {
 	for _, grant := range grants {
 		subject := buildSubjectKey(grant.SubjectType, grant.SubjectID)
 		domain := buildScopeKey(grant.ScopeType, grant.ScopeID)
-		_, _ = a.enforcer.AddGroupingPolicy(subject, grant.RoleID, domain)
+		if _, err = a.enforcer.AddGroupingPolicy(subject, grant.RoleID, domain); err != nil {
+			return err
+		}
 	}
 	return nil
 }

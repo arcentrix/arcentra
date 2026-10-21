@@ -41,12 +41,12 @@ func (rt *Router) approvalLiveAccess() fiber.Handler {
 		if !authenticated || actor.IsAgent {
 			return approvalError(c, repo.ErrApprovalForbidden)
 		}
-		subject, err := currentApprovalSubject(c.Context(), rt.Services.Repos(), actor.UserID)
+		subject, err := currentApprovalSubject(c.UserContext(), rt.Services.Repos(), actor.UserID)
 		if err != nil {
 			return approvalError(c, err)
 		}
 		c.Locals("approvalSubject", subject)
-		checker, err := authz.NewLiveAuthorizer(c.Context(), rt.Services.Repos())
+		checker, err := authz.NewLiveAuthorizer(c.UserContext(), rt.Services.Repos())
 		if err != nil {
 			return approvalError(c, err)
 		}
@@ -128,7 +128,7 @@ func approvalAllowed(c *fiber.Ctx, action string, resource authz.ResourceRef) (b
 	if !ok || !authenticated || subject.UserID == "" || subject.IsAgent {
 		return false, repo.ErrApprovalForbidden
 	}
-	return checker.Check(c.Context(), subject, action, resource)
+	return checker.Check(c.UserContext(), subject, action, resource)
 }
 
 func (rt *Router) approvalRunScope() middleware.ScopeResolver {
@@ -137,14 +137,14 @@ func (rt *Router) approvalRunScope() middleware.ScopeResolver {
 		if !validApprovalRouteID(id) || rt.Services == nil || rt.Services.PipelineRepo == nil {
 			return authz.ResourceRef{}, repo.ErrApprovalInvalid
 		}
-		run, err := rt.Services.PipelineRepo.GetRun(c.Context(), id)
+		run, err := rt.Services.PipelineRepo.GetRun(c.UserContext(), id)
 		if err != nil {
 			return authz.ResourceRef{}, err
 		}
 		if run == nil || run.RunID != id || run.PipelineID == "" {
 			return authz.ResourceRef{}, repo.ErrApprovalNotFound
 		}
-		org, project, err := rt.resolvePipelineScope(c.Context(), run.PipelineID)
+		org, project, err := rt.resolvePipelineScope(c.UserContext(), run.PipelineID)
 		if err != nil {
 			return authz.ResourceRef{}, err
 		}
@@ -167,7 +167,7 @@ type approvalDetail struct {
 
 func (rt *Router) approvalDetailFor(c *fiber.Ctx, value *model.ApprovalRequest) approvalDetail {
 	result := approvalDetail{ApprovalRequest: value}
-	review, reviewErr := rt.Services.Approval.RetryReview(c.Context(), value)
+	review, reviewErr := rt.Services.Approval.RetryReview(c.UserContext(), value)
 	if reviewErr != nil {
 		result.DecisionBlockReason = "retry approval evidence unavailable"
 		return result
@@ -178,8 +178,8 @@ func (rt *Router) approvalDetailFor(c *fiber.Ctx, value *model.ApprovalRequest) 
 		result.DecisionBlockReason = "authenticated user is required"
 		return result
 	}
-	old, approveErr := rt.Services.Approval.DecisionEligibility(c.Context(), value, subject.UserID, model.ApprovalDecisionApprove)
-	_, rejectErr := rt.Services.Approval.DecisionEligibility(c.Context(), value, subject.UserID, model.ApprovalDecisionReject)
+	old, approveErr := rt.Services.Approval.DecisionEligibility(c.UserContext(), value, subject.UserID, model.ApprovalDecisionApprove)
+	_, rejectErr := rt.Services.Approval.DecisionEligibility(c.UserContext(), value, subject.UserID, model.ApprovalDecisionReject)
 	if old != nil {
 		if old.Decision == model.ApprovalDecisionApprove {
 			result.ViewerDecision = "approved"
@@ -198,7 +198,7 @@ func (rt *Router) approvalDetailFor(c *fiber.Ctx, value *model.ApprovalRequest) 
 		}
 		return result
 	}
-	org, project, err := rt.ResolveProjectScopeByApprovalID(c.Context(), value.ApprovalID)
+	org, project, err := rt.ResolveProjectScopeByApprovalID(c.UserContext(), value.ApprovalID)
 	if err != nil {
 		result.DecisionBlockReason = "approval scope is unavailable"
 		return result
@@ -227,7 +227,7 @@ func (rt *Router) getApproval(c *fiber.Ctx) error {
 	if !validApprovalRouteID(id) {
 		return approvalError(c, repo.ErrApprovalInvalid)
 	}
-	value, err := rt.Services.Approval.GetApproval(c.Context(), id)
+	value, err := rt.Services.Approval.GetApproval(c.UserContext(), id)
 	if err != nil {
 		return approvalError(c, err)
 	}
@@ -293,7 +293,7 @@ func (rt *Router) decideApproval(c *fiber.Ctx, decision string) error {
 	if err != nil {
 		return approvalError(c, err)
 	}
-	value, err := rt.Services.Approval.Decide(c.Context(), id, subject.UserID, decision, input.Reason)
+	value, err := rt.Services.Approval.Decide(c.UserContext(), id, subject.UserID, decision, input.Reason)
 	if err != nil {
 		return approvalError(c, err)
 	}
@@ -305,7 +305,7 @@ func (rt *Router) listApprovals(c *fiber.Ctx) error {
 	if !validApprovalRouteID(id) {
 		return approvalError(c, repo.ErrApprovalInvalid)
 	}
-	values, err := rt.Services.Approval.ListByPipelineRun(c.Context(), id)
+	values, err := rt.Services.Approval.ListByPipelineRun(c.UserContext(), id)
 	if err != nil {
 		return approvalError(c, err)
 	}

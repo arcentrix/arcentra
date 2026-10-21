@@ -93,7 +93,7 @@ func (rt *Router) Router() *fiber.App {
 	// WARNING: middleware.RealIPMiddleware -> middleware.RequestMiddleware -> inject.FiberMiddleware sequence is important
 	app.Use(
 		middleware.RealIPMiddleware(),  // 先解析真实 IP 到 Locals("ip")
-		middleware.RequestMiddleware(), // 设置 request_id 到 Locals("request_id")
+		middleware.RequestMiddleware(), // 设置 request_id 和独立可取消的 UserContext
 		inject.FiberMiddleware(),       // trace middleware 读取 request_id/ip 并传播上下文
 		recover.New(),
 		middleware.HTTPMetricsMiddleware(),

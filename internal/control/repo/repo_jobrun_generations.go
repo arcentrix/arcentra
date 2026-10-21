@@ -172,7 +172,19 @@ func (r *JobRunRepo) ReconcileJobGeneration(ctx context.Context, request taskque
 		if request.Operation == "inspect" {
 			lockMode = executionLockInspect
 		}
-		lockedJob, lockErr := lockExecutionJob(ctx, tx, request.Identity.JobRunID, lockMode)
+		var lockedJob *model.JobRun
+		var lockErr error
+		if hint, protected := rerunProtectedLocator(tx); protected {
+			mode := executionLockRerunGeneration
+			if request.Operation == "inspect" {
+				mode = executionLockRerunGenerationInspect
+			} else if request.Operation == "advance" && model.IsJobRunTerminal(hint.Status) {
+				mode = executionLockRerunGenerationReceipt
+			}
+			lockedJob, _, _, lockErr = lockCopilotRerunOperation(ctx, tx, request.Identity, mode)
+		} else {
+			lockedJob, lockErr = lockExecutionJob(ctx, tx, request.Identity.JobRunID, lockMode)
+		}
 		if lockErr != nil {
 			return lockErr
 		}

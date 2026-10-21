@@ -26,6 +26,8 @@ jobs:
       GOTOOLCHAIN: local
       ARCENTRA_REAL_STACK: "1"
       ARCENTRA_REQUIRE_REAL_STACK: "1"
+      # Same literal as the pinned frontend checkout; verified before any browser/daemon.
+      ARCENTRA_COPILOT_BROWSER_FRONTEND_COMMIT: 804bcc2b67cc8739fd859b63d8eb79bf3e73cf21
       ARCENTRA_TEST_S3_ENDPOINT: http://127.0.0.1:19000
       ARCENTRA_TEST_S3_ACCESS_KEY: ci-only-s3-user
       ARCENTRA_TEST_S3_SECRET_KEY: ci-only-s3-password
@@ -52,7 +54,7 @@ jobs:
         with:
           repository: arcentrix/arcentra-web
           # Reviewed execution-enabled client: immutable cross-repository dependency.
-          ref: 360e6365028ea31ba04dc19a26e6acd27f774d61
+          ref: 804bcc2b67cc8739fd859b63d8eb79bf3e73cf21
           path: .acceptance/frontend
           persist-credentials: false
 
@@ -78,6 +80,7 @@ jobs:
           pnpm exec playwright install --with-deps chromium
           pnpm test:browser:harness
           test -f tests/actual-copilot-execution-acceptance.mjs
+          test -f tests/actual-rerun-browser.mjs
 
       - name: Check harness without privilege and compile real tests
         run: |
@@ -86,7 +89,8 @@ jobs:
           make deps-check
           make codegen
           make fmt-check
-          go test -race -count=1 -tags=sandbox_acceptance -run '^(TestContainerAcceptancePolicy.*|TestContainerAcceptanceFailedStepPolicyGuards|TestContainerAcceptanceFailedStepApprovalGuards|TestFailedStepApproval.*|TestRealContainerAcceptanceGate|TestRealContainerStepRetryAcceptanceGate|TestContainerAcceptanceObserverGuards|TestAcceptanceWorker.*|TestContainerCopilot.*)$' ./internal/control/process ./internal/agent/taskqueue ./pkg/sandbox
+          go test -race -count=1 -tags=sandbox_acceptance -run '^(TestContainerAcceptancePolicy.*|TestContainerAcceptanceFailedStepPolicyGuards|TestContainerAcceptanceFailedStepApprovalGuards|TestFailedStepApproval.*|TestRealContainerAcceptanceGate|TestRealContainerStepRetryAcceptanceGate|TestContainerAcceptanceObserverGuards|TestAcceptanceWorker.*|TestContainerCopilot.*|TestContainerTerminalRerun.*)$' ./internal/control/process ./internal/agent/taskqueue ./pkg/sandbox
+          go test -race -tags=sandbox_acceptance ./internal/control/router -run '^(TestCopilotRerunFullRouteGroupIdentityAndLegacyIsolation|TestCopilotRerunProductionRouterDefaultOff|TestCopilotRerunHTTPStaticErrors)$' -count=1 -timeout=2m -v
           mkdir -p .acceptance/containerd-bin .acceptance/containerd-evidence
           go test -race -tags=sandbox_acceptance -c -o .acceptance/containerd-bin/sandbox.test ./pkg/sandbox
           go test -race -tags=sandbox_acceptance -c -o .acceptance/containerd-bin/sandboxexec.test ./internal/agent/sandboxexec
@@ -141,5 +145,12 @@ jobs:
             .acceptance/containerd-evidence/cleanup.json
             .acceptance/containerd-evidence/copilot-browser/summary.json
             .acceptance/containerd-evidence/copilot-browser/copilot-execution-receipt.json
+            .acceptance/containerd-evidence/copilot-browser/terminal-rerun-prepare/summary.json
+            .acceptance/containerd-evidence/copilot-browser/terminal-rerun-prepare/copilot-rerun-preparation-receipt.json
+            .acceptance/containerd-evidence/copilot-browser/terminal-rerun-outcome/summary.json
+            .acceptance/containerd-evidence/copilot-browser/terminal-rerun-outcome/copilot-rerun-outcome-receipt.json
+            .acceptance/containerd-evidence/copilot-browser/terminal-rerun-owner-outcome/summary.json
+            .acceptance/containerd-evidence/copilot-browser/terminal-rerun-owner-outcome/copilot-rerun-owner-outcome-receipt.json
+            .acceptance/containerd-evidence/copilot-browser/terminal-rerun-runtime-receipt.json
           if-no-files-found: ignore
           retention-days: 7

@@ -32,6 +32,8 @@ import (
 )
 
 type AgentService struct {
+	// Private protected adapter; deliberately nil in every production constructor.
+	rerunClaim           CopilotRerunClaimRepository
 	agentRepo            repo.IAgentRepository
 	stepRunRepo          repo.IStepRunRepository
 	jobRunRepo           repo.IJobRunRepository

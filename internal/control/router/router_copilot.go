@@ -34,6 +34,12 @@ func (rt *Router) copilotRouter(r fiber.Router, authMW, subjectMW fiber.Handler)
 			}
 		}
 	}
+	// These routes remain independently available when no model provider is configured.
+	var rerun *service.CopilotRerunService
+	if rt.Services != nil {
+		rerun = rt.Services.TerminalRerunService()
+	}
+	RegisterCopilotRerunRoutes(r, authMW, subjectMW, rerun)
 	registerCopilotRoutes(r, authMW, subjectMW, svc)
 }
 func registerCopilotRoutes(r fiber.Router, authMW, subjectMW fiber.Handler, svc *service.CopilotService) {

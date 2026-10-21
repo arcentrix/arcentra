@@ -124,7 +124,7 @@ func (rt *Router) createProject(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.CreateProject(c.Context(), &req, claims.UserID)
+	result, err := projectService.CreateProject(c.UserContext(), &req, claims.UserID)
 	if err != nil {
 		if errors.Is(err, repo.ErrOrganizationInvalid) {
 			return sensitiveError(c, 400, "invalid project request")
@@ -153,7 +153,7 @@ func (rt *Router) updateProject(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.UpdateProject(c.Context(), projectID, &req)
+	result, err := projectService.UpdateProject(c.UserContext(), projectID, &req)
 	if err != nil {
 		log.Errorw("update project failed", "error", err)
 		return sensitiveError(c, 503, "project operation is unavailable")
@@ -171,7 +171,7 @@ func (rt *Router) deleteProject(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	if err := projectService.DeleteProject(c.Context(), projectID); err != nil {
+	if err := projectService.DeleteProject(c.UserContext(), projectID); err != nil {
 		log.Errorw("delete project failed", "error", err)
 		return sensitiveError(c, 503, "project operation is unavailable")
 	}
@@ -188,7 +188,7 @@ func (rt *Router) getProjectByID(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.GetProjectByID(c.Context(), projectID)
+	result, err := projectService.GetProjectByID(c.UserContext(), projectID)
 	if err != nil {
 		log.Errorw("get project by id failed", "error", err)
 		return sensitiveError(c, 503, "project operation is unavailable")
@@ -297,7 +297,7 @@ func (rt *Router) enableProject(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.EnableProject(c.Context(), projectID)
+	result, err := projectService.EnableProject(c.UserContext(), projectID)
 	if err != nil {
 		log.Errorw("enable project failed", "error", err)
 		return sensitiveError(c, 503, "project operation is unavailable")
@@ -315,7 +315,7 @@ func (rt *Router) disableProject(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.DisableProject(c.Context(), projectID)
+	result, err := projectService.DisableProject(c.UserContext(), projectID)
 	if err != nil {
 		log.Errorw("disable project failed", "error", err)
 		return sensitiveError(c, 503, "project operation is unavailable")
@@ -339,7 +339,7 @@ func (rt *Router) updateProjectStatistics(c *fiber.Ctx) error {
 
 	projectService := rt.Services.Project
 
-	result, err := projectService.UpdateProjectStatistics(c.Context(), projectID, &req)
+	result, err := projectService.UpdateProjectStatistics(c.UserContext(), projectID, &req)
 	if err != nil {
 		log.Errorw("update project statistics failed", "error", err)
 		return sensitiveError(c, 503, "project operation is unavailable")
@@ -358,7 +358,7 @@ func (rt *Router) getProjectMembers(c *fiber.Ctx) error {
 	// 通过 repository 访问项目成员
 	// 注意：这里需要通过 Services 获取 repository，或者创建一个 ProjectMemberService
 	// 暂时直接使用 repository，后续可以优化
-	members, err := rt.Services.ProjectMemberRepo.ListProjectMembers(c.Context(), projectID)
+	members, err := rt.Services.ProjectMemberRepo.ListProjectMembers(c.UserContext(), projectID)
 	if err != nil {
 		log.Errorw("get project members failed", "error", err)
 		return sensitiveError(c, 503, "project operation is unavailable")
@@ -395,7 +395,7 @@ func (rt *Router) addProjectMember(c *fiber.Ctx) error {
 		UserID:    req.UserID,
 	}
 
-	if err := rt.Services.ProjectMemberRepo.AddProjectMember(c.Context(), member); err != nil {
+	if err := rt.Services.ProjectMemberRepo.AddProjectMember(c.UserContext(), member); err != nil {
 		log.Errorw("add project member failed", "error", err)
 		return sensitiveError(c, 503, "project operation is unavailable")
 	}
@@ -435,7 +435,7 @@ func (rt *Router) removeProjectMember(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "project id and user id are required")
 	}
 
-	if err := rt.Services.ProjectMemberRepo.RemoveProjectMember(c.Context(), projectID, userID); err != nil {
+	if err := rt.Services.ProjectMemberRepo.RemoveProjectMember(c.UserContext(), projectID, userID); err != nil {
 		log.Errorw("remove project member failed", "error", err)
 		return sensitiveError(c, 503, "project operation is unavailable")
 	}
@@ -453,7 +453,7 @@ func (rt *Router) resolveProjectScope() middleware.ScopeResolver {
 		if projectID == "" {
 			return authz.ResourceRef{}, errors.New("project id is required")
 		}
-		project, err := rt.Services.Project.GetProjectByID(c.Context(), projectID)
+		project, err := rt.Services.Project.GetProjectByID(c.UserContext(), projectID)
 		if err != nil {
 			return authz.ResourceRef{}, err
 		}

@@ -557,6 +557,9 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 		if req.ArtifactStorageId != entity.ArtifactStorageID || req.ArtifactStorageFingerprint != entity.ArtifactStorageFingerprint {
 			return nil, status.Error(codes.FailedPrecondition, "artifact storage identity changed after execution claim")
 		}
+		if err := inspectProtectedRerunReceipt(ctx, a.agentService.jobRunRepo, entity); err != nil {
+			return nil, err
+		}
 		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "claim confirmed"}, nil
 	}
 	if err := validateReportedStatus(0, int(req.Status), false); err != nil {
@@ -578,6 +581,9 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 		if err := confirmCancelledJobReceipt(ctx, a.agentService.jobRunRepo, entity, claimID, digest, sourceUpdates); err != nil {
 			return nil, err
 		}
+		if err := inspectProtectedCancellationReceipt(ctx, a.agentService.jobRunRepo, entity, claimID, digest, sourceUpdates); err != nil {
+			return nil, err
+		}
 		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "cancellation receipt confirmed"}, nil
 	}
 	if model.IsJobRunTerminal(entity.Status) {
@@ -591,6 +597,9 @@ func (a *AgentServiceImpl) ReportJobRunStatus(
 			if err := verifySourceReplay(ctx, a.agentService.jobRunRepo, entity, claimID); err != nil {
 				return nil, err
 			}
+		}
+		if err := inspectProtectedRerunReceipt(ctx, a.agentService.jobRunRepo, entity); err != nil {
+			return nil, err
 		}
 		// 回执与制品在同一事务中提交，重放无需重新写入或复活已清理的制品
 		return &agentv1.ReportJobRunStatusResponse{Success: true, Message: "terminal report confirmed"}, nil
