@@ -46,3 +46,19 @@ helpers; tests verify closed HTTP connections and stopped descendant processes.
 No claim/approval ordering changes are made here. Container Start and user commands
 still require the existing independent approval admission. Local helper tests do
 not replace the full taskqueue race suite or real container/image acceptance.
+
+## Early DSL validation
+
+For ordinary baremetal jobs, any step with `runOnAgent: true` selects whole-job
+Agent dispatch. Static DSL validation rejects explicit SSH (`ssh://`, `git+ssh://`,
+`ssh+git://`) and scp-like Git source URLs for those jobs before manual run
+admission. An all-local job keeps the independent backend Git path and its
+existing SSH behavior. This check does not change definition-repository loading.
+
+The current protobuf schema defines source only on each Job; it has no
+pipeline/default source inheritance. Included definitions are resolved before
+validation. Empty source type retains the existing disabled Agent-checkout
+semantics. A fully dynamic URL cannot always be classified before variable
+substitution; the hardened runtime transport check still rejects resolved SSH
+before checkout. This early diagnostic is not a complete static transport
+allowlist and does not relax runtime credentials, helpers or network rules.

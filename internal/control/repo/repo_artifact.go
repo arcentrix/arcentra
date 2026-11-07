@@ -13,6 +13,7 @@ import (
 	"github.com/arcentrix/arcentra/internal/control/model"
 	artifactutil "github.com/arcentrix/arcentra/pkg/artifact"
 	"github.com/arcentrix/arcentra/pkg/database"
+	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -108,8 +109,32 @@ func UpsertArtifact(ctx context.Context, tx *gorm.DB, value *model.ProjectArtifa
 		return err
 	}
 	var job model.JobRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ? AND pipeline_run_id = ? AND pipeline_id = ?", value.JobRunID, value.PipelineRunID, value.PipelineID).First(&job).Error; err != nil {
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(append(append([]string{}, jobSnapshotColumns...), "artifact_storage_id", "artifact_storage_fingerprint", "artifact_storage_type")).Where("job_run_id = ? AND pipeline_run_id = ? AND pipeline_id = ?", value.JobRunID, value.PipelineRunID, value.PipelineID).First(&job).Error; err != nil {
 		return err
+	}
+	if !emptyJobRerun(&job) {
+		if !generationArtifactPublication(ctx) || requireCopilotRerunOperationProof(tx, &job, executionLockRerunJobSuccess) != nil {
+			return ErrCopilotRerunUnsupported
+		}
+		if job.ArtifactStorageID == "" || value.StorageID != job.ArtifactStorageID || value.StorageFingerprint != job.ArtifactStorageFingerprint || value.StorageType != job.ArtifactStorageType {
+			return ErrArtifactConflict
+		}
+		plan, err := retryPlanForJob(&job)
+		if err != nil {
+			return err
+		}
+		upload := false
+		for _, step := range plan.Steps {
+			if !taskqueue.RerunArtifactUploadStep(step.Uses, step.Action) {
+				continue
+			}
+			for _, id := range step.AttemptRunIDs {
+				upload = upload || id == value.StepRunID
+			}
+		}
+		if !upload {
+			return ErrArtifactConflict
+		}
 	}
 	if (job.RetryPlan != "" || !emptyRetryApproval(&job)) && !generationArtifactPublication(ctx) {
 		return fmt.Errorf("generation artifacts require the atomic final job report")

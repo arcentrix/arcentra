@@ -40,7 +40,7 @@ func (rt *Router) getUserExt(c *fiber.Ctx) error {
 
 	userExtService := rt.Services.UserExt
 
-	ext, err := userExtService.GetUserExt(c.Context(), userID)
+	ext, err := userExtService.GetUserExt(c.UserContext(), userID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -63,7 +63,7 @@ func (rt *Router) updateUserExt(c *fiber.Ctx) error {
 	ext.UserID = userID
 	userExtService := rt.Services.UserExt
 
-	if err := userExtService.UpdateUserExt(c.Context(), userID, &ext); err != nil {
+	if err := userExtService.UpdateUserExt(c.UserContext(), userID, &ext); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
@@ -92,7 +92,7 @@ func (rt *Router) updateTimezone(c *fiber.Ctx) error {
 
 	userExtService := rt.Services.UserExt
 
-	if err := userExtService.UpdateTimezone(c.Context(), userID, req.Timezone); err != nil {
+	if err := userExtService.UpdateTimezone(c.UserContext(), userID, req.Timezone); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
@@ -121,7 +121,7 @@ func (rt *Router) updateInvitationStatus(c *fiber.Ctx) error {
 
 	userExtService := rt.Services.UserExt
 
-	if err := userExtService.UpdateInvitationStatus(c.Context(), userID, req.Status); err != nil {
+	if err := userExtService.UpdateInvitationStatus(c.UserContext(), userID, req.Status); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 

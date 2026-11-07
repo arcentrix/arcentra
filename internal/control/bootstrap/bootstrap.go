@@ -78,6 +78,15 @@ func NewApp(
 	shutdownMgr *shutdown.Manager,
 	pipelineEngine *process.Process,
 ) (*App, func(), error) {
+	if appConf != nil && appConf.Copilot.Execution.TerminalRerunEnabled && (rt == nil || rt.Services == nil || pipelineEngine == nil) {
+		if pipelineEngine != nil {
+			pipelineEngine.Stop()
+		}
+		return nil, nil, errors.New("terminal execution startup dependencies are unavailable")
+	}
+	if rt == nil {
+		return nil, nil, errors.New("controller router is unavailable")
+	}
 	if rt.Services != nil && rt.Services.Polling != nil {
 		if err := rt.Services.ConfigurePollingAuthorization(); err != nil {
 			return nil, nil, err
@@ -119,6 +128,19 @@ func NewApp(
 		if err := rt.Services.BindPipelineEngine(pipelineEngine); err != nil {
 			pipelineEngine.Stop()
 			return nil, nil, err
+		}
+	}
+
+	// Bind all protected execution capabilities before Router() installs handlers
+	// and before any listener starts. Missing opt-in prerequisites fail startup.
+	if rt.Services != nil {
+		if pipelineEngine != nil {
+			if err := pipelineEngine.BindTerminalRerunServices(rt.Services, appConf != nil && appConf.Copilot.Execution.TerminalRerunEnabled); err != nil {
+				pipelineEngine.Stop()
+				return nil, nil, err
+			}
+		} else if appConf != nil && appConf.Copilot.Execution.TerminalRerunEnabled {
+			return nil, nil, errors.New("terminal execution requires a pipeline process")
 		}
 	}
 
@@ -242,7 +264,22 @@ func RunContext(ctx context.Context, app *App, cleanup func()) error {
 	return runContext(ctx, app, cleanup, 30*time.Second)
 }
 
-func runContext(ctx context.Context, app *App, cleanup func(), shutdownTimeout time.Duration) (runErr error) {
+type terminalRerunLifecycle interface {
+	StartTerminalRerun(context.Context) error
+	StopTerminalRerun(context.Context) error
+}
+
+func runContext(ctx context.Context, app *App, cleanup func(), shutdownTimeout time.Duration) error {
+	var lifecycle terminalRerunLifecycle
+	if app != nil && app.Services != nil {
+		lifecycle = app.Services
+	}
+	return runContextWithTerminalRerun(ctx, app, cleanup, shutdownTimeout, lifecycle)
+}
+
+// The private seam permits lifecycle ordering tests without constructing a database.
+// Production callers always supply the already bound Services through runContext.
+func runContextWithTerminalRerun(ctx context.Context, app *App, cleanup func(), shutdownTimeout time.Duration, lifecycle terminalRerunLifecycle) (runErr error) {
 	if app == nil || app.AppConf == nil || app.HTTPApp == nil {
 		return errors.New("controller application is incomplete")
 	}
@@ -254,35 +291,40 @@ func runContext(ctx context.Context, app *App, cleanup func(), shutdownTimeout t
 	defer func() {
 		app.ready.Store(false)
 		cancelRun()
-		if app.Services != nil && app.Services.CopilotHistoryMaintenance != nil {
-			app.Services.CopilotHistoryMaintenance.Stop()
-		}
-		// Join Inbox before releasing the database.
-		if app.Services != nil && app.Services.Inbox != nil {
-			app.Services.Inbox.Stop()
-		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		// Stop new listener admission immediately, before waiting for any worker.
 		if app.ShutdownMgr != nil {
 			app.ShutdownMgr.Shutdown()
 		}
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		// 停止调度新任务并取消运行派生上下文，随后网络排空和清理共享总期限
-		runErr = errors.Join(runErr, drainComponents(shutdownCtx, []func() error{func() error { cron.Stop(); return nil }}))
-		// 先停止接收 HTTP 请求，gRPC 排空和其余组件清理共享总期限
 		if httpListener != nil {
 			_ = httpListener.Close()
 		}
-		tasks := []func() error{}
+		tasks := []func() error{func() error { cron.Stop(); return nil }}
 		if httpListener != nil {
 			tasks = append(tasks, func() error { return app.HTTPApp.ShutdownWithContext(shutdownCtx) })
 		}
 		if app.GrpcServer != nil {
 			tasks = append(tasks, func() error { return app.GrpcServer.Stop(shutdownCtx) })
 		}
-		runErr = errors.Join(runErr, drainComponents(shutdownCtx, tasks))
+		if lifecycle != nil {
+			tasks = append(tasks, func() error { return lifecycle.StopTerminalRerun(shutdownCtx) })
+		}
+		if app.Services != nil && app.Services.CopilotHistoryMaintenance != nil {
+			tasks = append(tasks, func() error { app.Services.CopilotHistoryMaintenance.Stop(); return nil })
+		}
+		if app.Services != nil && app.Services.Inbox != nil {
+			tasks = append(tasks, func() error { app.Services.Inbox.Stop(); return nil })
+		}
+		// Network drain and dispatcher cancellation/join share the same deadline.
+		// No dependency may be released while either is still using it.
+		drainErr := drainComponents(shutdownCtx, tasks)
+		runErr = errors.Join(runErr, drainErr)
+		dependenciesSafe := drainErr == nil
+
 		// 依赖资源在网络请求排空之后释放，所有清理仍受同一总期限约束
 		runErr = errors.Join(runErr, drainComponents(shutdownCtx, []func() error{func() error {
-			if cleanup != nil {
+			if dependenciesSafe && cleanup != nil {
 				cleanup()
 			}
 			return nil
@@ -290,6 +332,11 @@ func runContext(ctx context.Context, app *App, cleanup func(), shutdownTimeout t
 	}()
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if lifecycle != nil {
+		if err := lifecycle.StartTerminalRerun(ctx); err != nil {
+			return err
+		}
 	}
 	if app.grpcRequired.Load() {
 		if app.GrpcServer == nil {

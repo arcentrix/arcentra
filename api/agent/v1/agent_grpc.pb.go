@@ -33,6 +33,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	AgentService_ClaimAndFetchCopilotRerun_FullMethodName = "/agent.v1.AgentService/ClaimAndFetchCopilotRerun"
 	AgentService_ReconcileJobRetryApproval_FullMethodName = "/agent.v1.AgentService/ReconcileJobRetryApproval"
 	AgentService_ReconcileJobGeneration_FullMethodName    = "/agent.v1.AgentService/ReconcileJobGeneration"
 	AgentService_ReconcileStepAttempt_FullMethodName      = "/agent.v1.AgentService/ReconcileStepAttempt"
@@ -56,6 +57,8 @@ const (
 //
 // AgentService - Main interface for communication between Agent and Server
 type AgentServiceClient interface {
+	// Confidential authenticated transport only. No ordinary claim fallback.
+	ClaimAndFetchCopilotRerun(ctx context.Context, in *ClaimAndFetchCopilotRerunRequest, opts ...grpc.CallOption) (*ClaimAndFetchCopilotRerunResponse, error)
 	ReconcileJobRetryApproval(ctx context.Context, in *ReconcileJobRetryApprovalRequest, opts ...grpc.CallOption) (*ReconcileJobRetryApprovalResponse, error)
 	// Bounded authenticated generation admission/advance; inspect never authorizes execution.
 	ReconcileJobGeneration(ctx context.Context, in *ReconcileJobGenerationRequest, opts ...grpc.CallOption) (*ReconcileJobGenerationResponse, error)
@@ -92,6 +95,16 @@ type agentServiceClient struct {
 
 func NewAgentServiceClient(cc grpc.ClientConnInterface) AgentServiceClient {
 	return &agentServiceClient{cc}
+}
+
+func (c *agentServiceClient) ClaimAndFetchCopilotRerun(ctx context.Context, in *ClaimAndFetchCopilotRerunRequest, opts ...grpc.CallOption) (*ClaimAndFetchCopilotRerunResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClaimAndFetchCopilotRerunResponse)
+	err := c.cc.Invoke(ctx, AgentService_ClaimAndFetchCopilotRerun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *agentServiceClient) ReconcileJobRetryApproval(ctx context.Context, in *ReconcileJobRetryApprovalRequest, opts ...grpc.CallOption) (*ReconcileJobRetryApprovalResponse, error) {
@@ -253,6 +266,8 @@ type AgentService_ConnectClient = grpc.BidiStreamingClient[ConnectRequest, Conne
 //
 // AgentService - Main interface for communication between Agent and Server
 type AgentServiceServer interface {
+	// Confidential authenticated transport only. No ordinary claim fallback.
+	ClaimAndFetchCopilotRerun(context.Context, *ClaimAndFetchCopilotRerunRequest) (*ClaimAndFetchCopilotRerunResponse, error)
 	ReconcileJobRetryApproval(context.Context, *ReconcileJobRetryApprovalRequest) (*ReconcileJobRetryApprovalResponse, error)
 	// Bounded authenticated generation admission/advance; inspect never authorizes execution.
 	ReconcileJobGeneration(context.Context, *ReconcileJobGenerationRequest) (*ReconcileJobGenerationResponse, error)
@@ -291,6 +306,9 @@ type AgentServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAgentServiceServer struct{}
 
+func (UnimplementedAgentServiceServer) ClaimAndFetchCopilotRerun(context.Context, *ClaimAndFetchCopilotRerunRequest) (*ClaimAndFetchCopilotRerunResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClaimAndFetchCopilotRerun not implemented")
+}
 func (UnimplementedAgentServiceServer) ReconcileJobRetryApproval(context.Context, *ReconcileJobRetryApprovalRequest) (*ReconcileJobRetryApprovalResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReconcileJobRetryApproval not implemented")
 }
@@ -355,6 +373,24 @@ func RegisterAgentServiceServer(s grpc.ServiceRegistrar, srv AgentServiceServer)
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&AgentService_ServiceDesc, srv)
+}
+
+func _AgentService_ClaimAndFetchCopilotRerun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClaimAndFetchCopilotRerunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).ClaimAndFetchCopilotRerun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_ClaimAndFetchCopilotRerun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).ClaimAndFetchCopilotRerun(ctx, req.(*ClaimAndFetchCopilotRerunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _AgentService_ReconcileJobRetryApproval_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -623,6 +659,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "agent.v1.AgentService",
 	HandlerType: (*AgentServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ClaimAndFetchCopilotRerun",
+			Handler:    _AgentService_ClaimAndFetchCopilotRerun_Handler,
+		},
 		{
 			MethodName: "ReconcileJobRetryApproval",
 			Handler:    _AgentService_ReconcileJobRetryApproval_Handler,

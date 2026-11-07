@@ -41,6 +41,12 @@ func prepareJobSource(job *model.JobRun, req *agentv1.ReportJobRunStatusRequest,
 }
 
 func verifySourceReplay(ctx context.Context, repository any, job *model.JobRun, claim string) error {
+	if protectedRerunJob(job) {
+		if job.ClaimID != claim {
+			return status.Error(codes.PermissionDenied, "original protected execution claim required")
+		}
+		return inspectProtectedRerunReceipt(ctx, repository, job)
+	}
 	validator, ok := repository.(interface {
 		ValidateTerminalConflict(context.Context, *model.JobRun, string) error
 	})

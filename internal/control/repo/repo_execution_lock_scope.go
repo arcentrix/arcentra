@@ -31,6 +31,27 @@ const (
 	executionLockTerminalReceipt
 	executionLockInspect
 	executionLockLegacy
+	executionLockRerunSeal
+	executionLockRerunClaim
+	executionLockRerunInput
+	executionLockRerunGeneration
+	executionLockRerunGenerationInspect
+	executionLockRerunGenerationReceipt
+	executionLockRerunApprovalObserve
+	executionLockRerunApprovalStartup
+	executionLockRerunHuman
+	executionLockRerunHumanReceipt
+	executionLockRerunHumanClose
+	executionLockRerunStepActivate
+	executionLockRerunStepReport
+	executionLockRerunStepReceipt
+	executionLockRerunJobReport
+	executionLockRerunJobSuccess
+	executionLockRerunJobReceipt
+	executionLockRerunFinalize
+	executionLockRerunPostCancel
+	executionLockRerunJobCancelReceipt
+	executionLockRerunStepCancelReceipt
 )
 
 func executionLegacyNoShared(job *model.JobRun) bool {
@@ -61,6 +82,12 @@ const executionScopeLocatorKey = "arcentra.execution.scope.locator"
 // Plain locator reads happen before BEGIN so they cannot establish an old
 // REPEATABLE READ snapshot ahead of a contended exact historical receipt.
 func executionTransaction(ctx context.Context, db *gorm.DB, id string, fn func(*gorm.DB) error) error {
+	return executionTransactionMode(ctx, db, id, fn, false)
+}
+func executionAttachmentTransaction(ctx context.Context, db *gorm.DB, id string, fn func(*gorm.DB) error) error {
+	return executionTransactionMode(ctx, db, id, fn, true)
+}
+func executionTransactionMode(ctx context.Context, db *gorm.DB, id string, fn func(*gorm.DB) error, attachment bool) error {
 	if db == nil || db.Statement == nil {
 		return fmt.Errorf("execution database required")
 	}
@@ -82,11 +109,18 @@ func executionTransaction(ctx context.Context, db *gorm.DB, id string, fn func(*
 			}
 		}
 	}
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	run := func(tx *gorm.DB) error {
 		locator.pool = tx.Statement.ConnPool
 		tx.Statement.Settings.Store(executionScopeLocatorKey, locator)
-		return fn(tx)
-	})
+		if err := fn(tx); err != nil {
+			return err
+		}
+		return completeCopilotRerunOperation(ctx, tx)
+	}
+	if attachment {
+		return rerunAttachmentTransaction(ctx, db, run)
+	}
+	return db.WithContext(ctx).Transaction(run)
 }
 func executionStepJobID(step *model.StepRun) string {
 	if step == nil {
@@ -103,7 +137,13 @@ func executionApprovalJobID(approval *model.ApprovalRequest) string {
 
 // Locator reads carry no authority. All immutable links are rechecked under
 // identity-only P -> optional O -> Q -> R -> J locks, without active-scope filters.
-func lockExecutionJob(ctx context.Context, tx *gorm.DB, id string, mode executionLockMode) (*model.JobRun, error) {
+func lockExecutionJob(ctx context.Context, tx *gorm.DB, id string, mode executionLockMode) (result *model.JobRun, resultErr error) {
+	defer func() {
+		if result != nil && !emptyJobRerun(result) && (!rerunGateProofMatchesOperation(tx, mode, result.CopilotRerunGateID, result.PipelineRunID, result.JobRunID, result.CopilotRerunIntentID) && !rerunOperationLockedJobMatches(tx, mode, result)) {
+			result = nil
+			resultErr = ErrCopilotRerunUnsupported
+		}
+	}()
 	if tx == nil || tx.Statement == nil {
 		return nil, fmt.Errorf("execution transaction required")
 	}
@@ -130,10 +170,13 @@ func lockExecutionJob(ctx context.Context, tx *gorm.DB, id string, mode executio
 		return nil, locator.jobErr
 	}
 	hint := locator.job
+	if (mode == executionLockRerunSeal || mode == executionLockRerunClaim) && !rerunGateProofMatchesOperation(tx, mode, hint.CopilotRerunGateID, hint.PipelineRunID, hint.JobRunID, hint.CopilotRerunIntentID) {
+		return nil, ErrCopilotRerunUnsupported
+	}
 	if hint.JobRunID != id {
 		return nil, fmt.Errorf("execution job identity changed")
 	}
-	narrow := mode == executionLockInspect || (mode == executionLockTerminalReceipt && model.IsJobRunTerminal(hint.Status)) || (mode == executionLockLegacy && executionLegacyNoShared(&hint))
+	narrow := rerunOperationHistorical(mode) || mode == executionLockInspect || (mode == executionLockTerminalReceipt && model.IsJobRunTerminal(hint.Status)) || (mode == executionLockLegacy && executionLegacyNoShared(&hint))
 	if narrow {
 		var job model.JobRun
 		if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns).Where("job_run_id = ?", id).First(&job).Error; err != nil {
@@ -189,11 +232,14 @@ func lockExecutionJob(ctx context.Context, tx *gorm.DB, id string, mode executio
 		return nil, fmt.Errorf("execution project scope changed")
 	}
 	var runs []model.PipelineRun
-	if err := q().Select("run_id", "pipeline_id", "project_id", "triggered_by", "definition_commit_sha", "definition_path", "retry_approval_context", "retry_approval_context_digest").Where("run_id = ?", hint.PipelineRunID).Limit(2).Find(&runs).Error; err != nil {
+	if err := q().Select("run_id", "pipeline_id", "project_id", "triggered_by", "definition_commit_sha", "definition_path", "retry_approval_context", "retry_approval_context_digest", "copilot_rerun_intent_id", "copilot_rerun_gate_id").Where("run_id = ?", hint.PipelineRunID).Limit(2).Find(&runs).Error; err != nil {
 		return nil, err
 	}
-	if len(runs) != 1 || runs[0].RunID != hint.PipelineRunID || runs[0].PipelineID != p.PipelineID || (runs[0].ProjectID != "" && runs[0].ProjectID != p.ProjectID) {
+	if len(runs) != 1 || (!emptyRunRerun(&runs[0]) && (!rerunGateProofMatchesOperation(tx, mode, runs[0].CopilotRerunGateID, runs[0].RunID, id, runs[0].CopilotRerunIntentID) && !rerunOperationRunMatches(tx, mode, &runs[0], id))) || runs[0].RunID != hint.PipelineRunID || runs[0].PipelineID != p.PipelineID || (runs[0].ProjectID != "" && runs[0].ProjectID != p.ProjectID) {
 		return nil, fmt.Errorf("execution run scope changed")
+	}
+	if rerunOperationMode(mode) && !rerunOperationRunMatches(tx, mode, &runs[0], id) {
+		return nil, ErrCopilotRerunConflict
 	}
 	if runs[0].ProjectID == "" {
 		run := runs[0]

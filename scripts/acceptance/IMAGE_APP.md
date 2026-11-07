@@ -63,6 +63,23 @@ the container, publishing only `127.0.0.1:18080/18081`. The read-only Git daemon
 publishes `127.0.0.1:19418` only for the host readiness probe. Browser/API request
 validation remains strictly loopback. Browser profile is `image-build-v1`.
 
+Before each owned Control container is created, the image harness subscribes to
+read-only Linux link/address notifications. After HTTP readiness it requires a
+three-second observed event-free window, bounded by fifteen seconds and the
+existing journey deadline. Queued/delayed notifications reset the window; lost,
+truncated, excessive or unavailable observations fail closed. Only elapsed time
+and packet counts are logged, never addresses or interface names. Control liveness
+and HTTP readiness are checked again. No host network setting is changed.
+
+This readiness condition addresses the observed pre-API Chromium
+`ERR_NETWORK_CHANGED` failures immediately after Control recreation. The causal
+link is an inference pending hosted validation: Chromium's Linux notifier observes
+link/address events and debounces IP changes for two seconds
+([upstream implementation](https://github.com/chromium/chromium/blob/main/net/base/network_change_notifier_linux.cc)).
+It is not a browser retry, error allowlist or product acceptance claim. Every
+subsequent browser navigation/network error remains a failure, and the actual
+Inbox restart/persisted-state journey is unchanged.
+
 Each application receives only its exact private mode-0700 configuration directory
 (readonly) and private writable state directory. Files are mode 0600. Control gets
 its server certificate/key, Agent gets only the CA certificate, and CLI gets only

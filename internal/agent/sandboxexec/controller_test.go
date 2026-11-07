@@ -25,7 +25,7 @@ type durableFake struct {
 	refs         map[string]sandbox.ResourceRef
 	states       map[string]sandbox.ResourceState
 	events       []string
-	beforeCreate func(*sandbox.CreateOptions) error
+	beforeCreate func(context.Context, *sandbox.CreateOptions) error
 	seal         func(context.Context, sandbox.ResourceRef) error
 	removeOwned  func(context.Context, sandbox.ResourceRef) error
 	inspect      func(context.Context, sandbox.ResourceRef) error
@@ -44,10 +44,10 @@ func (f *durableFake) PrepareResource(_ context.Context, id, owner string) (sand
 	f.event("prepare")
 	return sandbox.ResourceRef{ID: id, Owner: owner, Namespace: f.Namespace(), Snapshotter: "overlayfs"}, nil
 }
-func (f *durableFake) Create(_ context.Context, opts *sandbox.CreateOptions) (string, error) {
+func (f *durableFake) Create(ctx context.Context, opts *sandbox.CreateOptions) (string, error) {
 	f.event("create")
 	if f.beforeCreate != nil {
-		if err := f.beforeCreate(opts); err != nil {
+		if err := f.beforeCreate(ctx, opts); err != nil {
 			return "", err
 		}
 	}
@@ -193,7 +193,7 @@ func TestDurableSessionStagesBeforeCreateAndSealsBeforeArtifacts(t *testing.T) {
 	if err := os.WriteFile(artifact, []byte("trusted-input"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	backend.beforeCreate = func(create *sandbox.CreateOptions) error {
+	backend.beforeCreate = func(_ context.Context, create *sandbox.CreateOptions) error {
 		record, err := c.readJournal(context.Background(), session.recordID+".json")
 		if err != nil {
 			return err

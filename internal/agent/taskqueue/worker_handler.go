@@ -16,7 +16,7 @@ import (
 	"github.com/bytedance/sonic"
 )
 
-func newWorkerHandler(workerCtx context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper, execManager *executor.Manager, reports *terminalOutbox) nova.HandlerFunc {
+func newWorkerHandler(workerCtx context.Context, agentConf *config.AgentConfig, grpcClient *grpc.ClientWrapper, execManager *executor.Manager, reports *terminalOutbox, incarnations ...*rerunIncarnation) nova.HandlerFunc {
 	return nova.HandlerFunc(func(ctx context.Context, task *nova.Task) error {
 		ctx = withTerminalOutbox(ctx, reports)
 		if runtime := offlineRuntimeFromContext(workerCtx); runtime != nil {
@@ -27,6 +27,20 @@ func newWorkerHandler(workerCtx context.Context, agentConf *config.AgentConfig, 
 		}
 		if workerCtx.Err() != nil {
 			return workerCtx.Err()
+		}
+
+		// A reference notification is not a job result. Bound its own attempts;
+		// Nova retries every returned error indefinitely. Unknown admission or
+		// started work remains in the claim manager/journal/outbox for inspection.
+		if task.Type == taskqueue.TaskTypeCopilotRerunReference {
+			var incarnation *rerunIncarnation
+			if len(incarnations) == 1 {
+				incarnation = incarnations[0]
+			}
+			if err := handleRerunReference(ctx, agentConf, grpcClient, execManager, reports, incarnation, task.Payload); err != nil {
+				log.Warnw("rerun reference observed; execution outcome requires inspection")
+			}
+			return nil
 		}
 		if err := reports.replayBound(ctx, grpcClient, agentConf); err != nil {
 			return &terminalDeliveryError{err}
@@ -39,6 +53,9 @@ func newWorkerHandler(workerCtx context.Context, agentConf *config.AgentConfig, 
 			var payload taskqueue.JobRunTaskPayload
 			if err := sonic.Unmarshal(task.Payload, &payload); err != nil {
 				log.Warnw("discarding malformed job task", "error", err)
+				return nil
+			}
+			if payload.SourceExpectation != nil {
 				return nil
 			}
 			if payload.AgentID != agentConf.Agent.ID {

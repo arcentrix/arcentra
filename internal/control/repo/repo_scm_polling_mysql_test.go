@@ -207,7 +207,8 @@ func pollingMySQLMigration(t *testing.T, db *gorm.DB) {
 	if err := db.WithContext(ctx).AutoMigrate(&model.Project{}, &model.PipelineRun{}, &model.RoleGrant{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, column := range []string{"polling_context", "polling_context_digest"} {
+	// This legacy schema predates the later rerun authority markers too.
+	for _, column := range []string{"polling_context", "polling_context_digest", "copilot_rerun_intent_id", "copilot_rerun_gate_id"} {
 		if err := db.WithContext(ctx).Migrator().DropColumn(&model.PipelineRun{}, column); err != nil {
 			t.Fatal(err)
 		}
@@ -222,7 +223,7 @@ func pollingMySQLMigration(t *testing.T, db *gorm.DB) {
 		t.Fatal(err)
 	}
 	legacy := &model.PipelineRun{RunID: id, PipelineID: id, Status: model.PipelineStatusPending, TriggeredBy: "webhook", Env: "{}"}
-	if err := db.WithContext(ctx).Omit("PollingContext", "PollingContextDigest").Create(legacy).Error; err != nil {
+	if err := db.WithContext(ctx).Omit("PollingContext", "PollingContextDigest", "CopilotRerunIntentID", "CopilotRerunGateID").Create(legacy).Error; err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {

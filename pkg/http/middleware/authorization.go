@@ -15,7 +15,6 @@
 package middleware
 
 import (
-	"context"
 	"errors"
 	"strings"
 
@@ -70,7 +69,7 @@ func AuthorizationMiddleware(secretKey string, store cache.ICache) fiber.Handler
 
 		// 从 Redis 中获取 Token 信息
 		tokenKey := consts.UserTokenKey + claims.UserID
-		tokenInfoStr, err := store.Get(context.Background(), tokenKey).Result()
+		tokenInfoStr, err := store.Get(c.UserContext(), tokenKey).Result()
 		if err != nil {
 			log.Errorw("cache get token failed: ", "error", err, "tokenKey", tokenKey)
 			return http.Err(c, http.TokenExpired.Code, http.TokenExpired.Msg)

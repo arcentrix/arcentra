@@ -16,6 +16,9 @@ import (
 // checkoutJobInputs 在容器暂存前固定输入；旧裸机流程保持原有语义
 func checkoutJobInputs(ctx context.Context, client *agentgrpc.ClientWrapper, conf *config.AgentConfig, payload *taskpayload.JobRunTaskPayload, workspace string) (*agentv1.SourceCheckout, error) {
 	if payload.Runtime == nil {
+		if payload.SourceExpectation != nil {
+			return nil, fmt.Errorf("source expectation requires container input protocol")
+		}
 		return handleSourceClone(ctx, payload.Source, workspace)
 	}
 	if err := validateJobSourceBinding(payload); err != nil {
@@ -39,7 +42,17 @@ func checkoutJobInputs(ctx context.Context, client *agentgrpc.ClientWrapper, con
 	if err != nil {
 		return nil, err
 	}
-	req := &agentv1.GetOrRecordJobInputsRequest{AgentId: identity.AgentID, PipelineId: identity.PipelineID, PipelineRunId: identity.PipelineRunID, JobRunId: identity.JobRunID, OriginalClaimId: identity.ClaimID, RuntimeBindingDigest: identity.RuntimeBindingDigest, SourceBindingDigest: identity.SourceBindingDigest}
+	expectationDigest := ""
+	if payload.SourceExpectation != nil {
+		if payload.Runtime.Type != taskpayload.RuntimeContainerdOfflineV1 || payload.Source == nil || payload.Source.Type != "git" || payload.Source.Commit != "" || !payload.RetryApprovalRequired || len(payload.ArtifactURIs) != 0 || len(payload.ArtifactReferences) != 0 {
+			return nil, fmt.Errorf("unsupported source expectation payload")
+		}
+		expectationDigest, err = payload.SourceExpectation.Digest(identity)
+		if err != nil {
+			return nil, err
+		}
+	}
+	req := &agentv1.GetOrRecordJobInputsRequest{SourceExpectationDigest: expectationDigest, AgentId: identity.AgentID, PipelineId: identity.PipelineID, PipelineRunId: identity.PipelineRunID, JobRunId: identity.JobRunID, OriginalClaimId: identity.ClaimID, RuntimeBindingDigest: identity.RuntimeBindingDigest, SourceBindingDigest: identity.SourceBindingDigest}
 	call := func() (*agentv1.GetOrRecordJobInputsResponse, error) {
 		rpcCtx, cancel := client.WithTimeoutAndAuth(ctx)
 		defer cancel()
@@ -49,12 +62,21 @@ func checkoutJobInputs(ctx context.Context, client *agentgrpc.ClientWrapper, con
 	if err != nil {
 		return nil, fmt.Errorf("read immutable job inputs: %w", err)
 	}
+	if err := verifySourceExpectationResponse(response, identity, payload.SourceExpectation); err != nil {
+		return nil, err
+	}
 	pinned, err := verifyJobInputResponse(response, identity, expected, true)
 	if err != nil {
 		return nil, err
 	}
 	commit := ""
+	if payload.SourceExpectation != nil {
+		commit = payload.SourceExpectation.ExpectedSourceCommit
+	}
 	if pinned != nil {
+		if payload.SourceExpectation != nil && pinned.SourceCommit != commit {
+			return nil, fmt.Errorf("pinned source contradicts checkout expectation")
+		}
 		commit = pinned.SourceCommit
 	}
 	checkout, err := handleSourceCloneAtCommit(ctx, payload.Source, workspace, commit)
@@ -67,6 +89,11 @@ func checkoutJobInputs(ctx context.Context, client *agentgrpc.ClientWrapper, con
 	if pinned != nil && expected.SourceCommit != pinned.SourceCommit {
 		return checkout, fmt.Errorf("source checkout differs from pinned input commit")
 	}
+	if payload.SourceExpectation != nil {
+		if err := payload.SourceExpectation.ValidateObservation(expected); err != nil {
+			return checkout, err
+		}
+	}
 	encoded, err := expected.Canonical()
 	if err != nil {
 		return checkout, err
@@ -75,6 +102,9 @@ func checkoutJobInputs(ctx context.Context, client *agentgrpc.ClientWrapper, con
 	response, err = call()
 	if err != nil {
 		return checkout, fmt.Errorf("record immutable job inputs: %w", err)
+	}
+	if err := verifySourceExpectationResponse(response, identity, payload.SourceExpectation); err != nil {
+		return checkout, err
 	}
 	recorded, err := verifyJobInputResponse(response, identity, expected, false)
 	if err != nil {
@@ -121,4 +151,27 @@ func verifyJobInputResponse(response *agentv1.GetOrRecordJobInputsResponse, iden
 		return nil, fmt.Errorf("controller inputs do not match dispatched artifact set")
 	}
 	return manifest, nil
+}
+
+// A missing/partial/unexpected extension is an error, including older servers
+// dropping unknown request fields. It must fail before any checkout or proposal.
+func verifySourceExpectationResponse(response *agentv1.GetOrRecordJobInputsResponse, identity taskpayload.JobInputIdentity, expected *taskpayload.SourceCheckoutExpectation) error {
+	if response == nil {
+		return fmt.Errorf("missing source expectation response")
+	}
+	if expected == nil {
+		if response.SourceExpectationJson != "" || response.SourceExpectationDigest != "" {
+			return fmt.Errorf("unexpected source expectation")
+		}
+		return nil
+	}
+	actual, err := taskpayload.ParseSourceCheckoutExpectation(response.SourceExpectationJson)
+	if err != nil || *actual != *expected {
+		return fmt.Errorf("source expectation differs from sealed payload")
+	}
+	digest, err := expected.Digest(identity)
+	if err != nil || response.SourceExpectationDigest != digest {
+		return fmt.Errorf("source expectation identity mismatch")
+	}
+	return nil
 }

@@ -58,7 +58,7 @@ func (rt *Router) resolveCreatePipelineScope() middleware.ScopeResolver {
 		if strings.TrimSpace(request.ProjectID) == "" {
 			return authz.ResourceRef{}, errors.New("project id is required")
 		}
-		return rt.projectResource(c.Context(), strings.TrimSpace(request.ProjectID))
+		return rt.projectResource(c.UserContext(), strings.TrimSpace(request.ProjectID))
 	}
 }
 
@@ -91,7 +91,7 @@ func (rt *Router) authorizedPipelineList(c *fiber.Ctx, request *pipelinev1.ListP
 	// 显式 projectId 必须由数据库补齐组织范围，不能信任调用方传入的组织
 	resource := authz.ResourceRef{}
 	if request.ProjectId != "" {
-		scope, err := rt.projectResource(c.Context(), request.ProjectId)
+		scope, err := rt.projectResource(c.UserContext(), request.ProjectId)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -102,7 +102,7 @@ func (rt *Router) authorizedPipelineList(c *fiber.Ctx, request *pipelinev1.ListP
 		return nil, 0, err
 	}
 	if allAllowed {
-		response, err := rt.pipelineService().ListPipelines(c.Context(), request)
+		response, err := rt.pipelineService().ListPipelines(c.UserContext(), request)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -117,7 +117,7 @@ func (rt *Router) authorizedPipelineList(c *fiber.Ctx, request *pipelinev1.ListP
 	var total int64
 	projects := make(map[string]authz.ResourceRef)
 	for scanPage := int32(1); ; scanPage++ {
-		response, err := rt.pipelineService().ListPipelines(c.Context(), &pipelinev1.ListPipelinesRequest{ProjectId: request.ProjectId, Name: request.Name, Status: request.Status, Page: scanPage, PageSize: 100})
+		response, err := rt.pipelineService().ListPipelines(c.UserContext(), &pipelinev1.ListPipelinesRequest{ProjectId: request.ProjectId, Name: request.Name, Status: request.Status, Page: scanPage, PageSize: 100})
 		if err != nil {
 			return nil, 0, err
 		}
@@ -127,7 +127,7 @@ func (rt *Router) authorizedPipelineList(c *fiber.Ctx, request *pipelinev1.ListP
 		for _, item := range response.Pipelines {
 			scope, exists := projects[item.ProjectId]
 			if !exists {
-				scope, err = rt.projectResource(c.Context(), item.ProjectId)
+				scope, err = rt.projectResource(c.UserContext(), item.ProjectId)
 				if err != nil {
 					return nil, 0, err
 				}
@@ -162,7 +162,7 @@ func (rt *Router) authorizedProjectList(c *fiber.Ctx, query *model.ProjectQueryR
 		return nil, 0, err
 	}
 	if allAllowed {
-		return rt.Services.Project.ListProjects(c.Context(), query)
+		return rt.Services.Project.ListProjects(c.UserContext(), query)
 	}
 	page, size := normalizedCollectionPage(query.PageNum, query.PageSize)
 	offset := int64(page-1) * int64(size)
@@ -171,7 +171,7 @@ func (rt *Router) authorizedProjectList(c *fiber.Ctx, query *model.ProjectQueryR
 	for scanPage := 1; ; scanPage++ {
 		scanQuery := *query
 		scanQuery.PageNum, scanQuery.PageSize = scanPage, 100
-		projects, fullTotal, err := rt.Services.Project.ListProjects(c.Context(), &scanQuery)
+		projects, fullTotal, err := rt.Services.Project.ListProjects(c.UserContext(), &scanQuery)
 		if err != nil {
 			return nil, 0, err
 		}

@@ -51,7 +51,7 @@ func (rt *Router) createRegistrationToken(c *fiber.Ctx) error {
 		})
 	}
 
-	resp, err := rt.Services.RegistrationToken.GenerateToken(c.Context(), &req)
+	resp, err := rt.Services.RegistrationToken.GenerateToken(c.UserContext(), &req)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -70,7 +70,7 @@ func (rt *Router) listRegistrationTokens(c *fiber.Ctx) error {
 		pageSize = 10
 	}
 
-	tokens, count, err := rt.Services.RegistrationToken.ListTokens(c.Context(), pageNum, pageSize)
+	tokens, count, err := rt.Services.RegistrationToken.ListTokens(c.UserContext(), pageNum, pageSize)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -91,7 +91,7 @@ func (rt *Router) revokeRegistrationToken(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "invalid token id")
 	}
 
-	if err := rt.Services.RegistrationToken.RevokeToken(c.Context(), id); err != nil {
+	if err := rt.Services.RegistrationToken.RevokeToken(c.UserContext(), id); err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
 

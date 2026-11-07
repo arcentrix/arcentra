@@ -24,6 +24,8 @@ import (
 	"github.com/arcentrix/arcentra/pkg/sso/util"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
 	"golang.org/x/crypto/bcrypt"
+	"sync"
+	"sync/atomic"
 )
 
 // Services 统一管理所有 service
@@ -63,6 +65,10 @@ type Services struct {
 	Authorizer                authz.IAuthorizer
 	repos                     *repo.Repositories
 
+	rerunStartupMu       sync.Mutex
+	rerunStartupBound    bool
+	rerunBundle          atomic.Pointer[copilotRerunBundle]
+	rerunCapturePolicy   CopilotRerunCapturePolicy // startup-only; zero disables prospective capture
 	retryApprovalPolicy  *retryapproval.Policy
 	offlineRuntimePolicy taskqueue.OfflineRuntimePolicy // 仅由启动 provider 注入，零值禁用
 	pipelineEngine       pipelineEngineBinding

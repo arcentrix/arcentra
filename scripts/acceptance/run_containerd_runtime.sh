@@ -22,6 +22,11 @@ BROWSER_CWD="$PWD/.acceptance/frontend"
 BROWSER_NODE=$(command -v node)
 [[ $BROWSER_NODE == /* && -x $BROWSER_NODE && ${PLAYWRIGHT_BROWSERS_PATH:-} == /* ]] || exit 1
 [[ -f $BROWSER_CWD/tests/actual-copilot-execution-acceptance.mjs && -f $BROWSER_CWD/node_modules/playwright/package.json ]] || { echo 'Mandatory pinned Copilot browser fixture is missing.' >&2; exit 1; }
+[[ -f $BROWSER_CWD/tests/actual-rerun-browser.mjs && ${ARCENTRA_COPILOT_BROWSER_FRONTEND_COMMIT:-} =~ ^[0-9a-f]{40}$ ]] || { echo 'Mandatory pinned terminal rerun browser fixture is missing.' >&2; exit 1; }
+FRONTEND_GIT=(env -i PATH=/usr/bin:/bin GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null git -c core.fsmonitor=false -C "$BROWSER_CWD")
+FRONTEND_HEAD=$("${FRONTEND_GIT[@]}" rev-parse HEAD) || { echo 'Terminal rerun frontend HEAD read failed.' >&2; exit 1; }
+FRONTEND_STATUS=$("${FRONTEND_GIT[@]}" status --porcelain) || { echo 'Terminal rerun frontend status read failed.' >&2; exit 1; }
+[[ $FRONTEND_HEAD == "$ARCENTRA_COPILOT_BROWSER_FRONTEND_COMMIT" && -z $FRONTEND_STATUS ]] || { echo 'Terminal rerun frontend source provenance mismatch.' >&2; exit 1; }
 BASE=$(mktemp -d "/tmp/arc-cd.${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}.XXXXXX")
 SUPERVISOR=''
 finish() {
@@ -87,6 +92,8 @@ TEST_ENV=(env -i
   "USER=$(id -un)" GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted
   ARCENTRA_SANDBOX_ACCEPTANCE=1 ARCENTRA_SANDBOX_SESSION_ACCEPTANCE=1 ARCENTRA_DURABLE_SESSION_ACCEPTANCE=1
   ARCENTRA_CONTAINERD_ACCEPTANCE=1 ARCENTRA_REQUIRE_CONTAINERD_ACCEPTANCE=1
+  ARCENTRA_REQUIRE_TERMINAL_RERUN_ACCEPTANCE=1
+  "ARCENTRA_COPILOT_BROWSER_FRONTEND_COMMIT=$ARCENTRA_COPILOT_BROWSER_FRONTEND_COMMIT"
   "ARCENTRA_CONTAINERD_SOCKET=$BASE/run/containerd.sock" "ARCENTRA_SANDBOX_TEST_IMAGE=$ARCENTRA_SANDBOX_TEST_IMAGE"
   "ARCENTRA_CONTAINERD_RUNC_ROOT=$BASE/runc" "ARCENTRA_CONTAINERD_FIFO_DIR=$BASE/work/fifo"
   "ARCENTRA_DURABLE_SESSION_NAMESPACE=arcentra-durable-acceptance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -127,6 +134,7 @@ run_test sandboxexec '^TestLiveStepJournalRestartContainerdAcceptance$' "${SESSI
   TestLiveStepJournalRestartContainerdAcceptance/successor-intent TestLiveStepJournalRestartContainerdAcceptance/successor-admission \
   TestLiveStepJournalRestartContainerdAcceptance/successor-consumed
 run_test taskqueue '^TestRealContainerJobAcceptance$' 8m full-job 1 TestRealContainerJobAcceptance \
+  TestRealContainerJobAcceptance/terminal-whole-job-new-execution \
   TestRealContainerJobAcceptance/durable-retry-approval-approved-finite-plan/personal-inbox-request-delivery \
   TestRealContainerJobAcceptance/durable-retry-approval-approved-finite-plan/actual-browser-permanent-confirmation \
   TestRealContainerJobAcceptance/failed-step-approval/durable-retry-approval-approved-finite-plan/personal-inbox-request-delivery \

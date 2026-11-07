@@ -14,6 +14,7 @@ import time
 
 import run_actual_app as actual
 from image_runtime import ImageRuntime, validate_manifest, fullmatch, JOURNEY_SECONDS, validate_failure, validate_start_diagnostic, toolchain_contract
+from image_network_readiness import LinkAddressQuietWindow
 
 PROFILE = 'image-build-v1'
 REPOSITORY = 'git://git:9418/acceptance.git'
@@ -125,9 +126,18 @@ level = "INFO"
     def start_control(self, name):
         secret_env_file = self.write_private('image-control-config/synthetic-secret.env',
                                             'ARCENTRA_SECRET_ENCRYPTION_KEY=' + self.control_secret_key + '\n')
-        handle = self.runtime.create('control', config=self.config('control'), state=self.state('control'),
-                                     secret_env_file=secret_env_file)
-        self.wait_until('image Control readiness', lambda: self.probe(actual.BACKEND_URL + '/ready') == 200, handle)
+        # Subscribe before creation so queued/delayed bridge events are observed.
+        # HTTP alone does not establish host-network stability for Chromium.
+        with LinkAddressQuietWindow() as network:
+            handle = self.runtime.create('control', config=self.config('control'), state=self.state('control'),
+                                         secret_env_file=secret_env_file)
+            self.wait_until('image Control readiness', lambda: self.probe(actual.BACKEND_URL + '/ready') == 200, handle)
+            witness = network.wait(deadline=self.runtime.deadline)
+            if handle.poll() is not None:
+                raise RuntimeError('image Control exited during network readiness')
+            if self.probe(actual.BACKEND_URL + '/ready') != 200:
+                raise RuntimeError('image Control lost readiness during network observation')
+        self.note('Image network quiet-window readiness passed: ' + json.dumps(witness, sort_keys=True))
         self.note('Image Control readiness GET passed')
         return handle
 

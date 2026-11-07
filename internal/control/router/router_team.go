@@ -80,7 +80,7 @@ func (rt *Router) createTeam(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.CreateTeam(c.Context(), &req, claims.UserID)
+	result, err := teamService.CreateTeam(c.UserContext(), &req, claims.UserID)
 	if err != nil {
 		log.Errorw("create team failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
@@ -104,7 +104,7 @@ func (rt *Router) updateTeam(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.UpdateTeam(c.Context(), teamID, &req)
+	result, err := teamService.UpdateTeam(c.UserContext(), teamID, &req)
 	if err != nil {
 		log.Errorw("update team failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
@@ -122,7 +122,7 @@ func (rt *Router) deleteTeam(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	if err := teamService.DeleteTeam(c.Context(), teamID); err != nil {
+	if err := teamService.DeleteTeam(c.UserContext(), teamID); err != nil {
 		log.Errorw("delete team failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -139,7 +139,7 @@ func (rt *Router) getTeamByID(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.GetTeamByID(c.Context(), teamID)
+	result, err := teamService.GetTeamByID(c.UserContext(), teamID)
 	if err != nil {
 		log.Errorw("get team by id failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
@@ -183,7 +183,7 @@ func (rt *Router) listTeams(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.ListTeams(c.Context(), &query)
+	result, err := teamService.ListTeams(c.UserContext(), &query)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -200,7 +200,7 @@ func (rt *Router) getTeamsByOrgID(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.GetTeamsByOrgID(c.Context(), orgID)
+	result, err := teamService.GetTeamsByOrgID(c.UserContext(), orgID)
 	if err != nil {
 		log.Errorw("get teams by org id failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
@@ -218,7 +218,7 @@ func (rt *Router) getSubTeams(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.GetSubTeams(c.Context(), teamID)
+	result, err := teamService.GetSubTeams(c.UserContext(), teamID)
 	if err != nil {
 		log.Errorw("get sub teams failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
@@ -238,7 +238,7 @@ func (rt *Router) getUserTeams(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	result, err := teamService.GetTeamsByUserID(c.Context(), claims.UserID)
+	result, err := teamService.GetTeamsByUserID(c.UserContext(), claims.UserID)
 	if err != nil {
 		log.Errorw("get teams by user id failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
@@ -256,7 +256,7 @@ func (rt *Router) enableTeam(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	if err := teamService.EnableTeam(c.Context(), teamID); err != nil {
+	if err := teamService.EnableTeam(c.UserContext(), teamID); err != nil {
 		log.Errorw("enable team failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -273,7 +273,7 @@ func (rt *Router) disableTeam(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	if err := teamService.DisableTeam(c.Context(), teamID); err != nil {
+	if err := teamService.DisableTeam(c.UserContext(), teamID); err != nil {
 		log.Errorw("disable team failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -290,7 +290,7 @@ func (rt *Router) updateTeamStatistics(c *fiber.Ctx) error {
 
 	teamService := rt.Services.Team
 
-	if err := teamService.UpdateTeamStatistics(c.Context(), teamID); err != nil {
+	if err := teamService.UpdateTeamStatistics(c.UserContext(), teamID); err != nil {
 		log.Errorw("update team statistics failed", "error", err)
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}

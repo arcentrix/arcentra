@@ -255,6 +255,33 @@ class RuntimeGuardTests(unittest.TestCase):
         self.assertNotIn('copilot-browser/diagnostics.json', workflow)
         self.assertNotIn('copilot-browser/vite.log', workflow)
 
+    def test_terminal_rerun_reuses_exact_frontend_and_existing_runtime_budget(self):
+        import re
+        root = Path(__file__).resolve().parents[2]
+        script = Path(__file__).with_name("run_containerd_runtime.sh").read_text()
+        workflow = (root / ".github/workflows/containerd-acceptance.yml").read_text()
+        checkout = re.search(r"repository: arcentrix/arcentra-web\n(?:[^\n]*\n)*?          ref: ([0-9a-f]{40})", workflow)
+        expected = re.search(r"ARCENTRA_COPILOT_BROWSER_FRONTEND_COMMIT: ([0-9a-f]{40})", workflow)
+        self.assertIsNotNone(checkout)
+        self.assertIsNotNone(expected)
+        self.assertEqual(checkout.group(1), expected.group(1))
+        self.assertIn('ARCENTRA_REQUIRE_TERMINAL_RERUN_ACCEPTANCE=1', script)
+        self.assertIn('"ARCENTRA_COPILOT_BROWSER_FRONTEND_COMMIT=$ARCENTRA_COPILOT_BROWSER_FRONTEND_COMMIT"', script)
+        self.assertLess(script.index('Terminal rerun frontend source provenance mismatch.'), script.index('BASE=$(mktemp'))
+        self.assertIn('TestRealContainerJobAcceptance/terminal-whole-job-new-execution', script)
+        self.assertEqual(script.count("run_test taskqueue "), 1)
+        self.assertIn(" 8m full-job 1 TestRealContainerJobAcceptance", script)
+        for receipt in ("terminal-rerun-prepare/copilot-rerun-preparation-receipt.json", "terminal-rerun-outcome/copilot-rerun-outcome-receipt.json", "terminal-rerun-owner-outcome/summary.json", "terminal-rerun-owner-outcome/copilot-rerun-owner-outcome-receipt.json", "terminal-rerun-runtime-receipt.json"):
+            self.assertIn(receipt, workflow)
+        self.assertNotIn("terminal-rerun-prepare/diagnostics.json", workflow)
+        self.assertNotIn("terminal-rerun-outcome/diagnostics.json", workflow)
+        self.assertNotIn("terminal-rerun-owner-outcome/diagnostics.json", workflow)
+        owner_evidence = [line.strip() for line in workflow.splitlines() if "terminal-rerun-owner-outcome/" in line]
+        self.assertEqual(owner_evidence, [
+            ".acceptance/containerd-evidence/copilot-browser/terminal-rerun-owner-outcome/summary.json",
+            ".acceptance/containerd-evidence/copilot-browser/terminal-rerun-owner-outcome/copilot-rerun-owner-outcome-receipt.json",
+        ])
+
     def test_shell_repeats_sessions_inside_existing_deadline(self):
         script = Path(__file__).with_name("run_containerd_runtime.sh").read_text()
         self.assertIn('"-test.count=$repetitions"', script)

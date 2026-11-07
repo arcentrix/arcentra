@@ -46,7 +46,7 @@ func NewJobRunRepo(db database.IDatabase) IJobRunRepository {
 
 // Create inserts a new job run record.
 func (r *JobRunRepo) Create(ctx context.Context, jobRun *model.JobRun) error {
-	if jobRun == nil {
+	if !emptyJobRerun(jobRun) {
 		return gorm.ErrInvalidData
 	}
 	if !emptyRetryApproval(jobRun) || !emptyJobGeneration(jobRun) || !emptyJobInputs(jobRun) || !emptyRuntime(jobRun) || jobRun.SourceExpectationCaptured || jobRun.SourceType != "" || jobRun.SourceRepository != "" || jobRun.SourceRef != "" || jobRun.SourceBindingDigest != "" || jobRun.SourceResolvedCommit != "" || (jobRun.SourceProvenanceState != "" && jobRun.SourceProvenanceState != "unknown") {
@@ -55,7 +55,21 @@ func (r *JobRunRepo) Create(ctx context.Context, jobRun *model.JobRun) error {
 	if err := normalizeJSONFields(map[string]*string{"env": &jobRun.Env, "artifact_references": &jobRun.ArtifactReferences, "artifact_uris": &jobRun.ArtifactURIs}, jobRunJSONDefaults); err != nil {
 		return err
 	}
-	return r.Database().WithContext(ctx).Create(jobRun).Error
+	parents, err := locateOrdinaryAttachmentScope(ctx, r.Database(), []string{jobRun.PipelineRunID}, jobRun.JobRunID)
+	if err != nil {
+		return err
+	}
+	return rerunAttachmentTransaction(ctx, r.Database(), func(tx *gorm.DB) error {
+		if err := parents.lockParents(ctx, tx); err != nil {
+			return err
+		}
+		if parents.job != nil {
+			if err := parents.lockJob(ctx, tx, jobRun.JobRunID); err != nil {
+				return err
+			}
+		}
+		return tx.Create(jobRun).Error
+	})
 }
 
 // GetByJobRunID returns a job run by its business ID.
@@ -87,11 +101,30 @@ func (r *JobRunRepo) UpdateByJobRunID(ctx context.Context, jobRunID string, upda
 		return err
 	}
 	updates["updated_at"] = time.Now()
-	query := r.Database().WithContext(ctx).Model(&model.JobRun{}).Where("job_run_id = ? AND retry_plan = ? AND retry_plan_digest = ?", jobRunID, "", "").Where("retry_approval_required = ? AND retry_approval_id = ? AND retry_approval_evidence_hash = ?", false, "", "")
-	if changesJobIdentity(updates) {
-		return reportedStatusResult(query.Where("source_expectation_captured = ?", false).Updates(updates))
+	target, err := rerunUpdateRunDestination(updates)
+	if err != nil {
+		return err
 	}
-	return reportedStatusResult(query.Updates(updates))
+	parents, err := locateOrdinaryAttachmentScope(ctx, r.Database(), []string{target}, jobRunID)
+	if err != nil {
+		return err
+	}
+	if parents.job == nil {
+		return reportedStatusResult(&gorm.DB{})
+	}
+	return rerunAttachmentTransaction(ctx, r.Database(), func(tx *gorm.DB) error {
+		if err := parents.lockParents(ctx, tx); err != nil {
+			return err
+		}
+		if err := parents.lockJob(ctx, tx, jobRunID); err != nil {
+			return err
+		}
+		query := tx.Model(&model.JobRun{}).Where(ordinaryJobPredicate).Where("job_run_id = ? AND retry_plan = ? AND retry_plan_digest = ?", jobRunID, "", "").Where("retry_approval_required = ? AND retry_approval_id = ? AND retry_approval_evidence_hash = ?", false, "", "")
+		if changesJobIdentity(updates) {
+			return reportedStatusResult(query.Where("source_expectation_captured = ?", false).Updates(updates))
+		}
+		return reportedStatusResult(query.Updates(updates))
+	})
 }
 
 // ListByPipelineRunID returns all job runs belonging to a pipeline run.

@@ -41,9 +41,7 @@ func TestPersistedClaimResponseLossDoesNotDropOrRepeatExecution(t *testing.T) {
 			}
 			defer sqlDB.Close()
 			sqlDB.SetMaxOpenConns(1)
-			if err := db.WithContext(ctx).AutoMigrate(&model.JobRun{}, &model.StepRun{}); err != nil {
-				t.Fatal(err)
-			}
+			setupWorkerRunFixture(t, ctx, db, "claim-run")
 			jobRepo, stepRepo := repo.NewJobRunRepo(workerTestDatabase{db}), repo.NewStepRunRepo(workerTestDatabase{db})
 			agentID, jobID := "claim-agent", "lost-claim-"+lostKind
 			if err := jobRepo.Create(ctx, &model.JobRun{JobRunID: jobID, PipelineID: "pipeline", PipelineRunID: "claim-run", AgentID: agentID, Status: 2}); err != nil {

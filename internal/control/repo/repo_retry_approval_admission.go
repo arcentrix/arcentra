@@ -515,7 +515,17 @@ func (r *JobRunRepo) ReconcileJobRetryApproval(ctx context.Context, request retr
 	var result *retryapproval.Response
 	err := executionTransaction(ctx, r.Database(), request.Identity.JobRunID, func(tx *gorm.DB) error {
 		lockMode := executionLockTerminalReceipt
-		lockedJob, lockErr := lockExecutionJob(ctx, tx, request.Identity.JobRunID, lockMode)
+		var lockedJob *model.JobRun
+		var lockErr error
+		if _, protected := rerunProtectedLocator(tx); protected {
+			mode := executionLockRerunApprovalObserve
+			if request.Operation == "admit" {
+				mode = executionLockRerunApprovalStartup
+			}
+			lockedJob, _, _, lockErr = lockCopilotRerunOperation(ctx, tx, request.Identity, mode)
+		} else {
+			lockedJob, lockErr = lockExecutionJob(ctx, tx, request.Identity.JobRunID, lockMode)
+		}
 		if lockErr != nil {
 			return lockErr
 		}
@@ -703,7 +713,22 @@ func lockRetryApprovalJob(ctx context.Context, tx *gorm.DB, initial *model.Appro
 	if len(modes) > 0 {
 		mode = modes[0]
 	}
-	locked, err := lockExecutionJob(ctx, tx, *initial.RetryJobRunID, mode)
+	var locked *model.JobRun
+	var err error
+	if hint, protected := rerunProtectedLocator(tx); protected {
+		operation := executionLockRerunHuman
+		if mode == executionLockInspect {
+			operation = executionLockRerunHumanReceipt
+		} else if mode == executionLockRerunHumanClose {
+			operation = executionLockRerunHumanClose
+		}
+		locked, _, _, err = lockCopilotRerunOperation(ctx, tx, generationIdentity(&hint), operation)
+	} else {
+		if mode == executionLockRerunHumanClose {
+			mode = executionLockActive
+		}
+		locked, err = lockExecutionJob(ctx, tx, *initial.RetryJobRunID, mode)
+	}
 	if err != nil {
 		return nil, err
 	}

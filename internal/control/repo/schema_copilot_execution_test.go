@@ -29,11 +29,12 @@ func TestCopilotExecutionSchemaUpgradeDoesNotInventAuthority(t *testing.T) {
 	db := executionSchemaDB(t)
 	// Simulate migration 013: the complete preceding schema, no execution table.
 	for _, entity := range schemaModels() {
-		if _, execution := entity.(*model.CopilotExecutionIntent); execution {
+		if _, execution := entity.(*model.CopilotExecutionIntent); execution || isRerunSchemaModel(entity) {
 			continue
 		}
 		require.NoError(t, db.AutoMigrate(entity))
 	}
+	removeLaterRerunColumnsForMigration(t, db)
 	require.NoError(t, inboxSchemaIndexes(context.Background(), db))
 	require.NoError(t, db.Create(&model.User{UserID: "legacy-owner", Username: "legacy-owner", IsEnabled: 1}).Error)
 	require.NoError(t, db.Create(&model.CopilotActionPlan{PlanID: "legacy-plan", RequestID: "legacy-request", OwnerUserID: "legacy-owner", ProjectID: "legacy-project", Kind: "retry_approval_review", State: "reviewed", PlanDigest: "legacy-digest", Version: 2, SchemaVersion: 1, CipherVersion: 1, PayloadCiphertext: []byte("opaque-legacy-ciphertext"), PayloadPresent: true, CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}).Error)

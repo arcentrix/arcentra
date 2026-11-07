@@ -72,7 +72,7 @@ func seedTerminalTestRun(t *testing.T, db *gorm.DB, current int) {
 	}
 }
 
-func terminalTestClient(t *testing.T, db *gorm.DB, after func(proto.Message) error) (agentv1.AgentServiceClient, func()) {
+func terminalTestClient(t *testing.T, db *gorm.DB, after func(proto.Message) error, jobs ...repo.IJobRunRepository) (agentv1.AgentServiceClient, func()) {
 	t.Helper()
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer(grpc.UnaryInterceptor(func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
@@ -86,7 +86,14 @@ func terminalTestClient(t *testing.T, db *gorm.DB, after func(proto.Message) err
 		return response, nil
 	}))
 	storage := artifactServiceDatabase{db}
-	agentv1.RegisterAgentServiceServer(server, NewAgentServiceImpl(NewAgentService(nil, repo.NewStepRunRepo(storage), nil, repo.NewJobRunRepo(storage)), nil))
+	jobStore := repo.NewJobRunRepo(storage)
+	if len(jobs) > 1 {
+		t.Fatal("only one explicit test repository is supported")
+	}
+	if len(jobs) == 1 {
+		jobStore = jobs[0]
+	}
+	agentv1.RegisterAgentServiceServer(server, NewAgentServiceImpl(NewAgentService(nil, repo.NewStepRunRepo(storage), nil, jobStore), nil))
 	safe.Go(func() { _ = server.Serve(listener) })
 	conn, err := grpc.NewClient("passthrough:///terminal-test", grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return listener.DialContext(ctx) }))

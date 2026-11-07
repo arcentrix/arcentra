@@ -70,15 +70,34 @@ func (r *StepRunRepo) Create(ctx context.Context, stepRun *model.StepRun) error 
 	if err := normalizeJSONFields(map[string]*string{"retry_policy": &stepRun.RetryPolicy, "args": &stepRun.Args, "env": &stepRun.Env, "secrets": &stepRun.Secrets, "label_selector": &stepRun.LabelSelector}, stepRunJSONDefaults); err != nil {
 		return err
 	}
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	parents, err := locateOrdinaryAttachmentScope(ctx, r.Database(), []string{stepRun.PipelineRunID}, stepRun.JobRunID)
+	if err != nil {
+		return err
+	}
+	return rerunAttachmentTransaction(ctx, r.Database(), func(tx *gorm.DB) error {
+		if err := parents.lockParents(ctx, tx); err != nil {
+			return err
+		}
 		if stepRun.JobRunID != "" {
 			var parent model.JobRun
-			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id", "retry_plan", "retry_plan_digest").Where("job_run_id = ?", stepRun.JobRunID).First(&parent).Error
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("copilot_rerun_intent_id", "copilot_rerun_gate_id", "expected_source_commit", "job_run_id", "pipeline_id", "pipeline_run_id", "retry_plan", "retry_plan_digest").Where("job_run_id = ?", stepRun.JobRunID).First(&parent).Error
 			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
-			if err == nil && (parent.JobRunID != stepRun.JobRunID || parent.RetryPlan != "" || parent.RetryPlanDigest != "") {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				if err := requireRerunAttachmentTransaction(tx); err != nil {
+					return err
+				}
+			}
+			if err == nil && (!emptyJobRerun(&parent) || parent.JobRunID != stepRun.JobRunID || parent.RetryPlan != "" || parent.RetryPlanDigest != "") {
 				return fmt.Errorf("captured retry plan cannot acquire new step allocations")
+			}
+			var current *model.JobRun
+			if err == nil {
+				current = &parent
+			}
+			if err := parents.validateJob(current); err != nil {
+				return err
 			}
 		}
 		return tx.Table(stepRun.TableName()).Create(stepRun).Error
@@ -200,20 +219,22 @@ func (r *StepRunRepo) PatchByStepRunID(ctx context.Context, stepRunID string, up
 		return nil
 	}
 	updates["updated_at"] = time.Now()
-	return reportedStatusResult(excludeRetryPlanSteps(r.Database().WithContext(ctx).
-		Table((&model.StepRun{}).TableName()).
-		Where("step_run_id = ?", stepRunID)).
-		Updates(updates))
+	return ordinaryStepMutation(ctx, r.Database(), stepRunID, updates, func(tx *gorm.DB) error {
+		return reportedStatusResult(tx.Table((&model.StepRun{}).TableName()).Where("step_run_id = ?", stepRunID).Updates(updates))
+	})
 }
 
 // DeleteByStepRunID 仅删除未被固定重试计划或代次回执引用的步骤
 func (r *StepRunRepo) DeleteByStepRunID(ctx context.Context, stepRunID string) error {
-	return r.Database().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return rerunAttachmentTransaction(ctx, r.Database(), func(tx *gorm.DB) error {
 		var step model.StepRun
-		if err := tx.Select("step_run_id", "job_run_id", "generation_id", "generation_binding_digest", "attempt_admission_request", "attempt_admission_request_digest", "attempt_admission").Where("step_run_id = ?", stepRunID).First(&step).Error; err != nil {
+		if err := tx.Select("step_run_id", "pipeline_run_id", "job_run_id", "generation_id", "generation_binding_digest", "attempt_admission_request", "attempt_admission_request_digest", "attempt_admission").Where("step_run_id = ?", stepRunID).First(&step).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
+			return err
+		}
+		if err := lockOrdinaryRerunParent(ctx, tx, step.PipelineRunID); err != nil {
 			return err
 		}
 		if step.StepRunID != stepRunID {
@@ -224,15 +245,15 @@ func (r *StepRunRepo) DeleteByStepRunID(ctx context.Context, stepRunID string) e
 		}
 		if step.JobRunID != "" {
 			var parent model.JobRun
-			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("job_run_id", "retry_plan", "retry_plan_digest", "retry_approval_required", "retry_approval_id", "retry_approval_evidence_hash").Where("job_run_id = ?", step.JobRunID).First(&parent).Error
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("copilot_rerun_intent_id", "copilot_rerun_gate_id", "expected_source_commit", "job_run_id", "retry_plan", "retry_plan_digest", "retry_approval_required", "retry_approval_id", "retry_approval_evidence_hash").Where("job_run_id = ?", step.JobRunID).First(&parent).Error
 			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
-			if err == nil && (parent.JobRunID != step.JobRunID || parent.RetryPlan != "" || parent.RetryPlanDigest != "" || !emptyRetryApproval(&parent)) {
+			if err == nil && (!emptyJobRerun(&parent) || parent.JobRunID != step.JobRunID || parent.RetryPlan != "" || parent.RetryPlanDigest != "" || !emptyRetryApproval(&parent)) {
 				return fmt.Errorf("captured retry attempts and receipts cannot be deleted")
 			}
 		}
-		return reportedStatusResult(tx.Where("step_run_id = ? AND job_run_id = ? AND generation_id = ? AND generation_binding_digest = ?", stepRunID, step.JobRunID, "", "").Where("attempt_admission_request = ? AND attempt_admission_request_digest = ? AND attempt_admission = ?", "", "", "").Delete(&model.StepRun{}))
+		return reportedStatusResult(tx.Where("(pipeline_run_id = ? OR (pipeline_run_id IS NULL AND ? = ?))", step.PipelineRunID, step.PipelineRunID, "").Where("step_run_id = ? AND job_run_id = ? AND generation_id = ? AND generation_binding_digest = ?", stepRunID, step.JobRunID, "", "").Where("attempt_admission_request = ? AND attempt_admission_request_digest = ? AND attempt_admission = ?", "", "", "").Delete(&model.StepRun{}))
 	})
 }
 

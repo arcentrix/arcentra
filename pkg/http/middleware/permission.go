@@ -60,7 +60,7 @@ func RequirePermission(checker authz.IAuthorizer, action string, resolver ScopeR
 			}
 		}
 
-		allowed, err := checker.Check(c.Context(), subject, action, resource)
+		allowed, err := checker.Check(c.UserContext(), subject, action, resource)
 		if err != nil {
 			log.Errorw("permission check failed", "action", action, "error", err)
 			return http.Err(c, http.InternalError.Code, http.InternalError.Msg)
@@ -124,7 +124,7 @@ func ResolveFromPathPipelineID(pathParam string, lookup ResourceScopeLookup) Sco
 		if lookup == nil {
 			return authz.ResourceRef{}, errors.New("scope lookup is nil")
 		}
-		orgID, projectID, err := lookup.ResolveProjectScopeByPipelineID(c.Context(), pipelineID)
+		orgID, projectID, err := lookup.ResolveProjectScopeByPipelineID(c.UserContext(), pipelineID)
 		if err != nil {
 			return authz.ResourceRef{}, err
 		}
@@ -147,7 +147,7 @@ func ResolveFromApprovalID(pathParam string, lookup ResourceScopeLookup) ScopeRe
 		if lookup == nil {
 			return authz.ResourceRef{}, errors.New("scope lookup is nil")
 		}
-		orgID, projectID, err := lookup.ResolveProjectScopeByApprovalID(c.Context(), approvalID)
+		orgID, projectID, err := lookup.ResolveProjectScopeByApprovalID(c.UserContext(), approvalID)
 		if err != nil {
 			return authz.ResourceRef{}, err
 		}

@@ -277,8 +277,9 @@ func unusedGenerationClosure(next int) bool {
 }
 
 func excludeRetryPlanSteps(tx *gorm.DB) *gorm.DB {
-	jobs := tx.Session(&gorm.Session{NewDB: true}).Model(&model.JobRun{}).Select("job_run_id").Where("retry_plan <> ? OR retry_plan_digest <> ?", "", "")
-	return tx.Where("job_run_id NOT IN (?)", jobs)
+	jobs := tx.Session(&gorm.Session{NewDB: true}).Model(&model.JobRun{}).Select("job_run_id").Where("retry_plan <> ? OR retry_plan_digest <> ? OR copilot_rerun_intent_id <> ? OR copilot_rerun_gate_id <> ? OR expected_source_commit <> ?", "", "", "", "", "")
+	runs := tx.Session(&gorm.Session{NewDB: true}).Model(&model.PipelineRun{}).Select("run_id").Where("copilot_rerun_intent_id <> ? OR copilot_rerun_gate_id <> ?", "", "")
+	return tx.Where("job_run_id NOT IN (?)", jobs).Where("(pipeline_run_id IS NULL OR pipeline_run_id NOT IN (?))", runs)
 }
 
 type generationArtifactPublicationKey struct{}

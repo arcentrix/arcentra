@@ -22,7 +22,7 @@ func RecoverInterruptedRuns(ctx context.Context, db *gorm.DB, runIDs []string, a
 	}
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var runs []model.PipelineRun
-		query := tx.Select("run_id").Where("status IN ?", []int{model.PipelineStatusPending, model.PipelineStatusRunning, model.PipelineStatusPaused})
+		query := tx.Select("run_id").Where(ordinaryRunPredicate).Where("status IN ?", []int{model.PipelineStatusPending, model.PipelineStatusRunning, model.PipelineStatusPaused})
 		if len(runIDs) > 0 {
 			query = query.Where("run_id IN ?", runIDs)
 		}

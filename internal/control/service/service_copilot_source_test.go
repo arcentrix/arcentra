@@ -97,6 +97,7 @@ func copilotSourceFixture(t *testing.T) (*CopilotService, *gorm.DB, *copilotFixt
 		}
 	}
 	s.repos = repo.NewRepositories(artifactServiceDatabase{db}, nil)
+	s.contextPrimary = s.repos.CopilotPrimaryRepositories
 	encrypted, err := s.secrets.encrypt("registered-old-key")
 	if err != nil {
 		t.Fatal(err)

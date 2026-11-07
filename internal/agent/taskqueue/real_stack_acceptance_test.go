@@ -608,8 +608,18 @@ func realStackCleanupDatabase(t *testing.T, f *controllerWorkerFixture, storageI
 		return
 	}
 	if len(jobIDs) > 0 {
+		if err := f.db.WithContext(ctx).Where("job_run_id IN ?", jobIDs).Delete(&model.StepRunArtifact{}).Error; err != nil {
+			t.Errorf("delete exact acceptance artifact rows: %v", err)
+		}
 		if err := f.db.WithContext(ctx).Where("job_run_id IN ?", jobIDs).Delete(&model.JobRunGeneration{}).Error; err != nil {
 			t.Errorf("delete exact acceptance generations: %v", err)
+		}
+	}
+	// Terminal rerun records belong to the same disposable pipeline. The caller
+	// stops and joins its dispatcher before this cleanup; no other scope is touched.
+	for _, entity := range []any{&model.CopilotRerunAdmissionGate{}, &model.CopilotRerunSchedule{}, &model.CopilotRerunIntent{}, &model.CopilotDefinitionSnapshot{}} {
+		if err := f.db.WithContext(ctx).Where("pipeline_id = ?", f.pipelineID).Delete(entity).Error; err != nil {
+			t.Errorf("delete exact terminal rerun fixture %T: %v", entity, err)
 		}
 	}
 	for _, entity := range []any{&model.ProjectArtifact{}, &model.StepRun{}, &model.JobRun{}, &model.PipelineRun{}, &model.Pipeline{}} {

@@ -125,6 +125,7 @@ type CopilotService struct {
 	historyCipher         *copilotHistoryCipher
 	historyKey            []byte
 	historyPrimary        func(context.Context) (*repo.Repositories, error)
+	contextPrimary        func(context.Context) (*repo.Repositories, error)
 
 	sourceAllowed map[string]bool
 	sourceReader  copilotSourceReader
@@ -151,6 +152,7 @@ func NewCopilotService(repos *repo.Repositories, authorizer authz.IAuthorizer, a
 	s := &CopilotService{repos: repos, authorizer: authorizer, artifacts: artifacts, registry: registry}
 	if repos != nil {
 		s.secrets = NewSecretService(repos.Secret)
+		s.contextPrimary = repos.CopilotPrimaryRepositories
 	}
 	if len(secretServices) > 0 && secretServices[0] != nil {
 		s.secrets = secretServices[0]
@@ -195,7 +197,7 @@ func (s *CopilotService) run(ctx context.Context, subject authz.Subject, project
 
 // Status 返回授权项目的配置状态
 func (s *CopilotService) Status(ctx context.Context, subject authz.Subject, projectID string) (CopilotStatus, error) {
-	if _, err := s.project(ctx, subject, projectID); err != nil {
+	if _, _, err := s.liveProject(ctx, subject, projectID, s.contextPrimary); err != nil {
 		return CopilotStatus{}, err
 	}
 	models := s.registry.Options(projectID)
@@ -213,6 +215,13 @@ func (s *CopilotService) Sources(ctx context.Context, subject authz.Subject, pro
 	sourceMode := s.sourceEnabled(projectID)
 	if sourceMode {
 		local, _, _, err := s.sourceScope(ctx, subject, projectID, runID)
+		if err != nil {
+			return out, err
+		}
+		s = local
+		subject = local.sourceSubject
+	} else {
+		local, _, _, err := s.liveScope(ctx, subject, projectID, runID, s.contextPrimary)
 		if err != nil {
 			return out, err
 		}
@@ -282,6 +291,8 @@ func (s *CopilotService) Sources(ctx context.Context, subject authz.Subject, pro
 		if _, _, _, err := sourceOwner.sourceScope(ctx, subject, projectID, runID); err != nil {
 			return CopilotSources{}, err
 		}
+	} else if err := sourceOwner.verifyCurrentContext(ctx, subject, project, run); err != nil {
+		return CopilotSources{}, err
 	}
 
 	return out, nil
@@ -316,7 +327,7 @@ func (s *CopilotService) Cancel(ctx context.Context, subject authz.Subject, proj
 	if !copilot.ValidID(requestID) || len(requestID) < 16 {
 		return ErrCopilotInput
 	}
-	if _, err := s.project(ctx, subject, projectID); err != nil {
+	if _, _, err := s.liveProject(ctx, subject, projectID, s.contextPrimary); err != nil {
 		return err
 	}
 	return s.requests.Cancel(subject.UserID, projectID, requestID)
@@ -359,6 +370,8 @@ func (s *CopilotService) Analyze(ctx context.Context, subject authz.Subject, pro
 		if err := sources.verify(ctx); err != nil {
 			return CopilotResult{}, err
 		}
+	} else if err := s.verifyCurrentContext(ctx, subject, project, run); err != nil {
+		return CopilotResult{}, err
 	}
 
 	result, err := provider.Analyze(ctx, copilot.Input{Model: in.Model, System: copilotSystem, User: user, MaxOutputTokens: 2048})
@@ -367,6 +380,11 @@ func (s *CopilotService) Analyze(ctx context.Context, subject authz.Subject, pro
 	}
 	if err := ctx.Err(); err != nil {
 		return out, err
+	}
+	if sources == nil {
+		if err := s.verifyCurrentContext(ctx, subject, project, run); err != nil {
+			return CopilotResult{}, err
+		}
 	}
 	out.Text = redactor.Redact(result.Text)
 	out.Truncated = result.Truncated
@@ -414,6 +432,11 @@ func (s *CopilotService) Preview(ctx context.Context, subject authz.Subject, pro
 	out, _, err := local.prepare(ctx, project, run, in, sources)
 	if err != nil {
 		return CopilotPreview{}, err
+	}
+	if sources == nil {
+		if err := s.verifyCurrentContext(ctx, subject, project, run); err != nil {
+			return CopilotPreview{}, err
+		}
 	}
 	return CopilotPreview{Text: out.Text, Digest: copilotDigest(projectID, in, out), Evidence: out.Evidence, Warnings: out.Warnings}, nil
 }

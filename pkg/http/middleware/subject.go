@@ -45,7 +45,7 @@ func SubjectMiddleware(reader TeamMemberReader) fiber.Handler {
 			UserID: claims.UserID,
 		}
 		if reader != nil {
-			teams, err := reader.ListUserTeams(c.Context(), claims.UserID)
+			teams, err := reader.ListUserTeams(c.UserContext(), claims.UserID)
 			if err != nil {
 				log.Errorw("load user teams failed", "userId", claims.UserID, "error", err)
 				return http.Err(c, http.InternalError.Code, http.InternalError.Msg)

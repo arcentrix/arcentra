@@ -200,6 +200,7 @@ func TestJobInputsDispatchRejectsUnregisteredOrForeignArtifactsAtomically(t *tes
 
 func TestJobInputsMigrationNeverPromotesTerminalEvidence(t *testing.T) {
 	ctx, db, r, _ := sourceTestRepository(t)
+	removeLaterRerunColumnsForMigration(t, db)
 	for _, field := range jobInputColumns {
 		if err := db.WithContext(ctx).Migrator().DropColumn(&model.JobRun{}, field); err != nil {
 			t.Fatal(err)

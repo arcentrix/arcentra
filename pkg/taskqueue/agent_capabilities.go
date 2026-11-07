@@ -35,6 +35,8 @@ func ValidateAgentStepUses(uses, action string) error {
 // AgentRuntimeCapabilities 保存独立于用户标签的 Agent 运行时就绪报告
 // 缺失报告或未知版本不能获得离线容器任务
 type AgentRuntimeCapabilities struct {
+	// Reserved for the separately enabled dedicated rerun preparation protocol.
+	CopilotWholeJobRerunPreparationV1   bool   `json:"copilotWholeJobRerunPreparationV1,omitempty"`
 	ContainerdFailedStepRetryApprovalV1 bool   `json:"containerdFailedStepRetryApprovalV1,omitempty"`
 	ContainerdRetryApprovalV1           bool   `json:"containerdRetryApprovalV1,omitempty"`
 	ExecutionMode                       string `json:"executionMode,omitempty"`

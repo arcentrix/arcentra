@@ -3,10 +3,9 @@ package process
 import (
 	"context"
 	"fmt"
-	"slices"
-	"strconv"
 	"time"
 
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/materialize"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/validation"
 	"github.com/arcentrix/arcentra/pkg/taskqueue"
@@ -90,56 +89,7 @@ func (e *Process) selectAgentForRuntime(ctx context.Context, job *spec.Job, runt
 }
 
 func matchesAgentSelector(labels map[string]string, selector *spec.AgentSelector) bool {
-	if selector == nil {
-		return true
-	}
-	for key, value := range selector.MatchLabels {
-		if v, ok := labels[key]; !ok || v != value {
-			return false
-		}
-	}
-	for _, expression := range selector.MatchExpressions {
-		if expression == nil {
-			return false
-		}
-		value, exists := labels[expression.Key]
-		switch expression.Operator {
-		case "In":
-			if !exists || !slices.Contains(expression.Values, value) {
-				return false
-			}
-		case "NotIn":
-			if exists && slices.Contains(expression.Values, value) {
-				return false
-			}
-		case "Exists":
-			if !exists {
-				return false
-			}
-		case "NotExists":
-			if exists {
-				return false
-			}
-		case "Gt", "Lt":
-			if !exists || len(expression.Values) != 1 {
-				return false
-			}
-			actual, err := strconv.ParseFloat(value, 64)
-			if err != nil {
-				return false
-			}
-			expected, err := strconv.ParseFloat(expression.Values[0], 64)
-			if err != nil {
-				return false
-			}
-			if expression.Operator == "Gt" && actual <= expected || expression.Operator == "Lt" && actual >= expected {
-				return false
-			}
-		default:
-			return false
-		}
-	}
-	return true
+	return materialize.MatchesAgentSelector(labels, selector)
 }
 
 func decodeAgentRuntimeCapabilities(data []byte) (taskqueue.AgentRuntimeCapabilities, error) {
@@ -159,6 +109,12 @@ func decodeAgentRuntimeCapabilities(data []byte) (taskqueue.AgentRuntimeCapabili
 				return result, fmt.Errorf("invalid runtime execution mode")
 			}
 			result.ExecutionMode = mode
+		case "copilotWholeJobRerunPreparationV1":
+			ready, ok := value.(bool)
+			if !ok {
+				return result, fmt.Errorf("invalid rerun preparation readiness")
+			}
+			result.CopilotWholeJobRerunPreparationV1 = ready
 		case "containerdOfflineV1":
 			ready, ok := value.(bool)
 			if !ok {

@@ -55,7 +55,7 @@ func (rt *Router) listApprovalPolicies(c *fiber.Ctx) error {
 	if scopeType == "" {
 		return http.Err(c, http.BadRequest.Code, "scopeType is required")
 	}
-	policies, err := rt.Services.ApprovalPolicy.ListByScope(c.Context(), scopeType, scopeID)
+	policies, err := rt.Services.ApprovalPolicy.ListByScope(c.UserContext(), scopeType, scopeID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -92,7 +92,7 @@ func (rt *Router) createApprovalPolicy(c *fiber.Ctx) error {
 	if req.Enabled != nil {
 		policy.Enabled = *req.Enabled
 	}
-	if err := rt.Services.ApprovalPolicy.Create(c.Context(), policy); err != nil {
+	if err := rt.Services.ApprovalPolicy.Create(c.UserContext(), policy); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	return http.Detail(c, policy)
@@ -103,7 +103,7 @@ func (rt *Router) getApprovalPolicy(c *fiber.Ctx) error {
 	if policyID == "" {
 		return http.Err(c, http.BadRequest.Code, "policy id is required")
 	}
-	policy, err := rt.Services.ApprovalPolicy.Get(c.Context(), policyID)
+	policy, err := rt.Services.ApprovalPolicy.Get(c.UserContext(), policyID)
 	if err != nil {
 		return http.Err(c, http.NotFound.Code, "approval policy not found")
 	}
@@ -150,10 +150,10 @@ func (rt *Router) updateApprovalPolicy(c *fiber.Ctx) error {
 	if req.Description != "" {
 		updates["description"] = req.Description
 	}
-	if err := rt.Services.ApprovalPolicy.Update(c.Context(), policyID, updates); err != nil {
+	if err := rt.Services.ApprovalPolicy.Update(c.UserContext(), policyID, updates); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
-	policy, err := rt.Services.ApprovalPolicy.Get(c.Context(), policyID)
+	policy, err := rt.Services.ApprovalPolicy.Get(c.UserContext(), policyID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -165,7 +165,7 @@ func (rt *Router) deleteApprovalPolicy(c *fiber.Ctx) error {
 	if policyID == "" {
 		return http.Err(c, http.BadRequest.Code, "policy id is required")
 	}
-	if err := rt.Services.ApprovalPolicy.Delete(c.Context(), policyID); err != nil {
+	if err := rt.Services.ApprovalPolicy.Delete(c.UserContext(), policyID); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 	return http.Operation(c)

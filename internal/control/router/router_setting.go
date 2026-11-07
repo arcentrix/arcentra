@@ -36,7 +36,7 @@ func (rt *Router) settingRouter(r fiber.Router, auth fiber.Handler) {
 
 // listSettings returns every setting in the table.
 func (rt *Router) listSettings(c *fiber.Ctx) error {
-	settings, err := rt.Services.Setting.ListSettings(c.Context())
+	settings, err := rt.Services.Setting.ListSettings(c.UserContext())
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -58,7 +58,7 @@ func (rt *Router) getSetting(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "name is required")
 	}
 
-	setting, err := rt.Services.Setting.GetSetting(c.Context(), name)
+	setting, err := rt.Services.Setting.GetSetting(c.UserContext(), name)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
@@ -101,7 +101,7 @@ func (rt *Router) upsertSetting(c *fiber.Ctx) error {
 		}
 	}
 	setting.Value = merged
-	if err := rt.Services.Setting.UpsertSetting(c.Context(), &setting); err != nil {
+	if err := rt.Services.Setting.UpsertSetting(c.UserContext(), &setting); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 
@@ -116,7 +116,7 @@ func (rt *Router) deleteSetting(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "name is required")
 	}
 
-	if err := rt.Services.Setting.DeleteSetting(c.Context(), name); err != nil {
+	if err := rt.Services.Setting.DeleteSetting(c.UserContext(), name); err != nil {
 		return http.Err(c, http.Failed.Code, err.Error())
 	}
 

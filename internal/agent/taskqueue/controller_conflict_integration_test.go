@@ -12,7 +12,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -58,6 +60,35 @@ func (q *controllerWorkerRecordingQueue) Enqueue(task *nova.Task, opts ...nova.O
 		q.fixture.mu.Unlock()
 	}
 	return q.TaskQueue.Enqueue(task, opts...)
+}
+
+// Preserve the optional context capability of the real queue. Recording a
+// reference counts publication attempts only, never execution or completion.
+func (q *controllerWorkerRecordingQueue) EnqueueContext(ctx context.Context, task *nova.Task, opts ...nova.Option) (*nova.Result, error) {
+	publisher, ok := q.TaskQueue.(interface {
+		EnqueueContext(context.Context, *nova.Task, ...nova.Option) (*nova.Result, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("fixture queue lacks context publication")
+	}
+	if task != nil && task.Type == taskpayload.TaskTypeCopilotRerunReference {
+		var ref taskpayload.RerunClaimReference
+		if err := sonic.Unmarshal(task.Payload, &ref); err != nil {
+			return nil, err
+		}
+		if err := ref.Validate(); err != nil {
+			return nil, err
+		}
+		canonical, err := json.Marshal(ref)
+		if err != nil || !bytes.Equal(canonical, task.Payload) {
+			return nil, fmt.Errorf("fixture queue payload is not an exact reference-only message")
+		}
+		q.fixture.mu.Lock()
+		q.fixture.rerunNotifications[ref.JobRunID]++
+		q.fixture.rerunReferences[ref.JobRunID] = ref
+		q.fixture.mu.Unlock()
+	}
+	return publisher.EnqueueContext(ctx, task, opts...)
 }
 
 func controllerWorkerTLS(t *testing.T) controllerWorkerFixtureOptions {

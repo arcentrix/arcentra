@@ -66,8 +66,8 @@ func TestOfflineRuntimeAcceptsOnlyExplicitLinearChains(t *testing.T) {
 		{"three jobs", func(*spec.Pipeline) {}},
 		{"declaration order is not execution order", func(p *spec.Pipeline) { p.Jobs[0], p.Jobs[2] = p.Jobs[2], p.Jobs[0] }},
 		{"remote sources and agent selectors per job", func(p *spec.Pipeline) {
-			for i, scheme := range []string{"https", "http", "ssh"} {
-				p.Jobs[i].Source = &spec.Source{Type: "git", Repo: scheme + "://example.invalid/project.git"}
+			for i, repository := range []string{"https://example.invalid/project.git", "http://127.0.0.1/project.git", "git://example.invalid/project.git"} {
+				p.Jobs[i].Source = &spec.Source{Type: "git", Repo: repository}
 				p.Jobs[i].Steps[0].AgentSelector = &spec.AgentSelector{MatchLabels: map[string]string{"pool": p.Jobs[i].Name}}
 			}
 		}},

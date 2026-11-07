@@ -142,6 +142,9 @@ func (v *SchemaValidator) validateJobAdvanced(job *spec.Job, index int) error {
 	for _, step := range job.Steps {
 		agentJob = agentJob || step.RunOnAgent
 	}
+	if agentJob && job.Source != nil && strings.EqualFold(job.Source.Type, "git") && explicitSSHSource(job.Source.Repo) {
+		return fmt.Errorf("job %q: Agent checkout does not support SSH or scp-like source URLs", job.Name)
+	}
 	for i, step := range job.Steps {
 		if agentJob {
 			if err := taskqueue.ValidateAgentStepUses(step.Uses, step.Action); err != nil {

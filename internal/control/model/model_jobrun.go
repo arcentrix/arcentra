@@ -22,6 +22,10 @@ import (
 // Job is the minimum schedulable unit; an Agent receives a complete JobRun
 // and executes all its Steps sequentially.
 type JobRun struct {
+	CopilotRerunIntentID string `gorm:"type:varchar(64);not null;default:''" json:"-"`
+	CopilotRerunGateID   string `gorm:"type:varchar(64);not null;default:''" json:"-"`
+	ExpectedSourceCommit string `gorm:"type:varchar(64);not null;default:''" json:"-"`
+
 	RetryApprovalRequired     bool   `gorm:"column:retry_approval_required;not null;default:false" json:"retryApprovalRequired"`
 	RetryApprovalID           string `gorm:"column:retry_approval_id;type:varchar(64);not null;default:''" json:"retryApprovalId"`
 	RetryApprovalEvidenceHash string `gorm:"column:retry_approval_evidence_hash;type:varchar(67);not null;default:''" json:"retryApprovalEvidenceHash"`

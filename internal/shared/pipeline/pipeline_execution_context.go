@@ -21,12 +21,12 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 
 	"github.com/arcentrix/arcentra/internal/shared/executor"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/builtin"
+	"github.com/arcentrix/arcentra/internal/shared/pipeline/materialize"
 	"github.com/arcentrix/arcentra/internal/shared/pipeline/spec"
 	"github.com/arcentrix/arcentra/pkg/log"
 	"github.com/arcentrix/arcentra/pkg/nova"
@@ -280,14 +280,7 @@ func (c *ExecutionContext) ResolveStepEnv(job *spec.Job, step *spec.Step) map[st
 }
 
 func resolveEnvLayer(base, overrides map[string]string) map[string]string {
-	env := maps.Clone(base)
-	if env == nil {
-		env = make(map[string]string)
-	}
-	for key, value := range overrides {
-		env[key] = resolveVariable(value, base)
-	}
-	return env
+	return materialize.ResolveEnvLayer(base, overrides)
 }
 
 // forStep 保留尝试标识及共享产物状态，仅为步骤创建独立的有效环境快照
@@ -299,53 +292,16 @@ func (c *ExecutionContext) forStep(job *spec.Job, step *spec.Step) *ExecutionCon
 }
 
 // ResolveVariable resolves variable substitution: ${{ variable }}
-var varRegex = regexp.MustCompile(`\${{?\s*(\w+(?:\.\w+)?)\s*}}?`)
-
 func (c *ExecutionContext) ResolveVariable(value string) string {
-	return resolveVariable(value, c.Env)
+	return materialize.ResolveVariable(value, c.Env)
 }
-
 func resolveVariable(value string, env map[string]string) string {
-	return varRegex.ReplaceAllStringFunc(value, func(match string) string {
-		submatch := varRegex.FindStringSubmatch(match)
-		if len(submatch) == 2 {
-			key := submatch[1]
-			if val, ok := env[key]; ok {
-				return val
-			}
-		}
-		return match
-	})
+	return materialize.ResolveVariable(value, env)
 }
 
 // ResolveVariables resolves variables in a map recursively
 func (c *ExecutionContext) ResolveVariables(params map[string]any) map[string]any {
-	resolved := make(map[string]any)
-	for k, v := range params {
-		resolved[k] = c.resolveValue(v)
-	}
-	return resolved
-}
-
-func (c *ExecutionContext) resolveValue(v any) any {
-	switch val := v.(type) {
-	case string:
-		return c.ResolveVariable(val)
-	case map[string]any:
-		resolved := make(map[string]any)
-		for k, v := range val {
-			resolved[k] = c.resolveValue(v)
-		}
-		return resolved
-	case []any:
-		resolved := make([]any, len(val))
-		for i, v := range val {
-			resolved[i] = c.resolveValue(v)
-		}
-		return resolved
-	default:
-		return v
-	}
+	return (&materialize.Context{Env: c.Env}).ResolveVariables(params)
 }
 
 // MarshalParams marshals params to JSON

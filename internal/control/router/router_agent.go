@@ -41,7 +41,7 @@ func (rt *Router) approveAgent(c *fiber.Ctx) error {
 		return http.Err(c, http.BadRequest.Code, "agent id is required")
 	}
 
-	if err := rt.Services.Agent.ApproveAgent(c.Context(), agentID); err != nil {
+	if err := rt.Services.Agent.ApproveAgent(c.UserContext(), agentID); err != nil {
 		return http.Err(c, http.Failed.Code, "failed to approve agent")
 	}
 
@@ -61,7 +61,7 @@ func (rt *Router) listAgent(c *fiber.Ctx) error {
 		pageSize = 10
 	}
 
-	agents, count, err := agentLogic.ListAgent(c.Context(), pageNum, pageSize)
+	agents, count, err := agentLogic.ListAgent(c.UserContext(), pageNum, pageSize)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -78,7 +78,7 @@ func (rt *Router) listAgent(c *fiber.Ctx) error {
 func (rt *Router) getAgentStatistics(c *fiber.Ctx) error {
 	agentLogic := rt.Services.Agent
 
-	total, online, offline, err := agentLogic.GetAgentStatistics(c.Context())
+	total, online, offline, err := agentLogic.GetAgentStatistics(c.UserContext())
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -99,7 +99,7 @@ func (rt *Router) getAgent(c *fiber.Ctx) error {
 	}
 
 	agentLogic := rt.Services.Agent
-	agent, err := agentLogic.GetAgentByagentID(c.Context(), agentID)
+	agent, err := agentLogic.GetAgentByagentID(c.UserContext(), agentID)
 	if err != nil {
 		return http.Err(c, http.NotFound.Code, "agent not found")
 	}
@@ -120,12 +120,12 @@ func (rt *Router) updateAgent(c *fiber.Ctx) error {
 	}
 
 	agentLogic := rt.Services.Agent
-	if err := agentLogic.UpdateAgentByagentID(c.Context(), agentID, updateReq); err != nil {
+	if err := agentLogic.UpdateAgentByagentID(c.UserContext(), agentID, updateReq); err != nil {
 		return http.Err(c, http.NotFound.Code, "agent not found")
 	}
 
 	// Get updated agent
-	updatedAgent, err := agentLogic.GetAgentByagentID(c.Context(), agentID)
+	updatedAgent, err := agentLogic.GetAgentByagentID(c.UserContext(), agentID)
 	if err != nil {
 		return http.Err(c, http.Failed.Code, http.Failed.Msg)
 	}
@@ -141,7 +141,7 @@ func (rt *Router) deleteAgent(c *fiber.Ctx) error {
 	}
 
 	agentLogic := rt.Services.Agent
-	if err := agentLogic.DeleteAgentByagentID(c.Context(), agentID); err != nil {
+	if err := agentLogic.DeleteAgentByagentID(c.UserContext(), agentID); err != nil {
 		return http.Err(c, http.NotFound.Code, "agent not found")
 	}
 

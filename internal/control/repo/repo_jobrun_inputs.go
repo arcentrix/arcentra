@@ -59,73 +59,78 @@ func (r *JobRunRepo) GetOrRecordJobInputs(ctx context.Context, identity taskqueu
 			return lockErr
 		}
 		current := *lockedJob
-		if err := validateInputExecution(ctx, tx, &current, identity); err != nil {
-			return err
-		}
-		expected, err := taskqueue.ParseJobInputManifest(current.InputExpectation)
-		if err != nil || expected.SourceCommit != "" {
-			return fmt.Errorf("immutable dispatched inputs are unknown")
-		}
-		if err := validateRegisteredInputArtifacts(ctx, tx, &current, expected); err != nil {
-			return err
-		}
-		if current.InputManifestState == "pinned" {
-			stored, err := taskqueue.ParseJobInputManifest(current.InputManifest)
-			if err != nil {
-				return err
-			}
-			digest, err := stored.Digest(identity)
-			if err != nil || digest != current.InputManifestDigest {
-				return fmt.Errorf("stored input manifest is invalid")
-			}
-			if err := validateInputProposal(&current, stored); err != nil {
-				return err
-			}
-			if proposed != nil {
-				encoded, err := proposed.Canonical()
-				if err != nil || encoded != current.InputManifest {
-					return fmt.Errorf("input manifest is already pinned to different inputs")
-				}
-			}
-			if err := pinRetryApproval(ctx, tx, &current); err != nil {
-				return err
-			}
-			result = current
-			return nil
-		}
-		if current.InputManifestState != "unknown" || current.InputManifest != "" || current.InputManifestDigest != "" {
-			return fmt.Errorf("input manifest state is invalid")
-		}
-		if proposed == nil {
-			result = current
-			return nil
-		}
-		if err := validateInputProposal(&current, proposed); err != nil {
-			return err
-		}
-		encoded, err := proposed.Canonical()
-		if err != nil {
-			return err
-		}
-		digest, err := proposed.Digest(identity)
-		if err != nil {
-			return err
-		}
-		updates := map[string]any{"input_manifest_state": "pinned", "input_manifest": encoded, "input_manifest_digest": digest, "updated_at": time.Now()}
-		if err := reportedStatusResult(reportedJobQuery(tx.Model(&model.JobRun{}), &current).Updates(updates)); err != nil {
-			return err
-		}
-		current.InputManifestState, current.InputManifest, current.InputManifestDigest = "pinned", encoded, digest
-		if err := pinRetryApproval(ctx, tx, &current); err != nil {
-			return err
-		}
-		result = current
-		return nil
+		return recordJobInputsLocked(ctx, tx, &current, identity, proposed, &result)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &result, nil
+}
+
+// recordJobInputsLocked preserves the ordinary input/approval transaction body.
+func recordJobInputsLocked(ctx context.Context, tx *gorm.DB, current *model.JobRun, identity taskqueue.JobInputIdentity, proposed *taskqueue.JobInputManifest, result *model.JobRun) error {
+	if err := validateInputExecution(ctx, tx, current, identity); err != nil {
+		return err
+	}
+	expected, err := taskqueue.ParseJobInputManifest(current.InputExpectation)
+	if err != nil || expected.SourceCommit != "" {
+		return fmt.Errorf("immutable dispatched inputs are unknown")
+	}
+	if err := validateRegisteredInputArtifacts(ctx, tx, current, expected); err != nil {
+		return err
+	}
+	if current.InputManifestState == "pinned" {
+		stored, err := taskqueue.ParseJobInputManifest(current.InputManifest)
+		if err != nil {
+			return err
+		}
+		digest, err := stored.Digest(identity)
+		if err != nil || digest != current.InputManifestDigest {
+			return fmt.Errorf("stored input manifest is invalid")
+		}
+		if err := validateInputProposal(current, stored); err != nil {
+			return err
+		}
+		if proposed != nil {
+			encoded, err := proposed.Canonical()
+			if err != nil || encoded != current.InputManifest {
+				return fmt.Errorf("input manifest is already pinned to different inputs")
+			}
+		}
+		if err := pinRetryApproval(ctx, tx, current); err != nil {
+			return err
+		}
+		*result = *current
+		return nil
+	}
+	if current.InputManifestState != "unknown" || current.InputManifest != "" || current.InputManifestDigest != "" {
+		return fmt.Errorf("input manifest state is invalid")
+	}
+	if proposed == nil {
+		*result = *current
+		return nil
+	}
+	if err := validateInputProposal(current, proposed); err != nil {
+		return err
+	}
+	encoded, err := proposed.Canonical()
+	if err != nil {
+		return err
+	}
+	digest, err := proposed.Digest(identity)
+	if err != nil {
+		return err
+	}
+	updates := map[string]any{"input_manifest_state": "pinned", "input_manifest": encoded, "input_manifest_digest": digest, "updated_at": time.Now()}
+	if err := reportedStatusResult(reportedJobQuery(tx.Model(&model.JobRun{}), current).Updates(updates)); err != nil {
+		return err
+	}
+	current.InputManifestState, current.InputManifest, current.InputManifestDigest = "pinned", encoded, digest
+	if err := pinRetryApproval(ctx, tx, current); err != nil {
+		return err
+	}
+	*result = *current
+	return nil
 }
 
 func validateInputProposal(job *model.JobRun, manifest *taskqueue.JobInputManifest) error {

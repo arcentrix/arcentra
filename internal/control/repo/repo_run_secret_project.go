@@ -17,6 +17,9 @@ import (
 // must never change a historical run's project or pipeline identity.
 func rejectRunProjectUpdates(updates map[string]any) error {
 	for field := range updates {
+		if rerunProtectedField(field) {
+			return ErrCopilotRerunUnsupported
+		}
 		switch strings.ReplaceAll(strings.ToLower(field), "_", "") {
 		case "inboxactorid", "inboxorigin":
 			return errors.New("pipeline run inbox identity is immutable")

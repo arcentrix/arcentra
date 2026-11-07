@@ -31,6 +31,7 @@ const (
 // JobRunTaskPayload is the Kafka payload for dispatching a complete job to an Agent.
 // The Agent receives the entire job definition and executes all steps sequentially.
 type JobRunTaskPayload struct {
+	SourceExpectation *SourceCheckoutExpectation `json:"sourceExpectation,omitempty"`
 	// RetryApprovalTimeoutSeconds 固定可信策略等待上界并参与完整派发摘要
 	RetryApprovalTimeoutSeconds int64                        `json:"retryApprovalTimeoutSeconds,omitempty"`
 	RetryApprovalRequired       bool                         `json:"retryApprovalRequired,omitempty"`

@@ -421,6 +421,7 @@ func TestGenerationDelayIsControllerEnforcedAndDoesNotPreventUnusedClosure(t *te
 
 func TestGenerationMigrationDoesNotInventLegacyAuthority(t *testing.T) {
 	ctx, db, jobs, _ := sourceTestRepository(t)
+	removeLaterRerunColumnsForMigration(t, db)
 	for _, field := range jobGenerationColumns {
 		if err := db.WithContext(ctx).Migrator().DropColumn(&model.JobRun{}, field); err != nil {
 			t.Fatal(err)

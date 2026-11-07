@@ -23,6 +23,8 @@ option go_package = "github.com/arcentrix/arcentra/api/agent/v1;agentv1";
 
 // AgentService - Main interface for communication between Agent and Server
 service AgentService {
+  // Confidential authenticated transport only. No ordinary claim fallback.
+  rpc ClaimAndFetchCopilotRerun(ClaimAndFetchCopilotRerunRequest) returns (ClaimAndFetchCopilotRerunResponse);
   rpc ReconcileJobRetryApproval(ReconcileJobRetryApprovalRequest) returns (ReconcileJobRetryApprovalResponse);
   // Bounded authenticated generation admission/advance; inspect never authorizes execution.
   rpc ReconcileJobGeneration(ReconcileJobGenerationRequest) returns (ReconcileJobGenerationResponse) {}
@@ -141,6 +143,7 @@ enum AgentStatus {
 // Heartbeat request
 // RuntimeCapabilities reports authenticated Agent readiness, independently of editable labels.
 message RuntimeCapabilities {
+  bool copilot_whole_job_rerun_preparation_v1 = 22; // Explicit opt-in, accepted runtime, fresh worker incarnation only
   bool containerd_failed_step_retry_approval_v1 = 21; // Independent acceptance, operator policy and live step readiness required
   bool containerd_retry_approval_v1 = 4; // Durable exact-content retry approval protocol readiness
   bool containerd_offline_v1 = 1;
@@ -444,12 +447,17 @@ message GetOrRecordJobInputsRequest {
   string source_binding_digest = 7;
   // Empty reads the current manifest; nonempty records canonical v1 JSON once.
   string manifest_json = 8;
+  // Required only for sealed rerun expectations; includes the exact claim identity.
+  string source_expectation_digest = 9;
 }
 
 message GetOrRecordJobInputsResponse {
   string state = 1; // unknown or pinned; legacy terminal observations are never promoted
   string manifest_json = 2;
   string manifest_digest = 3;
+  // Expected checkout is separate from an observed/pinned manifest.
+  string source_expectation_json = 4;
+  string source_expectation_digest = 5;
 }
 
 // Canonical bounded v1 contracts are shared with the durable Agent journal.
@@ -478,4 +486,36 @@ message ReconcileStepAttemptRequest {
 message ReconcileStepAttemptResponse {
   string admission_json = 1;
   bool execution_allowed = 2;
+}
+
+// Never log these messages: generated String includes private wire fields.
+message CopilotRerunClaimReference {
+  string agent_id = 1;
+  string pipeline_id = 2;
+  string run_id = 3;
+  string job_run_id = 4;
+  string gate_id = 5;
+  string schedule_id = 6;
+  string seal_id = 7;
+  string seal_digest = 8;
+  string payload_digest = 9;
+}
+message ClaimAndFetchCopilotRerunRequest {
+  CopilotRerunClaimReference reference = 1;
+  string claim_id = 2;
+  bytes admission_nonce = 3;
+  string artifact_storage_id = 4;
+  string artifact_storage_fingerprint = 5;
+}
+message CopilotRerunClaimReceipt {
+  CopilotRerunClaimReference reference = 1;
+  string claim_id = 2;
+  int64 claimed_at_unix_milli = 3;
+  string artifact_storage_id = 4;
+  string artifact_storage_fingerprint = 5;
+  string artifact_storage_type = 6;
+}
+message ClaimAndFetchCopilotRerunResponse {
+  CopilotRerunClaimReceipt receipt = 1;
+  bytes payload_json = 2;
 }

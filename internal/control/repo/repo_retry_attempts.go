@@ -6,6 +6,7 @@ import (
 
 	pipelinev1 "github.com/arcentrix/arcentra/api/pipeline/v1"
 	"github.com/arcentrix/arcentra/internal/control/model"
+	"github.com/arcentrix/arcentra/internal/shared/agentidentity"
 	"github.com/arcentrix/arcentra/internal/shared/retry"
 	"github.com/bytedance/sonic"
 	"google.golang.org/protobuf/proto"
@@ -18,7 +19,7 @@ func lockReportedJob(ctx context.Context, tx *gorm.DB, expected *model.JobRun) e
 	if err := reportedJobQuery(tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).Select(jobSnapshotColumns), expected).First(&current).Error; err != nil {
 		return err
 	}
-	if !jobSnapshotEqual(&current, expected) {
+	if (!emptyJobRerun(&current) && requireCopilotRerunReportedJob(tx, &current) != nil) || !jobSnapshotEqual(&current, expected) {
 		return fmt.Errorf("execution identity or source changed")
 	}
 	return nil
@@ -57,7 +58,13 @@ func validateRetryActivation(ctx context.Context, tx *gorm.DB, expected *model.S
 	if policy.Mode != expected.RetryMode || expected.Attempt < 1 || expected.Attempt > int(policy.MaxAttempts) {
 		return fmt.Errorf("attempt is outside its immutable retry policy")
 	}
-	locked, err := lockExecutionJob(ctx, tx, expected.JobRunID, executionLockLegacy)
+	var locked *model.JobRun
+	var err error
+	if hint, protected := rerunProtectedLocator(tx); protected {
+		locked, err = lockCopilotRerunStepOperation(ctx, tx, expected, agentidentity.StepClaimID(hint.ClaimID, expected.StepRunID), model.JobRunStatusRunning)
+	} else {
+		locked, err = lockExecutionJob(ctx, tx, expected.JobRunID, executionLockLegacy)
+	}
 	if err != nil {
 		return err
 	}

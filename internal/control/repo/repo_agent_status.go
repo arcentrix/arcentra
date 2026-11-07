@@ -21,15 +21,17 @@ func (r *StepRunRepo) PatchStatusIfCurrent(ctx context.Context, runID string, cu
 		return err
 	}
 	updates["updated_at"] = time.Now()
-	result := excludeRetryPlanSteps(r.Database().WithContext(ctx).Model(&model.StepRun{})).
-		Where("step_run_id = ? AND status = ?", runID, current).Updates(updates)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected != 1 {
-		return fmt.Errorf("execution state changed")
-	}
-	return nil
+	return ordinaryStepMutation(ctx, r.Database(), runID, updates, func(tx *gorm.DB) error {
+		result := tx.Model(&model.StepRun{}).
+			Where("step_run_id = ? AND status = ?", runID, current).Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("execution state changed")
+		}
+		return nil
+	})
 }
 
 // PatchStatusIfCurrent 防止迟到或并发状态报告覆盖作业终态
@@ -46,7 +48,7 @@ func (r *JobRunRepo) PatchStatusIfCurrent(ctx context.Context, runID string, cur
 		return fmt.Errorf("generic status update cannot change job identity")
 	}
 	updates["updated_at"] = time.Now()
-	result := r.Database().WithContext(ctx).Model(&model.JobRun{}).
+	result := r.Database().WithContext(ctx).Model(&model.JobRun{}).Where(ordinaryJobPredicate).
 		Where("job_run_id = ? AND status = ? AND retry_plan = ? AND retry_plan_digest = ?", runID, current, "", "").Where("retry_approval_required = ? AND retry_approval_id = ? AND retry_approval_evidence_hash = ?", false, "", "").Updates(updates)
 	if result.Error != nil {
 		return result.Error
@@ -73,7 +75,7 @@ func (r *StepRunRepo) PatchReportedStatus(ctx context.Context, expected *model.S
 	if expected == nil || expected.Status < 1 || expected.Status > 3 {
 		return fmt.Errorf("active step snapshot is required")
 	}
-	return executionTransaction(ctx, r.Database(), executionStepJobID(expected), func(tx *gorm.DB) error {
+	return executionAttachmentTransaction(ctx, r.Database(), executionStepJobID(expected), func(tx *gorm.DB) error {
 		claim, _ := updates["claim_id"].(string)
 		next, _ := updates["status"].(int)
 		if err := validateRuntimeStepClaim(ctx, tx, expected, claim, next); err != nil {
@@ -133,7 +135,11 @@ func (r *JobRunRepo) PatchReportedStatus(ctx context.Context, expected *model.Jo
 		return fmt.Errorf("active job snapshot is required")
 	}
 	return executionTransaction(ctx, r.Database(), expected.JobRunID, func(tx *gorm.DB) error {
-		if _, err := lockExecutionJob(ctx, tx, expected.JobRunID, executionLockLegacy); err != nil {
+		if _, protected := rerunProtectedLocator(tx); protected {
+			if err := lockCopilotRerunReportedJob(ctx, tx, expected, updates); err != nil {
+				return err
+			}
+		} else if _, err := lockExecutionJob(ctx, tx, expected.JobRunID, executionLockLegacy); err != nil {
 			return err
 		}
 		if err := lockReportedJob(ctx, tx, expected); err != nil {
@@ -159,7 +165,7 @@ func (r *JobRunRepo) PatchReportedStatus(ctx context.Context, expected *model.Jo
 }
 
 func reportedJobQuery(tx *gorm.DB, expected *model.JobRun) *gorm.DB {
-	return tx.Where("job_run_id = ? AND status = ? AND agent_id = ? AND claim_id = ?", expected.JobRunID, expected.Status, expected.AgentID, expected.ClaimID).
+	return tx.Where("copilot_rerun_intent_id = ? AND copilot_rerun_gate_id = ? AND expected_source_commit = ?", expected.CopilotRerunIntentID, expected.CopilotRerunGateID, expected.ExpectedSourceCommit).Where("job_run_id = ? AND status = ? AND agent_id = ? AND claim_id = ?", expected.JobRunID, expected.Status, expected.AgentID, expected.ClaimID).
 		Where("pipeline_id = ? AND pipeline_run_id = ? AND job_name = ?", expected.PipelineID, expected.PipelineRunID, expected.JobName).
 		Where("terminal_report_digest = ? AND cancellation_claim_id = ?", expected.TerminalReportDigest, expected.CancellationClaimID).
 		Where("source_expectation_captured = ? AND source_type = ? AND source_repository = ? AND source_ref = ?", expected.SourceExpectationCaptured, expected.SourceType, expected.SourceRepository, expected.SourceRef).
